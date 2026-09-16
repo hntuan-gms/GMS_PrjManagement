@@ -1,0 +1,15 @@
+services:
+  app:
+    build: .
+    ports:
+      - "4000:4000"
+    env_file:
+      - server/.env
+    environment:
+      - PORT=4000
+    volumes:
+      - gms-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  gms-data:
