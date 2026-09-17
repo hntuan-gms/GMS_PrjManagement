@@ -1,0 +1,118 @@
+name: Deploy to Cloud Run
+
+# Builds the root Dockerfile (client + server into one image), pushes it to
+# Artifact Registry, and rolls out a new Cloud Run revision on every push to main.
+#
+# One-time setup — see the "Setup" section of this workflow's PR/commit notes:
+#   Repository variables (Settings -> Secrets and variables -> Actions -> Variables):
+#     GCP_PROJECT_ID           e.g. gms-prjmanagement-prod
+#     GCP_REGION               e.g. asia-southeast1
+#     GCP_SERVICE_ACCOUNT      deployer SA email, e.g. gh-deployer@PROJECT.iam.gserviceaccount.com
+#     GCP_WIF_PROVIDER         projects/NNN/locations/global/workloadIdentityPools/POOL/providers/PROVIDER
+#     JIRA_BASE_URL            https://gimasys.atlassian.net   (leave unset -> app runs in mock mode)
+#     JIRA_EMAIL               your.email@gimasys.com
+#     JIRA_PROJECT_KEY         HHBJ
+#     JIRA_START_DATE_FIELD_ID customfield_10059
+#   Secret Manager secret (NOT a GitHub secret): jira-api-token
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Keyless auth to Google Cloud via Workload Identity Federation needs id-token.
+permissions:
+  contents: read
+  id-token: write
+
+# Never let two deploys race to become the live revision.
+concurrency:
+  group: deploy-cloud-run
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ${{ vars.GCP_REGION }}-docker.pkg.dev
+  REPOSITORY: gms-prjmanagement # Artifact Registry repo name
+  SERVICE: gms-prjmanagement # Cloud Run service name
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGISTRY }} --quiet
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          # Cloud Run only runs linux/amd64.
+          platforms: linux/amd64
+          tags: |
+            ${{ env.REGISTRY }}/${{ vars.GCP_PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ vars.GCP_PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE }}:latest
+          # Two `npm ci` stages make cold builds slow; reuse layers across runs.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Deploy to Cloud Run
+        id: deploy
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ env.SERVICE }}
+          region: ${{ vars.GCP_REGION }}
+          # Deploy the immutable SHA tag, not :latest, so a rollback is unambiguous.
+          image: ${{ env.REGISTRY }}/${{ vars.GCP_PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE }}:${{ github.sha }}
+          # PORT is reserved: Cloud Run injects PORT=8080 and server/src/index.ts
+          # already honours it (`process.env.PORT ?? 4000`). Setting it here is rejected.
+          # Unset JIRA_* values are harmless — loadJiraConfig() falls back to mock mode.
+          env_vars: |-
+            JIRA_BASE_URL=${{ vars.JIRA_BASE_URL }}
+            JIRA_EMAIL=${{ vars.JIRA_EMAIL }}
+            JIRA_PROJECT_KEY=${{ vars.JIRA_PROJECT_KEY }}
+            JIRA_START_DATE_FIELD_ID=${{ vars.JIRA_START_DATE_FIELD_ID }}
+          # Requires a Secret Manager secret named `jira-api-token`; the runtime
+          # service account needs roles/secretmanager.secretAccessor on it.
+          secrets: |-
+            JIRA_API_TOKEN=jira-api-token:latest
+          flags: >-
+            --no-allow-unauthenticated
+            --port=8080
+            --cpu=1
+            --memory=512Mi
+            --min-instances=0
+            --max-instances=1
+            --timeout=60s
+          # ^ max-instances=1 is deliberate, not a cost tweak: the local schedule
+          # overlay (data/overlay.json) is per-instance state. See the note below.
+          #
+          # To persist the overlay across revisions and cold starts, create a bucket
+          # and add these two flags above:
+          #   --add-volume=name=overlay,type=cloud-storage,bucket=YOUR_BUCKET
+          #   --add-volume-mount=volume=overlay,mount-path=/app/data
+
+      - name: Summary
+        run: |
+          echo "### Deployed :rocket:" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Revision image: \`${{ github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Service URL: ${{ steps.deploy.outputs.url }}" >> "$GITHUB_STEP_SUMMARY"
