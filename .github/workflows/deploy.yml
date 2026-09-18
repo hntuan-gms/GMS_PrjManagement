@@ -32,8 +32,8 @@ concurrency:
 
 env:
   REGISTRY: ${{ vars.GCP_REGION }}-docker.pkg.dev
-  REPOSITORY: gms-prjmanagement # Artifact Registry repo name
-  SERVICE: gms-prjmanagement # Cloud Run service name
+  REPOSITORY: gms-project-manager # existing Artifact Registry repo in asia-southeast1
+  SERVICE: gms-prjmanagement # existing Cloud Run service name
 
 jobs:
   deploy:
