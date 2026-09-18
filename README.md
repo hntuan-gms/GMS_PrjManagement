@@ -1,149 +1,150 @@
 # GMS PrjManagement
 
 Ứng dụng quản lý dự án kiểu **Microsoft Project** (Gantt chart, WBS phân cấp,
-task dependencies, resource view) tích hợp 2 chiều với **Jira** — lấy task từ
-một Jira project (mặc định: `HHBJ` trên `gimasys.atlassian.net`), cho phép
-assign / update / delete ngay trên giao diện Gantt và đẩy thay đổi ngược lại Jira.
+task dependencies, resource view) tích hợp 2 chiều với **Jira Cloud**. Mỗi người
+dùng **đăng nhập bằng tài khoản Atlassian của chính mình** (OAuth 2.0 3LO), rồi
+chọn dự án Jira mà tài khoản đó có quyền xem — không còn credential dùng chung.
 
 ## Kiến trúc
 
 ```
-server/   Node.js + Express + TypeScript — REST API, gọi Jira REST API v3
-          bằng API token, lưu các trường lịch trình MS-Project-only
-          (start date, dependencies FS/SS/FF/SF + lag, baseline) trong
-          data/overlay.json vì Jira Cloud không có sẵn các trường này.
-client/   React + TypeScript + Vite — Gantt chart (gantt-task-react) + bảng
-          WBS tuỳ biến, Resource view, modal tạo/sửa/xoá task.
+server/   Node.js + Express + TypeScript — REST API, gọi Jira REST API v3 qua
+          cổng OAuth https://api.atlassian.com/ex/jira/{cloudId}. Lưu các trường
+          lịch trình MS-Project-only (start date, dependencies FS/SS/FF/SF + lag,
+          baseline) trong data/overlay.v2.json vì Jira Cloud không có sẵn.
+client/   React + TypeScript + Vite — màn hình đăng nhập, chọn dự án, Gantt chart
+          (gantt-task-react) + bảng WBS tuỳ biến, Resource view, modal tạo/sửa/xoá.
 ```
 
-Vì sao không gọi thẳng MCP Atlassian Rovo? MCP chỉ khả dụng bên trong phiên
-Claude Code có OAuth riêng cho phiên đó — một ứng dụng độc lập sau khi deploy
-không truy cập được. Nên backend dùng **Jira REST API v3** chính thức (API
-token, Basic Auth) — đây cũng là cơ chế mà chính Atlassian MCP server dùng ở
-tầng dưới.
+### Vì sao mỗi người đăng nhập riêng?
+
+Trước đây toàn bộ ứng dụng dùng chung một API token: mọi thao tác tạo / gán /
+chuyển trạng thái / xoá đều được Jira ghi nhận dưới tên một người duy nhất, và ai
+mở ứng dụng cũng có đúng quyền của tài khoản đó. Với OAuth, Jira ghi nhận đúng
+người thực hiện và áp đúng quyền của họ.
 
 ### Model dữ liệu
 
 Mỗi Task = 1 Jira issue (Epic/Story/Task/Bug/Sub-task) + một "overlay" cục bộ
 chứa các trường mà Jira Cloud chuẩn không có:
 
-| Trường            | Nguồn                                             |
-|-------------------|----------------------------------------------------|
-| summary, status, assignee, parent | Jira (đọc/ghi 2 chiều)             |
-| dueDate           | Jira field `duedate` — luôn = start + duration, tự đẩy lên Jira khi lịch thay đổi |
-| startDate, durationDays, % hoàn thành, predecessors, baseline | Overlay cục bộ (`server/data/overlay.json`) |
+| Trường | Nguồn |
+|---|---|
+| summary, status, assignee, parent | Jira (đọc/ghi 2 chiều) |
+| dueDate | Jira field `duedate` — luôn = start + duration, tự đẩy lên Jira khi lịch thay đổi |
+| startDate | Field "Start date" của site, **tự dò theo từng site**; nếu site không có thì lưu cục bộ |
+| durationDays, % hoàn thành, predecessors, baseline | Overlay cục bộ (`server/data/overlay.v2.json`) |
 
 Khi đổi ngày/thời lượng của một task, server tự động **cascade** các task phụ
-thuộc (Finish-to-Start / Start-to-Start / Finish-to-Finish / Start-to-Finish +
-lag) để chúng không bắt đầu sớm hơn mức cho phép — tương tự cách MS Project
-tính lại lịch khi kéo thanh Gantt.
+thuộc (FS / SS / FF / SF + lag) để chúng không bắt đầu sớm hơn mức cho phép —
+tương tự cách MS Project tính lại lịch khi kéo thanh Gantt.
 
-## Chạy thử (mock mode — không cần Jira)
+> ⚠️ **Overlay hiện được lưu trên ổ đĩa tạm của container.** Ngày tháng vẫn an
+> toàn (đồng bộ với Jira), nhưng **quan hệ phụ thuộc, baseline và % hoàn thành sẽ
+> mất mỗi lần deploy lại**. Ứng dụng hiển thị cảnh báo này trên giao diện. Xem
+> mục *Lưu overlay lâu dài* bên dưới để khắc phục.
 
-Không cấu hình `.env` thì server tự chạy ở **mock mode** với dữ liệu mẫu mô
-phỏng đúng cấu trúc thật của project HHBJ (Epic → Story → Sub-task), đủ để
-demo toàn bộ tính năng (tạo/sửa/xoá/assign/dependency) mà không đụng vào Jira
-thật.
+## Cài đặt
+
+### 1. Đăng ký ứng dụng Atlassian
+
+Vào https://developer.atlassian.com/console/myapps → **Create** → *OAuth 2.0
+integration*:
+
+- **Permissions → Jira API** (scope kiểu classic, không trộn với granular):
+  `read:jira-work`, `write:jira-work`, `read:jira-user`
+- **Authorization → OAuth 2.0 (3LO)**: bật `offline_access`, và đặt
+  **Callback URL** đúng bằng `<APP_BASE_URL>/api/auth/callback`
+
+Atlassian chỉ cho **một** Callback URL mỗi app, nên cần **hai app riêng**:
+
+| Môi trường | Callback URL |
+|---|---|
+| Local dev | `http://localhost:5173/api/auth/callback` |
+| Production | `https://<cloud-run-url>/api/auth/callback` |
+
+### 2. Chạy local
 
 ```bash
+cp server/.env.example server/.env    # điền Client ID / Secret của app dev
+# sinh khoá mã hoá cookie phiên:
+node -e "console.log('k1:'+require('crypto').randomBytes(32).toString('base64url'))"
+
 # Terminal 1 — backend (http://localhost:4000)
-cd server
-npm install
-npm run dev
+cd server && npm install && npm run dev
 
 # Terminal 2 — frontend (http://localhost:5173)
-cd client
-npm install
-npm run dev
+cd client && npm install && npm run dev
 ```
 
-Mở http://localhost:5173. Badge góc trên bên trái hiển thị `○ Mock data` khi
-chưa nối Jira thật, hoặc `● Live — Jira HHBJ` khi đã cấu hình.
+Mở **http://localhost:5173** (không phải `:4000` — Vite proxy `/api` sang backend
+để cookie phiên hoạt động đúng như trên production).
 
-## Kết nối Jira thật
+Server sẽ **dừng ngay khi khởi động** nếu thiếu `ATLASSIAN_CLIENT_ID`,
+`ATLASSIAN_CLIENT_SECRET`, `SESSION_ENCRYPTION_KEYS` hoặc `APP_BASE_URL` — không
+còn chế độ chạy tạm nào.
 
-1. Tạo API token tại https://id.atlassian.com/manage-profile/security/api-tokens
-2. Copy `server/.env.example` thành `server/.env` và điền:
+## Deploy
 
-```env
-JIRA_BASE_URL=https://gimasys.atlassian.net
-JIRA_EMAIL=your.email@gimasys.com
-JIRA_API_TOKEN=xxxxxxxxxxxxxxxx
-JIRA_PROJECT_KEY=HHBJ
-PORT=4000
-```
+Cả hai cách dưới đây build client + server thành **một process duy nhất** phục vụ
+cả giao diện lẫn API trên **một cổng** (mặc định `4000`).
 
-3. Khởi động lại `npm run dev` trong `server/` — toàn bộ task của project sẽ
-   được kéo về khi tải trang hoặc bấm **"⟳ Đồng bộ từ Jira"**.
-
-Tài khoản dùng token cần có quyền Browse/Edit/Assign/Transition/Delete issue
-trên project đó (delete issue thường yêu cầu quyền admin project).
-
-## Deploy trên máy của bạn
-
-Chế độ "dev" ở trên chạy 2 process riêng (Vite :5173 + API :4000) — tiện để
-sửa code. Để **deploy chạy lâu dài trên máy của bạn**, dùng một trong hai
-cách dưới đây: cả hai đều build client + server thành **một process duy nhất**
-phục vụ cả giao diện lẫn API trên **một cổng** (mặc định `4000`).
-
-### Cách 1 — Docker (khuyên dùng, không cần cài Node)
+### Cách 1 — Docker
 
 ```bash
-cp server/.env.example server/.env   # điền thông tin Jira thật nếu có, để trống = mock mode
+cp server/.env.example server/.env   # điền thông tin app production
 docker compose up -d --build
 ```
 
-Mở http://localhost:4000. Dữ liệu lịch trình cục bộ (`overlay.json`) được lưu
-trong Docker volume `gms-data` nên không mất khi restart container. Xem log:
-`docker compose logs -f`. Dừng: `docker compose down`.
-
-### Cách 2 — không cần Docker (cần sẵn Node.js ≥ 18)
+### Cách 2 — không cần Docker (Node.js ≥ 18)
 
 ```bash
 ./deploy.sh
 ```
 
-Script này tự: cài dependencies, build client, copy vào `server/public`, build
-server, rồi chạy `node dist/index.js` phục vụ mọi thứ trên
-http://localhost:4000. Nếu `server/.env` chưa có, script tự tạo từ
-`.env.example` (mock mode) — sửa file này rồi chạy lại `./deploy.sh` để nối
-Jira thật. Muốn đổi cổng: `PORT=8080 ./deploy.sh`.
+### Cách 3 — Google Cloud Run (tự động qua GitHub Actions)
 
-Để chạy nền lâu dài (không cần giữ terminal mở), dùng `pm2` hoặc `systemd`,
-ví dụ:
+`.github/workflows/deploy.yml` tự build image, đẩy lên Artifact Registry và deploy
+mỗi khi push lên `main`. Xem phần chú thích đầu file để biết các biến cần đặt.
+
+Lưu ý bảo mật: dịch vụ phải để `--allow-unauthenticated` vì Atlassian redirect
+trình duyệt về `/api/auth/callback` và request đó không thể mang token của Google.
+Vì vậy **cơ chế đăng nhập của chính ứng dụng là lớp bảo vệ duy nhất** — biến
+`ALLOWED_EMAIL_DOMAIN` giới hạn chỉ tài khoản của tổ chức mới đăng nhập được.
+
+### Lưu overlay lâu dài
 
 ```bash
-npm install -g pm2
-cd server && pm2 start dist/index.js --name gms-prjmanagement
-pm2 save && pm2 startup   # tự khởi động lại cùng máy
+gcloud storage buckets create gs://YOUR_BUCKET --location=asia-southeast1
 ```
+
+rồi bỏ chú thích hai flag `--add-volume` / `--add-volume-mount` trong
+`deploy.yml`. Giữ `--max-instances=1` vì lowdb chỉ hỗ trợ một tiến trình ghi.
 
 ## Tính năng
 
-- **Gantt + WBS**: cây phân cấp Epic → Story/Task/Bug → Sub-task, thu gọn/mở
-  rộng, kéo-thả để đổi ngày/thời lượng, kéo tay cầm để đổi % hoàn thành.
+- **Đăng nhập Atlassian + chọn dự án**: mỗi người dùng tài khoản riêng, chỉ thấy
+  những dự án mình có quyền browse.
+- **Gantt + WBS**: cây phân cấp Epic → Story/Task/Bug → Sub-task, thu gọn/mở rộng,
+  kéo-thả để đổi ngày/thời lượng, kéo tay cầm để đổi % hoàn thành.
 - **Dependencies**: thêm/xoá predecessor với 4 loại (FS/SS/FF/SF) + lag ngày,
   hiển thị mũi tên nối trên Gantt, tự động dời lịch task phụ thuộc.
-- **Assign / update / delete**: modal sửa task đầy đủ — tên, ngày, %, người
-  phụ trách, trạng thái Jira, predecessors; xoá task (kèm sub-task) đẩy thẳng
-  lên Jira.
-- **Tạo task mới**: chọn loại issue, task cha (WBS), ngày, người phụ trách —
-  tạo issue Jira thật ngay lập tức.
-- **Resource view**: bảng workload theo từng người phụ trách, giống Resource
-  Sheet của MS Project.
-- **Đồng bộ 2 chiều**: mọi thay đổi (trừ dates/duration/%/dependencies — vốn
-  là khái niệm MS-Project không có sẵn trong Jira) được đẩy ngay lập tức lên
-  Jira qua REST API; nút "Đồng bộ từ Jira" kéo lại toàn bộ để lấy thay đổi từ
-  phía Jira (người khác sửa trực tiếp trên Jira).
+- **Assign / update / delete**: modal sửa task đầy đủ; xoá task (kèm sub-task)
+  đẩy thẳng lên Jira.
+- **Tạo task mới**: chọn loại issue, task cha (WBS), ngày, người phụ trách.
+- **Resource view**: bảng workload theo từng người phụ trách.
+- **Đồng bộ 2 chiều**: mọi thay đổi được đẩy ngay lên Jira; nút "Đồng bộ từ Jira"
+  kéo lại toàn bộ để lấy thay đổi từ phía Jira.
 
-## Giới hạn đã biết (MVP)
+## Giới hạn đã biết
 
-- Chưa tính **critical path** / **baseline so sánh trực quan** (mới lưu được
-  baseline, chưa hiển thị so sánh trên Gantt).
-- Cascade phụ thuộc là forward-only (không phải full CPM 2 chiều như MS
-  Project thật).
-- Trạng thái Jira đổi qua danh sách cố định (Backlog/To Do/In Progress/Done);
-  nếu workflow project có transition tên khác, cần sửa `STATUS_OPTIONS` trong
-  `client/src/components/TaskEditModal.tsx`.
-- Xoá issue trên Jira Cloud yêu cầu quyền admin; nếu API trả lỗi 403 khi xoá,
-  cần cấp quyền tương ứng cho tài khoản API token.
+- Chưa tính **critical path** / so sánh baseline trực quan trên Gantt.
+- Cascade phụ thuộc là forward-only (không phải full CPM 2 chiều).
+- Phụ thuộc chỉ trong cùng một dự án; predecessor ở dự án khác bị từ chối.
+- Trạng thái Jira lấy từ danh sách cố định trong `TaskEditModal.tsx`; nếu workflow
+  của dự án có transition tên khác thì cần sửa danh sách đó.
+- Danh sách loại issue cũng cố định (`Epic/Story/Task/Bug/Sub-task`); dự án
+  team-managed đổi tên hoặc bỏ bớt sẽ gặp lỗi khi tạo task.
+- Xoá issue trên Jira Cloud yêu cầu quyền tương ứng của chính tài khoản đăng nhập.
+- **Đăng xuất chỉ xoá phiên phía ứng dụng.** Atlassian không có endpoint thu hồi
+  refresh token 3LO; muốn thu hồi hẳn phải vào phần cài đặt tài khoản Atlassian.

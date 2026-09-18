@@ -1,5 +1,5 @@
 node_modules/
 dist/
 .env
-server/data/overlay.json
+server/data/
 *.log

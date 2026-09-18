@@ -27,7 +27,27 @@ export interface Task {
   baselineStart: string | null;
   baselineDue: string | null;
   jiraUrl: string;
-  isMock?: boolean;
+}
+
+/** The acting user plus the site/project their session is bound to. */
+export interface SessionMeta {
+  user: { accountId: string; displayName: string; avatarUrl: string | null };
+  site: { cloudId: string; url: string; name: string };
+  project: { key: string; name: string } | null;
+  /** null when this site has no native Start date field; dates then ride on duedate alone. */
+  startDateFieldId: string | null;
+  /**
+   * True while the overlay lives on the container's ephemeral disk, so the client
+   * can warn that dependencies, baselines and % complete reset on each deploy.
+   */
+  overlayEphemeral: boolean;
+}
+
+export interface ProjectSummary {
+  id: string;
+  key: string;
+  name: string;
+  avatarUrl: string | null;
 }
 
 export interface JiraUser {

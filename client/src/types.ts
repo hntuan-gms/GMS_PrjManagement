@@ -26,7 +26,6 @@ export interface Task {
   baselineStart: string | null;
   baselineDue: string | null;
   jiraUrl: string;
-  isMock?: boolean;
 }
 
 export interface JiraUser {
@@ -58,8 +57,33 @@ export interface TaskCreateInput {
   assigneeAccountId?: string | null;
 }
 
-export interface ProjectMeta {
-  mode: "live" | "mock";
-  projectKey: string;
-  siteUrl: string | null;
+export interface AuthUser {
+  accountId: string;
+  displayName: string;
+  avatarUrl: string | null;
+}
+
+export interface AtlassianSite {
+  cloudId: string;
+  url: string;
+  name: string;
+}
+
+export interface ProjectSummary {
+  id: string;
+  key: string;
+  name: string;
+  avatarUrl: string | null;
+}
+
+/** What GET /api/auth/me returns once a session exists. */
+export interface Session {
+  user: AuthUser;
+  site: AtlassianSite;
+  /** null until the user picks one; the app shows the picker in that state. */
+  project: { key: string; name: string } | null;
+  /** null when this site has no native Start date field. */
+  startDateFieldId: string | null;
+  /** True while schedule overlays live on the server's ephemeral disk. */
+  overlayEphemeral: boolean;
 }

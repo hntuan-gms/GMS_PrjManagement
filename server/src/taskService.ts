@@ -1,9 +1,10 @@
-import { JiraClient, loadJiraConfig, type JiraConfig } from "./jiraClient.js";
-import { mockIssues, mockUsers, type MockIssue } from "./mockData.js";
+import { JiraApiError, type JiraClient } from "./jiraClient.js";
 import * as store from "./store.js";
 import type {
   IssueTypeName,
   JiraUser,
+  ProjectSummary,
+  SessionMeta,
   Task,
   TaskCreateInput,
   TaskUpdateInput,
@@ -17,35 +18,52 @@ function statusCategoryKey(key: string): "new" | "indeterminate" | "done" {
   return "new";
 }
 
-export interface ProjectMeta {
-  mode: "live" | "mock";
+/**
+ * Everything a request needs to act as one user on one project. Supplied by the
+ * auth middleware; there is no process-wide Jira identity any more.
+ */
+export interface TaskContext {
+  cloudId: string;
+  /** Human site URL — browse links only, never the api.atlassian.com gateway. */
+  siteUrl: string;
   projectKey: string;
-  siteUrl: string | null;
+  /** Discovered per site; null means this site has no native Start date field. */
+  startDateFieldId: string | null;
 }
 
+export interface UpdateResult {
+  task: Task;
+  /** Issue keys whose Jira write failed during the cascade, if any. */
+  cascadeWarnings: string[];
+}
+
+/**
+ * One instance per request. The constructor does no work beyond holding two
+ * references, so this is free — and it means the access token can never go stale
+ * inside a cached object, and one user's state can never leak into another's.
+ */
 export class TaskService {
-  private jira: JiraClient | null;
-  private cfg: JiraConfig | null;
-  private mockStore: MockIssue[]; // in-memory mutable copy used only in mock mode
-  private mockSeq = 1000;
+  constructor(
+    private readonly jira: JiraClient,
+    private readonly ctx: TaskContext
+  ) {}
 
-  constructor() {
-    this.cfg = loadJiraConfig();
-    this.jira = this.cfg ? new JiraClient(this.cfg) : null;
-    this.mockStore = mockIssues.map((i) => ({ ...i, predecessors: [...i.predecessors] }));
-  }
-
-  meta(): ProjectMeta {
+  meta(overlayEphemeral: boolean, user: SessionMeta["user"], siteName: string, projectName: string | null): SessionMeta {
     return {
-      mode: this.jira ? "live" : "mock",
-      projectKey: this.cfg?.projectKey ?? "HHBJ",
-      siteUrl: this.cfg?.baseUrl ?? null,
+      user,
+      site: { cloudId: this.ctx.cloudId, url: this.ctx.siteUrl, name: siteName },
+      project: projectName !== null ? { key: this.ctx.projectKey, name: projectName } : null,
+      startDateFieldId: this.ctx.startDateFieldId,
+      overlayEphemeral,
     };
   }
 
+  async listProjects(): Promise<ProjectSummary[]> {
+    return this.jira.listProjects();
+  }
+
   async listUsers(): Promise<JiraUser[]> {
-    if (!this.jira || !this.cfg) return mockUsers;
-    const users = await this.jira.getAssignableUsers(this.cfg.projectKey);
+    const users = await this.jira.getAssignableUsers(this.ctx.projectKey);
     return users.map((u) => ({
       accountId: u.accountId,
       displayName: u.displayName,
@@ -54,9 +72,11 @@ export class TaskService {
   }
 
   async listTasks(): Promise<Task[]> {
-    if (!this.jira || !this.cfg) return this.listMockTasks();
-    const jql = `project = ${this.cfg.projectKey} ORDER BY created ASC`;
-    const issues = await this.jira.searchIssues(jql, [...SEARCH_FIELDS, this.cfg.startDateFieldId]);
+    const jql = `project = ${this.ctx.projectKey} ORDER BY created ASC`;
+    const fields = this.ctx.startDateFieldId
+      ? [...SEARCH_FIELDS, this.ctx.startDateFieldId]
+      : SEARCH_FIELDS;
+    const issues = await this.jira.searchIssues(jql, fields);
     const tasks: Task[] = [];
     for (const issue of issues) {
       tasks.push(await this.hydrate(issue.key, this.fromJiraIssue(issue), this.jiraStartDateOf(issue)));
@@ -65,7 +85,8 @@ export class TaskService {
   }
 
   private jiraStartDateOf(issue: any): string | null {
-    return this.cfg ? issue.fields?.[this.cfg.startDateFieldId] ?? null : null;
+    if (!this.ctx.startDateFieldId) return null;
+    return issue.fields?.[this.ctx.startDateFieldId] ?? null;
   }
 
   private fromJiraIssue(issue: any): Record<string, unknown> {
@@ -81,7 +102,7 @@ export class TaskService {
       assigneeName: f.assignee?.displayName ?? null,
       assigneeAvatarUrl: f.assignee?.avatarUrls?.["24x24"] ?? null,
       dueDate: f.duedate ?? null,
-      jiraUrl: `${this.cfg!.baseUrl}/browse/${issue.key}`,
+      jiraUrl: `${this.ctx.siteUrl}/browse/${issue.key}`,
     };
   }
 
@@ -93,7 +114,7 @@ export class TaskService {
    * overlay value once set.
    */
   private async hydrate(id: string, base: any, jiraStartDate: string | null): Promise<Task> {
-    let overlay = await store.getOverlay(id);
+    let overlay = await store.getOverlay(this.ctx.cloudId, id);
     const hasOverlay = overlay.startDate !== null || overlay.percentComplete !== 0 || overlay.durationDays !== 1 || overlay.predecessors.length > 0;
     if (!hasOverlay) {
       const derivedPercent =
@@ -107,7 +128,7 @@ export class TaskService {
       } else {
         startDate = dueDate ? addDays(dueDate, -(durationDays - 1)) : null;
       }
-      overlay = await store.setOverlay(id, {
+      overlay = await store.setOverlay(this.ctx.cloudId, id, {
         startDate,
         durationDays,
         percentComplete: derivedPercent,
@@ -128,46 +149,21 @@ export class TaskService {
         }
       }
       if (Object.keys(patch).length > 0) {
-        overlay = await store.setOverlay(id, patch);
+        overlay = await store.setOverlay(this.ctx.cloudId, id, patch);
       }
     }
     return { ...base, ...overlay, id };
   }
 
-  private async listMockTasks(): Promise<Task[]> {
-    const tasks: Task[] = [];
-    for (const issue of this.mockStore) {
-      const base = {
-        id: issue.key,
-        wbsParentId: issue.parentKey,
-        summary: issue.summary,
-        issueType: issue.issueType,
-        statusName: issue.statusName,
-        statusCategory: issue.statusCategory,
-        assigneeAccountId: issue.assigneeAccountId,
-        assigneeName: mockUsers.find((u) => u.accountId === issue.assigneeAccountId)?.displayName ?? null,
-        assigneeAvatarUrl: null,
-        dueDate: issue.dueDate,
-        jiraUrl: `https://gimasys.atlassian.net/browse/${issue.key}`,
-        isMock: true,
-      };
-      let overlay = await store.getOverlay(issue.key);
-      const hasOverlay = overlay.startDate !== null || overlay.predecessors.length > 0 || overlay.percentComplete !== 0 || overlay.durationDays !== 1;
-      if (!hasOverlay) {
-        overlay = await store.setOverlay(issue.key, {
-          startDate: issue.startDate,
-          durationDays: issue.durationDays,
-          percentComplete: issue.percentComplete,
-          predecessors: issue.predecessors,
-        });
-      }
-      tasks.push({ ...base, ...overlay, id: issue.key } as Task);
-    }
-    return tasks;
+  /** Fields written to Jira for a schedule change, omitting the start date when the site has none. */
+  private scheduleFields(due: string | null, start: string | null): Record<string, unknown> {
+    const fields: Record<string, unknown> = { duedate: due };
+    if (this.ctx.startDateFieldId) fields[this.ctx.startDateFieldId] = start;
+    return fields;
   }
 
-  async updateTask(id: string, input: TaskUpdateInput): Promise<Task> {
-    const current = await store.getOverlay(id);
+  async updateTask(id: string, input: TaskUpdateInput): Promise<UpdateResult> {
+    const current = await store.getOverlay(this.ctx.cloudId, id);
 
     // Schedule (start/duration/due) is edited on the local overlay and the resulting
     // due date is always pushed back to Jira's native `duedate` field.
@@ -187,37 +183,26 @@ export class TaskService {
     }
     const newDue = newStart ? addDays(newStart, newDuration - 1) : input.dueDate ?? current.baselineDue ?? null;
 
-    if (this.jira && this.cfg) {
-      const fields: Record<string, unknown> = {};
-      if (input.summary !== undefined) fields.summary = input.summary;
-      if (scheduleTouched) {
-        fields.duedate = newDue;
-        fields[this.cfg.startDateFieldId] = newStart;
-      }
-      if (Object.keys(fields).length > 0) {
-        await this.jira.updateIssueFields(id, fields);
-      }
-      if (input.assigneeAccountId !== undefined) {
-        await this.jira.assignIssue(id, input.assigneeAccountId);
-      }
-      if (input.statusTransition) {
-        await this.jira.transitionIssue(id, input.statusTransition);
-      }
-    } else {
-      const issue = this.mockStore.find((i) => i.key === id);
-      if (!issue) throw new Error(`Task ${id} not found`);
-      if (input.summary !== undefined) issue.summary = input.summary;
-      if (scheduleTouched) issue.dueDate = newDue;
-      if (input.assigneeAccountId !== undefined) issue.assigneeAccountId = input.assigneeAccountId;
-      if (input.statusTransition) {
-        issue.statusName = input.statusTransition;
-        issue.statusCategory =
-          input.statusTransition.toLowerCase() === "done"
-            ? "done"
-            : input.statusTransition.toLowerCase() === "to do" || input.statusTransition.toLowerCase() === "backlog"
-            ? "new"
-            : "indeterminate";
-      }
+    const fields: Record<string, unknown> = {};
+    if (input.summary !== undefined) fields.summary = input.summary;
+    if (scheduleTouched) Object.assign(fields, this.scheduleFields(newDue, newStart));
+    if (Object.keys(fields).length > 0) {
+      await this.jira.updateIssueFields(id, fields);
+    } else if (
+      input.assigneeAccountId === undefined &&
+      input.statusTransition === undefined
+    ) {
+      // Overlay-only edit (%, predecessors, baseline) touches no Jira field, so it
+      // would otherwise skip every permission check. Read the issue first so a user
+      // who cannot even see it gets a 403/404 instead of silently rewriting shared
+      // schedule data.
+      await this.jira.getIssue(id);
+    }
+    if (input.assigneeAccountId !== undefined) {
+      await this.jira.assignIssue(id, input.assigneeAccountId);
+    }
+    if (input.statusTransition) {
+      await this.jira.transitionIssue(id, input.statusTransition);
     }
 
     const overlayPatch: Record<string, unknown> = {};
@@ -228,17 +213,18 @@ export class TaskService {
     if (input.baselineStart !== undefined) overlayPatch.baselineStart = input.baselineStart;
     if (input.baselineDue !== undefined) overlayPatch.baselineDue = input.baselineDue;
     if (Object.keys(overlayPatch).length > 0) {
-      await store.setOverlay(id, overlayPatch);
+      await store.setOverlay(this.ctx.cloudId, id, overlayPatch);
     }
 
+    let cascadeWarnings: string[] = [];
     if (scheduleTouched || input.predecessors !== undefined) {
-      await this.applyDependencyCascade(id);
+      cascadeWarnings = await this.applyDependencyCascade(id);
     }
 
     const all = await this.listTasks();
     const updated = all.find((t) => t.id === id);
     if (!updated) throw new Error(`Task ${id} not found after update`);
-    return updated;
+    return { task: updated, cascadeWarnings };
   }
 
   /**
@@ -246,8 +232,12 @@ export class TaskService {
    * successors forward so they never start earlier than their predecessor allows.
    * Simple forward-only propagation (not a full CPM/backward pass) — enough to keep
    * a Gantt chart consistent without needing MS Project's full scheduling engine.
+   *
+   * Returns the ids whose Jira write failed. A 401 is re-thrown instead: a revoked
+   * token used to be swallowed here, leaving the overlay and Jira permanently and
+   * silently divergent.
    */
-  private async applyDependencyCascade(changedId: string): Promise<void> {
+  private async applyDependencyCascade(changedId: string): Promise<string[]> {
     const tasks = await this.listTasks();
     const byId = new Map(tasks.map((t) => [t.id, t]));
     const successorsOf = new Map<string, Array<{ taskId: string; pred: { type: string; lagDays: number } }>>();
@@ -257,6 +247,16 @@ export class TaskService {
         successorsOf.get(p.taskId)!.push({ taskId: t.id, pred: p });
       }
     }
+
+    const warnings: string[] = [];
+    const pushDates = async (taskId: string, start: string, due: string) => {
+      try {
+        await this.jira.updateIssueFields(taskId, this.scheduleFields(due, start));
+      } catch (err) {
+        if (err instanceof JiraApiError && err.status === 401) throw err;
+        warnings.push(taskId);
+      }
+    };
 
     const visited = new Set<string>();
     const queue = [changedId];
@@ -286,15 +286,8 @@ export class TaskService {
       if (curStart !== cur.startDate) {
         cur.startDate = curStart;
         const curDue = addDays(curStart, cur.durationDays - 1);
-        await store.setOverlay(cur.id, { startDate: curStart });
-        if (this.jira && this.cfg) {
-          await this.jira
-            .updateIssueFields(cur.id, { duedate: curDue, [this.cfg.startDateFieldId]: curStart })
-            .catch(() => {});
-        } else {
-          const mockIssue = this.mockStore.find((i) => i.key === cur.id);
-          if (mockIssue) mockIssue.dueDate = curDue;
-        }
+        await store.setOverlay(this.ctx.cloudId, cur.id, { startDate: curStart });
+        await pushDates(cur.id, curStart, curDue);
         byId.set(cur.id, cur);
       }
       const curEnd = addDays(curStart, cur.durationDays - 1);
@@ -311,20 +304,14 @@ export class TaskService {
         if (earliestStart && earliestStart > succ.startDate) {
           succ.startDate = earliestStart;
           const succDue = addDays(earliestStart, succ.durationDays - 1);
-          await store.setOverlay(succ.id, { startDate: earliestStart });
-          if (this.jira && this.cfg) {
-            await this.jira
-              .updateIssueFields(succ.id, { duedate: succDue, [this.cfg.startDateFieldId]: earliestStart })
-              .catch(() => {});
-          } else {
-            const mockIssue = this.mockStore.find((i) => i.key === succ.id);
-            if (mockIssue) mockIssue.dueDate = succDue;
-          }
+          await store.setOverlay(this.ctx.cloudId, succ.id, { startDate: earliestStart });
+          await pushDates(succ.id, earliestStart, succDue);
           byId.set(succ.id, succ);
           queue.push(succ.id);
         }
       }
     }
+    return warnings;
   }
 
   async createTask(input: TaskCreateInput): Promise<Task> {
@@ -333,38 +320,19 @@ export class TaskService {
     const dueDate =
       input.dueDate ?? (startDate ? addDays(startDate, durationDays - 1) : null);
 
-    let key: string;
-    if (this.jira && this.cfg) {
-      const created = await this.jira.createIssue({
-        projectKey: this.cfg.projectKey,
-        issueTypeName: input.issueType,
-        summary: input.summary,
-        parentKey: input.wbsParentId ?? null,
-        dueDate,
-        startDate,
-        startDateFieldId: this.cfg.startDateFieldId,
-        assigneeAccountId: input.assigneeAccountId ?? null,
-      });
-      key = created.key;
-    } else {
-      key = `HHBJ-${this.mockSeq++}`;
-      this.mockStore.push({
-        key,
-        summary: input.summary,
-        issueType: input.issueType,
-        parentKey: input.wbsParentId ?? null,
-        statusName: "To Do",
-        statusCategory: "new",
-        assigneeAccountId: input.assigneeAccountId ?? null,
-        dueDate,
-        startDate,
-        durationDays,
-        percentComplete: 0,
-        predecessors: [],
-      });
-    }
+    const created = await this.jira.createIssue({
+      projectKey: this.ctx.projectKey,
+      issueTypeName: input.issueType,
+      summary: input.summary,
+      parentKey: input.wbsParentId ?? null,
+      dueDate,
+      startDate,
+      startDateFieldId: this.ctx.startDateFieldId,
+      assigneeAccountId: input.assigneeAccountId ?? null,
+    });
+    const key = created.key;
 
-    await store.setOverlay(key, {
+    await store.setOverlay(this.ctx.cloudId, key, {
       startDate,
       durationDays,
       percentComplete: 0,
@@ -377,23 +345,13 @@ export class TaskService {
     // JQL search: Jira Cloud's search index lags a few seconds behind issue creation,
     // so a freshly created issue can be briefly invisible to search while already
     // fetchable by key.
-    if (this.jira && this.cfg) {
-      const issue = await this.jira.getIssue(key);
-      return this.hydrate(key, this.fromJiraIssue(issue), this.jiraStartDateOf(issue));
-    }
-    const all = await this.listMockTasks();
-    const created = all.find((t) => t.id === key);
-    if (!created) throw new Error(`Task ${key} not found after create`);
-    return created;
+    const issue = await this.jira.getIssue(key);
+    return this.hydrate(key, this.fromJiraIssue(issue), this.jiraStartDateOf(issue));
   }
 
   async deleteTask(id: string): Promise<void> {
-    if (this.jira) {
-      await this.jira.deleteIssue(id);
-    } else {
-      this.mockStore = this.mockStore.filter((i) => i.key !== id && i.parentKey !== id);
-    }
-    await store.deleteOverlay(id);
+    await this.jira.deleteIssue(id);
+    await store.deleteOverlay(this.ctx.cloudId, id);
   }
 }
 
@@ -408,5 +366,3 @@ function diffDaysInclusive(startIso: string, endIso: string): number {
   const end = new Date(endIso + "T00:00:00Z").getTime();
   return Math.round((end - start) / 86_400_000) + 1;
 }
-
-export const taskService = new TaskService();

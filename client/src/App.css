@@ -48,18 +48,13 @@ body {
   margin: 0;
   white-space: nowrap;
 }
-.mode-badge {
+.project-badge {
   font-size: 12px;
   padding: 3px 8px;
   border-radius: 12px;
-}
-.mode-live {
   background: #dff3e3;
   color: #1c7c3c;
-}
-.mode-mock {
-  background: #fdf0d5;
-  color: #9a6a00;
+  white-space: nowrap;
 }
 .toolbar-tabs {
   display: flex;
@@ -398,4 +393,184 @@ button:disabled {
 }
 small {
   color: #aeb2bd;
+}
+
+/* Auth: login screen + project picker */
+.auth-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: #f5f6f8;
+}
+.auth-card {
+  width: 400px;
+  align-items: center;
+  text-align: center;
+}
+.auth-card h1 {
+  font-size: 20px;
+  margin: 0;
+}
+.auth-logo {
+  font-size: 40px;
+  line-height: 1;
+}
+.auth-sub {
+  font-size: 13px;
+  color: #5b6070;
+  margin: 0;
+}
+.auth-hint {
+  font-size: 12px;
+  color: #808693;
+  margin: 0;
+  line-height: 1.5;
+}
+/* button.primary only sets colours — the geometry lives under .toolbar-right
+   button, so a bare .primary outside the toolbar renders with UA chrome. */
+.auth-btn {
+  width: 100%;
+  padding: 10px 16px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  font-size: 14px;
+  cursor: pointer;
+}
+.auth-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.picker-card {
+  width: 520px;
+  max-height: 80vh;
+}
+.picker-title {
+  font-size: 17px;
+  margin: 0 0 2px;
+}
+.picker-empty {
+  font-size: 13px;
+  color: #808693;
+  padding: 12px 0;
+}
+.picker-identity {
+  font-size: 12px;
+  color: #808693;
+}
+.project-list {
+  max-height: 46vh;
+  overflow-y: auto;
+  border: 1px solid #eef0f3;
+  border-radius: 6px;
+}
+.project-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border-bottom: 1px solid #eef0f3;
+  font-size: 13px;
+}
+.project-row:last-child {
+  border-bottom: none;
+}
+.project-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  flex: none;
+}
+.project-avatar-blank {
+  background: #eef0f3;
+}
+.project-key {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: #3369c9;
+  flex: none;
+  min-width: 68px;
+}
+.project-name {
+  color: #1f2430;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.muted-inline {
+  margin-left: auto;
+  font-size: 12px;
+  color: #808693;
+}
+
+/* Toolbar identity block */
+.toolbar-divider {
+  width: 1px;
+  height: 20px;
+  background: #e2e4e9;
+}
+.user-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #1f2430;
+}
+.user-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  flex: none;
+}
+.user-avatar-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #3369c9;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+}
+.user-name {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Dismissible strips under the toolbar */
+.notice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  font-size: 12.5px;
+  border-bottom: 1px solid #e2e4e9;
+}
+.notice span {
+  flex: 1;
+}
+.notice-error {
+  background: #fdecea;
+  color: #b3261e;
+}
+.notice-warn {
+  background: #fdf0d5;
+  color: #7a5400;
+}
+
+.error-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 12px;
+}
+
+/* No focus styling existed anywhere; a login screen and a searchable picker are
+   exactly where keyboard users notice its absence. */
+:focus-visible {
+  outline: 2px solid #3369c9;
+  outline-offset: 1px;
 }

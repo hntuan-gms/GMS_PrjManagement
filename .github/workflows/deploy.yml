@@ -9,11 +9,15 @@ name: Deploy to Cloud Run
 #     GCP_REGION               e.g. asia-southeast1
 #     GCP_SERVICE_ACCOUNT      deployer SA email, e.g. gh-deployer@PROJECT.iam.gserviceaccount.com
 #     GCP_WIF_PROVIDER         projects/NNN/locations/global/workloadIdentityPools/POOL/providers/PROVIDER
-#     JIRA_BASE_URL            https://gimasys.atlassian.net   (leave unset -> app runs in mock mode)
-#     JIRA_EMAIL               your.email@gimasys.com
-#     JIRA_PROJECT_KEY         HHBJ
-#     JIRA_START_DATE_FIELD_ID customfield_10059
-#   Secret Manager secret (NOT a GitHub secret): jira-api-token
+#     ATLASSIAN_CLIENT_ID      from developer.atlassian.com/console/myapps
+#     APP_BASE_URL             https://gms-prjmanagement-ftlpeveyxa-as.a.run.app
+#     ALLOWED_EMAIL_DOMAIN     gimasys.com
+#   Secret Manager secrets (NOT GitHub secrets):
+#     atlassian-client-secret  the OAuth app's client secret
+#     session-encryption-keys  "k1:<32 random bytes, base64url>" — see server/.env.example
+#
+# The Atlassian app's Callback URL must be exactly $APP_BASE_URL/api/auth/callback.
+# Atlassian allows one callback per app, so local dev needs a second app.
 
 on:
   push:
@@ -84,36 +88,44 @@ jobs:
           image: ${{ env.REGISTRY }}/${{ vars.GCP_PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE }}:${{ github.sha }}
           # PORT is reserved: Cloud Run injects PORT=8080 and server/src/index.ts
           # already honours it (`process.env.PORT ?? 4000`). Setting it here is rejected.
-          # Unset JIRA_* values are harmless — loadJiraConfig() falls back to mock mode.
+          # There is no fallback mode: the server exits at boot if any of these or
+          # the two secrets below are missing.
           env_vars: |-
-            JIRA_BASE_URL=${{ vars.JIRA_BASE_URL }}
-            JIRA_EMAIL=${{ vars.JIRA_EMAIL }}
-            JIRA_PROJECT_KEY=${{ vars.JIRA_PROJECT_KEY }}
-            JIRA_START_DATE_FIELD_ID=${{ vars.JIRA_START_DATE_FIELD_ID }}
-          # Requires a Secret Manager secret named `jira-api-token`; the runtime
-          # service account needs roles/secretmanager.secretAccessor on it.
+            ATLASSIAN_CLIENT_ID=${{ vars.ATLASSIAN_CLIENT_ID }}
+            APP_BASE_URL=${{ vars.APP_BASE_URL }}
+            ALLOWED_EMAIL_DOMAIN=${{ vars.ALLOWED_EMAIL_DOMAIN }}
+          # The runtime service account needs roles/secretmanager.secretAccessor on
+          # both. Rotate session-encryption-keys by PREPENDING a new key — replacing
+          # the list outright logs every user out immediately.
           secrets: |-
-            JIRA_API_TOKEN=jira-api-token:latest
+            ATLASSIAN_CLIENT_SECRET=atlassian-client-secret:latest
+            SESSION_ENCRYPTION_KEYS=session-encryption-keys:latest
           # overwrite (--set-env-vars / --set-secrets) rather than the default merge
-          # (--update-*): the service already carries JIRA_API_TOKEN as a literal env
-          # var from an earlier manual deploy, and merge cannot convert a literal into
-          # a secret reference. It also makes this file the sole source of truth, so
-          # anything set by hand on the service is reverted on the next deploy.
+          # (--update-*): this file is the sole source of truth for the service's
+          # environment, so removing a line here removes it from the live service and
+          # anything set by hand is reverted on the next deploy.
           env_vars_update_strategy: overwrite
           secrets_update_strategy: overwrite
           flags: >-
-            --no-allow-unauthenticated
+            --allow-unauthenticated
             --port=8080
             --cpu=1
             --memory=512Mi
             --min-instances=0
             --max-instances=1
             --timeout=60s
-          # ^ max-instances=1 is deliberate, not a cost tweak: the local schedule
-          # overlay (data/overlay.json) is per-instance state. See the note below.
+          # allow-unauthenticated is REQUIRED here, not a relaxation for convenience:
+          # Atlassian redirects the browser back to /api/auth/callback, and that
+          # navigation cannot carry a Google-signed ID token, so Cloud Run IAM would
+          # reject it before Express ever runs. The consequence is that the app's own
+          # requireAuth middleware (mounted via apiRouter.use, so it is fail-closed)
+          # plus ALLOWED_EMAIL_DOMAIN are the only access control in front of Jira.
           #
-          # To persist the overlay across revisions and cold starts, create a bucket
-          # and add these two flags above:
+          # max-instances=1 is deliberate, not a cost tweak: the schedule overlay
+          # (data/overlay.v2.json) is a single-writer lowdb file. It also still lives
+          # on the container's ephemeral disk, so dependencies, baselines and %
+          # complete reset on every deploy — the client shows a warning strip.
+          # To make it durable, create a bucket and add these two flags above:
           #   --add-volume=name=overlay,type=cloud-storage,bucket=YOUR_BUCKET
           #   --add-volume-mount=volume=overlay,mount-path=/app/data
 

@@ -1,0 +1,131 @@
+/**
+ * One error taxonomy for the whole API, replacing the six identical
+ * `catch { res.status(502) }` blocks that used to live in routes/api.ts.
+ *
+ * The load-bearing distinction is 401 vs 403. Jira returns 401 for a dead token
+ * (the client must re-login) and 403 for "your account may not do that" (the
+ * client must show a message and stay logged in). Collapsing both into 502 is
+ * what made every Jira problem look like a server outage.
+ */
+import type { NextFunction, Request, Response } from "express";
+import { AtlassianAuthError } from "./auth/atlassian.js";
+import { JiraApiError } from "./jiraClient.js";
+
+export type ErrorCode =
+  | "AUTH_REQUIRED"
+  | "JIRA_REAUTH_REQUIRED"
+  | "JIRA_FORBIDDEN"
+  | "JIRA_SCOPE_MISSING"
+  | "ISSUE_NOT_FOUND"
+  | "JIRA_RATE_LIMITED"
+  | "JIRA_UPSTREAM"
+  | "NO_PROJECT_SELECTED"
+  | "BAD_REQUEST"
+  | "INTERNAL";
+
+export class AppError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly code: ErrorCode,
+    message: string
+  ) {
+    super(message);
+    this.name = "AppError";
+  }
+}
+
+export const authRequired = () =>
+  new AppError(401, "AUTH_REQUIRED", "Bạn cần đăng nhập bằng tài khoản Atlassian.");
+
+export const noProjectSelected = () =>
+  new AppError(409, "NO_PROJECT_SELECTED", "Chưa chọn dự án Jira.");
+
+export const badRequest = (message: string) => new AppError(400, "BAD_REQUEST", message);
+
+interface Mapped {
+  status: number;
+  code: ErrorCode;
+  error: string;
+  retryAfter?: string;
+}
+
+function mapError(err: unknown): Mapped {
+  if (err instanceof AppError) {
+    return { status: err.status, code: err.code, error: err.message };
+  }
+
+  if (err instanceof AtlassianAuthError) {
+    return {
+      status: 401,
+      code: "JIRA_REAUTH_REQUIRED",
+      error: "Phiên Atlassian đã hết hạn. Vui lòng đăng nhập lại.",
+    };
+  }
+
+  if (err instanceof JiraApiError) {
+    if (err.status === 401) {
+      return {
+        status: 401,
+        code: "JIRA_REAUTH_REQUIRED",
+        error: "Jira từ chối phiên đăng nhập. Vui lòng đăng nhập lại.",
+      };
+    }
+    if (err.status === 403) {
+      return err.scopeProblem
+        ? {
+            status: 403,
+            code: "JIRA_SCOPE_MISSING",
+            error:
+              "Ứng dụng chưa được cấp đủ quyền trên Atlassian cho thao tác này. " +
+              "Cần đăng nhập lại để cấp quyền bổ sung.",
+          }
+        : {
+            status: 403,
+            code: "JIRA_FORBIDDEN",
+            error: `Tài khoản của bạn không có quyền thực hiện thao tác này trên Jira. ${err.summary}`.trim(),
+          };
+    }
+    if (err.status === 404) {
+      return {
+        status: 404,
+        code: "ISSUE_NOT_FOUND",
+        error: `Không tìm thấy trên Jira. ${err.summary}`.trim(),
+      };
+    }
+    if (err.status === 429) {
+      return {
+        status: 503,
+        code: "JIRA_RATE_LIMITED",
+        error: "Jira đang giới hạn tần suất truy cập. Vui lòng thử lại sau giây lát.",
+        retryAfter: err.retryAfter ?? "5",
+      };
+    }
+    return {
+      status: 502,
+      code: "JIRA_UPSTREAM",
+      error: `Jira trả về lỗi ${err.status}. ${err.summary}`.trim(),
+    };
+  }
+
+  return {
+    status: 500,
+    code: "INTERNAL",
+    error: err instanceof Error ? err.message : "Lỗi không xác định.",
+  };
+}
+
+// Four args is what marks this as Express error middleware; `_next` must stay.
+export function errorHandler(err: unknown, _req: Request, res: Response, _next: NextFunction): void {
+  const mapped = mapError(err);
+
+  // Raw Jira bodies are useful in the log and noise (or a leak) in the browser.
+  if (mapped.status >= 500 || mapped.code === "INTERNAL") {
+    console.error("[api]", err);
+  } else if (err instanceof JiraApiError) {
+    console.warn(`[api] Jira ${err.status}: ${err.body.slice(0, 500)}`);
+  }
+
+  if (mapped.retryAfter) res.setHeader("Retry-After", mapped.retryAfter);
+  if (res.headersSent) return;
+  res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
+}

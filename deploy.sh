@@ -6,7 +6,9 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 if [ ! -f server/.env ]; then
-  echo "⚠️  server/.env not found — copying server/.env.example (app will run in MOCK mode until you fill in Jira credentials)."
+  echo "⚠️  server/.env not found — copying server/.env.example."
+  echo "    Fill in ATLASSIAN_CLIENT_ID / ATLASSIAN_CLIENT_SECRET / SESSION_ENCRYPTION_KEYS"
+  echo "    before starting: there is no mock mode, and the server exits at boot without them."
   cp server/.env.example server/.env
 fi
 
