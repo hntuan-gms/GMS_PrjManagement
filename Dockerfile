@@ -3,7 +3,9 @@
 
 FROM node:20-alpine AS client-build
 WORKDIR /app/client
-COPY client/package.json client/package-lock.json ./
+# .npmrc must land before `npm ci`: it carries legacy-peer-deps=true, without which
+# gantt-task-react's react@^18 peer range fails against React 19.
+COPY client/package.json client/package-lock.json client/.npmrc ./
 RUN npm ci
 COPY client/ ./
 RUN npm run build
