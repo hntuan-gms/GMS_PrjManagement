@@ -94,6 +94,13 @@ jobs:
           # service account needs roles/secretmanager.secretAccessor on it.
           secrets: |-
             JIRA_API_TOKEN=jira-api-token:latest
+          # overwrite (--set-env-vars / --set-secrets) rather than the default merge
+          # (--update-*): the service already carries JIRA_API_TOKEN as a literal env
+          # var from an earlier manual deploy, and merge cannot convert a literal into
+          # a secret reference. It also makes this file the sole source of truth, so
+          # anything set by hand on the service is reverted on the next deploy.
+          env_vars_update_strategy: overwrite
+          secrets_update_strategy: overwrite
           flags: >-
             --no-allow-unauthenticated
             --port=8080
