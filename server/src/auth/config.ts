@@ -24,11 +24,19 @@ export interface AuthConfig {
   cookieSecure: boolean;
 }
 
-/** Classic scopes. Do NOT mix these with granular scopes — Atlassian rejects the app. */
+/**
+ * Classic scopes. Do NOT mix these with granular scopes — Atlassian rejects the app.
+ *
+ * `read:me` is what lets GET https://api.atlassian.com/me return the user's email,
+ * which the ALLOWED_EMAIL_DOMAIN gate depends on. It is granted by the "User
+ * identity API" permission in the developer console, which is a SEPARATE product
+ * from the Jira API permission — enabling the Jira scopes alone leaves /me at 403.
+ */
 export const SCOPES = [
   "read:jira-work",
   "write:jira-work",
   "read:jira-user",
+  "read:me",
   "offline_access",
 ].join(" ");
 

@@ -152,6 +152,18 @@ export async function getTokenOwner(
   const res = await fetch("https://api.atlassian.com/me", {
     headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
   });
+  if (res.status === 401 || res.status === 403) {
+    // The token is valid (it was just issued) — this is the User identity API
+    // permission missing on the app, which is enabled separately from the Jira
+    // scopes and is easy to overlook.
+    throw new AtlassianAuthError(
+      "identity_scope_missing",
+      "GET /me returned " +
+        res.status +
+        ". Enable the 'User identity API' permission (read:me) on the app at " +
+        "developer.atlassian.com/console/myapps, then log in again."
+    );
+  }
   if (!res.ok) {
     throw new AtlassianAuthError(`http_${res.status}`, `Could not read Atlassian profile (${res.status}).`);
   }

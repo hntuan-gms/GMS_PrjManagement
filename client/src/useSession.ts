@@ -10,8 +10,17 @@ const AUTH_ERROR_MESSAGES: Record<string, string> = {
   missing_code: "Atlassian không trả về mã xác thực. Vui lòng thử lại.",
   insufficient_scope:
     "Ứng dụng chưa được cấp đủ quyền trên Atlassian. Liên hệ quản trị viên để bật đủ scope.",
+  identity_scope_missing:
+    "Ứng dụng Atlassian chưa bật quyền \"User identity API\" (read:me) nên không đọc được " +
+    "email để xác thực. Liên hệ quản trị viên để bật quyền này.",
+  email_unavailable:
+    "Không đọc được email của tài khoản Atlassian nên không thể xác thực tên miền. " +
+    "Liên hệ quản trị viên.",
   domain_not_allowed: "Chỉ tài khoản Gimasys mới được phép đăng nhập.",
   no_site_access: "Tài khoản của bạn chưa có quyền truy cập site Jira nào.",
+  login_failed: "Đăng nhập thất bại. Vui lòng thử lại.",
+  invalid_client:
+    "Client ID hoặc Client Secret của ứng dụng Atlassian không đúng. Liên hệ quản trị viên.",
 };
 
 const EXPIRED_MESSAGE = "Phiên làm việc đã hết hạn. Vui lòng đăng nhập lại.";
