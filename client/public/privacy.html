@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chính sách bảo mật — GMS PrjManagement</title>
+    <style>
+      :root { color-scheme: light; }
+      body {
+        margin: 0;
+        padding: 40px 16px 80px;
+        background: #f5f6f8;
+        color: #1f2430;
+        font: 15px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      }
+      main { max-width: 720px; margin: 0 auto; background: #fff; border-radius: 10px; padding: 32px; }
+      h1 { font-size: 22px; margin: 0 0 4px; }
+      h2 { font-size: 16px; margin: 28px 0 8px; }
+      .updated { color: #808693; font-size: 13px; margin: 0 0 8px; }
+      table { border-collapse: collapse; width: 100%; font-size: 14px; margin: 8px 0; }
+      th, td { text-align: left; border-bottom: 1px solid #eef0f3; padding: 8px 6px; vertical-align: top; }
+      th { color: #5b6070; font-weight: 600; }
+      code { background: #f1f2f5; padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+      a { color: #3369c9; }
+      ul { padding-left: 20px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Chính sách bảo mật — GMS PrjManagement</h1>
+      <p class="updated">Cập nhật: 18/09/2026</p>
+
+      <p>
+        GMS PrjManagement là công cụ nội bộ của Gimasys, dùng để lập kế hoạch và theo dõi
+        tiến độ dự án trên Jira Cloud theo kiểu Microsoft Project. Ứng dụng truy cập Jira
+        <strong>bằng chính tài khoản Atlassian của bạn</strong>, thông qua OAuth 2.0 (3LO).
+        Ứng dụng chỉ đọc và ghi được đúng những dự án mà tài khoản của bạn vốn đã có quyền.
+      </p>
+
+      <h2>1. Dữ liệu được lưu ở đâu</h2>
+      <table>
+        <tr>
+          <th>Dữ liệu</th>
+          <th>Nơi lưu</th>
+          <th>Thời gian</th>
+        </tr>
+        <tr>
+          <td>Refresh token của Atlassian, cloudId, địa chỉ site, accountId, tên hiển thị, ảnh đại diện, mã dự án đang chọn</td>
+          <td>Cookie đã mã hoá (AES-256-GCM) đặt trên trình duyệt của bạn, gắn cờ <code>HttpOnly</code></td>
+          <td>Tối đa 30 ngày, hoặc đến khi bạn đăng xuất</td>
+        </tr>
+        <tr>
+          <td>Access token của Atlassian</td>
+          <td>Cookie đã mã hoá và bộ nhớ tạm của máy chủ</td>
+          <td>Khoảng 1 giờ</td>
+        </tr>
+        <tr>
+          <td>Dữ liệu lịch trình: ngày bắt đầu, thời lượng, % hoàn thành, quan hệ phụ thuộc, baseline</td>
+          <td>Tệp trên máy chủ, gắn theo mã issue của Jira</td>
+          <td>Tạm thời — mất khi máy chủ được cập nhật</td>
+        </tr>
+      </table>
+
+      <h2>2. Địa chỉ email của bạn</h2>
+      <p>
+        Khi đăng nhập, ứng dụng đọc email của tài khoản Atlassian
+        (<code>read:me</code>) <strong>chỉ để kiểm tra bạn có thuộc tên miền được phép
+        hay không</strong>. Email <strong>không được lưu lại</strong> ở bất kỳ đâu — không
+        trong cookie, không trong tệp dữ liệu, không trong cơ sở dữ liệu.
+      </p>
+
+      <h2>3. Nội dung Jira</h2>
+      <p>
+        Ứng dụng <strong>không sao chép và không lưu trữ</strong> nội dung issue của bạn
+        (tiêu đề, mô tả, bình luận, tệp đính kèm, người phụ trách). Những dữ liệu này được
+        đọc trực tiếp từ Jira mỗi lần bạn mở trang và chỉ tồn tại trong bộ nhớ trong lúc xử lý
+        yêu cầu. Dữ liệu lịch trình nêu ở mục 1 chỉ gồm ngày tháng và con số, gắn với mã
+        issue — không chứa thông tin cá nhân.
+      </p>
+
+      <h2>4. Nhật ký hệ thống</h2>
+      <p>
+        Ứng dụng chạy trên Google Cloud Run (khu vực <code>asia-southeast1</code>, Singapore).
+        Cloud Run tự động ghi nhật ký các yêu cầu HTTP, trong đó có địa chỉ URL và mã uỷ quyền
+        tạm thời của Atlassian trong bước đăng nhập. Mã này chỉ dùng được một lần, hết hạn sau
+        vài phút và đã được sử dụng xong tại thời điểm ghi nhật ký. Nhật ký được lưu theo cấu
+        hình mặc định của Google Cloud Logging.
+      </p>
+
+      <h2>5. Bên thứ ba</h2>
+      <ul>
+        <li><strong>Atlassian</strong> — nguồn dữ liệu Jira và nhà cung cấp cơ chế đăng nhập.</li>
+        <li><strong>Google Cloud</strong> — hạ tầng lưu trữ và vận hành ứng dụng.</li>
+      </ul>
+      <p>
+        Ứng dụng không dùng công cụ phân tích, không đặt cookie theo dõi, không chia sẻ hay bán
+        dữ liệu cho bất kỳ bên nào khác.
+      </p>
+
+      <h2>6. Thu hồi quyền truy cập</h2>
+      <p>
+        Nút "Đăng xuất" trong ứng dụng xoá cookie phiên trên trình duyệt của bạn. Để thu hồi
+        hoàn toàn quyền truy cập Jira đã cấp cho ứng dụng, vào
+        <a href="https://id.atlassian.com/manage-profile/apps" target="_blank" rel="noreferrer">
+          id.atlassian.com/manage-profile/apps</a>
+        và gỡ ứng dụng GMS PrjManagement.
+      </p>
+
+      <h2>7. Liên hệ</h2>
+      <p>
+        Mọi câu hỏi về dữ liệu, xin liên hệ
+        <a href="mailto:vdquang@gimasys.com">vdquang@gimasys.com</a>.
+      </p>
+    </main>
+  </body>
+</html>

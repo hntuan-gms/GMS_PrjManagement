@@ -42,6 +42,10 @@ app.use(errorHandler);
 // on one port — no separate frontend server needed.
 const publicDir = path.join(__dirname, "../public");
 if (existsSync(path.join(publicDir, "index.html"))) {
+  // The privacy policy URL is registered with Atlassian and is awkward to change,
+  // so accept the extensionless form too — otherwise /privacy falls through to the
+  // SPA catch-all below and quietly renders the login screen instead.
+  app.get("/privacy", (_req, res) => res.redirect(301, "/privacy.html"));
   app.use(express.static(publicDir));
   // Excludes bare /api and /health as well as their subpaths; the previous
   // /^(?!\/api\/).*/ let "/api" itself fall through to index.html.

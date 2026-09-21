@@ -56,12 +56,30 @@ integration*:
 - **Authorization → OAuth 2.0 (3LO)**: bật `offline_access`, và đặt
   **Callback URL** đúng bằng `<APP_BASE_URL>/api/auth/callback`
 
+- **Permissions → User identity API**: bật `read:me`. Đây là sản phẩm **riêng** với
+  Jira API — chỉ bật scope Jira thì `GET /me` trả 403 và đăng nhập sẽ hỏng.
+
 Atlassian chỉ cho **một** Callback URL mỗi app, nên cần **hai app riêng**:
 
 | Môi trường | Callback URL |
 |---|---|
 | Local dev | `http://localhost:5173/api/auth/callback` |
 | Production | `https://<cloud-run-url>/api/auth/callback` |
+
+### Cho người khác đăng nhập được
+
+App mới tạo ở trạng thái *Development*: **chỉ chủ sở hữu app mới đăng nhập được**.
+Người khác sẽ thấy màn hình *"You don't have access to this app"* ngay trên trang
+consent của Atlassian, trước khi request đến được ứng dụng.
+
+Khắc phục: **Distribution → Sharing → On**. Form yêu cầu tên đơn vị, URL chính sách
+bảo mật (`https://<cloud-run-url>/privacy`, xem `client/public/privacy.html`), thông
+tin liên hệ và khai báo về dữ liệu cá nhân.
+
+> Bật Sharing đồng nghĩa **bất kỳ tài khoản Atlassian nào cũng có thể vào được màn
+> hình consent**. Từ lúc đó, `ALLOWED_EMAIL_DOMAIN` là thứ duy nhất chặn người lạ —
+> hãy kiểm tra biến này thực sự đang được đặt trên Cloud Run, không chỉ trong file
+> workflow.
 
 ### 2. Chạy local
 
