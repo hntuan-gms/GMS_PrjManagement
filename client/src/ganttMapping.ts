@@ -33,24 +33,71 @@ export function orderByWbs(tasks: Task[]): OrderedTask[] {
   return result;
 }
 
+export interface DateRange {
+  start: string;
+  end: string;
+}
+
+/**
+ * A displayable date range for every task: its own start/due when set, or — for a
+ * WBS parent (an Epic used purely as a grouping issue, say) that has none of its
+ * own — the min/max across its descendants' resolved ranges, so the parent still
+ * gets a bar spanning its children instead of vanishing from the chart entirely.
+ * Computed from the *full* tree regardless of collapse state, so collapsing a
+ * parent never changes its own resolved range.
+ */
+export function resolveRanges(ordered: OrderedTask[]): Map<string, DateRange> {
+  const childrenOf = new Map<string, string[]>();
+  const byId = new Map(ordered.map((o) => [o.task.id, o.task]));
+  for (const o of ordered) {
+    const parentId = o.task.wbsParentId;
+    if (parentId && byId.has(parentId)) {
+      if (!childrenOf.has(parentId)) childrenOf.set(parentId, []);
+      childrenOf.get(parentId)!.push(o.task.id);
+    }
+  }
+
+  const ranges = new Map<string, DateRange>();
+  // `ordered` is depth-first, parent-before-children, so every descendant of a node
+  // appears somewhere after it — walking in reverse guarantees children (and their
+  // own already-resolved rollups) are available by the time their parent is visited.
+  for (const { task } of [...ordered].reverse()) {
+    let start = task.startDate;
+    let end = task.dueDate ?? task.startDate;
+    for (const childId of childrenOf.get(task.id) ?? []) {
+      const childRange = ranges.get(childId);
+      if (!childRange) continue;
+      if (!start || childRange.start < start) start = childRange.start;
+      if (!end || childRange.end > end) end = childRange.end;
+    }
+    if (start && end) ranges.set(task.id, { start, end });
+  }
+  return ranges;
+}
+
 /**
  * Hierarchy (indentation, expand/collapse) is driven entirely by our own custom WBS
  * table, not gantt-task-react's built-in project/child aggregation — so every bar is
- * a plain "task" here regardless of whether it has children in the WBS.
+ * a plain "task" here regardless of whether it has children in the WBS. `ordered`
+ * must already be filtered to entries present in `ranges` (see GanttView) so this
+ * list stays index-aligned, row for row, with the custom TaskListTable.
  */
-export function toGanttTasks(ordered: OrderedTask[]): GanttTask[] {
+export function toGanttTasks(ordered: OrderedTask[], ranges: Map<string, DateRange>): GanttTask[] {
   return ordered
-    .filter((o) => o.task.startDate)
-    .map(({ task }) => ({
-      id: task.id,
-      name: task.summary,
-      start: new Date(task.startDate! + "T00:00:00"),
-      end: new Date((task.dueDate ?? task.startDate!) + "T23:59:59"),
-      progress: task.percentComplete,
-      type: "task",
-      dependencies: task.predecessors.map((p) => p.taskId),
-      styles: statusStyles(task.statusCategory, task.issueType),
-    }));
+    .filter((o) => ranges.has(o.task.id))
+    .map(({ task }) => {
+      const range = ranges.get(task.id)!;
+      return {
+        id: task.id,
+        name: task.summary,
+        start: new Date(range.start + "T00:00:00"),
+        end: new Date(range.end + "T23:59:59"),
+        progress: task.percentComplete,
+        type: "task",
+        dependencies: task.predecessors.map((p) => p.taskId),
+        styles: statusStyles(task.statusCategory, task.issueType),
+      };
+    });
 }
 
 function statusStyles(statusCategory: Task["statusCategory"], issueType: Task["issueType"]) {

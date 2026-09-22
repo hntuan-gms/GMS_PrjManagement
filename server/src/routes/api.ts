@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { requireAuth, requireProject } from "../auth/middleware.js";
 import { badRequest } from "../errors.js";
-import type { SessionMeta, TaskCreateInput, TaskUpdateInput } from "../types.js";
+import type { BulkTaskCreateInput, SessionMeta, TaskCreateInput, TaskUpdateInput } from "../types.js";
 
 export const apiRouter = Router();
 
@@ -53,6 +53,20 @@ apiRouter.post("/tasks", requireProject, async (req, res, next) => {
       return;
     }
     res.status(201).json(await req.auth!.taskService!.createTask(input));
+  } catch (err) {
+    next(err);
+  }
+});
+
+apiRouter.post("/tasks/bulk", requireProject, async (req, res, next) => {
+  try {
+    const input = req.body as BulkTaskCreateInput;
+    const summaries = (input.summaries ?? []).map((s) => s.trim()).filter(Boolean);
+    if (summaries.length === 0 || !input.issueType) {
+      next(badRequest("Cần nhập ít nhất một tên công việc và loại issue."));
+      return;
+    }
+    res.status(201).json(await req.auth!.taskService!.createTasksBulk({ ...input, summaries }));
   } catch (err) {
     next(err);
   }

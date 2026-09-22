@@ -115,14 +115,18 @@ button:disabled {
 /* Gantt */
 .gantt-wrap {
   flex: 1;
-  overflow: auto;
+  min-height: 0;
+  overflow: hidden;
   background: #fff;
+  display: flex;
+  flex-direction: column;
 }
 .gantt-toolbar {
   display: flex;
   gap: 4px;
   padding: 8px 12px;
   border-bottom: 1px solid #e2e4e9;
+  flex: none;
 }
 .gantt-toolbar button {
   border: 1px solid #d7dae0;
@@ -135,6 +139,35 @@ button:disabled {
 .gantt-toolbar button.active {
   background: #1f2430;
   color: #fff;
+}
+
+/* Fixed-height body below the toolbar row: gantt-task-react's ganttHeight prop is
+   sized to fit exactly here, so its own header row and bottom scrollbar stay put
+   (pinned) while only the task rows underneath scroll. */
+.gantt-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Draggable split between the WBS table and the timeline. Defaults to the middle
+   of .gantt-body (see GanttView); dragging it just updates gantt-task-react's own
+   listCellWidth, so the WBS columns (flex-based) resize along with it. */
+.gantt-divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  margin-left: -3px;
+  cursor: col-resize;
+  z-index: 5;
+  background: transparent;
+}
+.gantt-divider:hover,
+.gantt-divider.dragging {
+  background: #3369c9;
+  opacity: 0.35;
 }
 
 .wbs-header {
@@ -202,6 +235,9 @@ button:disabled {
   cursor: pointer;
   padding: 0 2px;
   font-size: 10px;
+}
+.issue-icon {
+  flex: none;
 }
 
 /* Resource view */
@@ -334,12 +370,17 @@ button:disabled {
   flex: 1;
 }
 .field input,
-.field select {
+.field select,
+.field textarea {
   padding: 7px 8px;
   border: 1px solid #d7dae0;
   border-radius: 6px;
   font-size: 13px;
   color: #1f2430;
+  font-family: inherit;
+}
+.field textarea {
+  resize: vertical;
 }
 .field-row {
   display: flex;
@@ -382,6 +423,31 @@ button:disabled {
   padding: 8px 10px;
   border-radius: 6px;
   font-size: 13px;
+}
+.import-count {
+  font-size: 12px;
+  color: #808693;
+  margin-top: -8px;
+}
+.import-result-summary {
+  font-size: 13px;
+}
+.import-error-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12.5px;
+}
+.import-error-list li {
+  background: #fdecec;
+  color: #b3261e;
+  padding: 6px 8px;
+  border-radius: 6px;
 }
 .modal-footer {
   display: flex;

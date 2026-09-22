@@ -1,6 +1,9 @@
+import { adfToText, textToAdf } from "./adf.js";
 import { JiraApiError, type JiraClient } from "./jiraClient.js";
 import * as store from "./store.js";
 import type {
+  BulkTaskCreateInput,
+  BulkTaskCreateResult,
   IssueTypeName,
   JiraUser,
   ProjectSummary,
@@ -10,7 +13,7 @@ import type {
   TaskUpdateInput,
 } from "./types.js";
 
-const SEARCH_FIELDS = ["summary", "issuetype", "status", "assignee", "duedate", "parent"];
+const SEARCH_FIELDS = ["summary", "description", "issuetype", "status", "assignee", "duedate", "parent"];
 
 function statusCategoryKey(key: string): "new" | "indeterminate" | "done" {
   if (key === "done") return "done";
@@ -95,6 +98,7 @@ export class TaskService {
       id: issue.key,
       wbsParentId: f.parent?.key ?? null,
       summary: f.summary,
+      description: f.description ? adfToText(f.description) : null,
       issueType: f.issuetype?.name as IssueTypeName,
       statusName: f.status?.name ?? "Unknown",
       statusCategory: statusCategoryKey(f.status?.statusCategory?.key ?? "new"),
@@ -185,6 +189,7 @@ export class TaskService {
 
     const fields: Record<string, unknown> = {};
     if (input.summary !== undefined) fields.summary = input.summary;
+    if (input.description !== undefined) fields.description = textToAdf(input.description ?? "");
     if (scheduleTouched) Object.assign(fields, this.scheduleFields(newDue, newStart));
     if (Object.keys(fields).length > 0) {
       await this.jira.updateIssueFields(id, fields);
@@ -324,6 +329,7 @@ export class TaskService {
       projectKey: this.ctx.projectKey,
       issueTypeName: input.issueType,
       summary: input.summary,
+      description: input.description ?? null,
       parentKey: input.wbsParentId ?? null,
       dueDate,
       startDate,
@@ -347,6 +353,38 @@ export class TaskService {
     // fetchable by key.
     const issue = await this.jira.getIssue(key);
     return this.hydrate(key, this.fromJiraIssue(issue), this.jiraStartDateOf(issue));
+  }
+
+  /**
+   * One shared set of fields applied to N summaries, created sequentially (not via
+   * Jira's native /issue/bulk) so each row can still resolve `wbsParentId` and get
+   * its own overlay the same way a single createTask does. Rows are independent: one
+   * Jira write failure (permission, 400 on a project without this issue type, ...)
+   * is collected as a per-row error instead of aborting the whole batch.
+   */
+  async createTasksBulk(input: BulkTaskCreateInput): Promise<BulkTaskCreateResult> {
+    const created: Task[] = [];
+    const errors: Array<{ summary: string; message: string }> = [];
+    for (const summary of input.summaries) {
+      try {
+        created.push(
+          await this.createTask({
+            summary,
+            issueType: input.issueType,
+            description: input.description ?? null,
+            wbsParentId: input.wbsParentId ?? null,
+            startDate: input.startDate ?? null,
+            durationDays: input.durationDays,
+            assigneeAccountId: input.assigneeAccountId ?? null,
+          })
+        );
+      } catch (err) {
+        if (err instanceof JiraApiError && err.status === 401) throw err;
+        const message = err instanceof JiraApiError ? err.summary || err.message : (err as Error).message;
+        errors.push({ summary, message });
+      }
+    }
+    return { created, errors };
   }
 
   async deleteTask(id: string): Promise<void> {

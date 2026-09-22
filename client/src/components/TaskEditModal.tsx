@@ -15,6 +15,7 @@ const STATUS_OPTIONS = ["Backlog", "To Do", "In Progress", "Done"];
 
 export default function TaskEditModal({ task, allTasks, users, onClose, onSave, onDelete }: Props) {
   const [summary, setSummary] = useState(task.summary);
+  const [description, setDescription] = useState(task.description ?? "");
   const [startDate, setStartDate] = useState(task.startDate ?? "");
   const [durationDays, setDurationDays] = useState(task.durationDays);
   const [percentComplete, setPercentComplete] = useState(task.percentComplete);
@@ -38,6 +39,7 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
     try {
       await onSave({
         summary,
+        description: description.trim() || null,
         startDate: startDate || null,
         durationDays,
         percentComplete,
@@ -89,6 +91,11 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
         <label className="field">
           <span>Tên công việc</span>
           <input value={summary} onChange={(e) => setSummary(e.target.value)} />
+        </label>
+
+        <label className="field">
+          <span>Mô tả</span>
+          <textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} />
         </label>
 
         <div className="field-row">
