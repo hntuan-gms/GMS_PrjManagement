@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { flushSync } from "react-dom";
 import { ApiError, NetworkError, api } from "../api";
 import { computeOptimisticCascade } from "../dependencyCascade";
 import type { BulkTaskCreateResult, DependencyType, JiraUser, Session, Task, TaskUpdateResponse } from "../types";
@@ -116,10 +117,20 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
    * detail this local pass got wrong (e.g. a concurrent edit) self-corrects. If the
    * save fails, roll back to the true server state instead of leaving the
    * optimistic (unsaved) value on screen.
+   *
+   * flushSync forces this update to commit and paint before control returns to
+   * gantt-task-react's own mouseup handler. Without it, the setTasks below is only
+   * *scheduled* — the library's handler keeps running on the old `tasks` prop, and
+   * its own post-drop effects (which briefly reconcile its internal bar state back
+   * toward whatever props last looked like) can paint one frame of the pre-drag
+   * position before React's batched update finally flushes, which reads as the bar
+   * hopping backward and then catching up a moment later.
    */
   async function handleScheduleChange(id: string, startDate: string, durationDays: number) {
     const cascade = computeOptimisticCascade(tasks, id, startDate, durationDays);
-    setTasks((prev) => prev.map((t) => cascade.get(t.id) ?? t));
+    flushSync(() => {
+      setTasks((prev) => prev.map((t) => cascade.get(t.id) ?? t));
+    });
     try {
       const updated = await api.updateTask(id, { startDate, durationDays });
       setTasks((prev) => applyTaskUpdate(prev, updated));
