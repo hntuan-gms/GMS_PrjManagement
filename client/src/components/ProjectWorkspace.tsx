@@ -34,12 +34,23 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [creating, setCreating] = useState(false);
-  // Sequence number per task id, bumped on every schedule-change request. A slow
-  // save's response is only applied if it's still the latest one issued for that
-  // task — otherwise a stale reply from an earlier drag (Jira round trips can take
-  // several seconds) can land after a newer drag's own optimistic update and yank
-  // the bar back to wherever that older drag left it.
-  const scheduleRequestSeq = useRef<Map<string, number>>(new Map());
+  // A single global counter, bumped once per mutating request (schedule change,
+  // progress change, add-dependency, modal save). `taskVersion` records, per task
+  // id, the seq of the most recent thing that touched it — whether that task was
+  // the request's own primary target OR one it optimistically cascaded to.
+  //
+  // Every response is applied task-by-task (see applyTaskUpdate) against this map:
+  // a task is only overwritten if no NEWER seq has touched it since. This matters
+  // beyond the primary task, because a save can take several seconds (a Jira round
+  // trip), and a request's response carries `cascaded` tasks too — e.g. dragging A
+  // (which pushes successor B) and then, before A's slow response lands, dragging
+  // B directly: A's response still shows B at the position A's cascade computed,
+  // and applying it unguarded would yank B backward over the drag you just did.
+  const seqCounter = useRef(0);
+  const taskVersion = useRef<Map<string, number>>(new Map());
+  function nextSeq(): number {
+    return ++seqCounter.current;
+  }
 
   async function loadAll() {
     setLoading(true);
@@ -103,12 +114,24 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
    * what made dragging a bar feel laggy: the optimistic value showed instantly,
    * then a moment later the full refetch would land and visibly snap the chart
    * to the server-confirmed value, even when nothing had actually changed.
-   * Object identity is preserved for every task the cascade didn't touch, so
-   * unrelated rows don't needlessly re-render either.
+   *
+   * Applied task-by-task against `taskVersion` (see its comment above): a task in
+   * this response — primary or cascaded — is only written if `seq` (this
+   * request's own place in the global order) is still >= whatever last touched
+   * that task. Skipping the ones that fail this check is what stops a slow
+   * response from one drag overwriting a *different* task's own, newer drag with
+   * stale cascaded data. Object identity is preserved for every task neither the
+   * cascade nor this guard touched, so unrelated rows don't needlessly re-render.
    */
-  function applyTaskUpdate(prev: Task[], response: TaskUpdateResponse): Task[] {
+  function applyTaskUpdate(prev: Task[], response: TaskUpdateResponse, seq: number): Task[] {
     const { cascaded, cascadeWarnings: _cascadeWarnings, ...primary } = response;
-    const byId = new Map<string, Task>([[primary.id, primary], ...cascaded.map((t) => [t.id, t] as const)]);
+    const byId = new Map<string, Task>();
+    for (const t of [primary, ...cascaded]) {
+      if ((taskVersion.current.get(t.id) ?? 0) <= seq) {
+        byId.set(t.id, t);
+        taskVersion.current.set(t.id, seq);
+      }
+    }
     return prev.map((t) => byId.get(t.id) ?? t);
   }
 
@@ -133,35 +156,37 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
    * hopping backward and then catching up a moment later.
    *
    * A save can take a few seconds (a Jira round trip), so it's easy to drag the
-   * same task again before the previous request's response lands. `seq` makes
-   * sure only the response for the LATEST request on this task id is ever
-   * applied — an older, slower reply arriving after a newer drag would otherwise
-   * overwrite the newer optimistic position with its own now-stale one.
+   * same task again — or drag a different task this one is linked to — before
+   * the previous request's response lands. `seq` (see `taskVersion` above) is
+   * what makes applyTaskUpdate apply only the tasks in this response that
+   * nothing newer has touched since.
    */
   async function handleScheduleChange(id: string, startDate: string, durationDays: number) {
+    const seq = nextSeq();
     const cascade = computeOptimisticCascade(tasks, id, startDate, durationDays);
     flushSync(() => {
       setTasks((prev) => prev.map((t) => cascade.get(t.id) ?? t));
     });
-    const seq = (scheduleRequestSeq.current.get(id) ?? 0) + 1;
-    scheduleRequestSeq.current.set(id, seq);
+    for (const touchedId of cascade.keys()) taskVersion.current.set(touchedId, seq);
     try {
       const updated = await api.updateTask(id, { startDate, durationDays });
-      if (scheduleRequestSeq.current.get(id) !== seq) return; // superseded by a newer drag
-      setTasks((prev) => applyTaskUpdate(prev, updated));
+      setTasks((prev) => applyTaskUpdate(prev, updated, seq));
     } catch (e) {
-      if (scheduleRequestSeq.current.get(id) !== seq) return;
+      if ((taskVersion.current.get(id) ?? 0) > seq) return; // superseded by a newer drag
       setSyncError(e instanceof Error ? e.message : "Không thể lưu thay đổi lịch trình.");
       await refreshTasks();
     }
   }
 
   async function handleProgressChange(id: string, percentComplete: number) {
+    const seq = nextSeq();
     setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, percentComplete } : t)));
+    taskVersion.current.set(id, seq);
     try {
       const updated = await api.updateTask(id, { percentComplete });
-      setTasks((prev) => applyTaskUpdate(prev, updated));
+      setTasks((prev) => applyTaskUpdate(prev, updated, seq));
     } catch (e) {
+      if ((taskVersion.current.get(id) ?? 0) > seq) return;
       setSyncError(e instanceof Error ? e.message : "Không thể lưu % hoàn thành.");
       await refreshTasks();
     }
@@ -172,11 +197,12 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
     const successor = tasks.find((t) => t.id === successorId);
     if (!successor) return;
     if (successor.predecessors.some((p) => p.taskId === predecessorId && p.type === type)) return;
+    const seq = nextSeq();
     try {
       const updated = await api.updateTask(successorId, {
         predecessors: [...successor.predecessors, { taskId: predecessorId, type, lagDays: 0 }],
       });
-      setTasks((prev) => applyTaskUpdate(prev, updated));
+      setTasks((prev) => applyTaskUpdate(prev, updated, seq));
     } catch (e) {
       alert(e instanceof Error ? e.message : "Không thể tạo phụ thuộc giữa hai task.");
     }
@@ -262,8 +288,9 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
           users={users}
           onClose={() => setEditingTask(null)}
           onSave={async (patch) => {
+            const seq = nextSeq();
             const updated = await api.updateTask(editingTask.id, patch);
-            setTasks((prev) => applyTaskUpdate(prev, updated));
+            setTasks((prev) => applyTaskUpdate(prev, updated, seq));
           }}
           onDelete={async () => {
             await api.deleteTask(editingTask.id);
