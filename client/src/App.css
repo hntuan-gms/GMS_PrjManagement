@@ -325,6 +325,42 @@ button:disabled {
   flex-direction: column;
   gap: 16px;
 }
+.resource-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  background: #fff;
+  border: 1px solid #e2e4e9;
+  border-radius: 8px;
+  padding: 10px 16px;
+  flex: none;
+}
+.resource-filters label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #5b6070;
+  white-space: nowrap;
+}
+.resource-filters input,
+.resource-filters select {
+  border: 1px solid #d7dae0;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+.resource-search {
+  width: 240px;
+}
+.resource-filter-count {
+  font-size: 12px;
+  color: #5b6070;
+  white-space: nowrap;
+  margin-left: auto;
+}
+
 .resource-card {
   background: #fff;
   border: 1px solid #e2e4e9;
