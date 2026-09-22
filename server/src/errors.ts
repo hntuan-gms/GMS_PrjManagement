@@ -9,6 +9,7 @@
  */
 import type { NextFunction, Request, Response } from "express";
 import { AtlassianAuthError } from "./auth/atlassian.js";
+import { SessionTooLargeError } from "./auth/session.js";
 import { JiraApiError } from "./jiraClient.js";
 
 export type ErrorCode =
@@ -18,6 +19,7 @@ export type ErrorCode =
   | "JIRA_SCOPE_MISSING"
   | "ISSUE_NOT_FOUND"
   | "JIRA_RATE_LIMITED"
+  | "SESSION_TOO_LARGE"
   | "JIRA_UPSTREAM"
   | "NO_PROJECT_SELECTED"
   | "BAD_REQUEST"
@@ -52,6 +54,14 @@ interface Mapped {
 function mapError(err: unknown): Mapped {
   if (err instanceof AppError) {
     return { status: err.status, code: err.code, error: err.message };
+  }
+
+  if (err instanceof SessionTooLargeError) {
+    // Server-side bug (the sealed session blob grew past the cookie cap), not
+    // something the user can fix by retrying — surface it as a real 500 so it
+    // gets logged and alerted on, instead of being swallowed and disguised as
+    // a silent, unexplained logout.
+    return { status: 500, code: "SESSION_TOO_LARGE", error: err.message };
   }
 
   if (err instanceof AtlassianAuthError) {
