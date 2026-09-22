@@ -18,9 +18,16 @@ export default function ResourceView({ tasks, users, onOpenEdit }: Props) {
     groups.get(t.assigneeAccountId)!.push(t);
   }
 
+  // Only people who actually carry work in this project. `users` is every
+  // assignable account on the project, which on a large site is mostly noise.
   const rows = users
-    .map((u) => ({ user: u, tasks: groups.get(u.accountId) ?? [] }))
+    .filter((u) => (groups.get(u.accountId)?.length ?? 0) > 0)
+    .map((u) => ({ user: u, tasks: groups.get(u.accountId)! }))
     .concat(unassigned.length > 0 ? [{ user: { accountId: "", displayName: "Chưa gán", avatarUrl: null }, tasks: unassigned }] : []);
+
+  if (rows.length === 0) {
+    return <div className="center-message">Dự án chưa có task nào được gán.</div>;
+  }
 
   return (
     <div className="resource-view">
@@ -38,7 +45,7 @@ export default function ResourceView({ tasks, users, onOpenEdit }: Props) {
             <div className="resource-load-bar">
               <div
                 className="resource-load-fill"
-                style={{ width: userTasks.length === 0 ? "0%" : `${Math.min(100, (openCount / Math.max(1, userTasks.length)) * 100)}%` }}
+                style={{ width: `${(openCount / userTasks.length) * 100}%` }}
               />
             </div>
             <table className="resource-table">
@@ -65,13 +72,6 @@ export default function ResourceView({ tasks, users, onOpenEdit }: Props) {
                     <td>{t.percentComplete}%</td>
                   </tr>
                 ))}
-                {userTasks.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="muted">
-                      Không có task
-                    </td>
-                  </tr>
-                )}
               </tbody>
             </table>
           </div>
