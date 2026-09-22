@@ -151,6 +151,31 @@ button:disabled {
   border-color: #a3271b;
 }
 
+/* Search sits at the far right of the view-mode row. It stays mounted even when a
+   query matches nothing, or there'd be no control left to clear the query with. */
+.gantt-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.gantt-search input {
+  border: 1px solid #d7dae0;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  width: 260px;
+}
+.gantt-search-count {
+  font-size: 12px;
+  color: #5b6070;
+  white-space: nowrap;
+}
+.gantt-search-clear {
+  line-height: 1;
+  padding: 2px 8px;
+}
+
 /* Fixed-height body below the toolbar row: gantt-task-react's ganttHeight prop is
    sized to fit exactly here, so its own header row and bottom scrollbar stay put
    (pinned) while only the task rows underneath scroll. */
@@ -200,6 +225,11 @@ button:disabled {
 }
 .wbs-row:hover {
   background: #f5f8ff;
+}
+/* Declared before .wbs-row-selected so selection still wins on a matched row;
+   .wbs-row-critical only sets a left border, so it stacks with either. */
+.wbs-row-match {
+  background: #fff6d9;
 }
 .wbs-row-selected {
   background: #e8f0ff;
