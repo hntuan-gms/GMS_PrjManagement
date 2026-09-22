@@ -2,6 +2,7 @@ import type {
   BulkTaskCreateInput,
   BulkTaskCreateResult,
   JiraUser,
+  PlanResponse,
   ProjectSummary,
   Session,
   Task,
@@ -115,4 +116,30 @@ export const api = {
   deleteTask: (id: string) =>
     request<void>(`/tasks/${encodeURIComponent(id)}`, { method: "DELETE" }),
   sync: () => request<{ syncedAt: string; count: number; tasks: Task[] }>("/sync", { method: "POST" }),
+
+  // AI planner. generatePlan is the slow one — it waits on the model — so callers
+  // should show progress rather than assume it returns like the others.
+  generatePlan: (brief: string, startDate: string) =>
+    request<PlanResponse>("/ai/plans", { method: "POST", body: JSON.stringify({ brief, startDate }) }),
+  updatePlanItem: (
+    runId: string,
+    itemId: string,
+    patch: { summary?: string; durationDays?: number; assigneeAccountId?: string | null; issueType?: string }
+  ) =>
+    request<PlanResponse>(
+      `/ai/plans/${encodeURIComponent(runId)}/items/${encodeURIComponent(itemId)}`,
+      { method: "PATCH", body: JSON.stringify(patch) }
+    ),
+  deletePlanItem: (runId: string, itemId: string) =>
+    request<PlanResponse>(
+      `/ai/plans/${encodeURIComponent(runId)}/items/${encodeURIComponent(itemId)}`,
+      { method: "DELETE" }
+    ),
+  applyPlan: (runId: string, startDate: string) =>
+    request<{ created: string[]; errors: Array<{ summary: string; message: string }> }>(
+      `/ai/plans/${encodeURIComponent(runId)}/apply`,
+      { method: "POST", body: JSON.stringify({ startDate }) }
+    ),
+  discardPlan: (runId: string) =>
+    request<void>(`/ai/plans/${encodeURIComponent(runId)}/discard`, { method: "POST" }),
 };

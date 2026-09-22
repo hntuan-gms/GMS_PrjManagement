@@ -223,4 +223,20 @@ export class JiraClient {
   async getFields(): Promise<Array<{ id: string; name: string; custom: boolean; schema?: { type?: string; custom?: string } }>> {
     return this.request(`/rest/api/3/field`);
   }
+
+  /**
+   * The issue types this specific project actually has — not the hard-coded
+   * `IssueTypeName` union (Epic|Story|Task|Bug|Sub-task) that `createTask` still
+   * uses for the manual "create task" form. A team-managed project routinely
+   * renames or drops those, so anything that creates issues in bulk (the AI
+   * planner) validates against this instead of assuming the union is universal.
+   */
+  async getProjectIssueTypes(
+    projectKey: string
+  ): Promise<Array<{ id: string; name: string; subtask: boolean }>> {
+    const res = await this.request<{ issueTypes: Array<{ id: string; name: string; subtask: boolean }> }>(
+      `/rest/api/3/project/${encodeURIComponent(projectKey)}`
+    );
+    return res.issueTypes ?? [];
+  }
 }

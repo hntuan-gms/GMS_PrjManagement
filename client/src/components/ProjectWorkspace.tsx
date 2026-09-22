@@ -11,6 +11,7 @@ import type {
   Task,
   TaskUpdateResponse,
 } from "../types";
+import AiPlannerModal from "./AiPlannerModal";
 import CreateTaskModal from "./CreateTaskModal";
 import GanttView from "./GanttView";
 import ResourceView from "./ResourceView";
@@ -42,6 +43,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [creating, setCreating] = useState(false);
+  const [planning, setPlanning] = useState(false);
   // A single global counter, bumped once per mutating request (schedule change,
   // progress change, add-dependency, modal save). `taskVersion` records, per task
   // id, the seq of the most recent thing that touched it — whether that task was
@@ -288,6 +290,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
         view={view}
         onViewChange={setView}
         onAddTask={() => setCreating(true)}
+        onOpenPlanner={() => setPlanning(true)}
         onSync={handleSync}
         syncing={syncing}
         lastSyncedAt={lastSyncedAt}
@@ -348,6 +351,14 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
             await api.deleteTask(editingTask.id);
             await refreshTasks();
           }}
+        />
+      )}
+
+      {planning && (
+        <AiPlannerModal
+          users={users}
+          onClose={() => setPlanning(false)}
+          onApplied={refreshTasks}
         />
       )}
 

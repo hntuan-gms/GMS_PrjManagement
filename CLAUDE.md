@@ -94,6 +94,18 @@ Jira write failures during a cascade are collected and returned as `cascadeWarni
 
 All dates are `YYYY-MM-DD` strings. Server arithmetic (`addDays`, `diffDaysInclusive` in `taskService.ts`) is UTC-based. The client must **not** use `toISOString()` on a local-midnight `Date` — in UTC+7 that rolls back a day (BUG-04). `GanttView.toIso()` uses local getters deliberately; `TaskEditModal` computes in UTC to match the server. Duration is inclusive: due = start + duration − 1.
 
+### AI planner
+
+`server/src/ai/` turns a plain-language brief into a work breakdown. One Gemini call (`@google/genai`, `GEMINI_API_KEY`, shared with the video-agent service), then everything numeric is computed here rather than asked for.
+
+The split is the design: **the model decides semantics, this code decides every number.** It returns tasks, durations in days, FS/SS/FF/SF edges and an assignee; `planner.layoutSchedule()` derives the actual dates from those durations and the graph, using the same earliest-start rules as `applyDependencyCascade`, so the preview a reviewer approves is what the live cascade will enforce. Asking a model for dates gets you a schedule that contradicts its own dependency list.
+
+`responseSchema` (constrained decoding) guarantees the *shape*, never the meaning, so `normalize()` re-checks everything that only fails later: an issue type this project doesn't have (validated against `listIssueTypes()`, not the hard-coded `IssueTypeName` union), an assignee who isn't on the team, an edge pointing at a `tempId` the model never emitted, and cycles — each corrected and surfaced to the reviewer as a warning rather than silently accepted or thrown away.
+
+**Nothing reaches Jira without a human.** Generation writes to `ai_plan_run`/`ai_plan_item` only; `POST /api/ai/plans/:id/apply` is the sole route that creates issues, in two passes — parents before children (Jira rejects an unborn parent key), then dependencies once every `tempId` resolves to a real issue key. Partial failure is reported per row, not rolled back: issues already created in Jira cannot be unmade, so the run stays `proposed` and the applied rows carry `applied_issue_key`.
+
+Not built yet: PRD/BRD upload with RAG. `pgvector` is why Postgres was chosen and why docker-compose uses the `pgvector/pgvector` image, but no vector tables exist.
+
 ### Client structure
 
 `App.tsx` is a ~50-line auth shell: `useSession()` runs before any branch (keeping `react/rules-of-hooks` satisfied), then it renders `LoginScreen`, `ProjectPicker` or `ProjectWorkspace`. There is no router — the OAuth callback is a *server* route, so the browser never sees `?code=`, only an optional `?auth_error=`.

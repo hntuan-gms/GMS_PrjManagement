@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { aiRouter } from "./ai.js";
 import { requireAuth, requireProject } from "../auth/middleware.js";
 import { badRequest } from "../errors.js";
 import type { BulkTaskCreateInput, TaskCreateInput, TaskUpdateInput } from "../types.js";
@@ -9,6 +10,9 @@ export const apiRouter = Router();
 // is protected by default. This matters because the Cloud Run service is publicly
 // invokable — this middleware is the only access control in front of Jira.
 apiRouter.use(requireAuth);
+
+// Mounted after requireAuth so the planner inherits it rather than restating it.
+apiRouter.use("/ai", aiRouter);
 
 // GET /meta used to live here, returning the same SessionMeta as
 // /api/auth/me. Nothing ever fetched it, and having two copies of that object is

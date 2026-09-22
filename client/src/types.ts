@@ -88,6 +88,46 @@ export interface TaskUpdateResponse extends Task {
   cascadeWarnings?: string[];
 }
 
+/** One task the AI planner has proposed. Nothing here exists in Jira yet. */
+export interface PlanItem {
+  id: string;
+  tempId: string;
+  parentTempId: string | null;
+  sortOrder: number;
+  summary: string;
+  description: string | null;
+  issueType: string;
+  durationDays: number;
+  assigneeAccountId: string | null;
+  dependencies: Array<{ tempId: string; type: DependencyType; lagDays: number }>;
+  rationale: string | null;
+  /** Derived server-side from durations and the dependency graph, never stored. */
+  startDate: string;
+  dueDate: string;
+  /** Set once this row has been created in Jira. */
+  appliedIssueKey: string | null;
+}
+
+export interface PlanRun {
+  id: string;
+  projectKey: string;
+  status: "running" | "proposed" | "applied" | "failed" | "discarded";
+  brief: string;
+  model: string | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  error: string | null;
+  createdAt: string;
+  appliedAt: string | null;
+}
+
+export interface PlanResponse {
+  run: PlanRun;
+  items: PlanItem[];
+  /** Things the server quietly corrected in the model's output. */
+  warnings?: string[];
+}
+
 export interface AuthUser {
   accountId: string;
   displayName: string;

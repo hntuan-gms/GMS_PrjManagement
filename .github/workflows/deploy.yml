@@ -18,6 +18,10 @@ name: Deploy to Cloud Run
 #     database-url             postgresql://USER:PASS@/gms?host=/cloudsql/<connection name>
 #                              (carries a password, so Secret Manager rather than a
 #                              plain env var — scripts/setup-gcp-db.ps1 creates it)
+#     video-agent-gemini-api-key  shared with the video-agent service, which owns it.
+#                              Only the AI planner routes read it, and they fail with
+#                              a clear message rather than at boot if it is missing —
+#                              everything else in the app works without it.
 #
 # The Atlassian app's Callback URL must be exactly $APP_BASE_URL/api/auth/callback.
 # Atlassian allows one callback per app, so local dev needs a second app.
@@ -107,6 +111,7 @@ jobs:
             ATLASSIAN_CLIENT_SECRET=atlassian-client-secret:latest
             SESSION_ENCRYPTION_KEYS=session-encryption-keys:latest
             DATABASE_URL=database-url:latest
+            GEMINI_API_KEY=video-agent-gemini-api-key:latest
           # overwrite (--set-env-vars / --set-secrets) rather than the default merge
           # (--update-*): this file is the sole source of truth for the service's
           # environment, so removing a line here removes it from the live service and
@@ -120,7 +125,7 @@ jobs:
             --memory=512Mi
             --min-instances=0
             --max-instances=1
-            --timeout=60s
+            --timeout=300s
             --add-cloudsql-instances=${{ vars.GCP_PROJECT_ID }}:${{ vars.GCP_REGION }}:${{ env.CLOUDSQL_INSTANCE }}
           # allow-unauthenticated is REQUIRED here, not a relaxation for convenience:
           # Atlassian redirects the browser back to /api/auth/callback, and that
@@ -137,6 +142,10 @@ jobs:
           # The server runs pending migrations at boot (server/src/db/migrate.ts),
           # serialised across instances by a Postgres advisory lock, so a schema
           # change ships with the release that needs it.
+          #
+          # timeout=300s is for the AI planner: breaking a project brief into a
+          # forty-task WBS is a single long model call, and the previous 60s was
+          # enough for the CRUD routes but would cut a plan off mid-generation.
           #
           # max-instances=1 is no longer about a single-writer file — the overlay is
           # in Postgres now and each write is atomic. What is left is that a

@@ -6,6 +6,7 @@ import type {
   BulkTaskCreateResult,
   IssueTypeName,
   JiraUser,
+  Predecessor,
   ProjectSummary,
   Task,
   TaskCreateInput,
@@ -510,6 +511,64 @@ export class TaskService {
     // fetchable by key.
     const issue = await this.jira.getIssue(key);
     return this.hydrate(key, this.fromJiraIssue(issue), this.jiraStartDateOf(issue));
+  }
+
+  /** The issue types this project actually accepts — used to validate an AI plan. */
+  async listIssueTypes(): Promise<Array<{ name: string; subtask: boolean }>> {
+    const types = await this.jira.getProjectIssueTypes(this.ctx.projectKey);
+    return types.map((t) => ({ name: t.name, subtask: t.subtask }));
+  }
+
+  /**
+   * Creates one issue from an approved AI plan.
+   *
+   * Separate from createTask because `issueType` here is whatever this project
+   * actually calls its types, read from Jira — not the hard-coded
+   * `IssueTypeName` union that the manual create form is still stuck with. It
+   * also takes explicit dates rather than deriving them: the plan's schedule was
+   * already computed across the whole dependency graph, and recomputing one task
+   * at a time here would contradict it.
+   */
+  async createFromPlan(input: {
+    summary: string;
+    description: string | null;
+    issueType: string;
+    parentKey: string | null;
+    startDate: string;
+    durationDays: number;
+    assigneeAccountId: string | null;
+  }): Promise<Task> {
+    const dueDate = addDays(input.startDate, input.durationDays - 1);
+    const created = await this.jira.createIssue({
+      projectKey: this.ctx.projectKey,
+      issueTypeName: input.issueType,
+      summary: input.summary,
+      description: input.description,
+      parentKey: input.parentKey,
+      dueDate,
+      startDate: input.startDate,
+      startDateFieldId: this.ctx.startDateFieldId,
+      assigneeAccountId: input.assigneeAccountId,
+    });
+
+    await store.setOverlay(this.ctx.cloudId, created.key, {
+      startDate: input.startDate,
+      durationDays: input.durationDays,
+      percentComplete: 0,
+      predecessors: [],
+      // The plan's own dates are the baseline: that is what was approved, so
+      // later drift shows up against it rather than against the first drag.
+      baselineStart: input.startDate,
+      baselineDue: dueDate,
+    });
+
+    const issue = await this.jira.getIssue(created.key);
+    return this.hydrate(created.key, this.fromJiraIssue(issue), this.jiraStartDateOf(issue));
+  }
+
+  /** Writes an approved plan's dependency edges once every issue key exists. */
+  async setPredecessors(issueKey: string, predecessors: Predecessor[]): Promise<void> {
+    await store.setOverlay(this.ctx.cloudId, issueKey, { predecessors });
   }
 
   /**

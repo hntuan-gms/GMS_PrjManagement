@@ -44,6 +44,8 @@ export const noProjectSelected = () =>
 
 export const badRequest = (message: string) => new AppError(400, "BAD_REQUEST", message);
 
+export const notFound = (message: string) => new AppError(404, "ISSUE_NOT_FOUND", message);
+
 interface Mapped {
   status: number;
   code: ErrorCode;

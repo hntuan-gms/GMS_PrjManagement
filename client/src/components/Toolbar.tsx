@@ -6,6 +6,7 @@ interface Props {
   view: "gantt" | "resource";
   onViewChange: (v: "gantt" | "resource") => void;
   onAddTask: () => void;
+  onOpenPlanner: () => void;
   onSync: () => void;
   syncing: boolean;
   lastSyncedAt: string | null;
@@ -27,6 +28,7 @@ export default function Toolbar({
   view,
   onViewChange,
   onAddTask,
+  onOpenPlanner,
   onSync,
   syncing,
   lastSyncedAt,
@@ -64,6 +66,9 @@ export default function Toolbar({
         )}
         <button onClick={onSync} disabled={syncing}>
           {syncing ? "Đang đồng bộ..." : "⟳ Đồng bộ từ Jira"}
+        </button>
+        <button onClick={onOpenPlanner} title="Mô tả dự án, AI chia việc thành WBS kèm phụ thuộc và người phụ trách">
+          ✦ Lập kế hoạch AI
         </button>
         <button className="primary" onClick={onAddTask}>
           + Task mới
