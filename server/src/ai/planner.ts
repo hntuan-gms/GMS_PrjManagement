@@ -171,7 +171,7 @@ function client(): GoogleGenAI {
 }
 
 export async function generatePlan(input: PlannerInput): Promise<PlannerResult> {
-  const model = process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash";
+  const model = process.env.GEMINI_MODEL?.trim() || "gemini-3.6-flash";
   const response = await client().models.generateContent({
     model,
     contents: `${systemPrompt(input)}\n\n---\n\nProject brief:\n${input.brief}`,
