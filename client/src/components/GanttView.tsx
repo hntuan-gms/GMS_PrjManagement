@@ -7,6 +7,10 @@ import IssueTypeIcon from "./IssueTypeIcon";
 
 const ROW_HEIGHT = 42;
 const HEADER_HEIGHT = 46;
+// Each WBS level steps in by this much; a fixed-width expander slot (reserved even
+// on leaf rows, see .wbs-expander-slot) keeps every level's icon aligned under its
+// parent's text rather than under the parent's own expander arrow.
+const INDENT_STEP = 28;
 const MIN_LIST_WIDTH = 220;
 const MIN_CHART_WIDTH = 240;
 // gantt-task-react always renders its own horizontal scrollbar strip under the
@@ -119,8 +123,14 @@ export default function GanttView({
     );
   }
 
+  // gantt-task-react does NOT size its TaskList wrapper to listCellWidth itself —
+  // it only forwards that value as a `rowWidth` prop and expects the consumer's own
+  // TaskListHeader/TaskListTable to apply it. Without an explicit width here, these
+  // roots stay at their shrink-to-fit content width, so dragging the divider moves
+  // only the handle (which follows `listWidth` directly) while the WBS pane itself
+  // never actually resizes.
   const TaskListHeader = () => (
-    <div className="wbs-header" style={{ height: HEADER_HEIGHT }}>
+    <div className="wbs-header" style={{ height: HEADER_HEIGHT, width: listWidth }}>
       <div className="wbs-col wbs-col-key">Mã</div>
       <div className="wbs-col wbs-col-name">Tên công việc</div>
       <div className="wbs-col wbs-col-assignee">Phụ trách</div>
@@ -129,7 +139,7 @@ export default function GanttView({
   );
 
   const TaskListTable = () => (
-    <div>
+    <div style={{ width: listWidth }}>
       {rows.map(({ task, depth, hasChildren }) => (
         <div
           key={task.id}
@@ -143,20 +153,26 @@ export default function GanttView({
               {task.id}
             </a>
           </div>
-          <div className="wbs-col wbs-col-name" style={{ paddingLeft: depth * 16 }}>
-            {hasChildren && (
-              <button
-                className="expander"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onToggleCollapse(task.id);
-                }}
-              >
-                {collapsed.has(task.id) ? "▸" : "▾"}
-              </button>
-            )}
+          <div className="wbs-col wbs-col-name" style={{ paddingLeft: depth * INDENT_STEP }}>
+            <span className="wbs-expander-slot">
+              {hasChildren && (
+                <button
+                  className={`expander ${collapsed.has(task.id) ? "expander-collapsed" : ""}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleCollapse(task.id);
+                  }}
+                >
+                  <svg width="10" height="10" viewBox="0 0 10 10">
+                    <path d="M2 1 L8 5 L2 9 Z" fill="currentColor" />
+                  </svg>
+                </button>
+              )}
+            </span>
             <IssueTypeIcon type={task.issueType} />
-            <span>{task.summary}</span>
+            <span className={hasChildren ? "wbs-summary wbs-summary-parent" : "wbs-summary"}>
+              {task.summary}
+            </span>
           </div>
           <div className="wbs-col wbs-col-assignee">{task.assigneeName ?? "—"}</div>
           <div className="wbs-col wbs-col-pct">{task.percentComplete}%</div>
