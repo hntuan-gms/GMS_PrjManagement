@@ -32,7 +32,17 @@ interface Props {
   collapsed: Set<string>;
   onToggleCollapse: (id: string) => void;
   selectedId: string | null;
-  onSelect: (id: string) => void;
+  /**
+   * Ctrl/Cmd toggles one row, Shift extends from the last click — like a file
+   * list. `visibleOrder` comes along because only this view knows which rows are
+   * on screen and in what order, which is what a Shift range is measured in.
+   */
+  onSelect: (
+    id: string,
+    modifiers: { toggle: boolean; range: boolean },
+    visibleOrder: string[]
+  ) => void;
+  selectedIds: Set<string>;
   onOpenEdit: (task: Task) => void;
   onScheduleChange: (id: string, startDate: string, durationDays: number) => void;
   onProgressChange: (id: string, percentComplete: number) => void;
@@ -62,6 +72,7 @@ export default function GanttView({
   onToggleCollapse,
   selectedId,
   onSelect,
+  selectedIds,
   onOpenEdit,
   onScheduleChange,
   onProgressChange,
@@ -223,10 +234,16 @@ export default function GanttView({
         <div
           key={task.id}
           className={`wbs-row ${matchIds?.has(task.id) ? "wbs-row-match" : ""} ${
-            task.id === selectedId ? "wbs-row-selected" : ""
+            selectedIds.has(task.id) || task.id === selectedId ? "wbs-row-selected" : ""
           } ${showCriticalPath && criticalIds.has(task.id) ? "wbs-row-critical" : ""}`}
           style={{ height: ROW_HEIGHT }}
-          onClick={() => onSelect(task.id)}
+          onClick={(e) =>
+            onSelect(
+              task.id,
+              { toggle: e.ctrlKey || e.metaKey, range: e.shiftKey },
+              rows.map((r) => r.task.id)
+            )
+          }
           onDoubleClick={() => onOpenEdit(task)}
         >
           <div className="wbs-col wbs-col-key">
@@ -343,7 +360,9 @@ export default function GanttView({
                 timeStep={DAY_MS}
                 TaskListHeader={TaskListHeader}
                 TaskListTable={TaskListTable}
-                onSelect={(t: GanttTaskT) => onSelect(t.id)}
+                onSelect={(t: GanttTaskT) =>
+                  onSelect(t.id, { toggle: false, range: false }, rows.map((r) => r.task.id))
+                }
                 onDoubleClick={(t: GanttTaskT) => {
                   const full = byId.get(t.id);
                   if (full) onOpenEdit(full);

@@ -12,6 +12,12 @@ name: Deploy to Cloud Run
 #     ATLASSIAN_CLIENT_ID      from developer.atlassian.com/console/myapps
 #     APP_BASE_URL             https://gms-prjmanagement-ftlpeveyxa-as.a.run.app
 #     ALLOWED_EMAIL_DOMAIN     gimasys.com
+#     GEMINI_MODEL             optional; the AI planner's model, e.g. gemini-3.6-flash.
+#                              Leave the variable unset to take the default in
+#                              server/src/ai/planner.ts. It has to live here rather
+#                              than be set on the service by hand: env_vars_update_strategy
+#                              is `overwrite`, so a hand-set value is wiped on the next
+#                              deploy. GET /api/ai/models lists what the key can call.
 #   Secret Manager secrets (NOT GitHub secrets):
 #     atlassian-client-secret  the OAuth app's client secret
 #     session-encryption-keys  "k1:<32 random bytes, base64url>" — see server/.env.example
@@ -104,6 +110,7 @@ jobs:
             ATLASSIAN_CLIENT_ID=${{ vars.ATLASSIAN_CLIENT_ID }}
             APP_BASE_URL=${{ vars.APP_BASE_URL }}
             ALLOWED_EMAIL_DOMAIN=${{ vars.ALLOWED_EMAIL_DOMAIN }}
+            GEMINI_MODEL=${{ vars.GEMINI_MODEL }}
           # The runtime service account needs roles/secretmanager.secretAccessor on
           # both. Rotate session-encryption-keys by PREPENDING a new key — replacing
           # the list outright logs every user out immediately.

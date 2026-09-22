@@ -11,9 +11,10 @@ import type {
   Task,
   TaskUpdateResponse,
 } from "../types";
-import AiPlannerModal from "./AiPlannerModal";
+import ChatDock from "./ChatDock";
 import CreateTaskModal from "./CreateTaskModal";
 import GanttView from "./GanttView";
+import PlanReviewModal from "./PlanReviewModal";
 import ResourceView from "./ResourceView";
 import TaskEditModal from "./TaskEditModal";
 import Toolbar from "./Toolbar";
@@ -41,9 +42,15 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
   const [view, setView] = useState<"gantt" | "resource">("gantt");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Multi-select, file-list style. `selectedIds` is the real selection;
+  // `selectedId` stays the single "focused" row the edit modal opens on, and
+  // doubles as the anchor a Shift range measures from.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [deleting, setDeleting] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [creating, setCreating] = useState(false);
-  const [planning, setPlanning] = useState(false);
+  // The plan being reviewed, opened from the assistant's table card.
+  const [reviewRunId, setReviewRunId] = useState<string | null>(null);
   // A single global counter, bumped once per mutating request (schedule change,
   // progress change, add-dependency, modal save). `taskVersion` records, per task
   // id, the seq of the most recent thing that touched it — whether that task was
@@ -110,6 +117,71 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
       else next.add(id);
       return next;
     });
+  }
+
+
+  /** Click semantics copied from a file manager: plain, Ctrl/Cmd, Shift. */
+  function handleSelect(
+    id: string,
+    modifiers: { toggle: boolean; range: boolean },
+    visibleOrder: string[]
+  ) {
+    if (modifiers.range && selectedId) {
+      const from = visibleOrder.indexOf(selectedId);
+      const to = visibleOrder.indexOf(id);
+      if (from !== -1 && to !== -1) {
+        const [lo, hi] = from < to ? [from, to] : [to, from];
+        setSelectedIds(new Set(visibleOrder.slice(lo, hi + 1)));
+        return;
+      }
+    }
+    if (modifiers.toggle) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      });
+      setSelectedId(id);
+      return;
+    }
+    setSelectedIds(new Set([id]));
+    setSelectedId(id);
+  }
+
+  /**
+   * Deleting is sequential on purpose: each delete is a Jira write plus an
+   * overlay cleanup that strips the issue from other tasks' predecessor lists,
+   * and firing thirty of those at once would both rate-limit and interleave
+   * those cleanups. Failures are collected so one undeletable issue (a
+   * permission, a sub-task whose parent went first) doesn't hide the rest.
+   */
+  async function handleDeleteSelected() {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    const ok = window.confirm(
+      ids.length === 1
+        ? `Xoá ${ids[0]} khỏi Jira? Không hoàn tác được.`
+        : `Xoá ${ids.length} công việc khỏi Jira? Không hoàn tác được.`
+    );
+    if (!ok) return;
+
+    setDeleting(true);
+    const failed: string[] = [];
+    for (const id of ids) {
+      try {
+        await api.deleteTask(id);
+      } catch {
+        failed.push(id);
+      }
+    }
+    setSelectedIds(new Set(failed));
+    setSelectedId(null);
+    setDeleting(false);
+    if (failed.length > 0) {
+      setSyncError(`Không xoá được ${failed.length} công việc: ${failed.join(", ")}`);
+    }
+    await refreshTasks();
   }
 
   async function refreshTasks() {
@@ -290,7 +362,6 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
         view={view}
         onViewChange={setView}
         onAddTask={() => setCreating(true)}
-        onOpenPlanner={() => setPlanning(true)}
         onSync={handleSync}
         syncing={syncing}
         lastSyncedAt={lastSyncedAt}
@@ -316,6 +387,19 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
         </div>
       )}
 
+      {selectedIds.size > 0 && view === "gantt" && (
+        <div className="selection-bar">
+          <span>
+            Đã chọn <strong>{selectedIds.size}</strong> công việc
+          </span>
+          <button onClick={() => setSelectedIds(new Set())}>Bỏ chọn</button>
+          <button className="danger" onClick={handleDeleteSelected} disabled={deleting}>
+            {deleting ? "Đang xoá..." : `Xoá ${selectedIds.size} công việc`}
+          </button>
+          <span className="selection-hint">Ctrl/Cmd để chọn thêm · Shift để chọn cả dải</span>
+        </div>
+      )}
+
       <div className="app-body">
         {view === "gantt" ? (
           <GanttView
@@ -323,7 +407,8 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
             collapsed={collapsed}
             onToggleCollapse={toggleCollapse}
             selectedId={selectedId}
-            onSelect={setSelectedId}
+            onSelect={handleSelect}
+            selectedIds={selectedIds}
             onOpenEdit={setEditingTask}
             onScheduleChange={handleScheduleChange}
             onProgressChange={handleProgressChange}
@@ -354,10 +439,13 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
         />
       )}
 
-      {planning && (
-        <AiPlannerModal
+      <ChatDock onOpenPlan={setReviewRunId} />
+
+      {reviewRunId && (
+        <PlanReviewModal
+          runId={reviewRunId}
           users={users}
-          onClose={() => setPlanning(false)}
+          onClose={() => setReviewRunId(null)}
           onApplied={refreshTasks}
         />
       )}

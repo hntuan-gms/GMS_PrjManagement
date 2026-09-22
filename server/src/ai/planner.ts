@@ -1,5 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import type { JiraUser, Predecessor } from "../types.js";
+import type { JiraUser, Predecessor, Task } from "../types.js";
+import { describeEvidence, inferRoleEvidence, type RoleEvidence } from "./roleEvidence.js";
 
 /**
  * Turns a plain-language project brief into a reviewable work breakdown.
@@ -22,6 +23,8 @@ export interface PlannerResource {
   skills: string[];
   /** Inclusive ISO ranges this person is already unavailable. */
   absences: Array<{ from: string; to: string }>;
+  /** What they have actually worked on, derived from Jira (see roleEvidence.ts). */
+  evidence: RoleEvidence | undefined;
 }
 
 export interface PlannerInput {
@@ -60,6 +63,13 @@ export interface PlannerResult {
 }
 
 const DEPENDENCY_TYPES = ["FS", "SS", "FF", "SF"] as const;
+
+/**
+ * Overridden per deployment with GEMINI_MODEL. Google retires and renames models
+ * faster than this file gets touched, so `GET /api/ai/models` lists what the key
+ * can actually call rather than anyone trusting this constant to still be valid.
+ */
+const DEFAULT_MODEL = "gemini-3.6-flash";
 
 /**
  * Deliberately not `responseJsonSchema`: `responseSchema` is the constrained-
@@ -127,12 +137,20 @@ function systemPrompt(input: PlannerInput): string {
       ? "(no team members are registered, so leave every assigneeAccountId empty)"
       : input.resources
           .map((r) => {
-            const skills = r.skills.length > 0 ? r.skills.join(", ") : "no skills recorded";
+            // Declared profile when someone filled one in; otherwise what Jira
+            // history shows they work on. Both are offered rather than one
+            // replacing the other, so a stale profile can be checked against
+            // what the person has actually been doing.
+            const declared =
+              r.skills.length > 0 || r.role
+                ? `role: ${r.role ?? "unspecified"} | skills: ${r.skills.join(", ") || "none recorded"}`
+                : "no profile recorded";
+            const observed = describeEvidence(r.evidence);
             const away =
               r.absences.length > 0
                 ? ` | unavailable: ${r.absences.map((a) => `${a.from}..${a.to}`).join(", ")}`
                 : "";
-            return `- ${r.displayName} (accountId: ${r.accountId}) | role: ${r.role ?? "unspecified"} | skills: ${skills}${away}`;
+            return `- ${r.displayName} (accountId: ${r.accountId}) | ${declared}${observed ? ` | lịch sử Jira: ${observed}` : ""}${away}`;
           })
           .join("\n");
 
@@ -147,8 +165,10 @@ function systemPrompt(input: PlannerInput): string {
     "   FS finish-to-start, SS start-together, FF finish-together, SF start-to-finish. lagDays is usually 0.",
     "5. Only create a dependency when the work genuinely cannot proceed otherwise. Do not chain everything linearly,",
     "   and never create a cycle.",
-    "6. assigneeAccountId must be an accountId copied from the team list, chosen by skill and role fit. Leave it empty",
-    "   when no one fits. Do not invent people and do not put dates in any field.",
+    "6. assigneeAccountId must be an accountId copied from the team list. Judge fit from the declared profile and,",
+    "   where there is none, from what Jira history shows the person actually works on. Evidence is weak: a keyword",
+    "   count is not a job title. When nobody clearly fits, leave it EMPTY — an unassigned task a human fills in is",
+    "   far better than a confident wrong assignment. Do not invent people and do not put dates in any field.",
     "7. Do NOT output dates or a schedule. Dates are computed from durations and dependencies by the caller.",
     "",
     `Allowed issue types for project ${input.projectKey}:`,
@@ -170,8 +190,55 @@ function client(): GoogleGenAI {
   return new GoogleGenAI({ apiKey });
 }
 
+export interface AvailableModel {
+  /** What to put in GEMINI_MODEL, e.g. "gemini-3.6-flash". */
+  id: string;
+  displayName: string | null;
+  description: string | null;
+  inputTokenLimit: number | null;
+  /** True for the one this deployment is currently configured to use. */
+  current: boolean;
+}
+
+/**
+ * The models this API key can actually call, asked of Google rather than kept as
+ * a list in the source.
+ *
+ * A hard-coded list goes stale the week after it's written — Google ships and
+ * retires model names continuously, and a wrong GEMINI_MODEL fails at request
+ * time with a 404, long after the deploy that introduced it. Filtered to models
+ * that support generateContent, since embedding-only ones would 404 exactly the
+ * same way if someone pasted the name in.
+ */
+export async function listAvailableModels(): Promise<AvailableModel[]> {
+  const current = activeModel();
+  const pager = await client().models.list({ config: { queryBase: true, pageSize: 100 } });
+
+  const out: AvailableModel[] = [];
+  for await (const model of pager) {
+    const actions = model.supportedActions ?? [];
+    if (actions.length > 0 && !actions.includes("generateContent")) continue;
+    // The API returns "models/gemini-x"; GEMINI_MODEL takes the bare name.
+    const id = (model.name ?? "").replace(/^models\//, "");
+    if (!id) continue;
+    out.push({
+      id,
+      displayName: model.displayName ?? null,
+      description: model.description ?? null,
+      inputTokenLimit: model.inputTokenLimit ?? null,
+      current: id === current,
+    });
+  }
+  return out.sort((a, b) => a.id.localeCompare(b.id));
+}
+
+/** The model this deployment will use for the next plan. */
+export function activeModel(): string {
+  return process.env.GEMINI_MODEL?.trim() || DEFAULT_MODEL;
+}
+
 export async function generatePlan(input: PlannerInput): Promise<PlannerResult> {
-  const model = process.env.GEMINI_MODEL?.trim() || "gemini-3.6-flash";
+  const model = activeModel();
   const response = await client().models.generateContent({
     model,
     contents: `${systemPrompt(input)}\n\n---\n\nProject brief:\n${input.brief}`,
@@ -373,13 +440,16 @@ function addDays(isoDate: string, days: number): string {
 export function toPlannerResources(
   users: JiraUser[],
   profiles: Map<string, { role: string | null; skills: string[] }>,
-  absences: Map<string, Array<{ from: string; to: string }>>
+  absences: Map<string, Array<{ from: string; to: string }>>,
+  existingTasks: Task[] = []
 ): PlannerResource[] {
+  const evidence = inferRoleEvidence(existingTasks);
   return users.map((u) => ({
     accountId: u.accountId,
     displayName: u.displayName,
     role: profiles.get(u.accountId)?.role ?? null,
     skills: profiles.get(u.accountId)?.skills ?? [],
     absences: absences.get(u.accountId) ?? [],
+    evidence: evidence.get(u.accountId),
   }));
 }

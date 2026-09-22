@@ -1,8 +1,10 @@
 import type {
   BulkTaskCreateInput,
   BulkTaskCreateResult,
+  ChatMessage,
   JiraUser,
   PlanResponse,
+  UsageStats,
   ProjectSummary,
   Session,
   Task,
@@ -119,8 +121,7 @@ export const api = {
 
   // AI planner. generatePlan is the slow one — it waits on the model — so callers
   // should show progress rather than assume it returns like the others.
-  generatePlan: (brief: string, startDate: string) =>
-    request<PlanResponse>("/ai/plans", { method: "POST", body: JSON.stringify({ brief, startDate }) }),
+  getPlan: (runId: string) => request<PlanResponse>(`/ai/plans/${encodeURIComponent(runId)}`),
   updatePlanItem: (
     runId: string,
     itemId: string,
@@ -142,4 +143,13 @@ export const api = {
     ),
   discardPlan: (runId: string) =>
     request<void>(`/ai/plans/${encodeURIComponent(runId)}/discard`, { method: "POST" }),
+
+  getChat: (sessionId: string) =>
+    request<{ sessionId: string; messages: ChatMessage[]; usage: UsageStats }>(
+      `/ai/chat/${encodeURIComponent(sessionId)}`
+    ),
+  getUsage: (sessionId: string | null) =>
+    request<{ model: string; session: UsageStats | null; project: UsageStats }>(
+      `/ai/usage${sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ""}`
+    ),
 };

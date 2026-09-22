@@ -94,6 +94,22 @@ Jira write failures during a cascade are collected and returned as `cascadeWarni
 
 All dates are `YYYY-MM-DD` strings. Server arithmetic (`addDays`, `diffDaysInclusive` in `taskService.ts`) is UTC-based. The client must **not** use `toISOString()` on a local-midnight `Date` — in UTC+7 that rolls back a day (BUG-04). `GanttView.toIso()` uses local getters deliberately; `TaskEditModal` computes in UTC to match the server. Duration is inclusive: due = start + duration − 1.
 
+### Assistant (chat)
+
+`ChatDock` docks bottom-right, collapsed to a pill. Planning is a **tool the assistant calls**, not a separate mode: "chia việc giúp tôi" and "dự án trễ mấy task?" are the same kind of request from the user's side, and making them pick a mode first pushes the classification onto them.
+
+`POST /api/ai/chat` streams **SSE** (`fetch` + manual parsing client-side, since `EventSource` can only GET and the message belongs in a body). `X-Accel-Buffering: no` is required or Cloud Run buffers the whole response and delivers it in one lump. Errors after the first byte go down the stream as an `error` event — the 200 is already sent.
+
+Reasoning streams separately from the answer (`thinkingConfig.includeThoughts`, parts flagged `thought`) and renders above it, collapsed. The first token of a real answer can be ten seconds away when the model is thinking or building a plan, and a blank panel for that long reads as a hang.
+
+Project state is injected into the system prompt rather than fetched by a tool — cheaper than a round trip at this size, and simple questions answer in one call. The snapshot is capped and drops `done` tasks first.
+
+Token usage is stored **per message**, with Gemini's four counters kept in separate columns (`prompt`/`output`/`thought`/`cached`). They price differently, so a single total can't be turned back into money, and a session's cost is only attributable if each turn is stored on its own.
+
+### Assignment without a skills matrix
+
+`resource_profile` is the declared answer to "who does what" and on every real team it is empty. `ai/roleEvidence.ts` derives evidence from the project's own Jira history instead — which issues each person was assigned, and the words in those summaries. It reports evidence ("12 issues, words: api, endpoint"), never a conclusion ("Backend Developer"): a keyword count is weak, and a job title would hide how weak. The prompt tells the model to leave `assigneeAccountId` **empty** when nothing clearly fits — an unassigned task a human fills in beats a confident wrong assignment.
+
 ### AI planner
 
 `server/src/ai/` turns a plain-language brief into a work breakdown. One Gemini call (`@google/genai`, `GEMINI_API_KEY`, shared with the video-agent service), then everything numeric is computed here rather than asked for.
@@ -103,6 +119,8 @@ The split is the design: **the model decides semantics, this code decides every 
 `responseSchema` (constrained decoding) guarantees the *shape*, never the meaning, so `normalize()` re-checks everything that only fails later: an issue type this project doesn't have (validated against `listIssueTypes()`, not the hard-coded `IssueTypeName` union), an assignee who isn't on the team, an edge pointing at a `tempId` the model never emitted, and cycles — each corrected and surfaced to the reviewer as a warning rather than silently accepted or thrown away.
 
 **Nothing reaches Jira without a human.** Generation writes to `ai_plan_run`/`ai_plan_item` only; `POST /api/ai/plans/:id/apply` is the sole route that creates issues, in two passes — parents before children (Jira rejects an unborn parent key), then dependencies once every `tempId` resolves to a real issue key. Partial failure is reported per row, not rolled back: issues already created in Jira cannot be unmade, so the run stays `proposed` and the applied rows carry `applied_issue_key`.
+
+The model is `GEMINI_MODEL` (default in `planner.ts`), and it must be set as a **repo variable** in the deploy workflow — `env_vars_update_strategy: overwrite` means a value set on the Cloud Run service by hand is wiped on the next deploy. `GET /api/ai/models` lists what the key can actually call, filtered to `generateContent`: model names are added and retired continuously, so a list written into source or docs is wrong within weeks, and a stale `GEMINI_MODEL` surfaces as a 404 on the next plan rather than at deploy time.
 
 Not built yet: PRD/BRD upload with RAG. `pgvector` is why Postgres was chosen and why docker-compose uses the `pgvector/pgvector` image, but no vector tables exist.
 

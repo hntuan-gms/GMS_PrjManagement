@@ -1,7 +1,9 @@
 import { Router } from "express";
 import { requireProject } from "../auth/middleware.js";
 import { badRequest, notFound } from "../errors.js";
-import { generatePlan, layoutSchedule, toPlannerResources } from "../ai/planner.js";
+import { activeModel, generatePlan, layoutSchedule, listAvailableModels, toPlannerResources } from "../ai/planner.js";
+import { streamChat, type ChatUsage } from "../ai/chat.js";
+import * as chatStore from "../ai/chatStore.js";
 import * as plans from "../ai/planStore.js";
 import type { Predecessor } from "../types.js";
 
@@ -30,6 +32,22 @@ async function loadPlan(cloudId: string, runId: string, startDate: string) {
   // silently go stale the moment the reviewer changed anything.
   return { run, items: layoutSchedule(stored, startDate) };
 }
+
+/**
+ * Which Gemini models this deployment's key can call, and which one is active.
+ *
+ * Asked of Google on each request rather than hard-coded: model names are added
+ * and retired continuously, and setting GEMINI_MODEL to one that no longer
+ * exists surfaces as a 404 on the next plan, not at deploy time. No
+ * requireProject — this is about the deployment, not about a project.
+ */
+aiRouter.get("/models", async (_req, res, next) => {
+  try {
+    res.json({ active: activeModel(), models: await listAvailableModels() });
+  } catch (err) {
+    next(err);
+  }
+});
 
 aiRouter.post("/plans", requireProject, async (req, res, next) => {
   const { session, taskService } = req.auth!;
@@ -66,6 +84,155 @@ aiRouter.post("/plans", requireProject, async (req, res, next) => {
     // The run row is kept, not deleted: a failed run with its error is the only
     // way to work out afterwards why a plan never appeared.
     if (runId) await plans.failRun(runId, (err as Error).message).catch(() => {});
+    next(err);
+  }
+});
+
+/**
+ * One assistant turn, streamed as Server-Sent Events.
+ *
+ * SSE rather than a JSON response because the useful part of a turn — the
+ * model's reasoning, then the answer token by token — arrives over many seconds,
+ * and holding it all back until the end is what makes an assistant feel broken.
+ * POST (so the message body isn't a query string) means the browser uses fetch
+ * and reads the stream itself rather than EventSource.
+ *
+ * Errors after the first byte cannot become an HTTP status — the 200 is already
+ * sent — so they go down the stream as an `error` event and the client renders
+ * them in the transcript.
+ */
+aiRouter.post("/chat", requireProject, async (req, res) => {
+  const { session, taskService } = req.auth!;
+  const body = req.body as { message?: unknown; sessionId?: unknown };
+  const message = String(body?.message ?? "").trim();
+
+  if (!message) {
+    res.status(400).json({ error: "Tin nhắn trống." });
+    return;
+  }
+
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  // Cloud Run and any proxy in front of it will otherwise buffer the whole
+  // response and deliver it in one lump, which defeats streaming entirely.
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders?.();
+
+  const send = (event: string, data: unknown) => {
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+
+  try {
+    const sessionId = await chatStore.ensureSession(
+      session.cloudId,
+      session.projectKey!,
+      session.accountId,
+      typeof body?.sessionId === "string" ? body.sessionId : null
+    );
+    send("session", { sessionId });
+    await chatStore.addUserMessage(sessionId, message);
+
+    const [tasks, history] = await Promise.all([
+      taskService!.listTasks(),
+      chatStore.recentTurns(sessionId),
+    ]);
+    // The turn just stored is the one being answered; replaying it as history
+    // too would show the model its own prompt twice.
+    const priorTurns = history.slice(0, -1);
+
+    let answer = "";
+    let thinking = "";
+    let planRunId: string | null = null;
+    let usage: ChatUsage | null = null;
+
+    const stream = streamChat(session.projectKey!, tasks, priorTurns, message, todayIso(), {
+      createPlan: async (brief, startDate) => {
+        const runId = await plans.createRun(session.cloudId, session.projectKey!, session.accountId, brief);
+        try {
+          const [issueTypes, users, profiles, absences] = await Promise.all([
+            taskService!.listIssueTypes(),
+            taskService!.listUsers(),
+            plans.getResourceProfiles(session.cloudId),
+            plans.getUpcomingAbsences(session.cloudId, startDate),
+          ]);
+          const result = await generatePlan({
+            brief,
+            projectKey: session.projectKey!,
+            issueTypes,
+            // Existing tasks double as the evidence for who works on what —
+            // see ai/roleEvidence.ts.
+            resources: toPlannerResources(users, profiles, absences, tasks),
+            startDate,
+          });
+          await plans.saveProposal(runId, result.items, result);
+          planRunId = runId;
+          return {
+            runId,
+            itemCount: result.items.length,
+            warnings: result.warnings,
+            summary: `Đã dựng ${result.items.length} công việc, chờ người duyệt. Hãy nói ngắn gọn kế hoạch gồm những giai đoạn nào và nhắc người dùng bấm vào bảng để kiểm tra trước khi tạo trên Jira.`,
+          };
+        } catch (err) {
+          await plans.failRun(runId, (err as Error).message).catch(() => {});
+          throw err;
+        }
+      },
+    });
+
+    for await (const event of stream) {
+      if (event.type === "text") answer += event.text;
+      if (event.type === "thinking") thinking += event.text;
+      if (event.type === "usage") usage = event.usage;
+      send(event.type, event);
+    }
+
+    const messageId = await chatStore.addModelMessage(
+      sessionId,
+      answer,
+      thinking || null,
+      planRunId,
+      usage ?? { promptTokens: 0, outputTokens: 0, thoughtTokens: 0, cachedTokens: 0, model: activeModel() }
+    );
+    send("done", { messageId, usage: await chatStore.sessionUsage(sessionId) });
+  } catch (err) {
+    send("error", { message: (err as Error).message });
+  } finally {
+    res.end();
+  }
+});
+
+/** Transcript of one session, for reopening the panel. */
+aiRouter.get("/chat/:sessionId", requireProject, async (req, res, next) => {
+  try {
+    const { session } = req.auth!;
+    const sessionId = await chatStore.ensureSession(
+      session.cloudId,
+      session.projectKey!,
+      session.accountId,
+      req.params.sessionId
+    );
+    res.json({
+      sessionId,
+      messages: await chatStore.listMessages(sessionId),
+      usage: await chatStore.sessionUsage(sessionId),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Token spend for this session and for the project as a whole. */
+aiRouter.get("/usage", requireProject, async (req, res, next) => {
+  try {
+    const { session } = req.auth!;
+    const sessionId = typeof req.query.sessionId === "string" ? req.query.sessionId : null;
+    res.json({
+      model: activeModel(),
+      session: sessionId ? await chatStore.sessionUsage(sessionId) : null,
+      project: await chatStore.projectUsage(session.cloudId, session.projectKey!),
+    });
+  } catch (err) {
     next(err);
   }
 });

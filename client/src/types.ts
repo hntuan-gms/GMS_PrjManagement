@@ -128,6 +128,28 @@ export interface PlanResponse {
   warnings?: string[];
 }
 
+/** Gemini's counters kept apart: they price differently, so one total cannot be costed. */
+export interface UsageStats {
+  messages: number;
+  promptTokens: number;
+  outputTokens: number;
+  thoughtTokens: number;
+  cachedTokens: number;
+  totalTokens: number;
+}
+
+export interface ChatMessage {
+  id: string;
+  role: "user" | "model";
+  content: string;
+  thinking: string | null;
+  /** Set when this turn produced a plan — the bubble renders a clickable table card. */
+  planRunId: string | null;
+  model: string | null;
+  usage: Omit<UsageStats, "messages" | "totalTokens">;
+  createdAt: string;
+}
+
 export interface AuthUser {
   accountId: string;
   displayName: string;
