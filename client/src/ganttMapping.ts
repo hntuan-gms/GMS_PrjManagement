@@ -85,6 +85,12 @@ export function resolveRanges(ordered: OrderedTask[]): Map<string, DateRange> {
   return ranges;
 }
 
+function nextDayIso(iso: string): string {
+  const d = new Date(iso + "T00:00:00");
+  d.setDate(d.getDate() + 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 /**
  * Hierarchy (indentation, expand/collapse) is driven entirely by our own custom WBS
  * table, not gantt-task-react's built-in project/child aggregation — so every bar is
@@ -96,6 +102,17 @@ export function resolveRanges(ordered: OrderedTask[]): Map<string, DateRange> {
  * FS/SS/FF/SF distinction (its Task.dependencies is just a list of ids, always drawn
  * as a Finish-to-Start elbow) — DependencyOverlay.tsx draws every relationship type
  * correctly instead, as a custom overlay portaled into the chart's own SVG.
+ *
+ * `end` is deliberately midnight of the day AFTER the due date (an EXCLUSIVE end),
+ * not 23:59:59 of the due date itself. gantt-task-react snaps a drag to 5-minute
+ * increments of mouse position, not whole days, so a plain move lands both edges on
+ * some arbitrary time-of-day, not midnight. With start at 00:00 and end at 23:59:59,
+ * that arbitrary offset had ~24h of slack before start rolled to the next calendar
+ * day but under a second's worth before end did — so nearly every move pushed end
+ * into the next day while start didn't, silently adding a day to the duration on
+ * drop (GanttView.tsx's onDateChange only reads the calendar date, not the time).
+ * Anchoring both edges to the same 00:00 keeps them at the identical time-of-day
+ * after an equal shift, so the day-count between them can no longer drift.
  */
 export function toGanttTasks(ordered: OrderedTask[], ranges: Map<string, DateRange>): GanttTask[] {
   return ordered
@@ -106,7 +123,7 @@ export function toGanttTasks(ordered: OrderedTask[], ranges: Map<string, DateRan
         id: task.id,
         name: task.summary,
         start: new Date(range.start + "T00:00:00"),
-        end: new Date(range.end + "T23:59:59"),
+        end: new Date(nextDayIso(range.end) + "T00:00:00"),
         progress: task.percentComplete,
         type: "task",
         dependencies: [],

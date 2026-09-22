@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { ApiError, NetworkError, api } from "../api";
+import { computeOptimisticCascade } from "../dependencyCascade";
 import type { BulkTaskCreateResult, DependencyType, JiraUser, Session, Task, TaskUpdateResponse } from "../types";
 import CreateTaskModal from "./CreateTaskModal";
 import GanttView from "./GanttView";
@@ -16,13 +17,6 @@ interface Props {
 const OVERLAY_WARNING =
   "Phụ thuộc, baseline và % hoàn thành được lưu tạm trên máy chủ và sẽ mất khi ứng dụng " +
   "được cập nhật. Ngày bắt đầu và ngày kết thúc vẫn được đồng bộ với Jira.";
-
-/** UTC-based, matching the server's own addDays/diffDaysInclusive convention. */
-function addDaysIso(iso: string, days: number): string {
-  const d = new Date(iso + "T00:00:00Z");
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
 
 export default function ProjectWorkspace({ session, onSwitchProject, onLogout }: Props) {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -112,16 +106,20 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
   }
 
   /**
-   * Applies the dragged values to local state immediately, before the network
-   * round trip even starts — otherwise the bar has nothing to show between
-   * mouseup and the response landing, so gantt-task-react's own drag preview
-   * resets to the old position and then jumps to the new one once the request
-   * finally resolves. If the save fails, roll back to the true server state
-   * instead of leaving the optimistic (unsaved) value on screen.
+   * Applies the dragged values, PLUS the same FS/SS/FF/SF cascade the server would
+   * compute, to local state immediately — before the network round trip even
+   * starts. Otherwise the bar (and every successor it constrains) has nothing to
+   * show between mouseup and the PATCH response landing, so gantt-task-react's own
+   * drag preview resets to the old position and successors only catch up once the
+   * whole cascade finishes writing to Jira. `applyTaskUpdate` below still applies
+   * the server's authoritative response on top of this once it resolves, so a
+   * detail this local pass got wrong (e.g. a concurrent edit) self-corrects. If the
+   * save fails, roll back to the true server state instead of leaving the
+   * optimistic (unsaved) value on screen.
    */
   async function handleScheduleChange(id: string, startDate: string, durationDays: number) {
-    const dueDate = addDaysIso(startDate, durationDays - 1);
-    setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, startDate, durationDays, dueDate } : t)));
+    const cascade = computeOptimisticCascade(tasks, id, startDate, durationDays);
+    setTasks((prev) => prev.map((t) => cascade.get(t.id) ?? t));
     try {
       const updated = await api.updateTask(id, { startDate, durationDays });
       setTasks((prev) => applyTaskUpdate(prev, updated));

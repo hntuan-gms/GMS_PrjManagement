@@ -25,6 +25,7 @@ const MIN_CHART_WIDTH = 240;
 // gantt-task-react always renders its own horizontal scrollbar strip under the
 // chart rows; reserve room for it so the fixed-height layout below doesn't clip it.
 const SCROLLBAR_RESERVE = 24;
+const DAY_MS = 86_400_000;
 
 interface Props {
   tasks: Task[];
@@ -326,6 +327,11 @@ export default function GanttView({
                 ganttHeight={ganttHeight}
                 listCellWidth={`${listWidth}px`}
                 columnWidth={columnWidth}
+                // Defaults to a 5-minute step, which snaps a drag to wherever the mouse
+                // happens to land instead of the day grid — a whole day here makes every
+                // drag jump cleanly from one day-cell to the next, matching how the rest
+                // of the app (and a real Gantt chart) treats a day as the smallest unit.
+                timeStep={DAY_MS}
                 TaskListHeader={TaskListHeader}
                 TaskListTable={TaskListTable}
                 onSelect={(t: GanttTaskT) => onSelect(t.id)}
@@ -336,9 +342,13 @@ export default function GanttView({
                 onDateChange={(t: GanttTaskT) => {
                   const start = toIso(t.start);
                   const end = toIso(t.end);
+                  // `end` is an EXCLUSIVE boundary (see ganttMapping.ts's toGanttTasks) —
+                  // midnight of the day after the last day of the bar — so the day count
+                  // between the two truncated calendar dates *is* the duration, with no
+                  // +1 to make it inclusive.
                   const durationDays = Math.max(
                     1,
-                    Math.round((new Date(end).getTime() - new Date(start).getTime()) / 86_400_000) + 1
+                    Math.round((new Date(end).getTime() - new Date(start).getTime()) / DAY_MS)
                   );
                   onScheduleChange(t.id, start, durationDays);
                 }}
