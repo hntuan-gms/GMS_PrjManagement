@@ -3,7 +3,6 @@ import { ApiError, NetworkError, api } from "../api";
 import type { BulkTaskCreateResult, JiraUser, Session, Task } from "../types";
 import CreateTaskModal from "./CreateTaskModal";
 import GanttView from "./GanttView";
-import ImportTasksModal from "./ImportTasksModal";
 import ResourceView from "./ResourceView";
 import TaskEditModal from "./TaskEditModal";
 import Toolbar from "./Toolbar";
@@ -33,7 +32,6 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [creating, setCreating] = useState(false);
-  const [importing, setImporting] = useState(false);
 
   async function loadAll() {
     setLoading(true);
@@ -131,7 +129,6 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
         view={view}
         onViewChange={setView}
         onAddTask={() => setCreating(true)}
-        onImportTasks={() => setImporting(true)}
         onSync={handleSync}
         syncing={syncing}
         lastSyncedAt={lastSyncedAt}
@@ -197,22 +194,24 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
           tasks={tasks}
           users={users}
           onClose={() => setCreating(false)}
-          onCreate={async (input) => {
-            await api.createTask(input);
-            await refreshTasks();
-          }}
-        />
-      )}
-
-      {importing && (
-        <ImportTasksModal
-          tasks={tasks}
-          users={users}
-          onClose={() => setImporting(false)}
-          onImport={async (input): Promise<BulkTaskCreateResult> => {
-            const res = await api.createTasksBulk(input);
-            if (res.created.length > 0) await refreshTasks();
-            return res;
+          onCreate={async (input): Promise<BulkTaskCreateResult> => {
+            if (input.summaries.length === 1) {
+              const single = await api.createTask({
+                summary: input.summaries[0],
+                description: input.description,
+                issueType: input.issueType,
+                wbsParentId: input.wbsParentId,
+                startDate: input.startDate,
+                durationDays: input.durationDays,
+                assigneeAccountId: input.assigneeAccountId,
+              });
+              await refreshTasks();
+              return { created: [single], errors: [] };
+            } else {
+              const res = await api.createTasksBulk(input);
+              if (res.created.length > 0) await refreshTasks();
+              return res;
+            }
           }}
         />
       )}

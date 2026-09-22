@@ -6,7 +6,6 @@ interface Props {
   view: "gantt" | "resource";
   onViewChange: (v: "gantt" | "resource") => void;
   onAddTask: () => void;
-  onImportTasks: () => void;
   onSync: () => void;
   syncing: boolean;
   lastSyncedAt: string | null;
@@ -28,7 +27,6 @@ export default function Toolbar({
   view,
   onViewChange,
   onAddTask,
-  onImportTasks,
   onSync,
   syncing,
   lastSyncedAt,
@@ -70,7 +68,6 @@ export default function Toolbar({
         <button className="primary" onClick={onAddTask}>
           + Task mới
         </button>
-        <button onClick={onImportTasks}>Import nhiều task</button>
 
         <span className="toolbar-divider" aria-hidden="true" />
 
