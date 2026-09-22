@@ -88,14 +88,32 @@ export class TaskService {
 
     const tasks: Task[] = [];
     const toPersist: Array<{ issueKey: string; overlay: store.TaskOverlay }> = [];
+    // Issue keys whose reconcile() just invented a schedule out of thin air (no
+    // due date, no Start date field, anywhere) — pushed to Jira too, same as a
+    // manual schedule edit always is, so the issue doesn't show "no due date" in
+    // Jira while this app shows one.
+    const toWriteJira: Array<{ issueKey: string; due: string; start: string }> = [];
     for (const issue of issues) {
       const base = this.fromJiraIssue(issue);
       const stored = overlays.get(issue.key) ?? store.defaultOverlay();
-      const { overlay, changed } = this.reconcile(base, this.jiraStartDateOf(issue), stored);
+      const { overlay, changed, synthesizedDue } = this.reconcile(base, this.jiraStartDateOf(issue), stored);
       if (changed) toPersist.push({ issueKey: issue.key, overlay });
-      tasks.push({ ...base, ...overlay, id: issue.key } as Task);
+      if (synthesizedDue) toWriteJira.push({ issueKey: issue.key, due: synthesizedDue, start: overlay.startDate! });
+      tasks.push({ ...base, ...overlay, id: issue.key, dueDate: synthesizedDue ?? base.dueDate } as Task);
     }
     await store.setOverlays(this.ctx.cloudId, toPersist);
+    if (toWriteJira.length > 0) {
+      // Best-effort and parallel, like the cascade's successor pushes: these are
+      // independent issues, and one write failing (a permission quirk on a
+      // single issue, say) must not stop the rest of a bulk first sync, nor make
+      // listTasks() itself fail — the overlay default already applied either way,
+      // so the app stays consistent even if Jira's copy lags for that one issue.
+      await Promise.allSettled(
+        toWriteJira.map(({ issueKey, due, start }) =>
+          this.jira.updateIssueFields(issueKey, this.scheduleFields(due, start))
+        )
+      );
+    }
     return tasks;
   }
 
@@ -136,7 +154,7 @@ export class TaskService {
     base: any,
     jiraStartDate: string | null,
     overlay: store.TaskOverlay
-  ): { overlay: store.TaskOverlay; changed: boolean } {
+  ): { overlay: store.TaskOverlay; changed: boolean; synthesizedDue: string | null } {
     const hasOverlay =
       overlay.startDate !== null ||
       overlay.percentComplete !== 0 ||
@@ -149,15 +167,27 @@ export class TaskService {
       const dueDate: string | null = base.dueDate;
       let durationDays = 3;
       let startDate: string | null;
+      // Neither Jira's own duedate nor (if this site has one) its Start date
+      // field has ever been set: a pure backlog item, never scheduled by anyone
+      // in or out of this app. Give it the same 3-days-from-today default a
+      // freshly created task gets (see createTask) instead of leaving it with no
+      // startDate — which drops it from the Gantt and the WBS table entirely
+      // (ganttMapping.ts), silently, with nothing on screen to explain why a
+      // task that clearly exists never shows up after a sync.
+      let synthesizedDue: string | null = null;
       if (jiraStartDate) {
         startDate = jiraStartDate;
         if (dueDate) durationDays = Math.max(1, diffDaysInclusive(jiraStartDate, dueDate));
+      } else if (dueDate) {
+        startDate = addDays(dueDate, -(durationDays - 1));
       } else {
-        startDate = dueDate ? addDays(dueDate, -(durationDays - 1)) : null;
+        startDate = todayIso();
+        synthesizedDue = addDays(startDate, durationDays - 1);
       }
       return {
         overlay: { ...overlay, startDate, durationDays, percentComplete: derivedPercent },
         changed: true,
+        synthesizedDue,
       };
     }
 
@@ -175,16 +205,19 @@ export class TaskService {
         patch.startDate = addDays(base.dueDate, -(overlay.durationDays - 1));
       }
     }
-    if (Object.keys(patch).length === 0) return { overlay, changed: false };
-    return { overlay: { ...overlay, ...patch }, changed: true };
+    if (Object.keys(patch).length === 0) return { overlay, changed: false, synthesizedDue: null };
+    return { overlay: { ...overlay, ...patch }, changed: true, synthesizedDue: null };
   }
 
   /** Single-task read-back path: reconcile one task and persist if it moved. */
   private async hydrate(id: string, base: any, jiraStartDate: string | null): Promise<Task> {
     const stored = await store.getOverlay(this.ctx.cloudId, id);
-    const { overlay, changed } = this.reconcile(base, jiraStartDate, stored);
+    const { overlay, changed, synthesizedDue } = this.reconcile(base, jiraStartDate, stored);
     if (changed) await store.setOverlays(this.ctx.cloudId, [{ issueKey: id, overlay }]);
-    return { ...base, ...overlay, id };
+    if (synthesizedDue) {
+      await this.jira.updateIssueFields(id, this.scheduleFields(synthesizedDue, overlay.startDate));
+    }
+    return { ...base, ...overlay, id, dueDate: synthesizedDue ?? base.dueDate };
   }
 
   /** Fields written to Jira for a schedule change, omitting the start date when the site has none. */
@@ -521,6 +554,11 @@ function addDays(isoDate: string, days: number): string {
   const d = new Date(isoDate + "T00:00:00Z");
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
+}
+
+/** UTC "today", matching addDays'/diffDaysInclusive's own convention. */
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
 }
 
 function diffDaysInclusive(startIso: string, endIso: string): number {
