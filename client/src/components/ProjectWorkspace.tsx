@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { ApiError, NetworkError, api } from "../api";
 import { computeOptimisticCascade } from "../dependencyCascade";
@@ -34,6 +34,12 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [creating, setCreating] = useState(false);
+  // Sequence number per task id, bumped on every schedule-change request. A slow
+  // save's response is only applied if it's still the latest one issued for that
+  // task — otherwise a stale reply from an earlier drag (Jira round trips can take
+  // several seconds) can land after a newer drag's own optimistic update and yank
+  // the bar back to wherever that older drag left it.
+  const scheduleRequestSeq = useRef<Map<string, number>>(new Map());
 
   async function loadAll() {
     setLoading(true);
@@ -125,16 +131,26 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
    * toward whatever props last looked like) can paint one frame of the pre-drag
    * position before React's batched update finally flushes, which reads as the bar
    * hopping backward and then catching up a moment later.
+   *
+   * A save can take a few seconds (a Jira round trip), so it's easy to drag the
+   * same task again before the previous request's response lands. `seq` makes
+   * sure only the response for the LATEST request on this task id is ever
+   * applied — an older, slower reply arriving after a newer drag would otherwise
+   * overwrite the newer optimistic position with its own now-stale one.
    */
   async function handleScheduleChange(id: string, startDate: string, durationDays: number) {
     const cascade = computeOptimisticCascade(tasks, id, startDate, durationDays);
     flushSync(() => {
       setTasks((prev) => prev.map((t) => cascade.get(t.id) ?? t));
     });
+    const seq = (scheduleRequestSeq.current.get(id) ?? 0) + 1;
+    scheduleRequestSeq.current.set(id, seq);
     try {
       const updated = await api.updateTask(id, { startDate, durationDays });
+      if (scheduleRequestSeq.current.get(id) !== seq) return; // superseded by a newer drag
       setTasks((prev) => applyTaskUpdate(prev, updated));
     } catch (e) {
+      if (scheduleRequestSeq.current.get(id) !== seq) return;
       setSyncError(e instanceof Error ? e.message : "Không thể lưu thay đổi lịch trình.");
       await refreshTasks();
     }

@@ -55,6 +55,11 @@ export async function getOverlay(scope: string, taskId: string): Promise<TaskOve
   return db.data.scopes[scope]?.[taskId] ?? defaultOverlay();
 }
 
+/** Every overlay in a scope, keyed by issue key. Read-only — does not create the scope bucket. */
+export async function getAllOverlays(scope: string): Promise<Record<string, TaskOverlay>> {
+  return db.data.scopes[scope] ?? {};
+}
+
 export async function setOverlay(
   scope: string,
   taskId: string,

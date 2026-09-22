@@ -233,13 +233,24 @@ export class TaskService {
     let cascadeWarnings: string[] = [];
     let cascaded: Task[] = [];
     if (scheduleTouched || input.predecessors !== undefined) {
-      // newStart/newDuration are what this request just wrote (or, if the
-      // schedule wasn't touched, the unchanged current value) — passed straight
-      // in rather than left for the cascade to re-derive from its own listTasks()
-      // snapshot, which is a search read that can still be racing the write above.
-      const result = await this.applyDependencyCascade(id, newStart, newDuration);
-      cascadeWarnings = result.warnings;
-      cascaded = result.changed.filter((t) => t.id !== id);
+      // cascadeSnapshot() (inside applyDependencyCascade) is a project-wide Jira
+      // search — expensive, and pure overhead for the common case of a task with
+      // no dependency edges at all, which can't possibly move anything else or be
+      // constrained itself. Skip it entirely then: this was previously
+      // unconditional, so every single drag paid for a full-project search (on
+      // top of the write + read-back below) regardless of whether the task had
+      // any predecessors or successors — the main reason a plain drag could take
+      // several seconds to save.
+      const ownPredecessors = input.predecessors ?? current.predecessors;
+      if (ownPredecessors.length > 0 || (await this.hasSuccessors(id))) {
+        // newStart/newDuration are what this request just wrote (or, if the
+        // schedule wasn't touched, the unchanged current value) — passed straight
+        // in rather than left for the cascade to re-derive from its own listTasks()
+        // snapshot, which is a search read that can still be racing the write above.
+        const result = await this.applyDependencyCascade(id, newStart, newDuration);
+        cascadeWarnings = result.warnings;
+        cascaded = result.changed.filter((t) => t.id !== id);
+      }
     }
 
     // Read the primary task back by key, NOT via listTasks()'s JQL search: Jira
@@ -253,6 +264,15 @@ export class TaskService {
     const issue = await this.jira.getIssue(id);
     const updated = await this.hydrate(id, this.fromJiraIssue(issue), this.jiraStartDateOf(issue));
     return { task: updated, cascadeWarnings, cascaded };
+  }
+
+  /** Cheap, Jira-free check: does any other task in this scope list `id` as a predecessor? */
+  private async hasSuccessors(id: string): Promise<boolean> {
+    const overlays = await store.getAllOverlays(this.ctx.cloudId);
+    for (const taskId in overlays) {
+      if (taskId !== id && overlays[taskId].predecessors.some((p) => p.taskId === id)) return true;
+    }
+    return false;
   }
 
   /**
