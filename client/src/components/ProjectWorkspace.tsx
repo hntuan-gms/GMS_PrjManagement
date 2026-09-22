@@ -2,7 +2,15 @@ import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { ApiError, NetworkError, api } from "../api";
 import { computeOptimisticCascade } from "../dependencyCascade";
-import type { BulkTaskCreateResult, DependencyType, JiraUser, Session, Task, TaskUpdateResponse } from "../types";
+import type {
+  BulkTaskCreateResult,
+  DependencyType,
+  JiraUser,
+  Predecessor,
+  Session,
+  Task,
+  TaskUpdateResponse,
+} from "../types";
 import CreateTaskModal from "./CreateTaskModal";
 import GanttView from "./GanttView";
 import ResourceView from "./ResourceView";
@@ -197,14 +205,56 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
     const successor = tasks.find((t) => t.id === successorId);
     if (!successor) return;
     if (successor.predecessors.some((p) => p.taskId === predecessorId && p.type === type)) return;
+    await writePredecessors(successorId, [
+      ...successor.predecessors,
+      { taskId: predecessorId, type, lagDays: 0 },
+    ]);
+  }
+
+  /** Clicking an arrow and changing its type or lag. */
+  async function handleEditDependency(
+    successorId: string,
+    predecessorId: string,
+    currentType: DependencyType,
+    next: { type: DependencyType; lagDays: number }
+  ) {
+    const successor = tasks.find((t) => t.id === successorId);
+    if (!successor) return;
+    await writePredecessors(
+      successorId,
+      successor.predecessors.map((p) =>
+        p.taskId === predecessorId && p.type === currentType
+          ? { taskId: predecessorId, type: next.type, lagDays: next.lagDays }
+          : p
+      )
+    );
+  }
+
+  async function handleDeleteDependency(
+    successorId: string,
+    predecessorId: string,
+    type: DependencyType
+  ) {
+    const successor = tasks.find((t) => t.id === successorId);
+    if (!successor) return;
+    await writePredecessors(
+      successorId,
+      successor.predecessors.filter((p) => !(p.taskId === predecessorId && p.type === type))
+    );
+  }
+
+  /**
+   * The whole predecessor list is the unit of change on the wire, so add, edit
+   * and delete are all the same PATCH — and all three can move successors, so
+   * they all go through the same staleness guard as a drag.
+   */
+  async function writePredecessors(successorId: string, predecessors: Predecessor[]) {
     const seq = nextSeq();
     try {
-      const updated = await api.updateTask(successorId, {
-        predecessors: [...successor.predecessors, { taskId: predecessorId, type, lagDays: 0 }],
-      });
+      const updated = await api.updateTask(successorId, { predecessors });
       setTasks((prev) => applyTaskUpdate(prev, updated, seq));
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Không thể tạo phụ thuộc giữa hai task.");
+      setSyncError(e instanceof Error ? e.message : "Không thể cập nhật phụ thuộc.");
     }
   }
 
@@ -275,6 +325,8 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
             onScheduleChange={handleScheduleChange}
             onProgressChange={handleProgressChange}
             onAddDependency={handleAddDependency}
+            onEditDependency={handleEditDependency}
+            onDeleteDependency={handleDeleteDependency}
           />
         ) : (
           <ResourceView tasks={tasks} users={users} onOpenEdit={setEditingTask} />

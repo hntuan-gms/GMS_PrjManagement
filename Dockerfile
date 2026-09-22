@@ -24,6 +24,9 @@ COPY server/package.json server/package-lock.json ./
 RUN npm ci --omit=dev
 COPY --from=server-build /app/server/dist ./dist
 COPY --from=client-build /app/client/dist ./public
+# Read at boot by the migration runner, which resolves ../../migrations from
+# dist/db — so this has to sit next to dist, not inside it.
+COPY server/migrations ./migrations
 
 EXPOSE 4000
 CMD ["node", "dist/index.js"]

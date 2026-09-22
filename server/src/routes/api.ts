@@ -23,8 +23,9 @@ apiRouter.get("/meta", (req, res) => {
       ? { key: session.projectKey, name: session.projectName ?? session.projectKey }
       : null,
     startDateFieldId,
-    // The overlay lives on the container's ephemeral disk; the client warns about it.
-    overlayEphemeral: true,
+    // Overlays live in Postgres now, not on the container's ephemeral disk, so
+    // they survive a deploy and the client no longer warns about losing them.
+    overlayEphemeral: false,
   };
   res.json(meta);
 });

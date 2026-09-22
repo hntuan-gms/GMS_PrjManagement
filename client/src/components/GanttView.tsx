@@ -37,6 +37,13 @@ interface Props {
   onScheduleChange: (id: string, startDate: string, durationDays: number) => void;
   onProgressChange: (id: string, percentComplete: number) => void;
   onAddDependency: (successorId: string, predecessorId: string, type: DependencyType) => void;
+  onEditDependency: (
+    successorId: string,
+    predecessorId: string,
+    currentType: DependencyType,
+    next: { type: DependencyType; lagDays: number }
+  ) => void;
+  onDeleteDependency: (successorId: string, predecessorId: string, type: DependencyType) => void;
 }
 
 function toIso(d: Date): string {
@@ -59,6 +66,8 @@ export default function GanttView({
   onScheduleChange,
   onProgressChange,
   onAddDependency,
+  onEditDependency,
+  onDeleteDependency,
 }: Props) {
   const [viewMode, setViewMode] = useState<ViewMode>(ViewMode.Week);
   const [showCriticalPath, setShowCriticalPath] = useState(false);
@@ -365,6 +374,8 @@ export default function GanttView({
                 showArrows={showDependencies}
                 measureKey={measureKey}
                 onAddDependency={onAddDependency}
+                onEditDependency={onEditDependency}
+                onDeleteDependency={onDeleteDependency}
               />
             </>
           )

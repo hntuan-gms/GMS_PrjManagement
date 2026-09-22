@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadAuthConfig } from "./auth/config.js";
+import { migrate } from "./db/migrate.js";
 import { errorHandler } from "./errors.js";
 import { apiRouter } from "./routes/api.js";
 import { authRouter } from "./routes/auth.js";
@@ -11,11 +12,15 @@ import { authRouter } from "./routes/auth.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Fail fast and loud. There is no mock/degraded mode any more, so a missing
-// credential must stop the process here rather than surface as a confusing error
-// on someone's first login. On Cloud Run a boot crash shows up only as "revision
-// failed to start", so the message has to carry the diagnosis.
+// credential or an unreachable database must stop the process here rather than
+// surface as a confusing error on someone's first login. On Cloud Run a boot
+// crash shows up only as "revision failed to start", so the message has to carry
+// the diagnosis. Migrating here (rather than as a deploy step) keeps the schema
+// and the code that reads it in the same release; concurrent instances are
+// serialised by an advisory lock.
 try {
   loadAuthConfig();
+  await migrate();
 } catch (err) {
   console.error("\n[startup] Cannot start GMS PrjManagement:\n  " + (err as Error).message + "\n");
   process.exit(1);

@@ -15,6 +15,9 @@ name: Deploy to Cloud Run
 #   Secret Manager secrets (NOT GitHub secrets):
 #     atlassian-client-secret  the OAuth app's client secret
 #     session-encryption-keys  "k1:<32 random bytes, base64url>" — see server/.env.example
+#     database-url             postgresql://USER:PASS@/gms?host=/cloudsql/<connection name>
+#                              (carries a password, so Secret Manager rather than a
+#                              plain env var — scripts/setup-gcp-db.ps1 creates it)
 #
 # The Atlassian app's Callback URL must be exactly $APP_BASE_URL/api/auth/callback.
 # Atlassian allows one callback per app, so local dev needs a second app.
@@ -38,6 +41,9 @@ env:
   REGISTRY: ${{ vars.GCP_REGION }}-docker.pkg.dev
   REPOSITORY: gms-project-manager # existing Artifact Registry repo in asia-southeast1
   SERVICE: gms-prjmanagement # existing Cloud Run service name
+  # Shared instance: it also hosts the intern portal (intern_db) and hnxcis. This
+  # app gets its own database and user on it, so nothing can collide with theirs.
+  CLOUDSQL_INSTANCE: intern-portal-db
 
 jobs:
   deploy:
@@ -100,6 +106,7 @@ jobs:
           secrets: |-
             ATLASSIAN_CLIENT_SECRET=atlassian-client-secret:latest
             SESSION_ENCRYPTION_KEYS=session-encryption-keys:latest
+            DATABASE_URL=database-url:latest
           # overwrite (--set-env-vars / --set-secrets) rather than the default merge
           # (--update-*): this file is the sole source of truth for the service's
           # environment, so removing a line here removes it from the live service and
@@ -114,6 +121,7 @@ jobs:
             --min-instances=0
             --max-instances=1
             --timeout=60s
+            --add-cloudsql-instances=${{ vars.GCP_PROJECT_ID }}:${{ vars.GCP_REGION }}:${{ env.CLOUDSQL_INSTANCE }}
           # allow-unauthenticated is REQUIRED here, not a relaxation for convenience:
           # Atlassian redirects the browser back to /api/auth/callback, and that
           # navigation cannot carry a Google-signed ID token, so Cloud Run IAM would
@@ -121,13 +129,20 @@ jobs:
           # requireAuth middleware (mounted via apiRouter.use, so it is fail-closed)
           # plus ALLOWED_EMAIL_DOMAIN are the only access control in front of Jira.
           #
-          # max-instances=1 is deliberate, not a cost tweak: the schedule overlay
-          # (data/overlay.v2.json) is a single-writer lowdb file. It also still lives
-          # on the container's ephemeral disk, so dependencies, baselines and %
-          # complete reset on every deploy — the client shows a warning strip.
-          # To make it durable, create a bucket and add these two flags above:
-          #   --add-volume=name=overlay,type=cloud-storage,bucket=YOUR_BUCKET
-          #   --add-volume-mount=volume=overlay,mount-path=/app/data
+          # add-cloudsql-instances mounts the instance's unix socket at
+          # /cloudsql/<connection name>, which is what the socket form of
+          # DATABASE_URL points at — no proxy and no TLS config needed here. The
+          # runtime service account needs roles/cloudsql.client for it to connect.
+          #
+          # The server runs pending migrations at boot (server/src/db/migrate.ts),
+          # serialised across instances by a Postgres advisory lock, so a schema
+          # change ships with the release that needs it.
+          #
+          # max-instances=1 is no longer about a single-writer file — the overlay is
+          # in Postgres now and each write is atomic. What is left is that a
+          # dependency cascade is several statements rather than one transaction, so
+          # two concurrent cascades over the same tasks could still interleave.
+          # Raising this is safe for everything except that.
 
       - name: Summary
         run: |

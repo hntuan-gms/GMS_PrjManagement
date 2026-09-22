@@ -9,9 +9,28 @@ An MS-Project-style planner (Gantt + WBS + dependencies + resource view) layered
 ## Commands
 
 ```bash
+# Schedule data lives in the `gms` database on the shared Cloud SQL instance
+# bof-intern:asia-southeast1:intern-portal-db, alongside — but isolated from —
+# the intern portal's own `intern_db` and `hnxcis`. One-time GCP wiring (database,
+# user, Secret Manager entry, two IAM grants):
+powershell -ExecutionPolicy Bypass -File scripts/setup-gcp-db.ps1
+
+# Deploying is what applies it. .github/workflows/deploy.yml is the SOLE source of
+# truth for the service's environment (env_vars_update_strategy: overwrite), so
+# anything set on the service by hand is reverted on the next push to main.
+git push origin main
+
 # Dev — two processes; browse localhost:5173, NOT :4000
 cd server && npm install && npm run dev     # tsx watch, API on :4000
 cd client && npm install && npm run dev     # Vite on :5173, proxies /api to :4000
+
+# Local dev needs its own DATABASE_URL and currently has none: this machine's IP
+# is not in the instance's authorized networks, and adding it means changing
+# firewall rules on an instance two other apps depend on. To bring local dev back,
+# run the Cloud SQL Auth Proxy and point DATABASE_URL at localhost:5432:
+#   cloud-sql-proxy bof-intern:asia-southeast1:intern-portal-db
+cd server && npm run db:migrate             # optional, boot does it too
+cd server && npm run db:import-overlay      # one-off: old data/overlay.v2.json -> Postgres
 
 cd client && npm run lint                   # oxlint (the only linter; no server lint)
 cd client && npm run build                  # tsc -b && vite build
@@ -23,7 +42,7 @@ docker compose up -d --build                # same, containerised
 
 Dev goes through the Vite proxy so it is same-origin with the API and the session cookie behaves exactly as in production. Hitting `:4000` directly, or pointing `VITE_API_BASE` at another origin, breaks login — the cookie is `SameSite=Lax` and won't be sent cross-site. The symptom is "login succeeds, then bounces straight back to the login screen".
 
-The server **exits at boot** if `ATLASSIAN_CLIENT_ID`, `ATLASSIAN_CLIENT_SECRET`, `SESSION_ENCRYPTION_KEYS` or `APP_BASE_URL` is missing. That is deliberate: with mock mode gone there is no degraded path worth starting.
+The server **exits at boot** if `ATLASSIAN_CLIENT_ID`, `ATLASSIAN_CLIENT_SECRET`, `SESSION_ENCRYPTION_KEYS`, `APP_BASE_URL` or `DATABASE_URL` is missing, or if the database is unreachable. That is deliberate: with mock mode gone there is no degraded path worth starting.
 
 There is **no test framework and no test script** in either package. The one test pass on record (`docs/test-reports/2026-09-11-jira-two-way-sync.md`) predates OAuth. API calls now require a session cookie, so `curl` needs a cookie jar (`-b`/`-c`) or you verify in the browser.
 
@@ -35,19 +54,23 @@ There is **no test framework and no test script** in either package. The one tes
 
 A `Task` (`server/src/types.ts`) = one Jira issue + a local "overlay" record, joined in `TaskService.hydrate()`:
 
-| Owned by Jira (read/write via REST v3) | Owned by the local overlay (`lowdb`, `data/overlay.v2.json`) |
+| Owned by Jira (read/write via REST v3) | Owned by the overlay (Postgres, `task_overlay` + `task_dependency`) |
 |---|---|
 | summary, issuetype, status, assignee, parent | durationDays, percentComplete, predecessors, baselineStart/Due |
 | `duedate` — always derived as start + duration and pushed back on every schedule edit | |
 | the site's "Start date" custom field, **discovered per site** | startDate, when the site has no such field |
 
-Only the overlay column is unrecoverable: Jira issue links carry no FS/SS/FF/SF type and no lag, Jira has no baseline concept, and standard issues have no % field. Lose the file and dates come back from Jira while the dependency graph and baselines do not.
+Only the overlay column is unrecoverable: Jira issue links carry no FS/SS/FF/SF type and no lag, Jira has no baseline concept, and standard issues have no % field. Lose the database and dates come back from Jira while the dependency graph and baselines do not.
 
 `hydrate()` is where the two reconcile, and the precedence matters: if Jira has a Start date value it **wins** over the overlay (and duration is recomputed from it against `duedate`); if it doesn't, an out-of-band `duedate` edit made directly in Jira shifts the overlay start to match while preserving duration. Both branches exist because of real bugs (BUG-02, BUG-03 in the test report) — don't simplify them away.
 
 **`customfield_10059` is no longer hard-coded.** It is HHBJ-specific; on another site that ID is absent or an unrelated field, and writing a date into it would be silent corruption. `server/src/fieldDiscovery.ts` resolves it per cloudId via `GET /rest/api/3/field` and caches for an hour. When it returns `null`, writes must **omit** the field — `hydrate()`'s duedate-only branch is then the designed path, not a fallback.
 
-Overlays are nested under the Atlassian **cloudId**: `{ schemaVersion: 2, scopes: { [cloudId]: { [issueKey]: TaskOverlay } } }`. Nested rather than a flat `"cloudId:issueKey"` key because `Predecessor.taskId` is a bare issue key on the wire, and within one bucket that stays unambiguous. `store.deleteOverlay()` strips the id from other predecessor lists **within that scope only**. On Cloud Run the file sits on ephemeral disk and resets on every deploy; `SessionMeta.overlayEphemeral` is what makes the client show a warning strip about it.
+Every table is keyed by the Atlassian **cloudId**, because two sites can both contain an issue called ABC-1 and `Predecessor.taskId` is a bare issue key on the wire. `store.deleteOverlay()` clears edges in both directions **within that scope only**.
+
+Dependencies are one row per edge in `task_dependency`, not a JSON array on the successor: the cascade's hot question is "who depends on X?", which an array can only answer by scanning every task. `hasSuccessors()` is an index lookup on `(cloud_id, predecessor_key)`, and it is what lets `updateTask` skip the whole cascade — including its project-wide Jira search — for a task with no dependency edges, which is most drags.
+
+`store` is deliberately **batch-first**: `getProjectOverlays()` loads a whole project in two queries and `setOverlays()` writes many rows in one. A per-task read was free against the old JSON file but is a round trip against Postgres, so `listTasks()` reconciles in memory and persists once — `reconcile()` is pure for exactly that reason, with the write left to its caller.
 
 ### Authentication
 
@@ -87,5 +110,5 @@ WBS hierarchy is ours, not the Gantt library's: `ganttMapping.orderByWbs()` does
 - `IssueTypeName` is a hard-coded union (`Epic|Story|Task|Bug|Sub-task`). Team-managed projects rename or omit these, so `createIssue` will 400 on the first project that does.
 - Cross-project predecessors are rejected with a 400. The cascade only loads issues from the session's project, so a foreign key would appear to exist while never being enforced.
 - An overlay-only PATCH (%, predecessors, baselines) touches no Jira field. `updateTask` does a `getIssue` visibility check in that case so a user who cannot see the issue cannot rewrite shared schedule data, but there is no write-level permission check.
-- `store.setOverlay` is read-modify-write on a shared object, so two concurrent cascades can interleave. `--max-instances=1` prevents cross-process corruption, not this.
+- A cascade is several statements, not one transaction, so two concurrent cascades over the same tasks can still interleave — but each individual write is now atomic, which is what `--max-instances=1` used to be standing in for.
 - Logout is local only — Atlassian publishes no endpoint to revoke a 3LO refresh token. Don't imply otherwise in UI copy.

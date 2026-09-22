@@ -88,11 +88,25 @@ export class TaskService {
     const fields = this.ctx.startDateFieldId
       ? [...SEARCH_FIELDS, this.ctx.startDateFieldId]
       : SEARCH_FIELDS;
-    const issues = await this.jira.searchIssues(jql, fields);
+    // The whole project's overlays in one read, and one write for whatever
+    // reconciliation changed. Against the old JSON file a read and a write per
+    // task were free; against Postgres they are a round trip each, so a 100-task
+    // project would otherwise spend 200 of them inside a single page load.
+    const [issues, overlays] = await Promise.all([
+      this.jira.searchIssues(jql, fields),
+      store.getProjectOverlays(this.ctx.cloudId, this.ctx.projectKey),
+    ]);
+
     const tasks: Task[] = [];
+    const toPersist: Array<{ issueKey: string; overlay: store.TaskOverlay }> = [];
     for (const issue of issues) {
-      tasks.push(await this.hydrate(issue.key, this.fromJiraIssue(issue), this.jiraStartDateOf(issue)));
+      const base = this.fromJiraIssue(issue);
+      const stored = overlays.get(issue.key) ?? store.defaultOverlay();
+      const { overlay, changed } = this.reconcile(base, this.jiraStartDateOf(issue), stored);
+      if (changed) toPersist.push({ issueKey: issue.key, overlay });
+      tasks.push({ ...base, ...overlay, id: issue.key } as Task);
     }
+    await store.setOverlays(this.ctx.cloudId, toPersist);
     return tasks;
   }
 
@@ -120,15 +134,26 @@ export class TaskService {
   }
 
   /**
-   * Merge Jira-sourced fields with the local schedule overlay, seeding sensible
-   * overlay defaults on first sight. When this Jira project has a native "Start
-   * date" field configured (jiraStartDate), that field is the source of truth for
-   * startDate — same as duedate already is — so it always wins over the local
-   * overlay value once set.
+   * Decides what a task's overlay should become once Jira's own fields are taken
+   * into account — seeding sensible defaults on first sight, and letting Jira's
+   * native "Start date" field (jiraStartDate) win over the stored value once it
+   * has one, the same way duedate already does.
+   *
+   * Pure, and separate from the write, so the caller decides whether that is one
+   * statement or a batched one. Both branches exist because of real bugs (BUG-02,
+   * BUG-03 in the test report) — don't simplify them away.
    */
-  private async hydrate(id: string, base: any, jiraStartDate: string | null): Promise<Task> {
-    let overlay = await store.getOverlay(this.ctx.cloudId, id);
-    const hasOverlay = overlay.startDate !== null || overlay.percentComplete !== 0 || overlay.durationDays !== 1 || overlay.predecessors.length > 0;
+  private reconcile(
+    base: any,
+    jiraStartDate: string | null,
+    overlay: store.TaskOverlay
+  ): { overlay: store.TaskOverlay; changed: boolean } {
+    const hasOverlay =
+      overlay.startDate !== null ||
+      overlay.percentComplete !== 0 ||
+      overlay.durationDays !== 1 ||
+      overlay.predecessors.length > 0;
+
     if (!hasOverlay) {
       const derivedPercent =
         base.statusCategory === "done" ? 100 : base.statusCategory === "indeterminate" ? 50 : 0;
@@ -141,30 +166,35 @@ export class TaskService {
       } else {
         startDate = dueDate ? addDays(dueDate, -(durationDays - 1)) : null;
       }
-      overlay = await store.setOverlay(this.ctx.cloudId, id, {
-        startDate,
-        durationDays,
-        percentComplete: derivedPercent,
-      });
-    } else {
-      const patch: Partial<store.TaskOverlay> = {};
-      if (jiraStartDate && jiraStartDate !== overlay.startDate) {
-        // Jira's Start date field is the source of truth once it has a value.
-        patch.startDate = jiraStartDate;
-        if (base.dueDate) patch.durationDays = Math.max(1, diffDaysInclusive(jiraStartDate, base.dueDate));
-      } else if (!jiraStartDate && overlay.startDate && base.dueDate) {
-        // No Jira Start date field (or this project doesn't have one): fall back to
-        // reconciling against duedate, in case someone edited it directly in Jira
-        // and it drifted from what the local schedule overlay implies.
-        const impliedDue = addDays(overlay.startDate, overlay.durationDays - 1);
-        if (impliedDue !== base.dueDate) {
-          patch.startDate = addDays(base.dueDate, -(overlay.durationDays - 1));
-        }
-      }
-      if (Object.keys(patch).length > 0) {
-        overlay = await store.setOverlay(this.ctx.cloudId, id, patch);
+      return {
+        overlay: { ...overlay, startDate, durationDays, percentComplete: derivedPercent },
+        changed: true,
+      };
+    }
+
+    const patch: Partial<store.TaskOverlay> = {};
+    if (jiraStartDate && jiraStartDate !== overlay.startDate) {
+      // Jira's Start date field is the source of truth once it has a value.
+      patch.startDate = jiraStartDate;
+      if (base.dueDate) patch.durationDays = Math.max(1, diffDaysInclusive(jiraStartDate, base.dueDate));
+    } else if (!jiraStartDate && overlay.startDate && base.dueDate) {
+      // No Jira Start date field (or this project doesn't have one): fall back to
+      // reconciling against duedate, in case someone edited it directly in Jira
+      // and it drifted from what the local schedule overlay implies.
+      const impliedDue = addDays(overlay.startDate, overlay.durationDays - 1);
+      if (impliedDue !== base.dueDate) {
+        patch.startDate = addDays(base.dueDate, -(overlay.durationDays - 1));
       }
     }
+    if (Object.keys(patch).length === 0) return { overlay, changed: false };
+    return { overlay: { ...overlay, ...patch }, changed: true };
+  }
+
+  /** Single-task read-back path: reconcile one task and persist if it moved. */
+  private async hydrate(id: string, base: any, jiraStartDate: string | null): Promise<Task> {
+    const stored = await store.getOverlay(this.ctx.cloudId, id);
+    const { overlay, changed } = this.reconcile(base, jiraStartDate, stored);
+    if (changed) await store.setOverlays(this.ctx.cloudId, [{ issueKey: id, overlay }]);
     return { ...base, ...overlay, id };
   }
 
@@ -268,11 +298,7 @@ export class TaskService {
 
   /** Cheap, Jira-free check: does any other task in this scope list `id` as a predecessor? */
   private async hasSuccessors(id: string): Promise<boolean> {
-    const overlays = await store.getAllOverlays(this.ctx.cloudId);
-    for (const taskId in overlays) {
-      if (taskId !== id && overlays[taskId].predecessors.some((p) => p.taskId === id)) return true;
-    }
-    return false;
+    return store.hasSuccessors(this.ctx.cloudId, id);
   }
 
   /**
@@ -291,9 +317,18 @@ export class TaskService {
    */
   private async cascadeSnapshot(): Promise<Task[]> {
     const jql = `project = ${this.ctx.projectKey} ORDER BY created ASC`;
-    const issues = await this.jira.searchIssues(jql, SEARCH_FIELDS);
-    const overlays = await Promise.all(issues.map((issue) => store.getOverlay(this.ctx.cloudId, issue.key)));
-    return issues.map((issue, i) => ({ ...this.fromJiraIssue(issue), ...overlays[i], id: issue.key }) as Task);
+    const [issues, overlays] = await Promise.all([
+      this.jira.searchIssues(jql, SEARCH_FIELDS),
+      store.getProjectOverlays(this.ctx.cloudId, this.ctx.projectKey),
+    ]);
+    return issues.map(
+      (issue) =>
+        ({
+          ...this.fromJiraIssue(issue),
+          ...(overlays.get(issue.key) ?? store.defaultOverlay()),
+          id: issue.key,
+        }) as Task
+    );
   }
 
   /**

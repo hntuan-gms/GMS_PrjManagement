@@ -1,4 +1,24 @@
 services:
+  # pgvector's image rather than plain postgres: the same instance will hold the
+  # PRD/BRD embeddings the planning agent retrieves over, and enabling the
+  # extension later on a stock image means rebuilding this service.
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: gms
+      POSTGRES_PASSWORD: gms
+      POSTGRES_DB: gms
+    ports:
+      - "5432:5432"
+    volumes:
+      - gms-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gms -d gms"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
   app:
     build: .
     ports:
@@ -7,9 +27,13 @@ services:
       - server/.env
     environment:
       - PORT=4000
-    volumes:
-      - gms-data:/app/data
+      # Overrides whatever server/.env says: inside the compose network the
+      # database is reachable as `db`, not localhost.
+      - DATABASE_URL=postgresql://gms:gms@db:5432/gms
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
-  gms-data:
+  gms-pgdata:

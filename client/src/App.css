@@ -988,24 +988,72 @@ button.danger:hover:not(:disabled) {
 
 /* Custom dependency overlay (DependencyOverlay.tsx), portaled into the chart's own
    SVG — see that file for why gantt-task-react's built-in arrows aren't used. */
-.dep-arrow path {
+.dep-arrow-line {
   fill: none;
   stroke: var(--color-text-muted);
   stroke-width: 1.5;
+  stroke-linejoin: round;
+  pointer-events: none;
 }
 .dep-arrow polygon {
   fill: var(--color-text-muted);
+  pointer-events: none;
 }
+/* Invisible, fat, and the only part of an arrow that takes pointer events —
+   a 1.5px line is far too thin to hit with a mouse. */
+.dep-arrow-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 14;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+.dep-arrow:hover .dep-arrow-line,
+.dep-arrow:hover polygon {
+  stroke: var(--color-primary);
+  fill: none;
+}
+.dep-arrow:hover polygon {
+  fill: var(--color-primary);
+}
+.dep-arrow-selected .dep-arrow-line {
+  stroke: var(--color-primary);
+  stroke-width: 2.5;
+}
+.dep-arrow-selected polygon {
+  fill: var(--color-primary);
+}
+
 .dep-hitzone {
   fill: transparent;
   cursor: crosshair;
   pointer-events: all;
 }
 .dep-dot {
-  fill: var(--color-primary);
-  stroke: #fff;
+  fill: #fff;
+  stroke: var(--color-text-muted);
   stroke-width: 1.5;
   pointer-events: none;
+  opacity: 0.45;
+  transition: opacity 120ms ease, r 120ms ease;
+}
+.dep-dot-hover {
+  fill: var(--color-primary);
+  stroke: #fff;
+  opacity: 1;
+}
+/* Every other task's anchors while a connection is being dragged, so the valid
+   drop targets are obvious before the mouse is released. */
+.dep-dot-target {
+  fill: var(--color-primary);
+  stroke: #fff;
+  opacity: 0.85;
+}
+.dep-dot-active {
+  fill: var(--color-primary);
+  stroke: #fff;
+  opacity: 1;
+  r: 6.5;
 }
 .dep-rubberband {
   stroke: var(--color-primary);
@@ -1013,6 +1061,59 @@ button.danger:hover:not(:disabled) {
   stroke-dasharray: 5 4;
   opacity: 0.45;
   pointer-events: none;
+}
+.dep-rubberband-locked {
+  stroke-dasharray: none;
+  opacity: 0.9;
+}
+
+.dep-popover-host {
+  overflow: visible;
+}
+.dep-popover {
+  font-size: 12px;
+  background: var(--color-surface, #fff);
+  border: 1px solid var(--color-border, #d5d5dd);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 18%);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.dep-popover-title {
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+.dep-popover-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.dep-popover-row select {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  padding: 3px 4px;
+}
+.dep-popover-row label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-text-muted);
+}
+.dep-popover-row input {
+  width: 46px;
+  font-size: 12px;
+  padding: 2px 4px;
+}
+.dep-popover-row button {
+  font-size: 12px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+.dep-popover-delete {
+  color: #c0392b;
 }
 
 .wbs-header {
