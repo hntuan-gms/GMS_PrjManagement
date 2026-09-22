@@ -76,6 +76,18 @@ export interface BulkTaskCreateResult {
   errors: Array<{ summary: string; message: string }>;
 }
 
+/**
+ * What PATCH /tasks/:id returns: the edited task, plus every OTHER task the
+ * dependency cascade moved as a side effect, fully hydrated. Applying `cascaded`
+ * directly is what lets the client skip a separate GET /tasks after every
+ * schedule edit — that extra round trip used to arrive a moment later and
+ * visibly snap the chart to the confirmed values.
+ */
+export interface TaskUpdateResponse extends Task {
+  cascaded: Task[];
+  cascadeWarnings?: string[];
+}
+
 export interface AuthUser {
   accountId: string;
   displayName: string;

@@ -3,7 +3,8 @@ import "gantt-task-react/dist/index.css";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { computeCriticalPath } from "../criticalPath";
 import { orderByWbs, resolveRanges, toGanttTasks } from "../ganttMapping";
-import type { Task } from "../types";
+import type { DependencyType, Task } from "../types";
+import DependencyOverlay from "./DependencyOverlay";
 import IssueTypeIcon from "./IssueTypeIcon";
 
 // "Spotlight" colours used only while the critical-path toggle is on: critical
@@ -34,6 +35,7 @@ interface Props {
   onOpenEdit: (task: Task) => void;
   onScheduleChange: (id: string, startDate: string, durationDays: number) => void;
   onProgressChange: (id: string, percentComplete: number) => void;
+  onAddDependency: (successorId: string, predecessorId: string, type: DependencyType) => void;
 }
 
 function toIso(d: Date): string {
@@ -55,14 +57,20 @@ export default function GanttView({
   onOpenEdit,
   onScheduleChange,
   onProgressChange,
+  onAddDependency,
 }: Props) {
   const [viewMode, setViewMode] = useState<ViewMode>(ViewMode.Week);
   const [showCriticalPath, setShowCriticalPath] = useState(false);
+  const [showDependencies, setShowDependencies] = useState(true);
   const [query, setQuery] = useState("");
   const criticalIds = useMemo(() => computeCriticalPath(tasks), [tasks]);
   const byId = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
 
   const bodyRef = useRef<HTMLDivElement>(null);
+  // Mirrors bodyRef.current into state: DependencyOverlay needs the element itself
+  // (to locate the chart's SVG to portal into), and reading ref.current directly
+  // during render isn't safe — this effect is the one place that's allowed to.
+  const [bodyEl, setBodyEl] = useState<HTMLDivElement | null>(null);
   const [bodySize, setBodySize] = useState({ width: 0, height: 0 });
   const [listWidthOverride, setListWidthOverride] = useState<number | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -70,6 +78,7 @@ export default function GanttView({
   useEffect(() => {
     const el = bodyRef.current;
     if (!el) return;
+    setBodyEl(el);
     const ro = new ResizeObserver((entries) => {
       const { width, height } = entries[0].contentRect;
       setBodySize({ width, height });
@@ -84,6 +93,7 @@ export default function GanttView({
   const maxListWidth = Math.max(MIN_LIST_WIDTH, bodySize.width - MIN_CHART_WIDTH);
   const listWidth = Math.min(maxListWidth, Math.max(MIN_LIST_WIDTH, listWidthOverride ?? defaultListWidth));
   const ganttHeight = Math.max(ROW_HEIGHT, bodySize.height - HEADER_HEIGHT - SCROLLBAR_RESERVE);
+  const columnWidth = viewMode === ViewMode.Month ? 200 : viewMode === ViewMode.Week ? 160 : 60;
 
   function startDrag(e: React.MouseEvent) {
     e.preventDefault();
@@ -170,6 +180,18 @@ export default function GanttView({
     }));
   }, [rows, ranges, showCriticalPath, criticalIds]);
 
+  // Bumped whenever a bar's actual on-screen position could have changed, so
+  // DependencyOverlay knows when to re-measure. Own dates in ms rather than
+  // object identity, since ganttTasks gets a new array/Date identity on every
+  // render regardless of whether anything actually moved.
+  const measureKey = useMemo(
+    () =>
+      `${viewMode}:${columnWidth}:${listWidth}:` +
+      ganttTasks.map((t) => `${t.id}=${t.start.getTime()}-${t.end.getTime()}`).join(","),
+    [viewMode, columnWidth, listWidth, ganttTasks]
+  );
+  const rowTasks = useMemo(() => rows.map((r) => r.task), [rows]);
+
   // gantt-task-react does NOT size its TaskList wrapper to listCellWidth itself —
   // it only forwards that value as a `rowWidth` prop and expects the consumer's own
   // TaskListHeader/TaskListTable to apply it. Without an explicit width here, these
@@ -250,6 +272,13 @@ export default function GanttView({
         >
           Đường găng
         </button>
+        <button
+          className={showDependencies ? "active" : ""}
+          onClick={() => setShowDependencies((v) => !v)}
+          title="Ẩn/hiện mũi tên phụ thuộc giữa các task (FS/SS/FF/SF). Kéo từ đầu hoặc đuôi một task sang task khác để tạo phụ thuộc mới."
+        >
+          Phụ thuộc
+        </button>
 
         <div className="gantt-search">
           <input
@@ -296,7 +325,7 @@ export default function GanttView({
                 headerHeight={HEADER_HEIGHT}
                 ganttHeight={ganttHeight}
                 listCellWidth={`${listWidth}px`}
-                columnWidth={viewMode === ViewMode.Month ? 200 : viewMode === ViewMode.Week ? 160 : 60}
+                columnWidth={columnWidth}
                 TaskListHeader={TaskListHeader}
                 TaskListTable={TaskListTable}
                 onSelect={(t: GanttTaskT) => onSelect(t.id)}
@@ -319,6 +348,13 @@ export default function GanttView({
                 className={`gantt-divider ${dragging ? "dragging" : ""}`}
                 style={{ left: listWidth }}
                 onMouseDown={startDrag}
+              />
+              <DependencyOverlay
+                bodyEl={bodyEl}
+                rows={rowTasks}
+                showArrows={showDependencies}
+                measureKey={measureKey}
+                onAddDependency={onAddDependency}
               />
             </>
           )

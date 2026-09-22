@@ -92,8 +92,13 @@ apiRouter.patch("/tasks/:id", requireProject, async (req, res, next) => {
       }
     }
 
-    const { task, cascadeWarnings } = await req.auth!.taskService!.updateTask(req.params.id, input);
-    res.json(cascadeWarnings.length > 0 ? { ...task, cascadeWarnings } : task);
+    const { task, cascadeWarnings, cascaded } = await req.auth!.taskService!.updateTask(req.params.id, input);
+    // `cascaded` (and cascadeWarnings, when non-empty) always present: the client
+    // applies a schedule edit's full effect — including any successors the
+    // dependency cascade moved — straight from this one response, rather than
+    // following up with a separate GET /tasks that used to arrive a moment later
+    // and visibly snap the chart to the confirmed values.
+    res.json({ ...task, cascaded, ...(cascadeWarnings.length > 0 ? { cascadeWarnings } : {}) });
   } catch (err) {
     next(err);
   }

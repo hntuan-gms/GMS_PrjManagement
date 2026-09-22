@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ApiError, NetworkError, api } from "../api";
-import type { BulkTaskCreateResult, JiraUser, Session, Task } from "../types";
+import type { BulkTaskCreateResult, DependencyType, JiraUser, Session, Task, TaskUpdateResponse } from "../types";
 import CreateTaskModal from "./CreateTaskModal";
 import GanttView from "./GanttView";
 import ResourceView from "./ResourceView";
@@ -88,15 +88,45 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
     setTasks(t);
   }
 
+  /**
+   * PATCH /tasks/:id now returns the edited task plus every other task the
+   * dependency cascade moved (`cascaded`) in the same response, so applying both
+   * here is enough — no follow-up GET /tasks needed. That follow-up used to be
+   * what made dragging a bar feel laggy: the optimistic value showed instantly,
+   * then a moment later the full refetch would land and visibly snap the chart
+   * to the server-confirmed value, even when nothing had actually changed.
+   * Object identity is preserved for every task the cascade didn't touch, so
+   * unrelated rows don't needlessly re-render either.
+   */
+  function applyTaskUpdate(prev: Task[], response: TaskUpdateResponse): Task[] {
+    const { cascaded, cascadeWarnings: _cascadeWarnings, ...primary } = response;
+    const byId = new Map<string, Task>([[primary.id, primary], ...cascaded.map((t) => [t.id, t] as const)]);
+    return prev.map((t) => byId.get(t.id) ?? t);
+  }
+
   async function handleScheduleChange(id: string, startDate: string, durationDays: number) {
     const updated = await api.updateTask(id, { startDate, durationDays });
-    setTasks((prev) => prev.map((t) => (t.id === id ? updated : t)));
-    await refreshTasks(); // pick up any dependency cascade on successors
+    setTasks((prev) => applyTaskUpdate(prev, updated));
   }
 
   async function handleProgressChange(id: string, percentComplete: number) {
     const updated = await api.updateTask(id, { percentComplete });
-    setTasks((prev) => prev.map((t) => (t.id === id ? updated : t)));
+    setTasks((prev) => applyTaskUpdate(prev, updated));
+  }
+
+  /** Drag-to-connect on the Gantt chart: successorId gets predecessorId added to its list. */
+  async function handleAddDependency(successorId: string, predecessorId: string, type: DependencyType) {
+    const successor = tasks.find((t) => t.id === successorId);
+    if (!successor) return;
+    if (successor.predecessors.some((p) => p.taskId === predecessorId && p.type === type)) return;
+    try {
+      const updated = await api.updateTask(successorId, {
+        predecessors: [...successor.predecessors, { taskId: predecessorId, type, lagDays: 0 }],
+      });
+      setTasks((prev) => applyTaskUpdate(prev, updated));
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Không thể tạo phụ thuộc giữa hai task.");
+    }
   }
 
   if (loading) return <div className="center-message">Đang tải dữ liệu...</div>;
@@ -165,6 +195,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
             onOpenEdit={setEditingTask}
             onScheduleChange={handleScheduleChange}
             onProgressChange={handleProgressChange}
+            onAddDependency={handleAddDependency}
           />
         ) : (
           <ResourceView tasks={tasks} users={users} onOpenEdit={setEditingTask} />
@@ -179,8 +210,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
           onClose={() => setEditingTask(null)}
           onSave={async (patch) => {
             const updated = await api.updateTask(editingTask.id, patch);
-            setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
-            await refreshTasks();
+            setTasks((prev) => applyTaskUpdate(prev, updated));
           }}
           onDelete={async () => {
             await api.deleteTask(editingTask.id);

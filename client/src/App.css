@@ -986,6 +986,35 @@ button.danger:hover:not(:disabled) {
   opacity: 0.45;
 }
 
+/* Custom dependency overlay (DependencyOverlay.tsx), portaled into the chart's own
+   SVG — see that file for why gantt-task-react's built-in arrows aren't used. */
+.dep-arrow path {
+  fill: none;
+  stroke: var(--color-text-muted);
+  stroke-width: 1.5;
+}
+.dep-arrow polygon {
+  fill: var(--color-text-muted);
+}
+.dep-hitzone {
+  fill: transparent;
+  cursor: crosshair;
+  pointer-events: all;
+}
+.dep-dot {
+  fill: var(--color-primary);
+  stroke: #fff;
+  stroke-width: 1.5;
+  pointer-events: none;
+}
+.dep-rubberband {
+  stroke: var(--color-primary);
+  stroke-width: 2;
+  stroke-dasharray: 5 4;
+  opacity: 0.45;
+  pointer-events: none;
+}
+
 .wbs-header {
   display: flex;
   align-items: center;

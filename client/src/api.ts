@@ -7,6 +7,7 @@ import type {
   Task,
   TaskCreateInput,
   TaskUpdateInput,
+  TaskUpdateResponse,
 } from "./types";
 
 // Always same-origin: in production this process also serves the UI, and in dev
@@ -107,7 +108,10 @@ export const api = {
   createTasksBulk: (input: BulkTaskCreateInput) =>
     request<BulkTaskCreateResult>("/tasks/bulk", { method: "POST", body: JSON.stringify(input) }),
   updateTask: (id: string, input: TaskUpdateInput) =>
-    request<Task>(`/tasks/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(input) }),
+    request<TaskUpdateResponse>(`/tasks/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }),
   deleteTask: (id: string) =>
     request<void>(`/tasks/${encodeURIComponent(id)}`, { method: "DELETE" }),
   sync: () => request<{ syncedAt: string; count: number; tasks: Task[] }>("/sync", { method: "POST" }),

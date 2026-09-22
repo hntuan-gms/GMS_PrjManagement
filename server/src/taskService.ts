@@ -38,6 +38,15 @@ export interface UpdateResult {
   task: Task;
   /** Issue keys whose Jira write failed during the cascade, if any. */
   cascadeWarnings: string[];
+  /**
+   * Every OTHER task the dependency cascade actually moved, fully hydrated — so
+   * the client can apply the whole effect of this one edit from this single
+   * response instead of following up with a separate GET /tasks. That follow-up
+   * GET used to be the only way to see a cascade's effect on successors, which
+   * meant every drag showed the optimistic value first and then visibly snapped
+   * to the server-confirmed one a moment later once the GET resolved.
+   */
+  cascaded: Task[];
 }
 
 /**
@@ -222,14 +231,18 @@ export class TaskService {
     }
 
     let cascadeWarnings: string[] = [];
+    let cascadedIds: string[] = [];
     if (scheduleTouched || input.predecessors !== undefined) {
-      cascadeWarnings = await this.applyDependencyCascade(id);
+      const result = await this.applyDependencyCascade(id);
+      cascadeWarnings = result.warnings;
+      cascadedIds = result.changedIds;
     }
 
     const all = await this.listTasks();
     const updated = all.find((t) => t.id === id);
     if (!updated) throw new Error(`Task ${id} not found after update`);
-    return { task: updated, cascadeWarnings };
+    const cascaded = all.filter((t) => t.id !== id && cascadedIds.includes(t.id));
+    return { task: updated, cascadeWarnings, cascaded };
   }
 
   /**
@@ -238,11 +251,15 @@ export class TaskService {
    * Simple forward-only propagation (not a full CPM/backward pass) — enough to keep
    * a Gantt chart consistent without needing MS Project's full scheduling engine.
    *
-   * Returns the ids whose Jira write failed. A 401 is re-thrown instead: a revoked
-   * token used to be swallowed here, leaving the overlay and Jira permanently and
-   * silently divergent.
+   * Returns the ids whose Jira write failed (`warnings`) and every id whose
+   * schedule was actually moved (`changedIds`), including `changedId` itself if
+   * its own self-check adjusted it. A 401 is re-thrown instead of collected as a
+   * warning: a revoked token used to be swallowed here, leaving the overlay and
+   * Jira permanently and silently divergent.
    */
-  private async applyDependencyCascade(changedId: string): Promise<string[]> {
+  private async applyDependencyCascade(
+    changedId: string
+  ): Promise<{ warnings: string[]; changedIds: string[] }> {
     const tasks = await this.listTasks();
     const byId = new Map(tasks.map((t) => [t.id, t]));
     const successorsOf = new Map<string, Array<{ taskId: string; pred: { type: string; lagDays: number } }>>();
@@ -254,6 +271,7 @@ export class TaskService {
     }
 
     const warnings: string[] = [];
+    const changed = new Set<string>();
     const pushDates = async (taskId: string, start: string, due: string) => {
       try {
         await this.jira.updateIssueFields(taskId, this.scheduleFields(due, start));
@@ -294,6 +312,7 @@ export class TaskService {
         await store.setOverlay(this.ctx.cloudId, cur.id, { startDate: curStart });
         await pushDates(cur.id, curStart, curDue);
         byId.set(cur.id, cur);
+        changed.add(cur.id);
       }
       const curEnd = addDays(curStart, cur.durationDays - 1);
 
@@ -312,11 +331,12 @@ export class TaskService {
           await store.setOverlay(this.ctx.cloudId, succ.id, { startDate: earliestStart });
           await pushDates(succ.id, earliestStart, succDue);
           byId.set(succ.id, succ);
+          changed.add(succ.id);
           queue.push(succ.id);
         }
       }
     }
-    return warnings;
+    return { warnings, changedIds: [...changed] };
   }
 
   async createTask(input: TaskCreateInput): Promise<Task> {

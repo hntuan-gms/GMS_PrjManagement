@@ -62,8 +62,18 @@ export function resolveRanges(ordered: OrderedTask[]): Map<string, DateRange> {
   // appears somewhere after it — walking in reverse guarantees children (and their
   // own already-resolved rollups) are available by the time their parent is visited.
   for (const { task } of [...ordered].reverse()) {
-    let start = task.startDate;
-    let end = task.dueDate ?? task.startDate;
+    if (task.startDate) {
+      // A task with its own dates is authoritative, full stop — never widened by a
+      // child's schedule. (Bug: this used to min/max against children unconditionally,
+      // so dragging any parent task narrower than its children's span would snap
+      // straight back to the wider range on the very next render.)
+      ranges.set(task.id, { start: task.startDate, end: task.dueDate ?? task.startDate });
+      continue;
+    }
+    // No own date — typically an Epic used purely as a grouping issue. Roll up the
+    // min/max across descendants' resolved ranges so it still gets a displayable bar.
+    let start: string | null = null;
+    let end: string | null = null;
     for (const childId of childrenOf.get(task.id) ?? []) {
       const childRange = ranges.get(childId);
       if (!childRange) continue;
@@ -81,6 +91,11 @@ export function resolveRanges(ordered: OrderedTask[]): Map<string, DateRange> {
  * a plain "task" here regardless of whether it has children in the WBS. `ordered`
  * must already be filtered to entries present in `ranges` (see GanttView) so this
  * list stays index-aligned, row for row, with the custom TaskListTable.
+ *
+ * `dependencies` is deliberately left empty: gantt-task-react's own arrows carry no
+ * FS/SS/FF/SF distinction (its Task.dependencies is just a list of ids, always drawn
+ * as a Finish-to-Start elbow) — DependencyOverlay.tsx draws every relationship type
+ * correctly instead, as a custom overlay portaled into the chart's own SVG.
  */
 export function toGanttTasks(ordered: OrderedTask[], ranges: Map<string, DateRange>): GanttTask[] {
   return ordered
@@ -94,7 +109,7 @@ export function toGanttTasks(ordered: OrderedTask[], ranges: Map<string, DateRan
         end: new Date(range.end + "T23:59:59"),
         progress: task.percentComplete,
         type: "task",
-        dependencies: task.predecessors.map((p) => p.taskId),
+        dependencies: [],
         styles: statusStyles(task.statusCategory, task.issueType),
       };
     });
