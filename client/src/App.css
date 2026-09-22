@@ -140,6 +140,16 @@ button:disabled {
   background: #1f2430;
   color: #fff;
 }
+.gantt-toolbar-divider {
+  width: 1px;
+  align-self: stretch;
+  background: #e2e4e9;
+  margin: 2px 4px;
+}
+.critical-toggle.active {
+  background: #a3271b;
+  border-color: #a3271b;
+}
 
 /* Fixed-height body below the toolbar row: gantt-task-react's ganttHeight prop is
    sized to fit exactly here, so its own header row and bottom scrollbar stay put
@@ -193,6 +203,12 @@ button:disabled {
 }
 .wbs-row-selected {
   background: #e8f0ff;
+}
+.wbs-row-critical {
+  border-left: 3px solid #a3271b;
+}
+.wbs-row-critical .wbs-col-key {
+  padding-left: 5px;
 }
 .wbs-col {
   padding: 0 8px;
@@ -328,6 +344,28 @@ button:disabled {
 .clickable-row:hover {
   background: #f5f8ff;
   cursor: pointer;
+}
+.resource-overlap-warning {
+  background: #fdf0d5;
+  color: #7a5400;
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  font-size: 12.5px;
+}
+.resource-overlap-warning ul {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.row-conflict {
+  background: #fdf6e8;
+}
+.row-conflict:hover {
+  background: #fbecc7;
 }
 .status-pill {
   font-size: 11px;
