@@ -1,9 +1,17 @@
 import { Gantt, ViewMode, type Task as GanttTaskT } from "gantt-task-react";
 import "gantt-task-react/dist/index.css";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { computeCriticalPath } from "../criticalPath";
 import { orderByWbs, resolveRanges, toGanttTasks } from "../ganttMapping";
 import type { Task } from "../types";
 import IssueTypeIcon from "./IssueTypeIcon";
+
+// "Spotlight" colours used only while the critical-path toggle is on: critical
+// bars get an unambiguous red-orange, everything else is dimmed to grey so the
+// chain reads clearly without fighting the normal status/type colour coding
+// (which already uses red for Bug and would otherwise be ambiguous with "critical").
+const CRITICAL_STYLES = { backgroundColor: "#e35d4f", progressColor: "#a3271b", backgroundSelectedColor: "#c94a3d" };
+const DIMMED_STYLES = { backgroundColor: "#e7e7ec", progressColor: "#b7b7c0", backgroundSelectedColor: "#d5d5db" };
 
 const ROW_HEIGHT = 42;
 const HEADER_HEIGHT = 46;
@@ -49,6 +57,8 @@ export default function GanttView({
   onProgressChange,
 }: Props) {
   const [viewMode, setViewMode] = useState<ViewMode>(ViewMode.Week);
+  const [showCriticalPath, setShowCriticalPath] = useState(false);
+  const criticalIds = useMemo(() => computeCriticalPath(tasks), [tasks]);
 
   const bodyRef = useRef<HTMLDivElement>(null);
   const [bodySize, setBodySize] = useState({ width: 0, height: 0 });
@@ -111,7 +121,14 @@ export default function GanttView({
   // render this exact same filtered list, in this exact order, or the two panes
   // drift out of row alignment (a task without a resolvable date can't get a bar).
   const rows = useMemo(() => visible.filter((v) => ranges.has(v.task.id)), [visible, ranges]);
-  const ganttTasks = useMemo(() => toGanttTasks(rows, ranges), [rows, ranges]);
+  const ganttTasks = useMemo(() => {
+    const base = toGanttTasks(rows, ranges);
+    if (!showCriticalPath) return base;
+    return base.map((t) => ({
+      ...t,
+      styles: criticalIds.has(t.id) ? CRITICAL_STYLES : DIMMED_STYLES,
+    }));
+  }, [rows, ranges, showCriticalPath, criticalIds]);
   const byId = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
 
   if (rows.length === 0) {
@@ -143,7 +160,9 @@ export default function GanttView({
       {rows.map(({ task, depth, hasChildren }) => (
         <div
           key={task.id}
-          className={`wbs-row ${task.id === selectedId ? "wbs-row-selected" : ""}`}
+          className={`wbs-row ${task.id === selectedId ? "wbs-row-selected" : ""} ${
+            showCriticalPath && criticalIds.has(task.id) ? "wbs-row-critical" : ""
+          }`}
           style={{ height: ROW_HEIGHT }}
           onClick={() => onSelect(task.id)}
           onDoubleClick={() => onOpenEdit(task)}
@@ -193,6 +212,14 @@ export default function GanttView({
             {vm}
           </button>
         ))}
+        <span className="gantt-toolbar-divider" aria-hidden="true" />
+        <button
+          className={showCriticalPath ? "active critical-toggle" : "critical-toggle"}
+          onClick={() => setShowCriticalPath((v) => !v)}
+          title="Chuỗi công việc quyết định thời gian hoàn thành dự án — trễ bất kỳ task nào trong chuỗi này sẽ làm trễ cả dự án"
+        >
+          Đường găng
+        </button>
       </div>
       <div className="gantt-body" ref={bodyRef}>
         {bodySize.width > 0 && (

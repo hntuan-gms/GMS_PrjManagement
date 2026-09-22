@@ -1,4 +1,10 @@
+import { findOverlaps } from "../resourceAllocation";
 import type { JiraUser, Task } from "../types";
+
+function formatRange(from: string, to: string): string {
+  const fmt = (iso: string) => iso.slice(8, 10) + "/" + iso.slice(5, 7);
+  return from === to ? fmt(from) : `${fmt(from)} – ${fmt(to)}`;
+}
 
 interface Props {
   tasks: Task[];
@@ -34,6 +40,10 @@ export default function ResourceView({ tasks, users, onOpenEdit }: Props) {
       {rows.map(({ user, tasks: userTasks }) => {
         const openCount = userTasks.filter((t) => t.statusCategory !== "done").length;
         const doneCount = userTasks.length - openCount;
+        // "Unassigned" isn't a person — overallocation only means something for a
+        // real assignee who'd have to work two overlapping tasks at once.
+        const overlaps = user.accountId ? findOverlaps(userTasks) : [];
+        const conflictIds = new Set(overlaps.flatMap((o) => [o.aId, o.bId]));
         return (
           <div key={user.accountId || "unassigned"} className="resource-card">
             <div className="resource-header">
@@ -48,6 +58,18 @@ export default function ResourceView({ tasks, users, onOpenEdit }: Props) {
                 style={{ width: `${(openCount / userTasks.length) * 100}%` }}
               />
             </div>
+            {overlaps.length > 0 && (
+              <div className="resource-overlap-warning">
+                <strong>⚠ Quá tải — {overlaps.length} cặp task trùng lịch:</strong>
+                <ul>
+                  {overlaps.map((o, i) => (
+                    <li key={i}>
+                      <b>{o.aId}</b> ↔ <b>{o.bId}</b> · {formatRange(o.from, o.to)}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             <table className="resource-table">
               <thead>
                 <tr>
@@ -61,8 +83,12 @@ export default function ResourceView({ tasks, users, onOpenEdit }: Props) {
               </thead>
               <tbody>
                 {userTasks.map((t) => (
-                  <tr key={t.id} onClick={() => onOpenEdit(t)} className="clickable-row">
-                    <td>{t.id}</td>
+                  <tr
+                    key={t.id}
+                    onClick={() => onOpenEdit(t)}
+                    className={`clickable-row ${conflictIds.has(t.id) ? "row-conflict" : ""}`}
+                  >
+                    <td>{conflictIds.has(t.id) && <span title="Trùng lịch với task khác">⚠ </span>}{t.id}</td>
                     <td>{t.summary}</td>
                     <td>
                       <span className={`status-pill status-${t.statusCategory}`}>{t.statusName}</span>
