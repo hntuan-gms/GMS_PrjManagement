@@ -77,8 +77,26 @@ export function readOAuthFlow(req: Request): OAuthFlowData | null {
   return flow;
 }
 
+/**
+ * Thrown when the sealed session blob won't fit in a cookie (setSealedCookie
+ * returned false). This must never be swallowed: silently skipping the
+ * Set-Cookie here means OAuth "succeeded" but the user has no session at all,
+ * which looks identical to — and used to be mistaken for — a SameSite bug.
+ */
+export class SessionTooLargeError extends Error {
+  constructor() {
+    super(
+      "Không thể lưu phiên đăng nhập: dữ liệu phiên vượt quá giới hạn cookie (~3900 bytes)."
+    );
+    this.name = "SessionTooLargeError";
+  }
+}
+
 export function commitSession(res: Response, session: SessionData): void {
-  setSealedCookie(res, SESSION_COOKIE, session, SESSION_MAX_AGE_MS);
+  const stored = setSealedCookie(res, SESSION_COOKIE, session, SESSION_MAX_AGE_MS);
+  if (!stored) {
+    throw new SessionTooLargeError();
+  }
 }
 
 export function commitAccess(res: Response, access: AccessData): void {
