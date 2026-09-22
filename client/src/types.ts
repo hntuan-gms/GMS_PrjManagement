@@ -12,6 +12,7 @@ export interface Task {
   id: string;
   wbsParentId: string | null;
   summary: string;
+  description: string | null;
   issueType: IssueTypeName;
   statusName: string;
   statusCategory: "new" | "indeterminate" | "done";
@@ -36,6 +37,7 @@ export interface JiraUser {
 
 export interface TaskUpdateInput {
   summary?: string;
+  description?: string | null;
   startDate?: string | null;
   dueDate?: string | null;
   durationDays?: number;
@@ -50,11 +52,28 @@ export interface TaskUpdateInput {
 export interface TaskCreateInput {
   summary: string;
   issueType: IssueTypeName;
+  description?: string | null;
   wbsParentId?: string | null;
   startDate?: string | null;
   dueDate?: string | null;
   durationDays?: number;
   assigneeAccountId?: string | null;
+}
+
+/** One shared set of fields, applied to N summaries — mirrors Jira's own "create several issues" bulk dialog. */
+export interface BulkTaskCreateInput {
+  summaries: string[];
+  issueType: IssueTypeName;
+  description?: string | null;
+  wbsParentId?: string | null;
+  startDate?: string | null;
+  durationDays?: number;
+  assigneeAccountId?: string | null;
+}
+
+export interface BulkTaskCreateResult {
+  created: Task[];
+  errors: Array<{ summary: string; message: string }>;
 }
 
 export interface AuthUser {

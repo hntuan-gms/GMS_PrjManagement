@@ -7,6 +7,7 @@
  * transport changed.
  */
 import { JIRA_API_BASE } from "./auth/config.js";
+import { textToAdf } from "./adf.js";
 
 export interface JiraClientOptions {
   cloudId: string;
@@ -159,6 +160,7 @@ export class JiraClient {
     projectKey: string;
     issueTypeName: string;
     summary: string;
+    description?: string | null;
     parentKey?: string | null;
     dueDate?: string | null;
     startDate?: string | null;
@@ -171,6 +173,7 @@ export class JiraClient {
       summary: input.summary,
     };
     if (input.parentKey) fields.parent = { key: input.parentKey };
+    if (input.description) fields.description = textToAdf(input.description);
     if (input.dueDate) fields.duedate = input.dueDate;
     if (input.startDate && input.startDateFieldId) fields[input.startDateFieldId] = input.startDate;
     if (input.assigneeAccountId) fields.assignee = { accountId: input.assigneeAccountId };

@@ -1,11 +1,17 @@
 import { Gantt, ViewMode, type Task as GanttTaskT } from "gantt-task-react";
 import "gantt-task-react/dist/index.css";
-import { useMemo, useState } from "react";
-import { orderByWbs, toGanttTasks } from "../ganttMapping";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { orderByWbs, resolveRanges, toGanttTasks } from "../ganttMapping";
 import type { Task } from "../types";
+import IssueTypeIcon from "./IssueTypeIcon";
 
 const ROW_HEIGHT = 42;
 const HEADER_HEIGHT = 46;
+const MIN_LIST_WIDTH = 220;
+const MIN_CHART_WIDTH = 240;
+// gantt-task-react always renders its own horizontal scrollbar strip under the
+// chart rows; reserve room for it so the fixed-height layout below doesn't clip it.
+const SCROLLBAR_RESERVE = 24;
 
 interface Props {
   tasks: Task[];
@@ -28,14 +34,6 @@ function toIso(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
-const typeBadge: Record<Task["issueType"], string> = {
-  Epic: "🟣",
-  Story: "🟦",
-  Task: "⬜",
-  Bug: "🟥",
-  "Sub-task": "↳",
-};
-
 export default function GanttView({
   tasks,
   collapsed,
@@ -48,7 +46,48 @@ export default function GanttView({
 }: Props) {
   const [viewMode, setViewMode] = useState<ViewMode>(ViewMode.Week);
 
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [bodySize, setBodySize] = useState({ width: 0, height: 0 });
+  const [listWidthOverride, setListWidthOverride] = useState<number | null>(null);
+  const [dragging, setDragging] = useState(false);
+
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const { width, height } = entries[0].contentRect;
+      setBodySize({ width, height });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Defaults to the middle of the visible Gantt area; a manual drag (listWidthOverride)
+  // always wins over that default once set.
+  const defaultListWidth = bodySize.width > 0 ? Math.round(bodySize.width / 2) : 320;
+  const maxListWidth = Math.max(MIN_LIST_WIDTH, bodySize.width - MIN_CHART_WIDTH);
+  const listWidth = Math.min(maxListWidth, Math.max(MIN_LIST_WIDTH, listWidthOverride ?? defaultListWidth));
+  const ganttHeight = Math.max(ROW_HEIGHT, bodySize.height - HEADER_HEIGHT - SCROLLBAR_RESERVE);
+
+  function startDrag(e: React.MouseEvent) {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = listWidth;
+    setDragging(true);
+    function onMove(ev: MouseEvent) {
+      setListWidthOverride(startWidth + (ev.clientX - startX));
+    }
+    function onUp() {
+      setDragging(false);
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
   const ordered = useMemo(() => orderByWbs(tasks), [tasks]);
+  const ranges = useMemo(() => resolveRanges(ordered), [ordered]);
   const visible = useMemo(() => {
     const hiddenAncestors = new Set<string>();
     const result = [] as typeof ordered;
@@ -63,10 +102,15 @@ export default function GanttView({
     return result;
   }, [ordered, collapsed]);
 
-  const ganttTasks = useMemo(() => toGanttTasks(visible), [visible]);
+  // Rows actually rendered: gantt-task-react positions its chart bars purely by
+  // index within the array passed to <Gantt>, so the custom WBS table below must
+  // render this exact same filtered list, in this exact order, or the two panes
+  // drift out of row alignment (a task without a resolvable date can't get a bar).
+  const rows = useMemo(() => visible.filter((v) => ranges.has(v.task.id)), [visible, ranges]);
+  const ganttTasks = useMemo(() => toGanttTasks(rows, ranges), [rows, ranges]);
   const byId = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
 
-  if (visible.length === 0 || ganttTasks.length === 0) {
+  if (rows.length === 0) {
     return (
       <div className="empty-state">
         Chưa có task nào có ngày bắt đầu để hiển thị trên Gantt. Hãy tạo task hoặc đặt
@@ -86,7 +130,7 @@ export default function GanttView({
 
   const TaskListTable = () => (
     <div>
-      {visible.map(({ task, depth, hasChildren }) => (
+      {rows.map(({ task, depth, hasChildren }) => (
         <div
           key={task.id}
           className={`wbs-row ${task.id === selectedId ? "wbs-row-selected" : ""}`}
@@ -111,7 +155,8 @@ export default function GanttView({
                 {collapsed.has(task.id) ? "▸" : "▾"}
               </button>
             )}
-            <span title={task.issueType}>{typeBadge[task.issueType]}</span> {task.summary}
+            <IssueTypeIcon type={task.issueType} />
+            <span>{task.summary}</span>
           </div>
           <div className="wbs-col wbs-col-assignee">{task.assigneeName ?? "—"}</div>
           <div className="wbs-col wbs-col-pct">{task.percentComplete}%</div>
@@ -133,32 +178,44 @@ export default function GanttView({
           </button>
         ))}
       </div>
-      <Gantt
-        tasks={ganttTasks}
-        viewMode={viewMode}
-        locale="vi"
-        rowHeight={ROW_HEIGHT}
-        headerHeight={HEADER_HEIGHT}
-        listCellWidth="320px"
-        columnWidth={viewMode === ViewMode.Month ? 200 : viewMode === ViewMode.Week ? 160 : 60}
-        TaskListHeader={TaskListHeader}
-        TaskListTable={TaskListTable}
-        onSelect={(t: GanttTaskT) => onSelect(t.id)}
-        onDoubleClick={(t: GanttTaskT) => {
-          const full = byId.get(t.id);
-          if (full) onOpenEdit(full);
-        }}
-        onDateChange={(t: GanttTaskT) => {
-          const start = toIso(t.start);
-          const end = toIso(t.end);
-          const durationDays = Math.max(
-            1,
-            Math.round((new Date(end).getTime() - new Date(start).getTime()) / 86_400_000) + 1
-          );
-          onScheduleChange(t.id, start, durationDays);
-        }}
-        onProgressChange={(t: GanttTaskT) => onProgressChange(t.id, Math.round(t.progress))}
-      />
+      <div className="gantt-body" ref={bodyRef}>
+        {bodySize.width > 0 && (
+          <>
+            <Gantt
+              tasks={ganttTasks}
+              viewMode={viewMode}
+              locale="vi"
+              rowHeight={ROW_HEIGHT}
+              headerHeight={HEADER_HEIGHT}
+              ganttHeight={ganttHeight}
+              listCellWidth={`${listWidth}px`}
+              columnWidth={viewMode === ViewMode.Month ? 200 : viewMode === ViewMode.Week ? 160 : 60}
+              TaskListHeader={TaskListHeader}
+              TaskListTable={TaskListTable}
+              onSelect={(t: GanttTaskT) => onSelect(t.id)}
+              onDoubleClick={(t: GanttTaskT) => {
+                const full = byId.get(t.id);
+                if (full) onOpenEdit(full);
+              }}
+              onDateChange={(t: GanttTaskT) => {
+                const start = toIso(t.start);
+                const end = toIso(t.end);
+                const durationDays = Math.max(
+                  1,
+                  Math.round((new Date(end).getTime() - new Date(start).getTime()) / 86_400_000) + 1
+                );
+                onScheduleChange(t.id, start, durationDays);
+              }}
+              onProgressChange={(t: GanttTaskT) => onProgressChange(t.id, Math.round(t.progress))}
+            />
+            <div
+              className={`gantt-divider ${dragging ? "dragging" : ""}`}
+              style={{ left: listWidth }}
+              onMouseDown={startDrag}
+            />
+          </>
+        )}
+      </div>
     </div>
   );
 }

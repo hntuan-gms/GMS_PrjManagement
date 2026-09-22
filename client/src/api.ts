@@ -1,4 +1,6 @@
 import type {
+  BulkTaskCreateInput,
+  BulkTaskCreateResult,
   JiraUser,
   ProjectSummary,
   Session,
@@ -102,6 +104,8 @@ export const api = {
   listUsers: () => request<JiraUser[]>("/users"),
   createTask: (input: TaskCreateInput) =>
     request<Task>("/tasks", { method: "POST", body: JSON.stringify(input) }),
+  createTasksBulk: (input: BulkTaskCreateInput) =>
+    request<BulkTaskCreateResult>("/tasks/bulk", { method: "POST", body: JSON.stringify(input) }),
   updateTask: (id: string, input: TaskUpdateInput) =>
     request<Task>(`/tasks/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(input) }),
   deleteTask: (id: string) =>

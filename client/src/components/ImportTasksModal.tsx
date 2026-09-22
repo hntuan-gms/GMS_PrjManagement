@@ -1,70 +1,118 @@
 import { useState } from "react";
-import type { IssueTypeName, JiraUser, Task, TaskCreateInput } from "../types";
+import type { BulkTaskCreateInput, BulkTaskCreateResult, IssueTypeName, JiraUser, Task } from "../types";
 
 interface Props {
   tasks: Task[];
   users: JiraUser[];
   onClose: () => void;
-  onCreate: (input: TaskCreateInput) => Promise<void>;
+  onImport: (input: BulkTaskCreateInput) => Promise<BulkTaskCreateResult>;
 }
 
 const ISSUE_TYPES: IssueTypeName[] = ["Epic", "Story", "Task", "Bug", "Sub-task"];
 
-export default function CreateTaskModal({ tasks, users, onClose, onCreate }: Props) {
-  const [summary, setSummary] = useState("");
+/** Bulk create: one shared set of fields (type, parent, dates, assignee) applied to
+ * many summaries at once — same shape as Jira's own "create several issues" dialog. */
+export default function ImportTasksModal({ tasks, users, onClose, onImport }: Props) {
+  const [summariesText, setSummariesText] = useState("");
   const [description, setDescription] = useState("");
   const [issueType, setIssueType] = useState<IssueTypeName>("Task");
   const [wbsParentId, setWbsParentId] = useState("");
   const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10));
   const [durationDays, setDurationDays] = useState(3);
   const [assigneeAccountId, setAssigneeAccountId] = useState("");
-  const [saving, setSaving] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<BulkTaskCreateResult | null>(null);
 
-  async function handleCreate() {
-    if (!summary.trim()) {
-      setError("Cần nhập tên công việc");
+  const summaries = summariesText
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  async function handleImport() {
+    if (summaries.length === 0) {
+      setError("Cần nhập ít nhất một tên công việc, mỗi dòng một task.");
       return;
     }
-    setSaving(true);
+    setImporting(true);
     setError(null);
     try {
-      await onCreate({
-        summary: summary.trim(),
-        description: description.trim() || null,
+      const res = await onImport({
+        summaries,
         issueType,
+        description: description.trim() || null,
         wbsParentId: wbsParentId || null,
         startDate,
         durationDays,
         assigneeAccountId: assigneeAccountId || null,
       });
-      onClose();
+      setResult(res);
     } catch (e: any) {
       setError(e.message);
     } finally {
-      setSaving(false);
+      setImporting(false);
     }
+  }
+
+  if (result) {
+    return (
+      <div className="modal-overlay" onClick={onClose}>
+        <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-header">
+            <span className="modal-id">Kết quả import</span>
+            <button className="modal-close" onClick={onClose}>
+              ✕
+            </button>
+          </div>
+          <div className="import-result-summary">
+            Đã tạo {result.created.length}/{result.created.length + result.errors.length} task trên Jira.
+          </div>
+          {result.errors.length > 0 && (
+            <ul className="import-error-list">
+              {result.errors.map((e, i) => (
+                <li key={i}>
+                  <b>{e.summary}</b> — {e.message}
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="modal-footer">
+            <div className="spacer" />
+            <button className="primary" onClick={onClose}>
+              Xong
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <span className="modal-id">Task mới</span>
+          <span className="modal-id">Import nhiều task</span>
           <button className="modal-close" onClick={onClose}>
             ✕
           </button>
         </div>
 
         <label className="field">
-          <span>Tên công việc</span>
-          <input autoFocus value={summary} onChange={(e) => setSummary(e.target.value)} />
+          <span>Danh sách công việc (mỗi dòng 1 task)</span>
+          <textarea
+            autoFocus
+            rows={6}
+            value={summariesText}
+            onChange={(e) => setSummariesText(e.target.value)}
+            placeholder={"Thiết kế màn hình đăng nhập\nViết API xác thực\nViết test cho API xác thực"}
+          />
         </label>
+        <div className="import-count">{summaries.length} công việc sẽ được tạo</div>
 
         <label className="field">
-          <span>Mô tả</span>
+          <span>Mô tả (áp dụng cho tất cả)</span>
           <textarea
-            rows={3}
+            rows={2}
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Không bắt buộc"
@@ -126,11 +174,11 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate }: Pro
 
         <div className="modal-footer">
           <div className="spacer" />
-          <button onClick={onClose} disabled={saving}>
+          <button onClick={onClose} disabled={importing}>
             Huỷ
           </button>
-          <button className="primary" onClick={handleCreate} disabled={saving}>
-            {saving ? "Đang tạo..." : "Tạo & đẩy lên Jira"}
+          <button className="primary" onClick={handleImport} disabled={importing || summaries.length === 0}>
+            {importing ? "Đang tạo..." : `Tạo ${summaries.length} task & đẩy lên Jira`}
           </button>
         </div>
       </div>
