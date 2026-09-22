@@ -58,7 +58,9 @@ export default function GanttView({
 }: Props) {
   const [viewMode, setViewMode] = useState<ViewMode>(ViewMode.Week);
   const [showCriticalPath, setShowCriticalPath] = useState(false);
+  const [query, setQuery] = useState("");
   const criticalIds = useMemo(() => computeCriticalPath(tasks), [tasks]);
+  const byId = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
 
   const bodyRef = useRef<HTMLDivElement>(null);
   const [bodySize, setBodySize] = useState({ width: 0, height: 0 });
@@ -101,8 +103,46 @@ export default function GanttView({
   }
 
   const ordered = useMemo(() => orderByWbs(tasks), [tasks]);
+  // Deliberately resolved from the FULL tree, before any search filtering: a parent's
+  // rolled-up bar must span all of its children, not just the ones matching the query.
   const ranges = useMemo(() => resolveRanges(ordered), [ordered]);
+
+  const needle = query.trim().toLowerCase();
+  const matchIds = useMemo(() => {
+    if (!needle) return null;
+    const ids = new Set<string>();
+    for (const t of tasks) {
+      if (t.id.toLowerCase().includes(needle) || t.summary.toLowerCase().includes(needle)) {
+        ids.add(t.id);
+      }
+    }
+    return ids;
+  }, [tasks, needle]);
+
+  /**
+   * Matches plus their ancestors. Keeping matches alone would strip a matched
+   * Sub-task of the Epic/Story rows that identify it, and leave gaps in the
+   * indentation that make the remaining depth values look arbitrary.
+   */
+  const searchKeep = useMemo(() => {
+    if (!matchIds) return null;
+    const keep = new Set<string>();
+    for (const id of matchIds) {
+      let cur: string | null = id;
+      // Doubles as a cycle guard: a malformed parent chain would otherwise spin
+      // here and hang the render thread rather than fail visibly.
+      while (cur && !keep.has(cur)) {
+        keep.add(cur);
+        cur = byId.get(cur)?.wbsParentId ?? null;
+      }
+    }
+    return keep;
+  }, [matchIds, byId]);
+
   const visible = useMemo(() => {
+    // While searching, collapse state is bypassed: a hit sitting inside a collapsed
+    // parent would be counted in the result total but never appear on screen.
+    if (searchKeep) return ordered.filter((o) => searchKeep.has(o.task.id));
     const hiddenAncestors = new Set<string>();
     const result = [] as typeof ordered;
     for (const item of ordered) {
@@ -114,7 +154,7 @@ export default function GanttView({
       if (collapsed.has(item.task.id)) hiddenAncestors.add(item.task.id);
     }
     return result;
-  }, [ordered, collapsed]);
+  }, [ordered, collapsed, searchKeep]);
 
   // Rows actually rendered: gantt-task-react positions its chart bars purely by
   // index within the array passed to <Gantt>, so the custom WBS table below must
@@ -129,16 +169,6 @@ export default function GanttView({
       styles: criticalIds.has(t.id) ? CRITICAL_STYLES : DIMMED_STYLES,
     }));
   }, [rows, ranges, showCriticalPath, criticalIds]);
-  const byId = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
-
-  if (rows.length === 0) {
-    return (
-      <div className="empty-state">
-        Chưa có task nào có ngày bắt đầu để hiển thị trên Gantt. Hãy tạo task hoặc đặt
-        ngày bắt đầu cho task hiện có.
-      </div>
-    );
-  }
 
   // gantt-task-react does NOT size its TaskList wrapper to listCellWidth itself —
   // it only forwards that value as a `rowWidth` prop and expects the consumer's own
@@ -160,9 +190,9 @@ export default function GanttView({
       {rows.map(({ task, depth, hasChildren }) => (
         <div
           key={task.id}
-          className={`wbs-row ${task.id === selectedId ? "wbs-row-selected" : ""} ${
-            showCriticalPath && criticalIds.has(task.id) ? "wbs-row-critical" : ""
-          }`}
+          className={`wbs-row ${matchIds?.has(task.id) ? "wbs-row-match" : ""} ${
+            task.id === selectedId ? "wbs-row-selected" : ""
+          } ${showCriticalPath && criticalIds.has(task.id) ? "wbs-row-critical" : ""}`}
           style={{ height: ROW_HEIGHT }}
           onClick={() => onSelect(task.id)}
           onDoubleClick={() => onOpenEdit(task)}
@@ -220,43 +250,78 @@ export default function GanttView({
         >
           Đường găng
         </button>
+
+        <div className="gantt-search">
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setQuery("");
+            }}
+            placeholder="Tìm theo mã hoặc tên công việc..."
+            aria-label="Tìm công việc"
+          />
+          {matchIds && <span className="gantt-search-count">{matchIds.size} kết quả</span>}
+          {query && (
+            <button
+              className="gantt-search-clear"
+              onClick={() => setQuery("")}
+              aria-label="Xoá tìm kiếm"
+            >
+              ×
+            </button>
+          )}
+        </div>
       </div>
+      {/* The empty state lives inside .gantt-body rather than replacing it: the
+          ResizeObserver attaches to bodyRef once on mount, so unmounting this node
+          when a query matches nothing would leave the observer bound to a detached
+          element and freeze bodySize once the query was cleared again. */}
       <div className="gantt-body" ref={bodyRef}>
-        {bodySize.width > 0 && (
-          <>
-            <Gantt
-              tasks={ganttTasks}
-              viewMode={viewMode}
-              locale="vi"
-              rowHeight={ROW_HEIGHT}
-              headerHeight={HEADER_HEIGHT}
-              ganttHeight={ganttHeight}
-              listCellWidth={`${listWidth}px`}
-              columnWidth={viewMode === ViewMode.Month ? 200 : viewMode === ViewMode.Week ? 160 : 60}
-              TaskListHeader={TaskListHeader}
-              TaskListTable={TaskListTable}
-              onSelect={(t: GanttTaskT) => onSelect(t.id)}
-              onDoubleClick={(t: GanttTaskT) => {
-                const full = byId.get(t.id);
-                if (full) onOpenEdit(full);
-              }}
-              onDateChange={(t: GanttTaskT) => {
-                const start = toIso(t.start);
-                const end = toIso(t.end);
-                const durationDays = Math.max(
-                  1,
-                  Math.round((new Date(end).getTime() - new Date(start).getTime()) / 86_400_000) + 1
-                );
-                onScheduleChange(t.id, start, durationDays);
-              }}
-              onProgressChange={(t: GanttTaskT) => onProgressChange(t.id, Math.round(t.progress))}
-            />
-            <div
-              className={`gantt-divider ${dragging ? "dragging" : ""}`}
-              style={{ left: listWidth }}
-              onMouseDown={startDrag}
-            />
-          </>
+        {rows.length === 0 ? (
+          <div className="empty-state">
+            {matchIds?.size === 0
+              ? `Không tìm thấy công việc nào khớp với "${query.trim()}".`
+              : "Chưa có task nào có ngày bắt đầu để hiển thị trên Gantt. Hãy tạo task hoặc đặt ngày bắt đầu cho task hiện có."}
+          </div>
+        ) : (
+          bodySize.width > 0 && (
+            <>
+              <Gantt
+                tasks={ganttTasks}
+                viewMode={viewMode}
+                locale="vi"
+                rowHeight={ROW_HEIGHT}
+                headerHeight={HEADER_HEIGHT}
+                ganttHeight={ganttHeight}
+                listCellWidth={`${listWidth}px`}
+                columnWidth={viewMode === ViewMode.Month ? 200 : viewMode === ViewMode.Week ? 160 : 60}
+                TaskListHeader={TaskListHeader}
+                TaskListTable={TaskListTable}
+                onSelect={(t: GanttTaskT) => onSelect(t.id)}
+                onDoubleClick={(t: GanttTaskT) => {
+                  const full = byId.get(t.id);
+                  if (full) onOpenEdit(full);
+                }}
+                onDateChange={(t: GanttTaskT) => {
+                  const start = toIso(t.start);
+                  const end = toIso(t.end);
+                  const durationDays = Math.max(
+                    1,
+                    Math.round((new Date(end).getTime() - new Date(start).getTime()) / 86_400_000) + 1
+                  );
+                  onScheduleChange(t.id, start, durationDays);
+                }}
+                onProgressChange={(t: GanttTaskT) => onProgressChange(t.id, Math.round(t.progress))}
+              />
+              <div
+                className={`gantt-divider ${dragging ? "dragging" : ""}`}
+                style={{ left: listWidth }}
+                onMouseDown={startDrag}
+              />
+            </>
+          )
         )}
       </div>
     </div>
