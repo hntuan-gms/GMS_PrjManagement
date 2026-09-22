@@ -147,14 +147,21 @@ export async function setOverlay(
     // Always upsert the row, even for a predecessors-only patch: the dependency
     // rows below are joined back through task_overlay, so an edge whose successor
     // has no overlay row would be invisible to getProjectOverlays.
-    const placeholders = values.map((_, i) => `$${i + 3}`);
+    //
+    // Numbering is derived from `leading` rather than written as a literal
+    // offset: hardcoding it put the first patch column on $3, which the three
+    // fixed columns already occupy, so `project_key` (text) and `start_date`
+    // (date) both resolved to $3 and Postgres refused the statement with
+    // "inconsistent types deduced for parameter $3".
+    const leading = [cloudId, issueKey, projectKeyOf(issueKey)];
+    const placeholders = values.map((_, i) => `$${leading.length + i + 1}`);
     const assignments = columns.map((c) => `${c} = EXCLUDED.${c}`);
     await client.query(
       `INSERT INTO task_overlay (cloud_id, issue_key, project_key${columns.length ? ", " + columns.join(", ") : ""})
        VALUES ($1, $2, $3${placeholders.length ? ", " + placeholders.join(", ") : ""})
        ON CONFLICT (cloud_id, issue_key) DO UPDATE
          SET updated_at = now()${assignments.length ? ", " + assignments.join(", ") : ""}`,
-      [cloudId, issueKey, projectKeyOf(issueKey), ...values]
+      [...leading, ...values]
     );
 
     if (patch.predecessors !== undefined) {

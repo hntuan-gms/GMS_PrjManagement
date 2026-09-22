@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { requireAuth, requireProject } from "../auth/middleware.js";
 import { badRequest } from "../errors.js";
-import type { BulkTaskCreateInput, SessionMeta, TaskCreateInput, TaskUpdateInput } from "../types.js";
+import type { BulkTaskCreateInput, TaskCreateInput, TaskUpdateInput } from "../types.js";
 
 export const apiRouter = Router();
 
@@ -10,25 +10,11 @@ export const apiRouter = Router();
 // invokable — this middleware is the only access control in front of Jira.
 apiRouter.use(requireAuth);
 
-apiRouter.get("/meta", (req, res) => {
-  const { session, startDateFieldId } = req.auth!;
-  const meta: SessionMeta = {
-    user: {
-      accountId: session.accountId,
-      displayName: session.displayName,
-      avatarUrl: session.avatarUrl,
-    },
-    site: { cloudId: session.cloudId, url: session.siteUrl, name: session.siteName },
-    project: session.projectKey
-      ? { key: session.projectKey, name: session.projectName ?? session.projectKey }
-      : null,
-    startDateFieldId,
-    // Overlays live in Postgres now, not on the container's ephemeral disk, so
-    // they survive a deploy and the client no longer warns about losing them.
-    overlayEphemeral: false,
-  };
-  res.json(meta);
-});
+// GET /meta used to live here, returning the same SessionMeta as
+// /api/auth/me. Nothing ever fetched it, and having two copies of that object is
+// how `overlayEphemeral` ended up flipped in one of them and not the other — the
+// client kept showing "your data will be lost on the next deploy" well after the
+// move to Postgres made that false. /api/auth/me is the only copy now.
 
 apiRouter.get("/tasks", requireProject, async (req, res, next) => {
   try {

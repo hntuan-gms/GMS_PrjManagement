@@ -7,7 +7,6 @@ import type {
   IssueTypeName,
   JiraUser,
   ProjectSummary,
-  SessionMeta,
   Task,
   TaskCreateInput,
   TaskUpdateInput,
@@ -59,16 +58,6 @@ export class TaskService {
     private readonly jira: JiraClient,
     private readonly ctx: TaskContext
   ) {}
-
-  meta(overlayEphemeral: boolean, user: SessionMeta["user"], siteName: string, projectName: string | null): SessionMeta {
-    return {
-      user,
-      site: { cloudId: this.ctx.cloudId, url: this.ctx.siteUrl, name: siteName },
-      project: projectName !== null ? { key: this.ctx.projectKey, name: projectName } : null,
-      startDateFieldId: this.ctx.startDateFieldId,
-      overlayEphemeral,
-    };
-  }
 
   async listProjects(): Promise<ProjectSummary[]> {
     return this.jira.listProjects();

@@ -91,13 +91,42 @@ try {
 }
 
 # --- iam --------------------------------------------------------------------
-Write-Host "==> Granting roles/cloudsql.client..."
-gcloud projects add-iam-policy-binding $Project `
-  --member="serviceAccount:$runtimeSa" --role="roles/cloudsql.client" --condition=None | Out-Null
+# Only grant what is actually missing. In this project the runtime account
+# already holds roles/editor (which carries cloudsql.instances.connect) and a
+# project-wide roles/secretmanager.secretAccessor, which is why the existing
+# atlassian-client-secret has an empty per-secret policy and still works.
+#
+# gcloud is a native command, so a failure here sets $LASTEXITCODE rather than
+# throwing: check it explicitly and warn, instead of continuing silently and
+# leaving someone to discover it from a deploy error much later.
+$projectRoles = @(gcloud projects get-iam-policy $Project `
+  --flatten="bindings[].members" `
+  --filter="bindings.members:$runtimeSa" --format="value(bindings.role)")
 
-Write-Host "==> Granting roles/secretmanager.secretAccessor on '$SecretName'..."
-gcloud secrets add-iam-policy-binding $SecretName --project=$Project `
-  --member="serviceAccount:$runtimeSa" --role="roles/secretmanager.secretAccessor" | Out-Null
+function Grant-IfMissing {
+  param([string]$Role, [string[]]$CoveredBy, [scriptblock]$Grant)
+  foreach ($covering in $CoveredBy) {
+    if ($projectRoles -contains $covering) {
+      Write-Host "==> $Role already covered by $covering, skipping."
+      return
+    }
+  }
+  Write-Host "==> Granting $Role..."
+  & $Grant
+  if ($LASTEXITCODE -ne 0) {
+    Write-Warning "Could not grant $Role. If the deploy then fails to reach the database or the secret, ask someone with project IAM rights to add it for $runtimeSa."
+  }
+}
+
+Grant-IfMissing -Role "roles/cloudsql.client" -CoveredBy @("roles/owner", "roles/editor", "roles/cloudsql.client") -Grant {
+  gcloud projects add-iam-policy-binding $Project `
+    --member="serviceAccount:$runtimeSa" --role="roles/cloudsql.client" --condition=None | Out-Null
+}
+
+Grant-IfMissing -Role "roles/secretmanager.secretAccessor" -CoveredBy @("roles/owner", "roles/secretmanager.secretAccessor") -Grant {
+  gcloud secrets add-iam-policy-binding $SecretName --project=$Project `
+    --member="serviceAccount:$runtimeSa" --role="roles/secretmanager.secretAccessor" | Out-Null
+}
 
 Write-Host ""
 Write-Host "========================================================================"
