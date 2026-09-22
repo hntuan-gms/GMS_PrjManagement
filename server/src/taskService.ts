@@ -231,17 +231,27 @@ export class TaskService {
     }
 
     let cascadeWarnings: string[] = [];
-    let cascadedIds: string[] = [];
+    let cascaded: Task[] = [];
     if (scheduleTouched || input.predecessors !== undefined) {
-      const result = await this.applyDependencyCascade(id);
+      // newStart/newDuration are what this request just wrote (or, if the
+      // schedule wasn't touched, the unchanged current value) — passed straight
+      // in rather than left for the cascade to re-derive from its own listTasks()
+      // snapshot, which is a search read that can still be racing the write above.
+      const result = await this.applyDependencyCascade(id, newStart, newDuration);
       cascadeWarnings = result.warnings;
-      cascadedIds = result.changedIds;
+      cascaded = result.changed.filter((t) => t.id !== id);
     }
 
-    const all = await this.listTasks();
-    const updated = all.find((t) => t.id === id);
-    if (!updated) throw new Error(`Task ${id} not found after update`);
-    const cascaded = all.filter((t) => t.id !== id && cascadedIds.includes(t.id));
+    // Read the primary task back by key, NOT via listTasks()'s JQL search: Jira
+    // Cloud's search index can lag a few seconds behind a write this same request
+    // just made (the exact reason createTask() already fetches by key — see its
+    // comment). Re-deriving straight from a stale search hit used to let hydrate()'s
+    // "Jira wins" reconciliation see an old duedate/start pair and recompute a wrong
+    // duration from it — a drag could "stick" at a different length than dropped.
+    // Cascaded tasks need no extra read at all: applyDependencyCascade already
+    // mutated them in memory with exactly what it wrote to Jira moments earlier.
+    const issue = await this.jira.getIssue(id);
+    const updated = await this.hydrate(id, this.fromJiraIssue(issue), this.jiraStartDateOf(issue));
     return { task: updated, cascadeWarnings, cascaded };
   }
 
@@ -251,17 +261,36 @@ export class TaskService {
    * Simple forward-only propagation (not a full CPM/backward pass) — enough to keep
    * a Gantt chart consistent without needing MS Project's full scheduling engine.
    *
-   * Returns the ids whose Jira write failed (`warnings`) and every id whose
-   * schedule was actually moved (`changedIds`), including `changedId` itself if
-   * its own self-check adjusted it. A 401 is re-thrown instead of collected as a
-   * warning: a revoked token used to be swallowed here, leaving the overlay and
-   * Jira permanently and silently divergent.
+   * Returns the ids whose Jira write failed (`warnings`) and every task whose
+   * schedule was actually moved (`changed`), including `changedId` itself if its
+   * own self-check adjusted it. `changed` tasks are returned straight from the
+   * in-memory copies this loop already mutated — exactly what was just pushed to
+   * Jira — rather than read back, so there's no stale-search-index window for
+   * them to be re-derived from (see updateTask's own comment on the same issue
+   * for the primary task). A 401 is re-thrown instead of collected as a warning:
+   * a revoked token used to be swallowed here, leaving the overlay and Jira
+   * permanently and silently divergent.
    */
   private async applyDependencyCascade(
-    changedId: string
-  ): Promise<{ warnings: string[]; changedIds: string[] }> {
+    changedId: string,
+    knownStart: string | null,
+    knownDuration: number
+  ): Promise<{ warnings: string[]; changed: Task[] }> {
     const tasks = await this.listTasks();
     const byId = new Map(tasks.map((t) => [t.id, t]));
+    // listTasks() here is a search read that can still be racing the write
+    // updateTask just made for `changedId` — seed it with the values already
+    // known to be correct rather than trust whatever the search happened to
+    // return, or a stale start/duration could propagate to every successor below.
+    const primary = byId.get(changedId);
+    if (primary && knownStart) {
+      byId.set(changedId, {
+        ...primary,
+        startDate: knownStart,
+        durationDays: knownDuration,
+        dueDate: addDays(knownStart, knownDuration - 1),
+      });
+    }
     const successorsOf = new Map<string, Array<{ taskId: string; pred: { type: string; lagDays: number } }>>();
     for (const t of tasks) {
       for (const p of t.predecessors) {
@@ -271,7 +300,7 @@ export class TaskService {
     }
 
     const warnings: string[] = [];
-    const changed = new Set<string>();
+    const changed = new Map<string, Task>();
     const pushDates = async (taskId: string, start: string, due: string) => {
       try {
         await this.jira.updateIssueFields(taskId, this.scheduleFields(due, start));
@@ -308,11 +337,11 @@ export class TaskService {
       }
       if (curStart !== cur.startDate) {
         cur.startDate = curStart;
-        const curDue = addDays(curStart, cur.durationDays - 1);
+        cur.dueDate = addDays(curStart, cur.durationDays - 1);
         await store.setOverlay(this.ctx.cloudId, cur.id, { startDate: curStart });
-        await pushDates(cur.id, curStart, curDue);
+        await pushDates(cur.id, curStart, cur.dueDate);
         byId.set(cur.id, cur);
-        changed.add(cur.id);
+        changed.set(cur.id, cur);
       }
       const curEnd = addDays(curStart, cur.durationDays - 1);
 
@@ -327,16 +356,16 @@ export class TaskService {
 
         if (earliestStart && earliestStart > succ.startDate) {
           succ.startDate = earliestStart;
-          const succDue = addDays(earliestStart, succ.durationDays - 1);
+          succ.dueDate = addDays(earliestStart, succ.durationDays - 1);
           await store.setOverlay(this.ctx.cloudId, succ.id, { startDate: earliestStart });
-          await pushDates(succ.id, earliestStart, succDue);
+          await pushDates(succ.id, earliestStart, succ.dueDate);
           byId.set(succ.id, succ);
-          changed.add(succ.id);
+          changed.set(succ.id, succ);
           queue.push(succ.id);
         }
       }
     }
-    return { warnings, changedIds: [...changed] };
+    return { warnings, changed: [...changed.values()] };
   }
 
   async createTask(input: TaskCreateInput): Promise<Task> {
