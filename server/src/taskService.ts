@@ -256,6 +256,27 @@ export class TaskService {
   }
 
   /**
+   * Project-wide snapshot used only by the dependency cascade. Deliberately built
+   * from Jira's base fields (summary/status/...) plus each task's overlay AS
+   * STORED, skipping hydrate()'s "Jira wins" reconciliation — the cascade only
+   * ever needs startDate/durationDays/predecessors, and every one of those is
+   * overlay-owned. Reconciling against Jira here used to be actively harmful:
+   * hydrate() trusted this same JQL search, whose index can still be catching up
+   * with a write this very request just made a moment earlier (worse for a custom
+   * Start-Date field, which Jira Cloud can reindex slower than `duedate`), so a
+   * stale read could overwrite an unrelated successor's overlay with a duration
+   * stretched to match a due date that had already moved. The primary task gets a
+   * corrective re-read by key at the end of updateTask(); every other task the
+   * cascade touches does not, so any corruption picked up here stuck permanently.
+   */
+  private async cascadeSnapshot(): Promise<Task[]> {
+    const jql = `project = ${this.ctx.projectKey} ORDER BY created ASC`;
+    const issues = await this.jira.searchIssues(jql, SEARCH_FIELDS);
+    const overlays = await Promise.all(issues.map((issue) => store.getOverlay(this.ctx.cloudId, issue.key)));
+    return issues.map((issue, i) => ({ ...this.fromJiraIssue(issue), ...overlays[i], id: issue.key }) as Task);
+  }
+
+  /**
    * After a task's schedule (or its dependency list) changes, push any FS/SS/FF/SF
    * successors forward so they never start earlier than their predecessor allows.
    * Simple forward-only propagation (not a full CPM/backward pass) — enough to keep
@@ -276,12 +297,12 @@ export class TaskService {
     knownStart: string | null,
     knownDuration: number
   ): Promise<{ warnings: string[]; changed: Task[] }> {
-    const tasks = await this.listTasks();
+    const tasks = await this.cascadeSnapshot();
     const byId = new Map(tasks.map((t) => [t.id, t]));
-    // listTasks() here is a search read that can still be racing the write
-    // updateTask just made for `changedId` — seed it with the values already
-    // known to be correct rather than trust whatever the search happened to
-    // return, or a stale start/duration could propagate to every successor below.
+    // cascadeSnapshot() reads the overlay directly, but `changedId`'s own overlay
+    // patch was only just written by updateTask() a moment ago — seed it with the
+    // values already known to be correct rather than re-read it, so there's no
+    // window where a slow write could leave this seeing the pre-drag value.
     const primary = byId.get(changedId);
     if (primary && knownStart) {
       byId.set(changedId, {
@@ -345,6 +366,12 @@ export class TaskService {
       }
       const curEnd = addDays(curStart, cur.durationDays - 1);
 
+      // Every successor here is a different Jira issue, so their writes have no
+      // ordering dependency on one another — collected and pushed with Promise.all
+      // below instead of one `await` per successor, which used to chain N
+      // sequential network round trips onto a single drag (the successors' bars
+      // would then only update once that whole chain finally resolved).
+      const toPush: Array<{ id: string; start: string; due: string }> = [];
       for (const { taskId, pred } of successorsOf.get(curId) ?? []) {
         const succ = byId.get(taskId);
         if (!succ || !succ.startDate) continue;
@@ -357,13 +384,17 @@ export class TaskService {
         if (earliestStart && earliestStart > succ.startDate) {
           succ.startDate = earliestStart;
           succ.dueDate = addDays(earliestStart, succ.durationDays - 1);
-          await store.setOverlay(this.ctx.cloudId, succ.id, { startDate: earliestStart });
-          await pushDates(succ.id, earliestStart, succ.dueDate);
           byId.set(succ.id, succ);
           changed.set(succ.id, succ);
           queue.push(succ.id);
+          toPush.push({ id: succ.id, start: earliestStart, due: succ.dueDate });
         }
       }
+      await Promise.all(
+        toPush.map(({ id, start, due }) =>
+          store.setOverlay(this.ctx.cloudId, id, { startDate: start }).then(() => pushDates(id, start, due))
+        )
+      );
     }
     return { warnings, changed: [...changed.values()] };
   }
