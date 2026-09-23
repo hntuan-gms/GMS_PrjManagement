@@ -26,20 +26,63 @@ const MIN_CHART_WIDTH = 240;
 // chart rows; reserve room for it so the fixed-height layout below doesn't clip it.
 const SCROLLBAR_RESERVE = 24;
 const DAY_MS = 86_400_000;
-// Per-viewMode base column width before the touchpad-zoom multiplier is applied.
-const BASE_COLUMN_WIDTH: Record<ViewMode, number> = {
-  [ViewMode.Month]: 200,
-  [ViewMode.Week]: 160,
-  [ViewMode.Day]: 60,
+
+// How many calendar days one column spans in each mode (gantt-task-react's own
+// seedDates — Month is a real calendar month, ~30.4 days on average). This is
+// what makes one continuous zoom variable ("pixels per day") work across all
+// three modes at once: a column's on-screen width is always pixelsPerDay times
+// this, so the SAME zoom gesture that shrinks a 1-day column also shrinks a
+// 7-day one, at the same rate, with no separate scale to reset between modes.
+const DAYS_PER_COLUMN: Record<ViewMode, number> = {
+  [ViewMode.Day]: 1,
+  [ViewMode.Week]: 7,
+  [ViewMode.Month]: 30.4,
 } as Record<ViewMode, number>;
-// Below this, a day cell is too narrow for even its own label; above this,
-// zooming in stops helping and just wastes horizontal space.
-const MIN_COLUMN_WIDTH = 14;
-const MAX_COLUMN_WIDTH = 420;
-// How much one "notch" of trackpad pinch or Ctrl+wheel changes columnWidth —
-// tuned so a full pinch gesture (deltaY in the low hundreds) crosses roughly
-// the Day-to-Week column-width range in one smooth motion, not a single jump.
+// A column narrower than this can't fit its own label; wider than this, zooming
+// in stops helping and just wastes horizontal space. Both modes' comfort bands
+// overlap on purpose — see pickScale — so the handoff between them has room to
+// land at a *comfortable* width on the new mode, not right at its own edge.
+const MIN_COLUMN_WIDTH = 26;
+const MAX_COLUMN_WIDTH = 260;
+const MIN_PIXELS_PER_DAY = MIN_COLUMN_WIDTH / DAYS_PER_COLUMN[ViewMode.Month];
+const MAX_PIXELS_PER_DAY = MAX_COLUMN_WIDTH / DAYS_PER_COLUMN[ViewMode.Day];
+// The pixels-per-day each mode's button jumps to — chosen to match this file's
+// old fixed per-mode column widths (60/160/200), so clicking a button lands
+// exactly where it always used to.
+const DEFAULT_PIXELS_PER_DAY: Record<ViewMode, number> = {
+  [ViewMode.Day]: 60,
+  [ViewMode.Week]: 160 / DAYS_PER_COLUMN[ViewMode.Week],
+  [ViewMode.Month]: 200 / DAYS_PER_COLUMN[ViewMode.Month],
+} as Record<ViewMode, number>;
+// How much one "notch" of trackpad pinch or Ctrl+wheel changes the zoom — tuned
+// so a full pinch gesture (deltaY in the low hundreds) crosses roughly one
+// mode's whole comfort band in one smooth motion, not a single jump.
 const ZOOM_SENSITIVITY = 0.9;
+
+/**
+ * The single source of truth for "how zoomed in are we": everything else
+ * (which of Day/Week/Month is showing, and how wide its columns are) is derived
+ * from this one number, never stored separately — so there is no way for the
+ * mode and the column width to disagree with each other. Whichever mode's
+ * column width would land inside [MIN_COLUMN_WIDTH, MAX_COLUMN_WIDTH] wins,
+ * preferring the finest granularity that still fits; Month is the fallback once
+ * even Week's columns would be too narrow.
+ */
+function pickScale(pixelsPerDay: number): { viewMode: ViewMode; columnWidth: number } {
+  const dayWidth = pixelsPerDay * DAYS_PER_COLUMN[ViewMode.Day];
+  if (dayWidth >= MIN_COLUMN_WIDTH) {
+    return { viewMode: ViewMode.Day, columnWidth: Math.min(MAX_COLUMN_WIDTH, dayWidth) };
+  }
+  const weekWidth = pixelsPerDay * DAYS_PER_COLUMN[ViewMode.Week];
+  if (weekWidth >= MIN_COLUMN_WIDTH) {
+    return { viewMode: ViewMode.Week, columnWidth: Math.min(MAX_COLUMN_WIDTH, weekWidth) };
+  }
+  const monthWidth = pixelsPerDay * DAYS_PER_COLUMN[ViewMode.Month];
+  return {
+    viewMode: ViewMode.Month,
+    columnWidth: Math.min(MAX_COLUMN_WIDTH, Math.max(MIN_COLUMN_WIDTH, monthWidth)),
+  };
+}
 
 interface Props {
   tasks: Task[];
@@ -94,7 +137,9 @@ export default function GanttView({
   onEditDependency,
   onDeleteDependency,
 }: Props) {
-  const [viewMode, setViewMode] = useState<ViewMode>(ViewMode.Week);
+  // The one zoom variable everything else derives from — see pickScale.
+  const [pixelsPerDay, setPixelsPerDay] = useState(DEFAULT_PIXELS_PER_DAY[ViewMode.Week]);
+  const { viewMode, columnWidth } = pickScale(pixelsPerDay);
   const [showCriticalPath, setShowCriticalPath] = useState(false);
   const [showDependencies, setShowDependencies] = useState(true);
   const [query, setQuery] = useState("");
@@ -109,11 +154,6 @@ export default function GanttView({
   const [bodySize, setBodySize] = useState({ width: 0, height: 0 });
   const [listWidthOverride, setListWidthOverride] = useState<number | null>(null);
   const [dragging, setDragging] = useState(false);
-  // Continuous zoom on top of the Day/Week/Month buttons: those pick the
-  // granularity, this stretches or compresses the resulting columns — the
-  // "horizontal day scale" a touchpad pinch adjusts. Reset whenever a button is
-  // clicked so switching granularity always starts from that mode's own default.
-  const [columnWidthOverride, setColumnWidthOverride] = useState<number | null>(null);
 
   useEffect(() => {
     const el = bodyRef.current;
@@ -133,9 +173,6 @@ export default function GanttView({
   const maxListWidth = Math.max(MIN_LIST_WIDTH, bodySize.width - MIN_CHART_WIDTH);
   const listWidth = Math.min(maxListWidth, Math.max(MIN_LIST_WIDTH, listWidthOverride ?? defaultListWidth));
   const ganttHeight = Math.max(ROW_HEIGHT, bodySize.height - HEADER_HEIGHT - SCROLLBAR_RESERVE);
-  const columnWidth = Math.round(
-    Math.min(MAX_COLUMN_WIDTH, Math.max(MIN_COLUMN_WIDTH, columnWidthOverride ?? BASE_COLUMN_WIDTH[viewMode]))
-  );
 
   // Trackpad pinch (and Ctrl+wheel) only — a plain two-finger scroll must keep
   // panning the chart, not hijack it into a zoom. Browsers report pinch-to-zoom
@@ -152,17 +189,15 @@ export default function GanttView({
     function onWheel(e: WheelEvent) {
       if (!e.ctrlKey) return;
       e.preventDefault();
-      setColumnWidthOverride((prev) => {
-        const current = prev ?? BASE_COLUMN_WIDTH[viewMode];
+      setPixelsPerDay((prev) => {
         // deltaY < 0 is pinch-out / scroll-up — zoom in.
-        const next = current * Math.exp((-e.deltaY / 100) * ZOOM_SENSITIVITY * 0.1);
-        return Math.min(MAX_COLUMN_WIDTH, Math.max(MIN_COLUMN_WIDTH, next));
+        const next = prev * Math.exp((-e.deltaY / 100) * ZOOM_SENSITIVITY * 0.1);
+        return Math.min(MAX_PIXELS_PER_DAY, Math.max(MIN_PIXELS_PER_DAY, next));
       });
     }
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewMode]);
+  }, []);
 
   // Day-view header: gantt-task-react always renders "Th 2, 15" (weekday + day),
   // with no prop to ask for just the day number, and always at the same pixel
@@ -176,15 +211,20 @@ export default function GanttView({
   useEffect(() => {
     if (!bodyEl || viewMode !== ViewMode.Day) return;
 
-    // Roughly how many characters fit before neighbours start to touch, given
-    // the font this label uses — thinned by skipping every Nth label instead of
-    // shrinking text, so what remains stays legible rather than tiny.
-    const skipEvery = columnWidth < 22 ? 4 : columnWidth < 32 ? 2 : 1;
+    // Day view's column width only ranges down to MIN_COLUMN_WIDTH before
+    // pickScale hands off to Week instead of cramming it further — so there's
+    // only ever a little room to thin out before the handoff does the rest.
+    // Thinned by skipping every Nth label instead of shrinking text, so what
+    // remains stays legible rather than tiny.
+    const skipEvery = columnWidth < MIN_COLUMN_WIDTH + 8 ? 2 : 1;
 
     function simplify() {
-      const svg = bodyEl!.querySelector("svg");
-      if (!svg) return;
-      const labels = svg.querySelectorAll<SVGTextElement>("text._9w8d5");
+      // Not scoped to a specific <svg>: gantt-task-react renders the calendar
+      // header and the bar grid as two SEPARATE sibling <svg> elements, and
+      // grabbing "the first svg in bodyEl" turned out not to reliably mean the
+      // header one — querying bodyEl's whole subtree finds the label class
+      // wherever it actually landed, since only the header ever uses it.
+      const labels = bodyEl!.querySelectorAll<SVGTextElement>("text._9w8d5");
       labels.forEach((el, i) => {
         const match = (el.dataset.fullLabel ?? el.textContent ?? "").match(/(\d+)\s*$/);
         if (!match) return;
@@ -375,10 +415,7 @@ export default function GanttView({
           <button
             key={vm}
             className={viewMode === vm ? "active" : ""}
-            onClick={() => {
-              setViewMode(vm);
-              setColumnWidthOverride(null);
-            }}
+            onClick={() => setPixelsPerDay(DEFAULT_PIXELS_PER_DAY[vm])}
           >
             {vm}
           </button>
