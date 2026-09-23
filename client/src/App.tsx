@@ -1,5 +1,6 @@
 import { useState } from "react";
 import "./App.css";
+import ErrorBoundary from "./components/ErrorBoundary";
 import LoginScreen from "./components/LoginScreen";
 import ProjectPicker from "./components/ProjectPicker";
 import ProjectWorkspace from "./components/ProjectWorkspace";
@@ -36,13 +37,21 @@ export default function App() {
   return (
     <>
       {/* key remounts the subtree on project switch, discarding tasks, users,
-          collapse set, selection and open modals without resetting each by hand. */}
-      <ProjectWorkspace
+          collapse set, selection and open modals without resetting each by hand.
+          It sits on the boundary so switching project also clears a caught error;
+          the picker below renders outside the boundary, so it stays reachable
+          even while the workspace is broken. */}
+      <ErrorBoundary
         key={session.project.key}
-        session={session}
         onSwitchProject={() => setSwitching(true)}
         onLogout={logout}
-      />
+      >
+        <ProjectWorkspace
+          session={session}
+          onSwitchProject={() => setSwitching(true)}
+          onLogout={logout}
+        />
+      </ErrorBoundary>
       {switching && (
         <ProjectPicker
           session={session}
