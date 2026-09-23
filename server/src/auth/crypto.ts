@@ -14,7 +14,7 @@ import { loadAuthConfig } from "./config.js";
 const VERSION = "v1";
 const IV_BYTES = 12;
 
-export type SealPurpose = "gms_sess" | "gms_at" | "gms_oauth";
+export type SealPurpose = "gms_sess" | "gms_at" | "gms_oauth" | "gms_refresh";
 
 export function seal(purpose: SealPurpose, value: unknown): string {
   const { keyring } = loadAuthConfig();

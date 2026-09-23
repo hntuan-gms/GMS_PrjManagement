@@ -20,10 +20,14 @@ export const SESSION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 export const ACCESS_MAX_AGE_MS = 55 * 60 * 1000; // just under the ~1h token life
 export const OAUTH_MAX_AGE_MS = 10 * 60 * 1000;
 
-/** Durable half — survives redeploys. Kept small so it never nears the 4KB cap. */
+/**
+ * Durable half — survives redeploys. Kept small so it never nears the 4KB cap:
+ * the refresh token, the one field here with no size ceiling, lives in Postgres
+ * instead (auth/refreshTokenStore.ts) and is looked up by (cloudId, accountId)
+ * when a route actually needs it, rather than carried on every request.
+ */
 export interface SessionData {
   v: 1;
-  refreshToken: string;
   cloudId: string;
   /** Human site URL; browse links must use this, never api.atlassian.com. */
   siteUrl: string;
@@ -56,7 +60,9 @@ export interface OAuthFlowData {
 export function readSession(req: Request): SessionData | null {
   const cookies = parseCookies(req);
   const session = unseal<SessionData>(SESSION_COOKIE, cookies[SESSION_COOKIE]);
-  if (!session || session.v !== 1 || !session.refreshToken || !session.cloudId) return null;
+  // accountId matters as much as cloudId now — together they're the lookup key
+  // for the refresh token in Postgres, not just a display value.
+  if (!session || session.v !== 1 || !session.cloudId || !session.accountId) return null;
   return session;
 }
 

@@ -11,7 +11,8 @@ import { getStartDateFieldId, startDateFieldOverride } from "../fieldDiscovery.j
 import { JiraClient } from "../jiraClient.js";
 import { TaskService } from "../taskService.js";
 import { clearAuthCookies } from "./cookies.js";
-import { commitAccess, commitSession, readAccess, readSession, type SessionData } from "./session.js";
+import { deleteRefreshToken } from "./refreshTokenStore.js";
+import { commitAccess, readAccess, readSession, type SessionData } from "./session.js";
 import { ensureAccessToken } from "./tokens.js";
 
 export interface RequestAuth {
@@ -36,34 +37,35 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
 
   try {
     // Refresh eagerly, here, before the route writes anything: res.cookie() after
-    // res.json() is a silent no-op, and losing a rotated refresh token logs the
-    // user out on their next request with no way to diagnose why.
+    // res.json() is a silent no-op, and losing a rotated access token logs the
+    // user out on their next request with no way to diagnose why. The refresh
+    // token itself rotating no longer touches gms_sess at all — it's persisted
+    // straight to Postgres (auth/refreshTokenStore.ts) — so only gms_at is ever
+    // recommitted here.
     const result = await ensureAccessToken(session, readAccess(req, session));
     if (result.rotated) {
-      commitSession(res, result.session);
       commitAccess(res, result.access);
     }
 
     let currentToken = result.accessToken;
     const jira = new JiraClient({
-      cloudId: result.session.cloudId,
+      cloudId: session.cloudId,
       getAccessToken: () => currentToken,
       onUnauthorized: async () => {
         // Safety net for a token that dies mid-request (clock skew, admin revoke).
         // Headers are still open here because every route ends in a single json().
-        const retry = await ensureAccessToken(result.session, null);
+        const retry = await ensureAccessToken(session, null);
         currentToken = retry.accessToken;
-        commitSession(res, retry.session);
         commitAccess(res, retry.access);
         return retry.accessToken;
       },
     });
 
     const startDateFieldId =
-      startDateFieldOverride() ?? (await getStartDateFieldId(jira, result.session.cloudId));
+      startDateFieldOverride() ?? (await getStartDateFieldId(jira, session.cloudId));
 
     req.auth = {
-      session: result.session,
+      session,
       accessToken: result.accessToken,
       jira,
       taskService: null,
@@ -73,6 +75,10 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   } catch (err) {
     if (err instanceof AtlassianAuthError && err.isDeadGrant) {
       clearAuthCookies(res);
+      // The grant is confirmed dead — a leftover row would just be a permanently
+      // unusable secret sitting in the table. Best-effort: this must not turn a
+      // clean "please log in again" into a 500.
+      void deleteRefreshToken(session.cloudId, session.accountId).catch(() => {});
       next(authRequired());
       return;
     }
