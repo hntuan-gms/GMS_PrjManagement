@@ -86,7 +86,7 @@ Three things there are load-bearing and easy to "harden" into an outage:
 
 ### Dependency cascade
 
-`TaskService.applyDependencyCascade()` runs after any schedule or predecessor change. It is a BFS, forward-only propagation (not a full CPM with a backward pass). Each visited node **first re-checks its own start against its own predecessors** before pushing successors — that self-check is the fix for BUG-06 (adding a new predecessor otherwise left the task itself in violation). FS/SS/FF/SF each have a distinct earliest-start formula; FF/SF subtract `durationDays - 1`.
+`TaskService.applyDependencyCascade()` runs after any schedule or predecessor change. It is a BFS that keeps every successor at its earliest allowed start (ASAP) — not just "no earlier than allowed": moving a predecessor earlier now pulls a successor backward too, **but only if that successor had zero slack** against the specific edge that moved (its start exactly equalled the old bound). A successor with an intentional gap keeps it; only one that was riding right behind its predecessor gets dragged along. This still isn't a full CPM backward pass — it moves what was touching a boundary, not everything that theoretically could shift — and it works by comparing against `priorState`, each touched task's position from the instant before this cascade run first touched it. Each visited node **first re-checks its own start against its own predecessors** before pushing successors — that self-check is the fix for BUG-06 (adding a new predecessor otherwise left the task itself in violation), and it doubles as the safety net for a tentative backward pull: if some other predecessor still requires a later start, this pushes the pulled successor back forward once it's dequeued. FS/SS/FF/SF each have a distinct earliest-start formula (`earliestStartFor` in `taskService.ts`, mirrored client-side in `dependencyCascade.ts` for the optimistic-drag preview); FF/SF subtract `durationDays - 1`.
 
 Jira write failures during a cascade are collected and returned as `cascadeWarnings` rather than swallowed, except a 401 which is re-thrown — a revoked token used to leave the overlay and Jira permanently and silently divergent.
 
@@ -124,6 +124,19 @@ The model is `GEMINI_MODEL` (default in `planner.ts`), and it must be set as a *
 
 Not built yet: PRD/BRD upload with RAG. `pgvector` is why Postgres was chosen and why docker-compose uses the `pgvector/pgvector` image, but no vector tables exist.
 
+### Gantt rendering reaches into gantt-task-react's own DOM
+
+`gantt-task-react` (pinned `^0.3.9`) exposes no prop for two things this app needed, so `GanttView.tsx` reaches into its rendered SVG directly instead — the same technique `DependencyOverlay.tsx` already used for drawing FS/SS/FF/SF arrows:
+
+- **Day-view labels.** The library always renders "Th 2, 15" (weekday + day) with no way to ask for just the day number, and at a fixed pixel width regardless of zoom. A `MutationObserver` finds every calendar-header `<text>` by its compiled CSS module class (`_9w8d5` — coupled to the exact installed version; if a bump changes it, the effect just no-ops and the old format reappears, not a crash), trims each to its trailing day number, and blanks out every Nth label once `columnWidth` is too narrow for all of them to fit without overlapping.
+- **Bar label contrast.** The library hard-codes white fill (`._3zRJQ`) for text drawn inside a bar. Every bar background here is a light pastel (see below), so white-on-pastel is low-contrast — overridden globally in `App.css` with `!important`, since there's no per-task hook to win the cascade otherwise.
+
+**Touchpad zoom is horizontal-only, layered on top of the Day/Week/Month buttons rather than replacing them.** A native (non-passive) `wheel` listener on `.gantt-body` — not React's `onWheel`, which React attaches passively by default, where `preventDefault()` is silently ignored — checks `e.ctrlKey` (how browsers report trackpad pinch, specifically so a page can override the browser's own page-zoom) and adjusts `columnWidthOverride`. Row height is untouched, so vertical scale never moves. Clicking a Day/Week/Month button resets the override to that mode's own default width.
+
+**An Epic's bar is always its children's min/max span**, even when the Epic issue itself carries its own Jira dates — `resolveRanges()` in `ganttMapping.ts` checks Epic-with-children before checking the task's own `startDate`, the opposite priority from every other WBS parent (a Story with sub-tasks keeps its own dates as authoritative, per the BUG already documented there). Dragging is disabled (`isDisabled` in `toGanttTasks()`) for an Epic that has children, since its bar would just snap back to the rollup on the next render otherwise; a childless Epic stays draggable.
+
+**Bar colours are a hash of the task id into a fixed hue palette** (`PALETTE_HUES` in `ganttMapping.ts`) — "random" meaning varied per task and stable across renders, not re-rolled each time. Saturation and lightness are fixed and only hue varies, which is the actual mechanism for "random but harmonious": any two neighbours still read as one matched set. Bug keeps its old fixed red (worth being able to spot at a glance across a hundred bars) and Epic gets a bolder, more saturated version of its own hash-hue rather than a fully separate colour.
+
 ### Client structure
 
 `App.tsx` is a ~50-line auth shell: `useSession()` runs before any branch (keeping `react/rules-of-hooks` satisfied), then it renders `LoginScreen`, `ProjectPicker` or `ProjectWorkspace`. There is no router — the OAuth callback is a *server* route, so the browser never sees `?code=`, only an optional `?auth_error=`.
@@ -131,6 +144,10 @@ Not built yet: PRD/BRD upload with RAG. `pgvector` is why Postgres was chosen an
 `ProjectWorkspace` holds all the project state and is keyed on the project key, so switching project remounts the subtree and discards tasks/users/collapse/selection rather than resetting seven fields by hand. After any mutation it calls `refreshTasks()` on top of the optimistic single-task update, because a cascade can move *other* tasks server-side.
 
 `api.ts` sends `credentials: "include"` on every call and routes 401s through a module-level handler so any failed call pulls the app back to the login screen. A 403 must **not** log out: Jira returns 401 for a dead token and 403 for a permission problem, and `server/src/errors.ts` preserves that distinction across the whole API.
+
+Selection is file-manager style: click selects one, Ctrl/Cmd toggles, Shift extends a range measured in the **visible row order** (post-filter, post-collapse) — see `GanttView`'s `onSelect`. A global `keydown` in `ProjectWorkspace` handles Escape: closes the edit modal if one is open, otherwise clears the selection, never both at once.
+
+`server/src/adf.ts`'s `textToAdf()` wraps a bare `http(s)` URL in ADF's `link` mark rather than leaving it as plain text — a link pasted in from an import file (an image URL, a shared doc) needs to land in Jira as something clickable. The link lives on the issue's `description` field only, never in the overlay/database.
 
 WBS hierarchy is ours, not the Gantt library's: `ganttMapping.orderByWbs()` does the depth-first ordering and `toGanttTasks()` emits every row as `type: "task"` — `gantt-task-react`'s own project/child aggregation is bypassed, and the tree is rendered by the custom `TaskListHeader`/`TaskListTable` components inside `GanttView`. Tasks without a `startDate` are dropped from the chart.
 

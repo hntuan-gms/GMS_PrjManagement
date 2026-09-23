@@ -94,6 +94,24 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Esc backs out one layer at a time: closes the edit modal if one is open
+  // (matching its own Esc-to-close, if it has one, but this is the fallback),
+  // otherwise clears the Gantt selection — never both at once, so Esc from
+  // inside a detail view doesn't also wipe a multi-select the user still wants.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      if (editingTask) {
+        setEditingTask(null);
+      } else if (selectedIds.size > 0 || selectedId) {
+        setSelectedIds(new Set());
+        setSelectedId(null);
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [editingTask, selectedIds, selectedId]);
+
   async function handleSync() {
     setSyncing(true);
     setSyncError(null);

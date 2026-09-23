@@ -26,6 +26,20 @@ const MIN_CHART_WIDTH = 240;
 // chart rows; reserve room for it so the fixed-height layout below doesn't clip it.
 const SCROLLBAR_RESERVE = 24;
 const DAY_MS = 86_400_000;
+// Per-viewMode base column width before the touchpad-zoom multiplier is applied.
+const BASE_COLUMN_WIDTH: Record<ViewMode, number> = {
+  [ViewMode.Month]: 200,
+  [ViewMode.Week]: 160,
+  [ViewMode.Day]: 60,
+} as Record<ViewMode, number>;
+// Below this, a day cell is too narrow for even its own label; above this,
+// zooming in stops helping and just wastes horizontal space.
+const MIN_COLUMN_WIDTH = 14;
+const MAX_COLUMN_WIDTH = 420;
+// How much one "notch" of trackpad pinch or Ctrl+wheel changes columnWidth —
+// tuned so a full pinch gesture (deltaY in the low hundreds) crosses roughly
+// the Day-to-Week column-width range in one smooth motion, not a single jump.
+const ZOOM_SENSITIVITY = 0.9;
 
 interface Props {
   tasks: Task[];
@@ -95,6 +109,11 @@ export default function GanttView({
   const [bodySize, setBodySize] = useState({ width: 0, height: 0 });
   const [listWidthOverride, setListWidthOverride] = useState<number | null>(null);
   const [dragging, setDragging] = useState(false);
+  // Continuous zoom on top of the Day/Week/Month buttons: those pick the
+  // granularity, this stretches or compresses the resulting columns — the
+  // "horizontal day scale" a touchpad pinch adjusts. Reset whenever a button is
+  // clicked so switching granularity always starts from that mode's own default.
+  const [columnWidthOverride, setColumnWidthOverride] = useState<number | null>(null);
 
   useEffect(() => {
     const el = bodyRef.current;
@@ -114,7 +133,77 @@ export default function GanttView({
   const maxListWidth = Math.max(MIN_LIST_WIDTH, bodySize.width - MIN_CHART_WIDTH);
   const listWidth = Math.min(maxListWidth, Math.max(MIN_LIST_WIDTH, listWidthOverride ?? defaultListWidth));
   const ganttHeight = Math.max(ROW_HEIGHT, bodySize.height - HEADER_HEIGHT - SCROLLBAR_RESERVE);
-  const columnWidth = viewMode === ViewMode.Month ? 200 : viewMode === ViewMode.Week ? 160 : 60;
+  const columnWidth = Math.round(
+    Math.min(MAX_COLUMN_WIDTH, Math.max(MIN_COLUMN_WIDTH, columnWidthOverride ?? BASE_COLUMN_WIDTH[viewMode]))
+  );
+
+  // Trackpad pinch (and Ctrl+wheel) only — a plain two-finger scroll must keep
+  // panning the chart, not hijack it into a zoom. Browsers report pinch-to-zoom
+  // as a wheel event with ctrlKey set specifically so a page can tell the two
+  // apart and override the browser's own page-zoom with its own behaviour.
+  //
+  // Registered as a native, non-passive listener rather than React's onWheel:
+  // React attaches wheel handlers as passive by default, where preventDefault()
+  // is silently ignored — the browser would still zoom the whole page underneath
+  // this chart's own zoom.
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    function onWheel(e: WheelEvent) {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      setColumnWidthOverride((prev) => {
+        const current = prev ?? BASE_COLUMN_WIDTH[viewMode];
+        // deltaY < 0 is pinch-out / scroll-up — zoom in.
+        const next = current * Math.exp((-e.deltaY / 100) * ZOOM_SENSITIVITY * 0.1);
+        return Math.min(MAX_COLUMN_WIDTH, Math.max(MIN_COLUMN_WIDTH, next));
+      });
+    }
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode]);
+
+  // Day-view header: gantt-task-react always renders "Th 2, 15" (weekday + day),
+  // with no prop to ask for just the day number, and always at the same pixel
+  // width regardless of zoom — at low zoom that text collides with its
+  // neighbours. Both are fixed by reaching into the rendered SVG directly (same
+  // technique DependencyOverlay already uses for this library's other missing
+  // extension points): every calendar-header label shares one CSS module class,
+  // so labels are found by that class and by ending in a bare day number, then
+  // trimmed to just the number, dropping every Nth one once columns are too
+  // narrow for all of them to fit without overlapping.
+  useEffect(() => {
+    if (!bodyEl || viewMode !== ViewMode.Day) return;
+
+    // Roughly how many characters fit before neighbours start to touch, given
+    // the font this label uses — thinned by skipping every Nth label instead of
+    // shrinking text, so what remains stays legible rather than tiny.
+    const skipEvery = columnWidth < 22 ? 4 : columnWidth < 32 ? 2 : 1;
+
+    function simplify() {
+      const svg = bodyEl!.querySelector("svg");
+      if (!svg) return;
+      const labels = svg.querySelectorAll<SVGTextElement>("text._9w8d5");
+      labels.forEach((el, i) => {
+        const match = (el.dataset.fullLabel ?? el.textContent ?? "").match(/(\d+)\s*$/);
+        if (!match) return;
+        // The original text is stashed once so re-simplifying (e.g. after the
+        // skip pattern changes with zoom) always starts from the real label
+        // instead of compounding an earlier truncation.
+        if (!el.dataset.fullLabel) el.dataset.fullLabel = el.textContent ?? "";
+        const next = i % skipEvery === 0 ? match[1] : "";
+        // Skipped when already correct so this doesn't retrigger the very
+        // MutationObserver watching this subtree for the library's own changes.
+        if (el.textContent !== next) el.textContent = next;
+      });
+    }
+
+    simplify();
+    const observer = new MutationObserver(simplify);
+    observer.observe(bodyEl, { subtree: true, childList: true, characterData: true });
+    return () => observer.disconnect();
+  }, [bodyEl, viewMode, columnWidth]);
 
   function startDrag(e: React.MouseEvent) {
     e.preventDefault();
@@ -286,7 +375,10 @@ export default function GanttView({
           <button
             key={vm}
             className={viewMode === vm ? "active" : ""}
-            onClick={() => setViewMode(vm)}
+            onClick={() => {
+              setViewMode(vm);
+              setColumnWidthOverride(null);
+            }}
           >
             {vm}
           </button>

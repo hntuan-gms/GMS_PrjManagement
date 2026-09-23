@@ -300,7 +300,17 @@ export class TaskService {
         // schedule wasn't touched, the unchanged current value) — passed straight
         // in rather than left for the cascade to re-derive from its own listTasks()
         // snapshot, which is a search read that can still be racing the write above.
-        const result = await this.applyDependencyCascade(id, newStart, newDuration);
+        // current.startDate/durationDays (read before any of this request's writes)
+        // is what lets the cascade tell "this successor was pulled along because it
+        // had zero slack" apart from "this successor is just later than required" —
+        // see applyDependencyCascade's own comment.
+        const result = await this.applyDependencyCascade(
+          id,
+          newStart,
+          newDuration,
+          current.startDate,
+          current.durationDays
+        );
         cascadeWarnings = result.warnings;
         cascaded = result.changed.filter((t) => t.id !== id);
       }
@@ -355,10 +365,29 @@ export class TaskService {
   }
 
   /**
-   * After a task's schedule (or its dependency list) changes, push any FS/SS/FF/SF
-   * successors forward so they never start earlier than their predecessor allows.
-   * Simple forward-only propagation (not a full CPM/backward pass) — enough to keep
-   * a Gantt chart consistent without needing MS Project's full scheduling engine.
+   * After a task's schedule (or its dependency list) changes, this keeps every
+   * FS/SS/FF/SF successor at its earliest allowed start (ASAP) rather than merely
+   * "no earlier than allowed" — pushing a successor forward when its predecessor
+   * now requires it, but also pulling one backward when its predecessor moved
+   * earlier, PROVIDED that successor had zero slack against that specific edge.
+   *
+   * The slack check is what tells "this successor was riding right behind its
+   * predecessor" apart from "this successor just happens to be later than
+   * required" — pulling the second kind backward would silently erase a gap a
+   * human put there on purpose. It works by comparing the successor's start
+   * against the bound its predecessor implied *before* this cascade touched
+   * anything (`priorState`, seeded for `changedId` from the overlay read at the
+   * top of updateTask() — by the time this runs, `changedId`'s own entry in the
+   * snapshot below already holds the NEW value, so there is nowhere else to
+   * recover the old one from). Only an exact match counts as "zero slack": any
+   * gap at all means the human meant it, so it never gets tightened up either.
+   *
+   * A pulled-back successor still visits the existing forward self-check (below)
+   * once dequeued, which re-derives the true earliest start from *all* of its
+   * predecessors and pushes it back forward if a different predecessor still
+   * requires that — so a tentative pull can never undershoot a real constraint.
+   * That reuse is why this still isn't a full CPM backward pass: it moves things
+   * that were touching a boundary, not everything that theoretically could shift.
    *
    * Returns the ids whose Jira write failed (`warnings`) and every task whose
    * schedule was actually moved (`changed`), including `changedId` itself if its
@@ -373,7 +402,9 @@ export class TaskService {
   private async applyDependencyCascade(
     changedId: string,
     knownStart: string | null,
-    knownDuration: number
+    knownDuration: number,
+    knownOldStart: string | null,
+    knownOldDuration: number
   ): Promise<{ warnings: string[]; changed: Task[] }> {
     const tasks = await this.cascadeSnapshot();
     const byId = new Map(tasks.map((t) => [t.id, t]));
@@ -398,6 +429,15 @@ export class TaskService {
       }
     }
 
+    // Each task's start/duration the moment before this cascade first touches
+    // it — see the method comment. `changedId` is seeded explicitly because its
+    // slot in `byId` above already holds the new value by this point.
+    const priorState = new Map<string, { start: string; duration: number }>();
+    if (knownOldStart) priorState.set(changedId, { start: knownOldStart, duration: knownOldDuration });
+    const capturePrior = (t: Task) => {
+      if (!priorState.has(t.id) && t.startDate) priorState.set(t.id, { start: t.startDate, duration: t.durationDays });
+    };
+
     const warnings: string[] = [];
     const changed = new Map<string, Task>();
     const pushDates = async (taskId: string, start: string, due: string) => {
@@ -417,21 +457,21 @@ export class TaskService {
       visited.add(curId);
       const cur = byId.get(curId);
       if (!cur || !cur.startDate) continue;
+      capturePrior(cur);
 
       // Before pushing this task's schedule onto its successors, first make sure its
       // own start doesn't violate its own predecessors (e.g. a predecessor was just
       // added, or the predecessor list changed) — otherwise a newly added dependency
       // is silently not enforced until some unrelated edit happens to re-trigger this.
+      // This is also the safety net for a tentative backward pull below: when a
+      // pulled successor is dequeued it lands here, and if some OTHER predecessor
+      // still needs it later than the pull left it, this pushes it back forward.
       let curStart = cur.startDate;
       for (const pred of cur.predecessors) {
         const predTask = byId.get(pred.taskId);
         if (!predTask || !predTask.startDate) continue;
         const predEnd = addDays(predTask.startDate, predTask.durationDays - 1);
-        let earliest: string | null = null;
-        if (pred.type === "FS") earliest = addDays(predEnd, pred.lagDays + 1);
-        else if (pred.type === "SS") earliest = addDays(predTask.startDate, pred.lagDays);
-        else if (pred.type === "FF") earliest = addDays(predEnd, pred.lagDays - (cur.durationDays - 1));
-        else if (pred.type === "SF") earliest = addDays(predTask.startDate, pred.lagDays - (cur.durationDays - 1));
+        const earliest = earliestStartFor(pred.type, predTask.startDate, predEnd, pred.lagDays, cur.durationDays);
         if (earliest && earliest > curStart) curStart = earliest;
       }
       if (curStart !== cur.startDate) {
@@ -443,6 +483,8 @@ export class TaskService {
         changed.set(cur.id, cur);
       }
       const curEnd = addDays(curStart, cur.durationDays - 1);
+      const prior = priorState.get(curId)!;
+      const priorEnd = addDays(prior.start, prior.duration - 1);
 
       // Every successor here is a different Jira issue, so their writes have no
       // ordering dependency on one another — collected and pushed with Promise.all
@@ -453,19 +495,32 @@ export class TaskService {
       for (const { taskId, pred } of successorsOf.get(curId) ?? []) {
         const succ = byId.get(taskId);
         if (!succ || !succ.startDate) continue;
-        let earliestStart: string | null = null;
-        if (pred.type === "FS") earliestStart = addDays(curEnd, pred.lagDays + 1);
-        else if (pred.type === "SS") earliestStart = addDays(curStart, pred.lagDays);
-        else if (pred.type === "FF") earliestStart = addDays(curEnd, pred.lagDays - (succ.durationDays - 1));
-        else if (pred.type === "SF") earliestStart = addDays(curStart, pred.lagDays - (succ.durationDays - 1));
+        const newBound = earliestStartFor(pred.type, curStart, curEnd, pred.lagDays, succ.durationDays);
+        if (!newBound) continue;
 
-        if (earliestStart && earliestStart > succ.startDate) {
-          succ.startDate = earliestStart;
-          succ.dueDate = addDays(earliestStart, succ.durationDays - 1);
+        let nextStart: string | null = null;
+        if (newBound > succ.startDate) {
+          // Forward: this predecessor now requires a later start than the
+          // successor currently has, regardless of how it got there.
+          nextStart = newBound;
+        } else if (newBound < succ.startDate) {
+          // Candidate for a backward ASAP pull — only if the successor was
+          // sitting exactly on the bound this edge used to imply, i.e. had no
+          // slack to give up. `curId` moved earlier in this cascade (it wasn't
+          // dequeued into this branch otherwise, since nothing pushed it), so
+          // `prior` reliably reflects its pre-cascade position here.
+          const oldBound = earliestStartFor(pred.type, prior.start, priorEnd, pred.lagDays, succ.durationDays);
+          if (oldBound && succ.startDate === oldBound) nextStart = newBound;
+        }
+
+        if (nextStart) {
+          capturePrior(succ);
+          succ.startDate = nextStart;
+          succ.dueDate = addDays(nextStart, succ.durationDays - 1);
           byId.set(succ.id, succ);
           changed.set(succ.id, succ);
           queue.push(succ.id);
-          toPush.push({ id: succ.id, start: earliestStart, due: succ.dueDate });
+          toPush.push({ id: succ.id, start: nextStart, due: succ.dueDate });
         }
       }
       await Promise.all(
@@ -624,4 +679,19 @@ function diffDaysInclusive(startIso: string, endIso: string): number {
   const start = new Date(startIso + "T00:00:00Z").getTime();
   const end = new Date(endIso + "T00:00:00Z").getTime();
   return Math.round((end - start) / 86_400_000) + 1;
+}
+
+/** Earliest allowed start for a task, given one FS/SS/FF/SF link to another task. */
+function earliestStartFor(
+  type: string,
+  otherStart: string,
+  otherEnd: string,
+  lagDays: number,
+  ownDurationDays: number
+): string | null {
+  if (type === "FS") return addDays(otherEnd, lagDays + 1);
+  if (type === "SS") return addDays(otherStart, lagDays);
+  if (type === "FF") return addDays(otherEnd, lagDays - (ownDurationDays - 1));
+  if (type === "SF") return addDays(otherStart, lagDays - (ownDurationDays - 1));
+  return null;
 }

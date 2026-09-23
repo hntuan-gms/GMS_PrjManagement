@@ -62,6 +62,32 @@ export function resolveRanges(ordered: OrderedTask[]): Map<string, DateRange> {
   // appears somewhere after it — walking in reverse guarantees children (and their
   // own already-resolved rollups) are available by the time their parent is visited.
   for (const { task } of [...ordered].reverse()) {
+    const children = childrenOf.get(task.id) ?? [];
+
+    // An Epic's bar is always the span of its own children, full stop — even when
+    // the Epic issue itself carries a startDate/dueDate (Jira lets you set one; this
+    // app ignores it for the bar on purpose). A WBS is read top-down as "this phase
+    // runs from its earliest task to its latest", and an Epic with its own,
+    // unrelated dates would show a span that has nothing to do with the work under
+    // it. Non-Epic parents (a Story with sub-tasks, say) keep the opposite rule
+    // below: their own dates win, because those are usually the real commitment.
+    if (task.issueType === "Epic" && children.length > 0) {
+      let start: string | null = null;
+      let end: string | null = null;
+      for (const childId of children) {
+        const childRange = ranges.get(childId);
+        if (!childRange) continue;
+        if (!start || childRange.start < start) start = childRange.start;
+        if (!end || childRange.end > end) end = childRange.end;
+      }
+      if (start && end) {
+        ranges.set(task.id, { start, end });
+        continue;
+      }
+      // No child has a resolvable range (yet) — fall through to the Epic's own
+      // dates below rather than leaving it with no bar at all.
+    }
+
     if (task.startDate) {
       // A task with its own dates is authoritative, full stop — never widened by a
       // child's schedule. (Bug: this used to min/max against children unconditionally,
@@ -70,11 +96,11 @@ export function resolveRanges(ordered: OrderedTask[]): Map<string, DateRange> {
       ranges.set(task.id, { start: task.startDate, end: task.dueDate ?? task.startDate });
       continue;
     }
-    // No own date — typically an Epic used purely as a grouping issue. Roll up the
-    // min/max across descendants' resolved ranges so it still gets a displayable bar.
+    // No own date — typically a grouping issue with no schedule of its own. Roll up
+    // the min/max across descendants' resolved ranges so it still gets a displayable bar.
     let start: string | null = null;
     let end: string | null = null;
-    for (const childId of childrenOf.get(task.id) ?? []) {
+    for (const childId of children) {
       const childRange = ranges.get(childId);
       if (!childRange) continue;
       if (!start || childRange.start < start) start = childRange.start;
@@ -117,7 +143,7 @@ function nextDayIso(iso: string): string {
 export function toGanttTasks(ordered: OrderedTask[], ranges: Map<string, DateRange>): GanttTask[] {
   return ordered
     .filter((o) => ranges.has(o.task.id))
-    .map(({ task }) => {
+    .map(({ task, hasChildren }) => {
       const range = ranges.get(task.id)!;
       return {
         id: task.id,
@@ -127,24 +153,53 @@ export function toGanttTasks(ordered: OrderedTask[], ranges: Map<string, DateRan
         progress: task.percentComplete,
         type: "task",
         dependencies: [],
-        styles: statusStyles(task.statusCategory, task.issueType),
+        // An Epic's bar is a computed rollup of its children (see resolveRanges),
+        // not its own schedule, so dragging it would just snap straight back on
+        // the next render — disabled rather than left to look broken. A
+        // childless Epic has no rollup to snap back to, so it stays draggable.
+        isDisabled: task.issueType === "Epic" && hasChildren,
+        styles: statusStyles(task),
       };
     });
 }
 
-function statusStyles(statusCategory: Task["statusCategory"], issueType: Task["issueType"]) {
-  if (issueType === "Bug") {
+// Hues picked by hand, not evenly spaced around the wheel: the 60°-140° band
+// (yellow-green) is skipped because it turns muddy at this saturation/lightness,
+// and everything left is close enough in chroma that any two neighbours in a
+// list still read as "a matched set" rather than clashing — which is the actual
+// mechanism behind "random but harmonious": fix saturation and lightness, vary
+// only the hue, and pick hues from one continuous, tested arc.
+const PALETTE_HUES = [4, 18, 32, 155, 172, 189, 206, 223, 250, 271, 291, 315, 335, 352];
+
+/** A task's hue is a hash of its id, not re-rolled per render — "varied", not "flickering". */
+function hueFor(taskId: string): number {
+  let hash = 0;
+  for (let i = 0; i < taskId.length; i++) hash = (hash * 31 + taskId.charCodeAt(i)) >>> 0;
+  return PALETTE_HUES[hash % PALETTE_HUES.length];
+}
+
+function statusStyles(task: Task) {
+  // Bug keeps a fixed, unambiguous red: "there is a bug in this chart" is a
+  // signal worth being able to spot at a glance across a hundred other bars,
+  // and randomizing it away would cost more than the variety is worth.
+  if (task.issueType === "Bug") {
     return { backgroundColor: "#f8caca", progressColor: "#d64545", backgroundSelectedColor: "#f2a4a4" };
   }
-  if (issueType === "Epic") {
-    return { backgroundColor: "#e3d4fb", progressColor: "#7c4dd6", backgroundSelectedColor: "#d0b8f7" };
-  }
-  switch (statusCategory) {
-    case "done":
-      return { backgroundColor: "#c6e8c6", progressColor: "#3a9d3a", backgroundSelectedColor: "#a6d8a6" };
-    case "indeterminate":
-      return { backgroundColor: "#cfe0fb", progressColor: "#3369c9", backgroundSelectedColor: "#aecafb" };
-    default:
-      return { backgroundColor: "#e3e3e8", progressColor: "#8a8a93", backgroundSelectedColor: "#cacace" };
-  }
+
+  const hue = hueFor(task.id);
+  const done = task.statusCategory === "done";
+  // Epics get a bolder (more saturated, less pastel) version of their own hue —
+  // still part of the random palette, but visually a "summary bar" among the
+  // ordinary task bars under it, the same way MS Project's own Gantt weights them.
+  const epic = task.issueType === "Epic";
+  const saturation = epic ? 58 : 52;
+  // Finished work fades toward white rather than keeping full pastel strength,
+  // so a glance at a busy chart still separates "done" from "in progress"
+  // without needing the old fixed green to do that job.
+  const bgLightness = done ? 92 : 85;
+  return {
+    backgroundColor: `hsl(${hue} ${saturation}% ${bgLightness}%)`,
+    progressColor: `hsl(${hue} ${saturation + 8}% ${done ? 62 : 45}%)`,
+    backgroundSelectedColor: `hsl(${hue} ${saturation}% ${bgLightness - 9}%)`,
+  };
 }

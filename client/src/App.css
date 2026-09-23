@@ -1981,3 +1981,18 @@ button.danger:hover:not(:disabled) {
   font-size: 11px;
   color: var(--color-text-muted);
 }
+
+/* --- gantt-task-react overrides ------------------------------------------ */
+/* The library hard-codes white fill for the label drawn INSIDE a bar (its own
+   CSS module class, not something exposed via props — see GanttView.tsx's
+   day-label handling for the same limitation). Our bars are always a light
+   pastel tint (ganttMapping.ts's statusStyles), so white-on-pastel is close to
+   unreadable; a single dark neutral has strong contrast against every hue in
+   the palette, so one override covers all of them rather than needing a
+   per-task text colour the library has no hook for.
+   Coupled to gantt-task-react@0.3.x's compiled class name — if it stops
+   matching after a version bump, the symptom is just low-contrast bar text
+   again, not a crash. */
+svg text._3zRJQ {
+  fill: #2a2a33 !important;
+}
