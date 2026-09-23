@@ -59,7 +59,11 @@ export default function ResourceView({
   onOpenEdit,
 }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [includeIdle, setIncludeIdle] = useState(false);
+  // Everyone on the project by default. Showing only people who already hold
+  // dated work makes the tab go blank on a project nobody has assigned yet,
+  // which reads as "broken" rather than as "nothing is assigned" — and the
+  // whole point of a resource tab is to see who is free.
+  const [onlyBusy, setOnlyBusy] = useState(false);
   const [query, setQuery] = useState("");
   const [range, setRange] = useState<{ from: string; to: string } | null>(null);
 
@@ -80,9 +84,9 @@ export default function ResourceView({
         defaultCapacityHours: pool?.defaultCapacityHours,
         from: span.from,
         to: span.to,
-        includeIdle,
+        includeIdle: !onlyBusy,
       }),
-    [tasks, users, pool, span, includeIdle]
+    [tasks, users, pool, span, onlyBusy]
   );
 
   const byWeek = diffDays(span.from, span.to) > WEEK_THRESHOLD;
@@ -176,10 +180,10 @@ export default function ResourceView({
           <label className="rv-toggle">
             <input
               type="checkbox"
-              checked={includeIdle}
-              onChange={(e) => setIncludeIdle(e.target.checked)}
+              checked={onlyBusy}
+              onChange={(e) => setOnlyBusy(e.target.checked)}
             />
-            Hiện cả người chưa có việc
+            Chỉ hiện người đang có việc
           </label>
         </div>
       </div>
@@ -214,6 +218,8 @@ export default function ResourceView({
         </div>
       </div>
 
+      <MemberSourceNote pool={pool} count={load.people.length} />
+
       {poolError && (
         <div className="rv-notice">
           Không tải được công suất và lịch nghỉ ({poolError}). Bản đồ nhiệt vẫn tính theo mặc định{" "}
@@ -223,9 +229,13 @@ export default function ResourceView({
 
       {visiblePeople.length === 0 ? (
         <div className="empty-state">
-          {load.people.length === 0
-            ? "Chưa có công việc nào được gán trong khoảng thời gian này."
-            : "Không có thành viên nào khớp."}
+          {load.people.length > 0
+            ? "Không có thành viên nào khớp."
+            : onlyBusy
+              ? "Không ai có công việc trong khoảng thời gian này. Bỏ chọn “Chỉ hiện người đang có việc” để xem toàn bộ thành viên dự án."
+              : pool === null
+                ? "Đang tải danh sách thành viên..."
+                : "Dự án này chưa có thành viên nào trên Jira, hoặc tài khoản của bạn không đọc được danh sách."}
         </div>
       ) : (
         <div className="rv-heatmap-scroll">
@@ -276,6 +286,37 @@ export default function ResourceView({
           onAbsenceRemoved={removeAbsence}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * One line saying where the member list came from.
+ *
+ * Without it, "why is X not here / why is this stranger here" has no answer on
+ * screen: the two sources differ enormously (a project's declared roles versus
+ * everyone on the site holding one permission), and which one you get depends
+ * on a Jira permission the user cannot see from here.
+ */
+function MemberSourceNote({ pool, count }: { pool: ResourcePool | null; count: number }) {
+  if (!pool) return null;
+
+  if (pool.memberSource === "project-roles") {
+    return (
+      <div className="rv-source">
+        {count} thành viên, lấy từ vai trò dự án trên Jira
+        {pool.memberRoles.length > 0 && <> ({pool.memberRoles.join(", ")})</>}. Sửa danh sách này
+        trong Jira: <b>Project settings → People</b>.
+      </div>
+    );
+  }
+
+  return (
+    <div className="rv-source rv-source-warn">
+      {count} người, lấy từ danh sách <b>có thể được giao việc</b> — tài khoản của bạn không có
+      quyền <i>Administer Projects</i> nên không đọc được vai trò dự án. Danh sách này thường rộng
+      hơn đội thật.
+      {pool.memberTruncated && " Jira đã cắt ở 100 người, có thể còn thiếu."}
     </div>
   );
 }

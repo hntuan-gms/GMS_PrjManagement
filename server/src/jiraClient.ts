@@ -50,6 +50,25 @@ export class JiraApiError extends Error {
   }
 }
 
+/** One entry in a project role: either a person, or a group standing for many. */
+export interface RoleActor {
+  type: string;
+  displayName?: string;
+  avatarUrl?: string;
+  actorUser?: { accountId: string };
+  actorGroup?: { groupId?: string; name?: string; displayName?: string };
+}
+
+/** The user shape Jira returns from user and group endpoints alike. */
+export interface JiraUserLike {
+  accountId: string;
+  displayName: string;
+  avatarUrls?: Record<string, string>;
+  active?: boolean;
+  /** "atlassian" for a person; "app" for a bot, which is never a team member. */
+  accountType?: string;
+}
+
 const RATE_LIMIT_RETRIES = 2;
 const RATE_LIMIT_MAX_WAIT_MS = 5000;
 
@@ -186,12 +205,55 @@ export class JiraClient {
     });
   }
 
-  async getAssignableUsers(
-    projectKey: string
-  ): Promise<Array<{ accountId: string; displayName: string; avatarUrls?: Record<string, string> }>> {
+  /**
+   * Everyone Jira will let you put in the Assignee field of this project.
+   *
+   * Project-scoped, but only by the *Assignable User* permission — on a
+   * company-managed site that is usually granted to a broad group, so this can
+   * come back as most of the site rather than the project's team. See
+   * projectMembers.ts, which prefers declared project roles and falls back here.
+   */
+  async getAssignableUsers(projectKey: string): Promise<JiraUserLike[]> {
     return this.request(
       `/rest/api/3/user/assignable/search?project=${encodeURIComponent(projectKey)}&maxResults=100`
     );
+  }
+
+  /**
+   * The project's role definitions: `{ "Administrators": "<url>", ... }`.
+   *
+   * The URLs are absolute **site** URLs (gimasys.atlassian.net/...), not gateway
+   * ones, so they cannot be fetched as returned — getProjectRoleActors takes the
+   * role id out of them and rebuilds the path.
+   */
+  async getProjectRoles(projectKey: string): Promise<Record<string, string>> {
+    return this.request(`/rest/api/3/project/${encodeURIComponent(projectKey)}/role`);
+  }
+
+  async getProjectRoleActors(projectKey: string, roleId: string): Promise<{ name?: string; actors?: RoleActor[] }> {
+    return this.request(
+      `/rest/api/3/project/${encodeURIComponent(projectKey)}/role/${encodeURIComponent(roleId)}`
+    );
+  }
+
+  /**
+   * Members of one group, paged. Roles are usually granted to a group rather
+   * than to people one by one, so without this expansion a role read returns a
+   * group name and no humans.
+   */
+  async getGroupMembers(groupId: string): Promise<JiraUserLike[]> {
+    const out: JiraUserLike[] = [];
+    let startAt = 0;
+    for (let page = 0; page < 10; page++) {
+      const res = await this.request<{ values: JiraUserLike[]; isLast: boolean }>(
+        `/rest/api/3/group/member?groupId=${encodeURIComponent(groupId)}` +
+          `&includeInactiveUsers=false&maxResults=50&startAt=${startAt}`
+      );
+      out.push(...(res.values ?? []));
+      if (res.isLast || (res.values?.length ?? 0) === 0) break;
+      startAt += res.values.length;
+    }
+    return out;
   }
 
   /**

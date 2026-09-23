@@ -21,13 +21,20 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 resourcesRouter.get("/", requireProject, async (req, res, next) => {
   const { session, taskService } = req.auth!;
   try {
-    const [users, profiles, absences] = await Promise.all([
-      taskService!.listUsers(),
+    const [members, profiles, absences] = await Promise.all([
+      taskService!.listMembers(),
       resources.listProfiles(session.cloudId),
       resources.listAbsences(session.cloudId),
     ]);
     res.json({
-      users,
+      users: members.users,
+      // Where the list came from, so the tab can say so rather than leaving the
+      // user to guess why a colleague is or isn't in it. "assignable" means the
+      // account could not read the project's roles and this is everyone Jira
+      // will let it assign — a superset, usually a large one.
+      memberSource: members.source,
+      memberRoles: members.roles,
+      memberTruncated: members.truncated,
       profiles,
       absences,
       defaultCapacityHours: resources.DEFAULT_CAPACITY_HOURS,

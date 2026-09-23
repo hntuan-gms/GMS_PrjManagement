@@ -1,3 +1,4 @@
+import { getProjectMembers, type ProjectMembers } from "./projectMembers.js";
 import { adfToText, textToAdf } from "./adf.js";
 import { JiraApiError, type JiraClient } from "./jiraClient.js";
 import * as store from "./store.js";
@@ -76,13 +77,17 @@ export class TaskService {
     return this.jira.listProjects();
   }
 
+  /**
+   * The project's team. Prefers Jira's declared project roles and falls back to
+   * assignable users — see projectMembers.ts for why the fallback is mandatory.
+   */
   async listUsers(): Promise<JiraUser[]> {
-    const users = await this.jira.getAssignableUsers(this.ctx.projectKey);
-    return users.map((u) => ({
-      accountId: u.accountId,
-      displayName: u.displayName,
-      avatarUrl: u.avatarUrls?.["24x24"] ?? null,
-    }));
+    return (await this.listMembers()).users;
+  }
+
+  /** Same list, plus where it came from, for UI that needs to say so. */
+  async listMembers(): Promise<ProjectMembers> {
+    return getProjectMembers(this.jira, this.ctx.cloudId, this.ctx.projectKey);
   }
 
   async listTasks(): Promise<Task[]> {

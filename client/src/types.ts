@@ -63,6 +63,16 @@ export interface ResourceAbsence {
 
 export interface ResourcePool {
   users: JiraUser[];
+  /**
+   * "project-roles" = Jira's declared project membership. "assignable" = the
+   * fallback for an account that cannot read roles: everyone with the Assignable
+   * User permission, which on a company-managed site is most of the site.
+   */
+  memberSource: "project-roles" | "assignable";
+  /** Which roles contributed, when memberSource is "project-roles". */
+  memberRoles: string[];
+  /** The assignable fallback hit Jira's 100-user cap and may be incomplete. */
+  memberTruncated: boolean;
   profiles: ResourceProfile[];
   absences: ResourceAbsence[];
   defaultCapacityHours: number;

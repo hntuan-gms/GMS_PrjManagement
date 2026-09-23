@@ -1438,6 +1438,22 @@ button.danger:hover:not(:disabled) {
   border: 1px solid rgba(15, 23, 42, 0.12);
 }
 
+.rv-source {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  padding: 2px 2px 0;
+}
+.rv-source b {
+  color: var(--color-text-secondary);
+}
+.rv-source-warn {
+  color: #92400e;
+  background: var(--color-warning-light);
+  border: 1px solid var(--color-warning-border);
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+}
+
 .rv-notice {
   padding: 9px 13px;
   border-radius: var(--radius-md);
