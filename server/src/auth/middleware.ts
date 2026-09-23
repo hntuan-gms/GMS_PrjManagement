@@ -6,7 +6,7 @@
  */
 import type { NextFunction, Request, Response } from "express";
 import { AtlassianAuthError } from "./atlassian.js";
-import { authRequired, noProjectSelected } from "../errors.js";
+import { authRequired, noProjectSelected, staffOnly } from "../errors.js";
 import { getStartDateFieldId, startDateFieldOverride } from "../fieldDiscovery.js";
 import { JiraClient } from "../jiraClient.js";
 import { TaskService } from "../taskService.js";
@@ -97,5 +97,24 @@ export function requireProject(req: Request, _res: Response, next: NextFunction)
     projectKey: auth.session.projectKey,
     startDateFieldId: auth.startDateFieldId,
   });
+  next();
+}
+
+/**
+ * Internal staff only. Guarding the AI routes rather than the login gate is what
+ * lets external guests use everything else: the assistant and planner call Gemini
+ * on a shared key, so an unbounded audience is a cost and data-exposure surface
+ * that the Jira-backed features simply aren't.
+ */
+export function requireStaff(req: Request, _res: Response, next: NextFunction): void {
+  const auth = req.auth;
+  if (!auth) {
+    next(authRequired());
+    return;
+  }
+  if (!auth.session.staff) {
+    next(staffOnly());
+    return;
+  }
   next();
 }

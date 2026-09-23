@@ -542,7 +542,9 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
         />
       )}
 
-      <ChatDock onOpenPlan={setReviewRunId} onProjectChanged={refreshTasks} />
+      {/* Hidden for guests rather than disabled: /api/ai/* 403s for them, and a
+          visible assistant that always errors is worse than no assistant. */}
+      {session.staff && <ChatDock onOpenPlan={setReviewRunId} onProjectChanged={refreshTasks} />}
 
       {reviewRunId && (
         <PlanReviewModal

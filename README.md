@@ -77,9 +77,24 @@ bảo mật (`https://<cloud-run-url>/privacy`, xem `client/public/privacy.html`
 tin liên hệ và khai báo về dữ liệu cá nhân.
 
 > Bật Sharing đồng nghĩa **bất kỳ tài khoản Atlassian nào cũng có thể vào được màn
-> hình consent**. Từ lúc đó, `ALLOWED_EMAIL_DOMAIN` là thứ duy nhất chặn người lạ —
+> hình consent**. Từ lúc đó, `ALLOWED_SITE_HOSTS` là thứ duy nhất chặn người lạ —
 > hãy kiểm tra biến này thực sự đang được đặt trên Cloud Run, không chỉ trong file
 > workflow.
+
+### Ai được đăng nhập
+
+Quyền đăng nhập **do chính Jira quyết định**: `ALLOWED_SITE_HOSTS` liệt kê hostname
+của site Atlassian (ví dụ `gimasys.atlassian.net`), và ai đã được mời vào site đó
+thì đăng nhập được — kể cả **khách mời dùng email cá nhân hoặc email của công ty
+khách hàng**. Không cần duy trì danh sách email nào ở đây; mời người ta vào dự án
+Jira là đủ.
+
+Người chưa được mời sẽ thấy thông báo hướng dẫn xin quyền, thay vì bị chặn im lặng.
+
+`STAFF_EMAIL_DOMAIN` **không** phải cổng đăng nhập. Nó chỉ đánh dấu tài khoản nội
+bộ, và chỉ những tài khoản đó mới dùng được trợ lý AI (`/api/ai/*`) — vì tính năng
+này tính phí trên Gemini key dùng chung. Khách mời vẫn dùng đầy đủ Gantt, nguồn lực
+và mọi thao tác Jira; khung chat đơn giản là không hiện.
 
 ### 2. Chạy local
 
@@ -128,7 +143,7 @@ mỗi khi push lên `main`. Xem phần chú thích đầu file để biết các
 Lưu ý bảo mật: dịch vụ phải để `--allow-unauthenticated` vì Atlassian redirect
 trình duyệt về `/api/auth/callback` và request đó không thể mang token của Google.
 Vì vậy **cơ chế đăng nhập của chính ứng dụng là lớp bảo vệ duy nhất** — biến
-`ALLOWED_EMAIL_DOMAIN` giới hạn chỉ tài khoản của tổ chức mới đăng nhập được.
+`ALLOWED_SITE_HOSTS` giới hạn chỉ thành viên của site Jira mới đăng nhập được.
 
 ### Lưu overlay lâu dài
 

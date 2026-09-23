@@ -232,4 +232,10 @@ export interface Session {
   startDateFieldId: string | null;
   /** True while schedule overlays live on the server's ephemeral disk. */
   overlayEphemeral: boolean;
+  /**
+   * Internal staff. Guests invited to the Jira site get everything except the AI
+   * assistant, so the dock is hidden for them rather than handed a 403 they can
+   * do nothing about.
+   */
+  staff: boolean;
 }

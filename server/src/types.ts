@@ -58,6 +58,12 @@ export interface SessionMeta {
    * can warn that dependencies, baselines and % complete reset on each deploy.
    */
   overlayEphemeral: boolean;
+  /**
+   * Internal staff. Guests invited to the Jira site get everything except the AI
+   * features, which bill against a shared key — the client hides the assistant
+   * rather than letting them hit a 403 they can do nothing about.
+   */
+  staff: boolean;
 }
 
 export interface ProjectSummary {

@@ -22,6 +22,7 @@ export type ErrorCode =
   | "SESSION_TOO_LARGE"
   | "JIRA_UPSTREAM"
   | "NO_PROJECT_SELECTED"
+  | "STAFF_ONLY"
   | "BAD_REQUEST"
   | "INTERNAL";
 
@@ -41,6 +42,13 @@ export const authRequired = () =>
 
 export const noProjectSelected = () =>
   new AppError(409, "NO_PROJECT_SELECTED", "Chưa chọn dự án Jira.");
+
+export const staffOnly = () =>
+  new AppError(
+    403,
+    "STAFF_ONLY",
+    "Tính năng trợ lý AI chỉ dành cho tài khoản nội bộ. Các tính năng còn lại vẫn dùng được bình thường."
+  );
 
 export const badRequest = (message: string) => new AppError(400, "BAD_REQUEST", message);
 

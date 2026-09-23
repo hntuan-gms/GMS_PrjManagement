@@ -13,10 +13,9 @@ const AUTH_ERROR_MESSAGES: Record<string, string> = {
   identity_scope_missing:
     "Ứng dụng Atlassian chưa bật quyền \"User identity API\" (read:me) nên không đọc được " +
     "email để xác thực. Liên hệ quản trị viên để bật quyền này.",
-  email_unavailable:
-    "Không đọc được email của tài khoản Atlassian nên không thể xác thực tên miền. " +
-    "Liên hệ quản trị viên.",
-  domain_not_allowed: "Chỉ tài khoản Gimasys mới được phép đăng nhập.",
+  site_not_allowed:
+    "Tài khoản Atlassian của bạn chưa được mời vào site Jira của Gimasys. " +
+    "Hãy đề nghị quản trị viên dự án mời bạn, rồi đăng nhập lại.",
   no_site_access: "Tài khoản của bạn chưa có quyền truy cập site Jira nào.",
   login_failed: "Đăng nhập thất bại. Vui lòng thử lại.",
   invalid_client:

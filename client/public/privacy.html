@@ -45,7 +45,7 @@
           <th>Thời gian</th>
         </tr>
         <tr>
-          <td>Refresh token của Atlassian, cloudId, địa chỉ site, accountId, tên hiển thị, ảnh đại diện, mã dự án đang chọn</td>
+          <td>Refresh token của Atlassian, cloudId, địa chỉ site, accountId, tên hiển thị, ảnh đại diện, mã dự án đang chọn, và một cờ đúng/sai đánh dấu tài khoản nội bộ</td>
           <td>Cookie đã mã hoá (AES-256-GCM) đặt trên trình duyệt của bạn, gắn cờ <code>HttpOnly</code></td>
           <td>Tối đa 30 ngày, hoặc đến khi bạn đăng xuất</td>
         </tr>
@@ -64,9 +64,16 @@
       <h2>2. Địa chỉ email của bạn</h2>
       <p>
         Khi đăng nhập, ứng dụng đọc email của tài khoản Atlassian
-        (<code>read:me</code>) <strong>chỉ để kiểm tra bạn có thuộc tên miền được phép
-        hay không</strong>. Email <strong>không được lưu lại</strong> ở bất kỳ đâu — không
-        trong cookie, không trong tệp dữ liệu, không trong cơ sở dữ liệu.
+        (<code>read:me</code>) <strong>chỉ một lần, để xác định đây có phải tài khoản nội
+        bộ hay không</strong> — điều này quyết định bạn có dùng được trợ lý AI. Kết quả
+        được lưu dưới dạng một cờ đúng/sai; bản thân địa chỉ email
+        <strong>không được lưu lại</strong> ở bất kỳ đâu — không trong cookie, không trong
+        tệp dữ liệu, không trong cơ sở dữ liệu.
+      </p>
+      <p>
+        Quyền đăng nhập <strong>không</strong> dựa trên email, mà dựa trên việc tài khoản
+        Atlassian của bạn có được mời vào site Jira của chúng tôi hay không — nghĩa là
+        khách mời dùng email cá nhân hoặc email công ty khác vẫn đăng nhập bình thường.
       </p>
 
       <h2>3. Nội dung Jira</h2>

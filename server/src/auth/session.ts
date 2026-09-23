@@ -20,9 +20,16 @@ export const SESSION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 export const ACCESS_MAX_AGE_MS = 55 * 60 * 1000; // just under the ~1h token life
 export const OAUTH_MAX_AGE_MS = 10 * 60 * 1000;
 
-/** Durable half — survives redeploys. Kept small so it never nears the 4KB cap. */
+/**
+ * Durable half — survives redeploys. Kept small so it never nears the 4KB cap.
+ *
+ * v2 added `staff`. The version bump forces one re-login rather than defaulting
+ * the missing field: a v1 cookie lives for 30 days, and silently treating those
+ * users as non-staff would have taken the AI features away from the whole team
+ * for weeks with no visible cause.
+ */
 export interface SessionData {
-  v: 1;
+  v: 2;
   refreshToken: string;
   cloudId: string;
   /** Human site URL; browse links must use this, never api.atlassian.com. */
@@ -34,6 +41,12 @@ export interface SessionData {
   /** Chosen by the user after login; null until then. */
   projectKey: string | null;
   projectName: string | null;
+  /**
+   * Internal staff, decided once at login from the email domain. The email itself
+   * is deliberately NOT stored — the privacy policy says so, and a boolean is all
+   * the AI gate needs.
+   */
+  staff: boolean;
 }
 
 /** Volatile half — a cache, never authoritative. */
@@ -56,7 +69,7 @@ export interface OAuthFlowData {
 export function readSession(req: Request): SessionData | null {
   const cookies = parseCookies(req);
   const session = unseal<SessionData>(SESSION_COOKIE, cookies[SESSION_COOKIE]);
-  if (!session || session.v !== 1 || !session.refreshToken || !session.cloudId) return null;
+  if (!session || session.v !== 2 || !session.refreshToken || !session.cloudId) return null;
   return session;
 }
 

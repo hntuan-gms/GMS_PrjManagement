@@ -19,8 +19,22 @@ export interface AuthConfig {
   appBaseUrl: string;
   /** First entry encrypts; every entry is a decryption candidate (see crypto.ts). */
   keyring: EncryptionKey[];
-  /** Lowercase domain a user's email must end with, or null to allow any account. */
-  allowedEmailDomain: string | null;
+  /**
+   * Atlassian site hostnames whose members may log in, lowercased.
+   *
+   * This is the access gate, and it deliberately delegates to Jira: a user is
+   * allowed in exactly when an admin has already invited them to one of these
+   * sites. That covers guests on personal or client-company addresses — which an
+   * email-domain rule cannot express without either excluding them or letting in
+   * anyone who happens to share a domain.
+   */
+  allowedSiteHosts: string[];
+  /**
+   * Lowercase domain marking someone as internal staff, or null to treat everyone
+   * as staff. NOT a login gate — it only decides who may use the AI features,
+   * which bill against a shared Gemini key.
+   */
+  staffEmailDomain: string | null;
   cookieSecure: boolean;
 }
 
@@ -28,9 +42,10 @@ export interface AuthConfig {
  * Classic scopes. Do NOT mix these with granular scopes — Atlassian rejects the app.
  *
  * `read:me` is what lets GET https://api.atlassian.com/me return the user's email,
- * which the ALLOWED_EMAIL_DOMAIN gate depends on. It is granted by the "User
- * identity API" permission in the developer console, which is a SEPARATE product
- * from the Jira API permission — enabling the Jira scopes alone leaves /me at 403.
+ * which STAFF_EMAIL_DOMAIN uses to decide who may use the AI features. It is
+ * granted by the "User identity API" permission in the developer console, which is
+ * a SEPARATE product from the Jira API permission — enabling the Jira scopes alone
+ * leaves /me at 403.
  */
 export const SCOPES = [
   "read:jira-work",
@@ -95,11 +110,37 @@ function parseKeyring(raw: string): EncryptionKey[] {
   return keys;
 }
 
+/**
+ * Accepts either bare hostnames or full URLs, so `gimasys.atlassian.net` and
+ * `https://gimasys.atlassian.net/` both work — the value gets copy-pasted from a
+ * browser address bar as often as it gets typed.
+ */
+function parseSiteHosts(raw: string): string[] {
+  const hosts = raw
+    .split(",")
+    .map((entry) => {
+      const trimmed = entry.trim().toLowerCase();
+      if (!trimmed) return "";
+      try {
+        return new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`).host;
+      } catch {
+        return "";
+      }
+    })
+    .filter(Boolean);
+  if (hosts.length === 0) {
+    throw new Error(
+      `ALLOWED_SITE_HOSTS contained no usable hostnames. Expected e.g. "gimasys.atlassian.net".`
+    );
+  }
+  return hosts;
+}
+
 export function loadAuthConfig(): AuthConfig {
   if (cached) return cached;
 
   const appBaseUrl = required("APP_BASE_URL").replace(/\/+$/, "");
-  const domain = process.env.ALLOWED_EMAIL_DOMAIN?.trim().toLowerCase().replace(/^@/, "");
+  const staff = process.env.STAFF_EMAIL_DOMAIN?.trim().toLowerCase().replace(/^@/, "");
 
   cached = {
     clientId: required("ATLASSIAN_CLIENT_ID"),
@@ -109,7 +150,11 @@ export function loadAuthConfig(): AuthConfig {
     // Atlassian matches the redirect_uri byte-for-byte against the registered value.
     redirectUri: `${appBaseUrl}${CALLBACK_PATH}`,
     keyring: parseKeyring(required("SESSION_ENCRYPTION_KEYS")),
-    allowedEmailDomain: domain ? domain : null,
+    // Required, not optional: this service is publicly invokable, so an unset
+    // value would mean any Atlassian account on earth could sign in. Better a
+    // loud boot failure than a silent open door.
+    allowedSiteHosts: parseSiteHosts(required("ALLOWED_SITE_HOSTS")),
+    staffEmailDomain: staff ? staff : null,
     cookieSecure: process.env.COOKIE_SECURE
       ? process.env.COOKIE_SECURE === "true"
       : process.env.NODE_ENV === "production",
