@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { aiRouter } from "./ai.js";
+import { resourcesRouter } from "./resources.js";
 import { requireAuth, requireProject } from "../auth/middleware.js";
 import { badRequest } from "../errors.js";
 import type { BulkTaskCreateInput, TaskCreateInput, TaskUpdateInput } from "../types.js";
@@ -13,6 +14,7 @@ apiRouter.use(requireAuth);
 
 // Mounted after requireAuth so the planner inherits it rather than restating it.
 apiRouter.use("/ai", aiRouter);
+apiRouter.use("/resources", resourcesRouter);
 
 // GET /meta used to live here, returning the same SessionMeta as
 // /api/auth/me. Nothing ever fetched it, and having two copies of that object is

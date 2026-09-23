@@ -5,6 +5,7 @@ import { activeModel, generatePlan, layoutSchedule, listAvailableModels, toPlann
 import { streamChat, type ChatUsage } from "../ai/chat.js";
 import * as chatStore from "../ai/chatStore.js";
 import * as plans from "../ai/planStore.js";
+import * as resources from "../resourceStore.js";
 import type { Predecessor } from "../types.js";
 
 export const aiRouter = Router();
@@ -65,8 +66,8 @@ aiRouter.post("/plans", requireProject, async (req, res, next) => {
     const [issueTypes, users, profiles, absences] = await Promise.all([
       taskService!.listIssueTypes(),
       taskService!.listUsers(),
-      plans.getResourceProfiles(session.cloudId),
-      plans.getUpcomingAbsences(session.cloudId, startDate),
+      resources.profilesByAccount(session.cloudId),
+      resources.absencesByAccount(session.cloudId, startDate),
     ]);
 
     const result = await generatePlan({
@@ -153,8 +154,8 @@ aiRouter.post("/chat", requireProject, async (req, res) => {
           const [issueTypes, users, profiles, absences] = await Promise.all([
             taskService!.listIssueTypes(),
             taskService!.listUsers(),
-            plans.getResourceProfiles(session.cloudId),
-            plans.getUpcomingAbsences(session.cloudId, startDate),
+            resources.profilesByAccount(session.cloudId),
+            resources.absencesByAccount(session.cloudId, startDate),
           ]);
           const result = await generatePlan({
             brief,

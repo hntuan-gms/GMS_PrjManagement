@@ -5,6 +5,8 @@ interface Props {
   session: Session;
   view: "gantt" | "resource";
   onViewChange: (v: "gantt" | "resource") => void;
+  /** People overloaded in the near-term window — badged on the resource tab. */
+  overloadedPeople: number;
   onAddTask: () => void;
   onSync: () => void;
   syncing: boolean;
@@ -26,6 +28,7 @@ export default function Toolbar({
   session,
   view,
   onViewChange,
+  overloadedPeople,
   onAddTask,
   onSync,
   syncing,
@@ -54,6 +57,14 @@ export default function Toolbar({
         </button>
         <button className={view === "resource" ? "active" : ""} onClick={() => onViewChange("resource")}>
           Nguồn lực
+          {/* The overload count lives on the tab, not inside it: the reason to
+              open this tab is that someone is overbooked, and that is exactly
+              what you cannot see from the Gantt. */}
+          {overloadedPeople > 0 && (
+            <span className="tab-badge" title={`${overloadedPeople} thành viên đang quá tải`}>
+              {overloadedPeople}
+            </span>
+          )}
         </button>
       </div>
       <div className="toolbar-right">

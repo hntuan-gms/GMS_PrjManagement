@@ -1,12 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { ApiError, NetworkError, api } from "../api";
 import { computeOptimisticCascade } from "../dependencyCascade";
+import { buildResourceLoad, defaultWindow, todayIso } from "../resourceAllocation";
 import type {
   BulkTaskCreateResult,
   DependencyType,
   JiraUser,
   Predecessor,
+  ResourcePool,
   Session,
   Task,
   TaskUpdateResponse,
@@ -38,6 +40,11 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
   const [syncError, setSyncError] = useState<string | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [overlayNoticeDismissed, setOverlayNoticeDismissed] = useState(false);
+  // Capacity and absences. Held here rather than inside ResourceView so the
+  // toolbar can badge overload without mounting the tab, and so switching tabs
+  // does not refetch it.
+  const [pool, setPool] = useState<ResourcePool | null>(null);
+  const [poolError, setPoolError] = useState<string | null>(null);
 
   const [view, setView] = useState<"gantt" | "resource">("gantt");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -93,6 +100,36 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
     loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Fetched separately from tasks, not inside loadAll: an empty or failing
+  // resource pool is a valid state (capacity falls back to the default), and it
+  // must not be able to take the whole workspace down with it.
+  useEffect(() => {
+    let alive = true;
+    api
+      .getResourcePool()
+      .then((p) => alive && setPool(p))
+      .catch((e: Error) => alive && setPoolError(e.message));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // The toolbar's overload count, over the same default window the resource tab
+  // opens on — so the badge and the tab can never contradict each other.
+  const overloadedPeople = useMemo(() => {
+    const today = todayIso();
+    const span = defaultWindow(tasks, today);
+    return buildResourceLoad({
+      tasks,
+      users,
+      profiles: pool?.profiles ?? [],
+      absences: pool?.absences ?? [],
+      defaultCapacityHours: pool?.defaultCapacityHours,
+      from: span.from,
+      to: span.to,
+    }).overloadedPeople;
+  }, [tasks, users, pool]);
 
   // Esc backs out one layer at a time: closes the edit modal if one is open
   // (matching its own Esc-to-close, if it has one, but this is the fallback),
@@ -379,6 +416,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
         session={session}
         view={view}
         onViewChange={setView}
+        overloadedPeople={overloadedPeople}
         onAddTask={() => setCreating(true)}
         onSync={handleSync}
         syncing={syncing}
@@ -435,7 +473,14 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
             onDeleteDependency={handleDeleteDependency}
           />
         ) : (
-          <ResourceView tasks={tasks} users={users} onOpenEdit={setEditingTask} />
+          <ResourceView
+            tasks={tasks}
+            users={users}
+            pool={pool}
+            poolError={poolError}
+            onPoolChange={setPool}
+            onOpenEdit={setEditingTask}
+          />
         )}
       </div>
 

@@ -13,7 +13,19 @@ import type {
   TaskUpdateInput,
 } from "./types.js";
 
-const SEARCH_FIELDS = ["summary", "description", "issuetype", "status", "assignee", "duedate", "parent"];
+// timeoriginalestimate is what turns the resource heatmap from task-counting
+// into real effort-based allocation (see client/src/resourceAllocation.ts).
+// It rides along on the search that was already happening — no extra request.
+const SEARCH_FIELDS = [
+  "summary",
+  "description",
+  "issuetype",
+  "status",
+  "assignee",
+  "duedate",
+  "parent",
+  "timeoriginalestimate",
+];
 
 function statusCategoryKey(key: string): "new" | "indeterminate" | "done" {
   if (key === "done") return "done";
@@ -137,6 +149,10 @@ export class TaskService {
       assigneeName: f.assignee?.displayName ?? null,
       assigneeAvatarUrl: f.assignee?.avatarUrls?.["24x24"] ?? null,
       dueDate: f.duedate ?? null,
+      // Jira reports it in seconds; hours is the unit the allocation engine
+      // and every capacity figure in this app work in.
+      estimateHours:
+        typeof f.timeoriginalestimate === "number" ? f.timeoriginalestimate / 3600 : null,
       jiraUrl: `${this.ctx.siteUrl}/browse/${issue.key}`,
     };
   }

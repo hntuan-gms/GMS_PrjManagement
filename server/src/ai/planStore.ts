@@ -207,31 +207,6 @@ export async function setRunStatus(runId: string, status: PlanStatus): Promise<v
   );
 }
 
-/** Resource pool inputs for the planner, both optional — an empty team still plans. */
-export async function getResourceProfiles(
-  cloudId: string
-): Promise<Map<string, { role: string | null; skills: string[] }>> {
-  const { rows } = await db().query<{ account_id: string; role: string | null; skills: string[] }>(
-    `SELECT account_id, role, skills FROM resource_profile WHERE cloud_id = $1`,
-    [cloudId]
-  );
-  return new Map(rows.map((r) => [r.account_id, { role: r.role, skills: r.skills ?? [] }]));
-}
-
-export async function getUpcomingAbsences(
-  cloudId: string,
-  from: string
-): Promise<Map<string, Array<{ from: string; to: string }>>> {
-  const { rows } = await db().query<{ account_id: string; from_date: string; to_date: string }>(
-    `SELECT account_id, from_date, to_date FROM resource_absence
-      WHERE cloud_id = $1 AND to_date >= $2 ORDER BY from_date`,
-    [cloudId, from]
-  );
-  const out = new Map<string, Array<{ from: string; to: string }>>();
-  for (const r of rows) {
-    const list = out.get(r.account_id) ?? [];
-    list.push({ from: r.from_date, to: r.to_date });
-    out.set(r.account_id, list);
-  }
-  return out;
-}
+// The resource pool itself lives in ../resourceStore.ts: it is the AI planner's
+// input here, but the Nguon luc tab's subject, and one table should not have two
+// sets of accessors drifting apart.

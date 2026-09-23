@@ -1,254 +1,427 @@
 import { useMemo, useState } from "react";
-import { findOverlaps } from "../resourceAllocation";
-import type { JiraUser, Task } from "../types";
-
-function formatRange(from: string, to: string): string {
-  const fmt = (iso: string) => iso.slice(8, 10) + "/" + iso.slice(5, 7);
-  return from === to ? fmt(from) : `${fmt(from)} – ${fmt(to)}`;
-}
+import {
+  aggregateWeeks,
+  BAND_LABEL,
+  buildResourceLoad,
+  defaultWindow,
+  diffDays,
+  addDays,
+  todayIso,
+  type LoadBand,
+  type PersonLoad,
+} from "../resourceAllocation";
+import type { JiraUser, ResourceAbsence, ResourceProfile, ResourcePool, Task } from "../types";
+import ResourcePersonPanel from "./ResourcePersonPanel";
 
 interface Props {
   tasks: Task[];
   users: JiraUser[];
+  /** Capacity and absences, fetched once by the workspace. null while loading. */
+  pool: ResourcePool | null;
+  poolError: string | null;
+  onPoolChange: (next: ResourcePool) => void;
   onOpenEdit: (task: Task) => void;
 }
 
-/** Sentinel for the assignee <select>; "" already means "no filter". */
-const UNASSIGNED = "__unassigned__";
+/** Above this many days the heatmap switches to week columns — see aggregateWeeks. */
+const WEEK_THRESHOLD = 45;
 
-export default function ResourceView({ tasks, users, onOpenEdit }: Props) {
+const PRESETS: Array<{ label: string; days: number | null }> = [
+  { label: "4 tuần", days: 28 },
+  { label: "8 tuần", days: 56 },
+  { label: "1 quý", days: 90 },
+  { label: "Toàn dự án", days: null },
+];
+
+function shortDate(iso: string): string {
+  return `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
+}
+
+function pct(ratio: number): string {
+  if (!Number.isFinite(ratio)) return "—";
+  return `${Math.round(ratio * 100)}%`;
+}
+
+/**
+ * The resource tab: who is overloaded, when, and by how much.
+ *
+ * Load is computed here from tasks the workspace already holds (see
+ * resourceAllocation.ts), so dragging a bar in the Gantt recolours this tab on
+ * the same render rather than after a round trip. Only the two things Jira has
+ * no field for — capacity and absence — are fetched.
+ */
+export default function ResourceView({
+  tasks,
+  users,
+  pool,
+  poolError,
+  onPoolChange,
+  onOpenEdit,
+}: Props) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [includeIdle, setIncludeIdle] = useState(false);
   const [query, setQuery] = useState("");
-  const [status, setStatus] = useState("");
-  const [assignee, setAssignee] = useState("");
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
+  const [range, setRange] = useState<{ from: string; to: string } | null>(null);
 
-  const needle = query.trim().toLowerCase();
-  const filterActive = needle !== "" || status !== "" || assignee !== "" || from !== "" || to !== "";
+  const today = useMemo(() => todayIso(), []);
 
-  /**
-   * Status options are derived from the loaded tasks, never a hard-coded list.
-   * Workflow status names differ per Jira project — HHBJ uses "Selected for
-   * development" where another site uses "To Do" — so a fixed list would offer
-   * filters that silently match nothing (the same trap as STATUS_OPTIONS in
-   * TaskEditModal, see BUG-05).
-   */
-  const statusOptions = useMemo(() => {
-    const names = new Set(tasks.map((t) => t.statusName));
-    return [...names].sort((a, b) => a.localeCompare(b, "vi"));
-  }, [tasks]);
+  // The window follows the project until the user touches it, then stops —
+  // otherwise every drag that extends the plan would yank the view they are
+  // reading out from under them.
+  const span = useMemo(() => range ?? defaultWindow(tasks, today), [range, tasks, today]);
 
-  // Everyone holding work, before any filtering. `users` is every assignable
-  // account on the project, which on a large site is mostly noise.
-  const people = useMemo(() => {
-    const groups = new Map<string, Task[]>();
-    const unassigned: Task[] = [];
-    for (const t of tasks) {
-      if (!t.assigneeAccountId) {
-        unassigned.push(t);
-        continue;
-      }
-      if (!groups.has(t.assigneeAccountId)) groups.set(t.assigneeAccountId, []);
-      groups.get(t.assigneeAccountId)!.push(t);
+  const load = useMemo(
+    () =>
+      buildResourceLoad({
+        tasks,
+        users,
+        profiles: pool?.profiles ?? [],
+        absences: pool?.absences ?? [],
+        defaultCapacityHours: pool?.defaultCapacityHours,
+        from: span.from,
+        to: span.to,
+        includeIdle,
+      }),
+    [tasks, users, pool, span, includeIdle]
+  );
+
+  const byWeek = diffDays(span.from, span.to) > WEEK_THRESHOLD;
+
+  const visiblePeople = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return load.people;
+    return load.people.filter(
+      (p) =>
+        p.displayName.toLowerCase().includes(needle) ||
+        (p.role ?? "").toLowerCase().includes(needle)
+    );
+  }, [load.people, query]);
+
+  const selected = load.people.find((p) => p.accountId === selectedId) ?? null;
+
+  function applyPreset(days: number | null) {
+    if (days === null) {
+      setRange(defaultWindow(tasks, today, 3650));
+      return;
     }
-    const held = users
-      .filter((u) => (groups.get(u.accountId)?.length ?? 0) > 0)
-      .map((u) => ({ user: u, all: groups.get(u.accountId)! }));
-    return unassigned.length > 0
-      ? held.concat([
-          { user: { accountId: "", displayName: "Chưa gán", avatarUrl: null }, all: unassigned },
-        ])
-      : held;
-  }, [tasks, users]);
+    const from = span.from;
+    setRange({ from, to: addDays(from, days - 1) });
+  }
 
-  const rows = useMemo(() => {
-    const keep = (t: Task): boolean => {
-      if (
-        needle &&
-        !t.id.toLowerCase().includes(needle) &&
-        !t.summary.toLowerCase().includes(needle)
-      ) {
-        return false;
-      }
-      if (status && t.statusName !== status) return false;
-      if (assignee) {
-        const wantUnassigned = assignee === UNASSIGNED;
-        if (wantUnassigned !== (t.assigneeAccountId === null)) return false;
-        if (!wantUnassigned && t.assigneeAccountId !== assignee) return false;
-      }
-      if (from || to) {
-        // A task with no dates at all can't be placed on a calendar, so it can't
-        // satisfy a date window — dropped rather than silently kept.
-        const start = t.startDate ?? t.dueDate;
-        const end = t.dueDate ?? t.startDate;
-        if (!start || !end) return false;
-        // Overlap, not containment: the useful question in a resource view is
-        // "who is busy during this window", which a task straddling either edge
-        // still answers. ISO strings compare chronologically as written.
-        if (to && start > to) return false;
-        if (from && end < from) return false;
-      }
-      return true;
-    };
+  // Saves are applied to the cached pool rather than triggering a refetch: the
+  // response is the authoritative row, and a round trip here would make the
+  // heatmap flicker back to the old colour before settling.
+  function upsertProfile(profile: ResourceProfile) {
+    if (!pool) return;
+    const others = pool.profiles.filter((p) => p.accountId !== profile.accountId);
+    onPoolChange({ ...pool, profiles: [...others, profile] });
+  }
 
-    return people
-      .map((p) => ({ ...p, shown: p.all.filter(keep) }))
-      .filter((p) => p.shown.length > 0);
-  }, [people, needle, status, assignee, from, to]);
+  function addAbsence(absence: ResourceAbsence) {
+    if (!pool) return;
+    onPoolChange({ ...pool, absences: [...pool.absences, absence] });
+  }
 
-  const shownTotal = rows.reduce((n, r) => n + r.shown.length, 0);
-  const allTotal = people.reduce((n, p) => n + p.all.length, 0);
-
-  function clearFilters() {
-    setQuery("");
-    setStatus("");
-    setAssignee("");
-    setFrom("");
-    setTo("");
+  function removeAbsence(id: string) {
+    if (!pool) return;
+    onPoolChange({ ...pool, absences: pool.absences.filter((a) => a.id !== id) });
   }
 
   return (
     <div className="resource-view">
-      {/* Always mounted, including when nothing matches — otherwise a filter that
-          excludes everything would take away the only controls able to undo it. */}
-      <div className="resource-filters">
-        <input
-          type="search"
-          className="resource-search"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") setQuery("");
-          }}
-          placeholder="Tìm theo mã hoặc tên công việc..."
-          aria-label="Tìm công việc"
-        />
-        <label>
-          Trạng thái
-          <select value={status} onChange={(e) => setStatus(e.target.value)}>
-            <option value="">Tất cả</option>
-            {statusOptions.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Phụ trách
-          <select value={assignee} onChange={(e) => setAssignee(e.target.value)}>
-            <option value="">Tất cả</option>
-            {people.map(({ user }) => (
-              <option key={user.accountId || UNASSIGNED} value={user.accountId || UNASSIGNED}>
-                {user.displayName}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Từ ngày
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-        </label>
-        <label>
-          Đến ngày
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
-        </label>
-        {filterActive && (
-          <>
-            <button className="link-btn" onClick={clearFilters}>
-              Xoá bộ lọc
+      <div className="rv-controls">
+        <div className="rv-range">
+          <label>
+            Từ
+            <input
+              type="date"
+              value={span.from}
+              onChange={(e) =>
+                e.target.value && setRange({ from: e.target.value, to: span.to })
+              }
+            />
+          </label>
+          <label>
+            Đến
+            <input
+              type="date"
+              value={span.to}
+              onChange={(e) =>
+                e.target.value && setRange({ from: span.from, to: e.target.value })
+              }
+            />
+          </label>
+          {PRESETS.map((p) => (
+            <button key={p.label} className="rv-preset" onClick={() => applyPreset(p.days)}>
+              {p.label}
             </button>
-            <span className="resource-filter-count">
-              {shownTotal}/{allTotal} công việc
-            </span>
-          </>
-        )}
+          ))}
+          {range && (
+            <button className="link-btn" onClick={() => setRange(null)}>
+              Theo dự án
+            </button>
+          )}
+        </div>
+
+        <div className="rv-control-right">
+          <input
+            type="search"
+            className="rv-search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => e.key === "Escape" && setQuery("")}
+            placeholder="Tìm thành viên..."
+            aria-label="Tìm thành viên"
+          />
+          <label className="rv-toggle">
+            <input
+              type="checkbox"
+              checked={includeIdle}
+              onChange={(e) => setIncludeIdle(e.target.checked)}
+            />
+            Hiện cả người chưa có việc
+          </label>
+        </div>
       </div>
 
-      {rows.length === 0 ? (
+      <div className="rv-summary">
+        <Stat value={String(load.people.length)} label="thành viên có việc" />
+        <Stat
+          value={String(load.overloadedPeople)}
+          label="đang quá tải"
+          tone={load.overloadedPeople > 0 ? "danger" : "ok"}
+        />
+        <Stat
+          value={pct(
+            load.people.length > 0
+              ? load.people.reduce((n, p) => n + p.utilisation, 0) / load.people.length
+              : 0
+          )}
+          label="hiệu suất trung bình"
+        />
+        <Stat
+          value={String(load.unassigned.length)}
+          label="công việc chưa gán"
+          tone={load.unassigned.length > 0 ? "warn" : "ok"}
+        />
+        <div className="rv-legend">
+          {(["free", "light", "healthy", "over", "off-violation"] as LoadBand[]).map((b) => (
+            <span key={b} className="rv-legend-item">
+              <i className={`rv-swatch band-${b}`} />
+              {BAND_LABEL[b]}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {poolError && (
+        <div className="rv-notice">
+          Không tải được công suất và lịch nghỉ ({poolError}). Bản đồ nhiệt vẫn tính theo mặc định{" "}
+          {pool?.defaultCapacityHours ?? 8} giờ/ngày.
+        </div>
+      )}
+
+      {visiblePeople.length === 0 ? (
         <div className="empty-state">
-          {people.length === 0
-            ? "Dự án chưa có task nào được gán."
-            : "Không có công việc nào khớp với bộ lọc."}
+          {load.people.length === 0
+            ? "Chưa có công việc nào được gán trong khoảng thời gian này."
+            : "Không có thành viên nào khớp."}
         </div>
       ) : (
-        rows.map(({ user, all, shown }) => {
-          const openCount = shown.filter((t) => t.statusCategory !== "done").length;
-          const doneCount = shown.length - openCount;
-          // Load bar and overlap detection deliberately read the person's FULL task
-          // list, not the filtered one: they describe real workload, and a view
-          // filter must not be able to make someone look free or conflict-free.
-          const loadOpen = all.filter((t) => t.statusCategory !== "done").length;
-          // "Unassigned" isn't a person — overallocation only means something for a
-          // real assignee who'd have to work two overlapping tasks at once.
-          const overlaps = user.accountId ? findOverlaps(all) : [];
-          const conflictIds = new Set(overlaps.flatMap((o) => [o.aId, o.bId]));
-          return (
-            <div key={user.accountId || "unassigned"} className="resource-card">
-              <div className="resource-header">
-                <span className="resource-name">{user.displayName}</span>
-                <span className="resource-stats">
-                  {filterActive ? `${shown.length}/${all.length}` : all.length} task · {openCount} đang
-                  mở · {doneCount} hoàn thành
-                </span>
-              </div>
-              <div className="resource-load-bar">
-                <div
-                  className="resource-load-fill"
-                  style={{ width: `${(loadOpen / all.length) * 100}%` }}
-                />
-              </div>
-              {overlaps.length > 0 && (
-                <div className="resource-overlap-warning">
-                  <strong>⚠ Quá tải — {overlaps.length} cặp task trùng lịch:</strong>
-                  <ul>
-                    {overlaps.map((o, i) => (
-                      <li key={i}>
-                        <b>{o.aId}</b> ↔ <b>{o.bId}</b> · {formatRange(o.from, o.to)}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              <table className="resource-table">
-                <thead>
-                  <tr>
-                    <th>Mã</th>
-                    <th>Tên công việc</th>
-                    <th>Trạng thái</th>
-                    <th>Bắt đầu</th>
-                    <th>Kết thúc</th>
-                    <th>% hoàn thành</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {shown.map((t) => (
-                    <tr
-                      key={t.id}
-                      onClick={() => onOpenEdit(t)}
-                      className={`clickable-row ${conflictIds.has(t.id) ? "row-conflict" : ""}`}
-                    >
-                      <td>
-                        {conflictIds.has(t.id) && <span title="Trùng lịch với task khác">⚠ </span>}
-                        {t.id}
-                      </td>
-                      <td>{t.summary}</td>
-                      <td>
-                        <span className={`status-pill status-${t.statusCategory}`}>
-                          {t.statusName}
-                        </span>
-                      </td>
-                      <td>{t.startDate ?? "—"}</td>
-                      <td>{t.dueDate ?? "—"}</td>
-                      <td>{t.percentComplete}%</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          );
-        })
+        <div className="rv-heatmap-scroll">
+          <div className={`rv-grid ${byWeek ? "rv-grid-week" : "rv-grid-day"}`}>
+            <HeatmapHeader dates={load.dates} byWeek={byWeek} today={today} />
+            {visiblePeople.map((person) => (
+              <PersonRow
+                key={person.accountId}
+                person={person}
+                byWeek={byWeek}
+                today={today}
+                selected={person.accountId === selectedId}
+                onSelect={() =>
+                  setSelectedId((cur) => (cur === person.accountId ? null : person.accountId))
+                }
+              />
+            ))}
+          </div>
+        </div>
       )}
+
+      {load.unassigned.length > 0 && (
+        <div className="rv-unassigned">
+          <strong>{load.unassigned.length} công việc chưa có người phụ trách</strong>
+          <div className="rv-unassigned-list">
+            {load.unassigned.slice(0, 12).map((t) => (
+              <button key={t.id} className="rv-chip" onClick={() => onOpenEdit(t)}>
+                {t.id} · {t.summary}
+              </button>
+            ))}
+            {load.unassigned.length > 12 && (
+              <span className="rv-chip-more">+{load.unassigned.length - 12} nữa</span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {selected && (
+        <ResourcePersonPanel
+          person={selected}
+          dates={load.dates}
+          today={today}
+          defaultCapacityHours={pool?.defaultCapacityHours ?? 8}
+          onClose={() => setSelectedId(null)}
+          onOpenEdit={onOpenEdit}
+          onProfileSaved={upsertProfile}
+          onAbsenceAdded={addAbsence}
+          onAbsenceRemoved={removeAbsence}
+        />
+      )}
+    </div>
+  );
+}
+
+function Stat({
+  value,
+  label,
+  tone,
+}: {
+  value: string;
+  label: string;
+  tone?: "ok" | "warn" | "danger";
+}) {
+  return (
+    <div className={`rv-stat ${tone ? `rv-stat-${tone}` : ""}`}>
+      <b>{value}</b>
+      <span>{label}</span>
+    </div>
+  );
+}
+
+/**
+ * Two header rows: months spanning their days, then the day (or week) itself.
+ * The month row is what makes a 90-column strip readable — bare day numbers
+ * repeat every month and give a reader nothing to anchor on.
+ */
+function HeatmapHeader({
+  dates,
+  byWeek,
+  today,
+}: {
+  dates: string[];
+  byWeek: boolean;
+  today: string;
+}) {
+  const columns = byWeek ? weekStarts(dates) : dates;
+
+  const months: Array<{ label: string; span: number }> = [];
+  for (const iso of columns) {
+    const label = `Thg ${Number(iso.slice(5, 7))}/${iso.slice(0, 4)}`;
+    const last = months[months.length - 1];
+    if (last && last.label === label) last.span += 1;
+    else months.push({ label, span: 1 });
+  }
+
+  return (
+    <>
+      <div className="rv-row rv-row-months">
+        <div className="rv-name rv-corner" />
+        {months.map((m, i) => (
+          <div key={i} className="rv-month" style={{ "--span": m.span } as React.CSSProperties}>
+            {m.label}
+          </div>
+        ))}
+      </div>
+      <div className="rv-row rv-row-head">
+        <div className="rv-name rv-corner">Thành viên</div>
+        {columns.map((iso) => (
+          <div
+            key={iso}
+            className={`rv-cell rv-head-cell ${iso === today ? "is-today" : ""}`}
+            title={iso}
+          >
+            {byWeek ? shortDate(iso) : iso.slice(8, 10)}
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function weekStarts(dates: string[]): string[] {
+  const out: string[] = [];
+  dates.forEach((d, i) => {
+    if (i === 0 || new Date(`${d}T00:00:00Z`).getUTCDay() === 1) out.push(d);
+  });
+  return out;
+}
+
+function PersonRow({
+  person,
+  byWeek,
+  today,
+  selected,
+  onSelect,
+}: {
+  person: PersonLoad;
+  byWeek: boolean;
+  today: string;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const cells = byWeek
+    ? aggregateWeeks(person.days).map((w) => ({
+        key: w.start,
+        band: w.band,
+        ratio: w.ratio,
+        allocated: w.allocatedHours,
+        capacity: w.capacityHours,
+        label: `${w.start} → ${w.end}`,
+        taskIds: w.taskIds,
+        isToday: today >= w.start && today <= w.end,
+      }))
+    : person.days.map((d) => ({
+        key: d.date,
+        band: d.band,
+        ratio: d.ratio,
+        allocated: d.allocatedHours,
+        capacity: d.capacityHours,
+        label: d.date,
+        taskIds: d.taskIds,
+        isToday: d.date === today,
+      }));
+
+  return (
+    <div className={`rv-row rv-row-person ${selected ? "is-selected" : ""}`} onClick={onSelect}>
+      <div className="rv-name">
+        {person.avatarUrl ? (
+          <img src={person.avatarUrl} alt="" className="rv-avatar" />
+        ) : (
+          <span className="rv-avatar rv-avatar-empty">{person.displayName.slice(0, 1)}</span>
+        )}
+        <span className="rv-person-text">
+          <b>{person.displayName}</b>
+          <small>
+            {person.role ? `${person.role} · ` : ""}
+            {person.capacityHoursPerDay}h/ngày · {person.tasks.length} việc
+          </small>
+        </span>
+        {person.overloadedDays > 0 && (
+          <span className="rv-badge-over" title={`${person.overloadedDays} ngày quá tải`}>
+            {person.overloadedDays}
+          </span>
+        )}
+      </div>
+      {cells.map((c) => (
+        <div
+          key={c.key}
+          className={`rv-cell band-${c.band} ${c.isToday ? "is-today" : ""}`}
+          title={`${c.label} · ${c.allocated}h / ${c.capacity}h (${pct(c.ratio)})${
+            c.taskIds.length > 0 ? `\n${[...new Set(c.taskIds)].join(", ")}` : ""
+          }`}
+        >
+          {byWeek && c.capacity > 0 ? pct(c.ratio) : ""}
+        </div>
+      ))}
     </div>
   );
 }

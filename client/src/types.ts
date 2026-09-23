@@ -26,6 +26,13 @@ export interface Task {
   predecessors: Predecessor[];
   baselineStart: string | null;
   baselineDue: string | null;
+  /**
+   * Jira's original estimate, in hours (its API stores seconds). Read-only here
+   * and often null — the resource view falls back to "one task fills a working
+   * day" when it is, because a team that never estimates should still get a
+   * usable heatmap rather than an empty one.
+   */
+  estimateHours: number | null;
   jiraUrl: string;
 }
 
@@ -33,6 +40,32 @@ export interface JiraUser {
   accountId: string;
   displayName: string;
   avatarUrl: string | null;
+}
+
+/** Capacity and skills we store about a person; Jira owns everything else. */
+export interface ResourceProfile {
+  accountId: string;
+  role: string | null;
+  skills: string[];
+  capacityHoursPerDay: number;
+  costPerDay: number | null;
+  notes: string | null;
+}
+
+/** Planned leave. Days inside the range have zero capacity. */
+export interface ResourceAbsence {
+  id: string;
+  accountId: string;
+  from: string;
+  to: string;
+  reason: string | null;
+}
+
+export interface ResourcePool {
+  users: JiraUser[];
+  profiles: ResourceProfile[];
+  absences: ResourceAbsence[];
+  defaultCapacityHours: number;
 }
 
 export interface TaskUpdateInput {

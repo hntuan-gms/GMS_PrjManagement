@@ -4,6 +4,9 @@ import type {
   ChatMessage,
   JiraUser,
   PlanResponse,
+  ResourceAbsence,
+  ResourcePool,
+  ResourceProfile,
   UsageStats,
   ProjectSummary,
   Session,
@@ -117,6 +120,29 @@ export const api = {
     }),
   deleteTask: (id: string) =>
     request<void>(`/tasks/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  getResourcePool: () => request<ResourcePool>("/resources"),
+  saveResourceProfile: (
+    accountId: string,
+    patch: {
+      displayName: string;
+      role?: string | null;
+      skills?: string[];
+      capacityHoursPerDay?: number;
+      notes?: string | null;
+    }
+  ) =>
+    request<ResourceProfile>(`/resources/${encodeURIComponent(accountId)}`, {
+      method: "PUT",
+      body: JSON.stringify(patch),
+    }),
+  addAbsence: (accountId: string, from: string, to: string, reason: string | null) =>
+    request<ResourceAbsence>(`/resources/${encodeURIComponent(accountId)}/absences`, {
+      method: "POST",
+      body: JSON.stringify({ from, to, reason }),
+    }),
+  deleteAbsence: (id: string) =>
+    request<void>(`/resources/absences/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
   sync: () => request<{ syncedAt: string; count: number; tasks: Task[] }>("/sync", { method: "POST" }),
 
   // AI planner. generatePlan is the slow one — it waits on the model — so callers

@@ -27,6 +27,8 @@ export interface Task {
   predecessors: Predecessor[];
   baselineStart: string | null;
   baselineDue: string | null;
+  /** Jira's original estimate in hours, when the team fills one in. */
+  estimateHours: number | null;
   jiraUrl: string;
 }
 

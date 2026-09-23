@@ -108,7 +108,21 @@ Token usage is stored **per message**, with Gemini's four counters kept in separ
 
 ### Assignment without a skills matrix
 
-`resource_profile` is the declared answer to "who does what" and on every real team it is empty. `ai/roleEvidence.ts` derives evidence from the project's own Jira history instead — which issues each person was assigned, and the words in those summaries. It reports evidence ("12 issues, words: api, endpoint"), never a conclusion ("Backend Developer"): a keyword count is weak, and a job title would hide how weak. The prompt tells the model to leave `assigneeAccountId` **empty** when nothing clearly fits — an unassigned task a human fills in beats a confident wrong assignment.
+`resource_profile` is the declared answer to "who does what", and until someone opens the Nguồn lực tab and fills it in it is empty. `ai/roleEvidence.ts` derives evidence from the project's own Jira history instead — which issues each person was assigned, and the words in those summaries. It reports evidence ("12 issues, words: api, endpoint"), never a conclusion ("Backend Developer"): a keyword count is weak, and a job title would hide how weak. The prompt tells the model to leave `assigneeAccountId` **empty** when nothing clearly fits — an unassigned task a human fills in beats a confident wrong assignment.
+
+### Resource view
+
+`resource_profile` and `resource_absence` (both via `server/src/resourceStore.ts`, exposed as `/api/resources`) hold the only two things Jira has no field for: how many hours a day a person actually has, and when they are away. Everything else about a person — name, avatar, account id — comes from `getAssignableUsers` on each load, so the tab is never a second, staling copy of Jira's directory. A person with no row gets `DEFAULT_CAPACITY_HOURS`, which makes an empty table a valid state rather than a setup step.
+
+**The load itself is computed on the client** (`client/src/resourceAllocation.ts`), from tasks `ProjectWorkspace` already holds. That is the whole reason it lives there: the heatmap has to recolour while a Gantt bar is still under the cursor, and a round trip per drag would reintroduce exactly the lag the cascade work removed. `buildResourceLoad()` produces one `DayLoad` per person per day, and the heatmap, the per-person grid and the toolbar badge are all views over that same array — a colour and a number can't disagree.
+
+Demand per day is `estimateHours / working days in the task's span`, falling back to a full working day when Jira has no `timeoriginalestimate` (most tasks). The fallback is what stops the sub-50% band from being dead code on a team that doesn't estimate. The rate is derived from the task's **whole** span, not the visible window, or scrolling the heatmap would change how loaded someone looks. Weekends and absence days have zero capacity; work landing on one is its own band (`off-violation`), louder than "busy", because nobody is going to do it.
+
+Two deliberate departures from a naive reading of "show who's overloaded":
+- **Four non-overlapping bands**, split at 50%: "green under 100%, yellow under 50%" overlap, and a 30% day would be both. Yellow means "has room for more work", which is a different message from green.
+- **`percentComplete` does not scale demand.** It's an overlay field most teams never fill in, and halving someone's load off a number nobody maintains hides real overload. Tasks Jira calls *done* drop out entirely — a finished task is not a claim on anyone's time.
+
+`findOverlaps()` survives alongside the hours model because it answers a different question: two half-day tasks on the same day are not an overload, but they are still two things at once, and the detail grid marks them.
 
 ### AI planner
 
