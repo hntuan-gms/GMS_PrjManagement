@@ -14,6 +14,12 @@ interface Props {
   onProfileSaved: (profile: ResourceProfile) => void;
   onAbsenceAdded: (absence: ResourceAbsence) => void;
   onAbsenceRemoved: (id: string) => void;
+  /** Dragging a row out of this panel is how work is taken off this person. */
+  onDragTask: (task: Task) => void;
+  droppable: boolean;
+  isDropTarget: boolean;
+  onDragOverPanel: () => void;
+  onDropOnPanel: () => void;
 }
 
 function pct(ratio: number): string {
@@ -44,6 +50,11 @@ export default function ResourcePersonPanel({
   onProfileSaved,
   onAbsenceAdded,
   onAbsenceRemoved,
+  onDragTask,
+  droppable,
+  isDropTarget,
+  onDragOverPanel,
+  onDropOnPanel,
 }: Props) {
   const [role, setRole] = useState(person.role ?? "");
   const [capacity, setCapacity] = useState(String(person.capacityHoursPerDay));
@@ -151,7 +162,22 @@ export default function ResourcePersonPanel({
   }
 
   return (
-    <div className="rv-panel">
+    <div
+      className={`rv-panel ${droppable ? "is-droppable" : ""} ${isDropTarget ? "is-drop-target" : ""}`}
+      onDragOver={(e) => {
+        if (!droppable) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        onDragOverPanel();
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        onDropOnPanel();
+      }}
+    >
+      {droppable && (
+        <div className="rv-drop-hint">Thả vào đây để giao việc cho {person.displayName}</div>
+      )}
       <div className="rv-panel-head">
         <div className="rv-panel-title">
           {person.avatarUrl ? (
@@ -286,8 +312,14 @@ export default function ResourcePersonPanel({
               <div
                 key={task.id}
                 className="rv-tl-row rv-tl-taskrow"
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.effectAllowed = "move";
+                  e.dataTransfer.setData("text/plain", task.id);
+                  onDragTask(task);
+                }}
                 onClick={() => onOpenEdit(task)}
-                title={`${task.id} · ${task.summary}`}
+                title={`${task.id} · ${task.summary} — kéo sang người khác để chuyển, kéo xuống vùng "chưa gán" để bỏ gán`}
               >
                 <div className="rv-tl-name">
                   {conflictIds.has(task.id) && <span className="rv-warn">⚠</span>}

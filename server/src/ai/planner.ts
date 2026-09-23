@@ -1,4 +1,5 @@
 import { GoogleGenAI, Type } from "@google/genai";
+import { isAssignableType } from "../types.js";
 import type { JiraUser, Predecessor, Task } from "../types.js";
 import { describeEvidence, inferRoleEvidence, type RoleEvidence } from "./roleEvidence.js";
 
@@ -165,11 +166,14 @@ function systemPrompt(input: PlannerInput): string {
     "   FS finish-to-start, SS start-together, FF finish-together, SF start-to-finish. lagDays is usually 0.",
     "5. Only create a dependency when the work genuinely cannot proceed otherwise. Do not chain everything linearly,",
     "   and never create a cycle.",
-    "6. assigneeAccountId must be an accountId copied from the team list. Judge fit from the declared profile and,",
+    "6. NEVER put an assigneeAccountId on an Epic or any other container/phase item — only on the leaf tasks",
+    "   underneath it. An Epic spans its children's whole date range, so assigning one books that person solid",
+    "   for the entire phase on top of the real work.",
+    "7. assigneeAccountId must be an accountId copied from the team list. Judge fit from the declared profile and,",
     "   where there is none, from what Jira history shows the person actually works on. Evidence is weak: a keyword",
     "   count is not a job title. When nobody clearly fits, leave it EMPTY — an unassigned task a human fills in is",
     "   far better than a confident wrong assignment. Do not invent people and do not put dates in any field.",
-    "7. Do NOT output dates or a schedule. Dates are computed from durations and dependencies by the caller.",
+    "8. Do NOT output dates or a schedule. Dates are computed from durations and dependencies by the caller.",
     "",
     `Allowed issue types for project ${input.projectKey}:`,
     types,
@@ -302,9 +306,17 @@ function normalize(raw: unknown[], input: PlannerInput, warnings: string[]): Dra
       warnings.push(`"${summary}": issue type "${proposedType}" is not in this project; used "${fallbackType}".`);
     }
 
-    const assignee = String(row.assigneeAccountId ?? "").trim();
+    const resolvedType = matched?.name ?? fallbackType ?? proposedType;
+    let assignee = String(row.assigneeAccountId ?? "").trim();
     if (assignee && !knownAccounts.has(assignee)) {
       warnings.push(`"${summary}": assignee was not on the team list and has been cleared.`);
+      assignee = "";
+    }
+    // A phase-level container never carries a person; the model is told so in
+    // the prompt, but constrained decoding guarantees shape, not obedience.
+    if (assignee && !isAssignableType(resolvedType)) {
+      warnings.push(`"${summary}": là ${resolvedType} nên đã bỏ người phụ trách — hãy gán cho công việc con.`);
+      assignee = "";
     }
 
     const duration = Number(row.durationDays);
@@ -313,9 +325,9 @@ function normalize(raw: unknown[], input: PlannerInput, warnings: string[]): Dra
       parentTempId: String(row.parentTempId ?? "").trim() || null,
       summary,
       description: String(row.description ?? "").trim() || null,
-      issueType: matched?.name ?? fallbackType ?? proposedType,
+      issueType: resolvedType,
       durationDays: Number.isFinite(duration) ? Math.max(1, Math.round(duration)) : 1,
-      assigneeAccountId: assignee && knownAccounts.has(assignee) ? assignee : null,
+      assigneeAccountId: assignee || null,
       dependencies: [],
       rationale: String(row.rationale ?? "").trim() || null,
     });

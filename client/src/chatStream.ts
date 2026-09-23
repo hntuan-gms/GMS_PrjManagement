@@ -14,6 +14,8 @@ export type ChatStreamEvent =
   | { type: "text"; text: string }
   | { type: "tool"; name: string; label: string }
   | { type: "plan"; runId: string; itemCount: number; warnings: string[] }
+  /** A tool wrote to Jira this turn — the workspace must reload its tasks. */
+  | { type: "mutated" }
   | { type: "usage"; usage: UsageStats & { model: string } }
   | { type: "done"; messageId: string; usage: UsageStats }
   | { type: "error"; message: string };

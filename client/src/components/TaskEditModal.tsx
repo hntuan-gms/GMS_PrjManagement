@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { isAssignableType } from "../types";
 import type { DependencyType, JiraUser, Predecessor, Task, TaskUpdateInput } from "../types";
 
 interface Props {
@@ -138,16 +139,25 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
             />
             <span>{percentComplete}%</span>
           </label>
+          {/* An Epic is a container, not work — see isAssignableType. Shown as a
+              disabled field with the reason rather than hidden, so the field
+              doesn't appear to vanish at random when switching between tasks. */}
           <label className="field">
             <span>Người phụ trách</span>
-            <select value={assigneeAccountId} onChange={(e) => setAssigneeAccountId(e.target.value)}>
-              <option value="">— Chưa gán —</option>
-              {users.map((u) => (
-                <option key={u.accountId} value={u.accountId}>
-                  {u.displayName}
-                </option>
-              ))}
-            </select>
+            {isAssignableType(task.issueType) ? (
+              <select value={assigneeAccountId} onChange={(e) => setAssigneeAccountId(e.target.value)}>
+                <option value="">— Chưa gán —</option>
+                {users.map((u) => (
+                  <option key={u.accountId} value={u.accountId}>
+                    {u.displayName}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span className="field-note">
+                Epic không gán người phụ trách — hãy gán cho các công việc con.
+              </span>
+            )}
           </label>
           <label className="field">
             <span>

@@ -1438,6 +1438,13 @@ button.danger:hover:not(:disabled) {
   border: 1px solid rgba(15, 23, 42, 0.12);
 }
 
+.field-note {
+  font-size: 12.5px;
+  color: var(--color-text-muted);
+  font-style: italic;
+  padding: 7px 0;
+}
+
 .rv-source {
   font-size: 12px;
   color: var(--color-text-muted);
@@ -1666,6 +1673,62 @@ button.danger:hover:not(:disabled) {
 .rv-chip-more {
   align-self: center;
   font-size: 12px;
+}
+
+/* --- drag and drop assignment --- */
+/* Only the row under the cursor gets the strong treatment; everything else that
+   would accept the drop gets a dashed hint, so the target is obvious without
+   the whole table flashing. */
+.rv-row-person.is-droppable {
+  outline: 1px dashed var(--color-primary-border);
+  outline-offset: -1px;
+}
+.rv-row-person.is-drop-target {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+.rv-row-person.is-drop-target .rv-name {
+  background: var(--color-primary-light);
+}
+
+.rv-chip[draggable="true"] {
+  cursor: grab;
+}
+.rv-chip[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+.rv-unassigned.is-droppable {
+  border-style: dashed;
+  border-color: var(--color-primary-border);
+}
+.rv-unassigned.is-drop-target {
+  border-style: solid;
+  border-color: var(--color-primary);
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+}
+
+.rv-panel.is-droppable {
+  border-color: var(--color-primary-border);
+}
+.rv-panel.is-drop-target {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-light), var(--shadow-md);
+}
+.rv-drop-hint {
+  padding: 7px 12px;
+  border-radius: var(--radius-md);
+  background: var(--color-primary-light);
+  border: 1px dashed var(--color-primary-border);
+  color: var(--color-primary);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.rv-tl-taskrow[draggable="true"] .rv-tl-name {
+  cursor: grab;
 }
 
 /* --- person detail panel --- */

@@ -148,6 +148,9 @@ aiRouter.post("/chat", requireProject, async (req, res) => {
     let usage: ChatUsage | null = null;
 
     const stream = streamChat(session.projectKey!, tasks, priorTurns, message, todayIso(), {
+      taskService: taskService!,
+      cloudId: session.cloudId,
+      projectKey: session.projectKey!,
       createPlan: async (brief, startDate) => {
         const runId = await plans.createRun(session.cloudId, session.projectKey!, session.accountId, brief);
         try {

@@ -8,6 +8,20 @@ export interface Predecessor {
 
 export type IssueTypeName = "Epic" | "Story" | "Task" | "Bug" | "Sub-task";
 
+/**
+ * An Epic is a container, not a unit of work, so it takes no assignee.
+ *
+ * Enforced rather than merely discouraged because an assigned Epic corrupts
+ * every workload number downstream: its span is its children's full min/max
+ * (see ganttMapping.resolveRanges), so one Epic would book its owner solid for
+ * the length of the whole phase on top of the children they are actually doing.
+ *
+ * Mirrored in client/src/types.ts — keep both in step.
+ */
+export function isAssignableType(issueType: string | null | undefined): boolean {
+  return (issueType ?? "").toLowerCase() !== "epic";
+}
+
 /** Internal Task model — MS Project style, backed by a Jira issue plus a local schedule overlay. */
 export interface Task {
   id: string; // Jira issue key

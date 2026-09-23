@@ -6,6 +6,12 @@ import type { ChatMessage, UsageStats } from "../types";
 interface Props {
   /** Opens the human-check table for a plan the assistant produced. */
   onOpenPlan: (runId: string) => void;
+  /**
+   * The assistant's write tools (create_task, assign_task) change Jira behind
+   * the workspace's back, so it has to reload — nothing else in the app knows
+   * a task appeared or changed owner.
+   */
+  onProjectChanged: () => void;
 }
 
 /** A turn being streamed right now — not yet in the persisted transcript. */
@@ -37,7 +43,7 @@ function formatTokens(n: number): string {
  * real answer can be ten seconds away when the model is thinking or building a
  * plan, and an empty panel for that long reads as a hang.
  */
-export default function ChatDock({ onOpenPlan }: Props) {
+export default function ChatDock({ onOpenPlan, onProjectChanged }: Props) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(() => localStorage.getItem(SESSION_KEY));
@@ -123,6 +129,8 @@ export default function ChatDock({ onOpenPlan }: Props) {
           turn = { ...turn, toolLabel: event.label };
         } else if (event.type === "plan") {
           turn = { ...turn, planRunId: event.runId, planItemCount: event.itemCount, toolLabel: null };
+        } else if (event.type === "mutated") {
+          onProjectChanged();
         } else if (event.type === "done") {
           setUsage(event.usage);
         } else if (event.type === "error") {

@@ -2,6 +2,8 @@ import { getProjectMembers, type ProjectMembers } from "./projectMembers.js";
 import { adfToText, textToAdf } from "./adf.js";
 import { JiraApiError, type JiraClient } from "./jiraClient.js";
 import * as store from "./store.js";
+import { isAssignableType } from "./types.js";
+import { badRequest } from "./errors.js";
 import type {
   BulkTaskCreateInput,
   BulkTaskCreateResult,
@@ -287,6 +289,18 @@ export class TaskService {
       await this.jira.getIssue(id);
     }
     if (input.assigneeAccountId !== undefined) {
+      // Costs an extra read, but only when someone is actually being put on a
+      // task: the issue type is not in the overlay, and this is the one choke
+      // point every assignment goes through — the modals, the resource tab's
+      // drag-and-drop and the assistant's assign_task tool alike.
+      if (input.assigneeAccountId !== null) {
+        const type = (await this.jira.getIssue(id)).fields?.issuetype?.name;
+        if (!isAssignableType(type)) {
+          throw badRequest(
+            `${id} là Epic nên không gán người phụ trách được. Hãy gán cho các công việc con của nó.`
+          );
+        }
+      }
       await this.jira.assignIssue(id, input.assigneeAccountId);
     }
     if (input.statusTransition) {
@@ -554,6 +568,13 @@ export class TaskService {
   }
 
   async createTask(input: TaskCreateInput): Promise<Task> {
+    // An Epic never carries an assignee (see isAssignableType). Dropped rather
+    // than rejected here: a caller asking for "an Epic for phase 2, owner Minh"
+    // means Minh leads it, and failing the whole creation over a field we are
+    // going to ignore anyway helps nobody.
+    const assigneeAccountId = isAssignableType(input.issueType)
+      ? input.assigneeAccountId ?? null
+      : null;
     const durationDays = input.durationDays ?? 3;
     const startDate = input.startDate ?? null;
     const dueDate =
@@ -568,7 +589,7 @@ export class TaskService {
       dueDate,
       startDate,
       startDateFieldId: this.ctx.startDateFieldId,
-      assigneeAccountId: input.assigneeAccountId ?? null,
+      assigneeAccountId,
     });
     const key = created.key;
 
@@ -624,7 +645,7 @@ export class TaskService {
       dueDate,
       startDate: input.startDate,
       startDateFieldId: this.ctx.startDateFieldId,
-      assigneeAccountId: input.assigneeAccountId,
+      assigneeAccountId: isAssignableType(input.issueType) ? input.assigneeAccountId : null,
     });
 
     await store.setOverlay(this.ctx.cloudId, created.key, {

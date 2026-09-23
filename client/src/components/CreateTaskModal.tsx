@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { isAssignableType } from "../types";
 import type { BulkTaskCreateInput, BulkTaskCreateResult, IssueTypeName, JiraUser, Task } from "../types";
 
 interface Props {
@@ -309,14 +310,20 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate }: Pro
           </label>
           <label className="field">
             <span className="field-label-text">Người phụ trách</span>
-            <select value={assigneeAccountId} onChange={(e) => setAssigneeAccountId(e.target.value)}>
-              <option value="">— Chưa gán —</option>
-              {users.map((u) => (
-                <option key={u.accountId} value={u.accountId}>
-                  {u.displayName}
-                </option>
-              ))}
-            </select>
+            {isAssignableType(issueType) ? (
+              <select value={assigneeAccountId} onChange={(e) => setAssigneeAccountId(e.target.value)}>
+                <option value="">— Chưa gán —</option>
+                {users.map((u) => (
+                  <option key={u.accountId} value={u.accountId}>
+                    {u.displayName}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span className="field-note">
+                Epic không gán người phụ trách — hãy gán cho các công việc con.
+              </span>
+            )}
           </label>
         </div>
 

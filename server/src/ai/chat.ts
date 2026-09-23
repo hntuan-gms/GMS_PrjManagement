@@ -1,6 +1,7 @@
-import { GoogleGenAI, Type, type Content, type FunctionDeclaration } from "@google/genai";
+import { GoogleGenAI, type Content } from "@google/genai";
 import type { Task } from "../types.js";
 import { activeModel } from "./planner.js";
+import { TOOLS, labelFor, runTool, type ToolContext } from "./tools.js";
 
 /**
  * The project assistant: a streaming chat that can answer questions about the
@@ -36,34 +37,10 @@ export type ChatEvent =
   | { type: "text"; text: string }
   | { type: "tool"; name: string; label: string }
   | { type: "plan"; runId: string; itemCount: number; warnings: string[] }
+  /** A tool wrote to Jira; the client must reload the project. */
+  | { type: "mutated" }
   | { type: "usage"; usage: ChatUsage }
   | { type: "error"; message: string };
-
-const CREATE_PLAN: FunctionDeclaration = {
-  name: "create_plan",
-  description:
-    "Break a project or a body of work into a reviewable work breakdown structure with durations, " +
-    "dependencies and suggested assignees. Use this whenever the user asks for a plan, a schedule, " +
-    "a WBS, or to split work into tasks. The result is a proposal a human reviews before anything " +
-    "is created in Jira.",
-  parameters: {
-    type: Type.OBJECT,
-    properties: {
-      brief: {
-        type: Type.STRING,
-        description:
-          "A self-contained description of what to plan: goals, scope, technology, constraints and " +
-          "deadline. Expand on what the user said using the conversation so far; do not just copy " +
-          "their last message.",
-      },
-      startDate: {
-        type: Type.STRING,
-        description: "Day 1 of the plan as YYYY-MM-DD. Use today unless the user named a date.",
-      },
-    },
-    required: ["brief"],
-  },
-};
 
 /**
  * A compact view of the project for the prompt.
@@ -103,15 +80,44 @@ function projectSnapshot(tasks: Task[], today: string, limit = 150): string {
     .join("\n");
 }
 
+/**
+ * Issue types actually in use in this project.
+ *
+ * Read off the snapshot rather than asked of Jira: /project/{key}/issuetypes is
+ * another round trip on every single message, and a type nobody has ever used is
+ * not one the model should be reaching for anyway. If it picks a wrong one,
+ * create_task's 400 comes back as a tool error the model can correct from.
+ */
+function issueTypesInUse(tasks: Task[]): string {
+  const names = [...new Set(tasks.map((t) => t.issueType).filter(Boolean))];
+  return names.length > 0 ? names.join(", ") : "Task, Story, Bug, Epic";
+}
+
 function systemPrompt(projectKey: string, tasks: Task[], today: string): string {
   return [
     `Bạn là trợ lý quản lý dự án cho project Jira "${projectKey}". Trả lời bằng tiếng Việt, ngắn gọn, đi thẳng vào việc.`,
     "",
     "Nguyên tắc:",
-    "- Chỉ trả lời dựa trên dữ liệu dự án bên dưới. Không có dữ liệu thì nói thẳng là không biết, tuyệt đối không bịa số.",
+    "- Chỉ trả lời dựa trên dữ liệu dự án bên dưới hoặc kết quả công cụ. Không có dữ liệu thì nói thẳng là không biết, tuyệt đối không bịa số.",
     "- Khi nói về tiến độ, dẫn ra mã công việc cụ thể (ví dụ AI-12) để người dùng kiểm chứng được.",
-    "- Khi người dùng muốn lập kế hoạch/chia việc, gọi công cụ create_plan. Không tự liệt kê kế hoạch dạng văn bản.",
     "- Không tự tính hay hứa hẹn ngày tháng ngoài những gì dữ liệu đã có.",
+    "",
+    "Công cụ:",
+    "- Chia một khối công việc lớn thành nhiều task → create_plan. Kết quả là bản nháp chờ người duyệt, KHÔNG tự lên Jira.",
+    "  Đừng tự liệt kê kế hoạch dạng văn bản thay cho công cụ này.",
+    "- Người dùng yêu cầu thêm ĐÚNG MỘT công việc cụ thể → create_task. Cái này ghi thẳng lên Jira,",
+    `  nên chỉ gọi khi người dùng thực sự bảo tạo. Loại issue đang dùng trong dự án: ${issueTypesInUse(tasks)}.`,
+    "- Gán/đổi người phụ trách → assign_task. Bỏ gán → unassign_task.",
+    "- Trước khi gán ai, hãy gọi suggest_assignees để xem ai ít trùng lịch nhất; đừng đoán.",
+    "  Hỏi 'ai đang rảnh', 'ai quá tải' → team_workload.",
+    "",
+    "Quy tắc gán người:",
+    "- TUYỆT ĐỐI không gán người cho Epic. Epic là vùng chứa, trải dài toàn bộ thời gian của các công việc con,",
+    "  gán người vào đó sẽ khoá cứng lịch của họ suốt cả giai đoạn. Chỉ gán cho task/story/bug lá.",
+    "- Khi người dùng không chỉ đích danh ai, ưu tiên người có ÍT NGÀY TRÙNG LỊCH nhất, rồi mới đến người tải thấp hơn.",
+    "  Người tải trung bình thấp vẫn có thể kẹt cứng đúng tuần cần làm — hãy đọc conflictDays, đừng chỉ nhìn loadPercent.",
+    "- Nói rõ vì sao chọn người đó (số ngày trùng, giờ còn trống) để người dùng phản biện được.",
+    "- Sau khi tạo hoặc gán xong, nhắc lại mã issue vừa tác động.",
     "",
     "Dữ liệu dự án:",
     projectSnapshot(tasks, today),
@@ -124,15 +130,8 @@ function client(): GoogleGenAI {
   return new GoogleGenAI({ apiKey });
 }
 
-export interface ChatDeps {
-  /** Runs the planner and stages the result; returns what to tell the model. */
-  createPlan: (brief: string, startDate: string) => Promise<{
-    runId: string;
-    itemCount: number;
-    warnings: string[];
-    summary: string;
-  }>;
-}
+/** Everything the tools need that this module has no business knowing about. */
+export type ChatDeps = Omit<ToolContext, "tasks" | "today" | "mutated" | "workload">;
 
 /**
  * Streams one assistant turn, yielding events as they arrive.
@@ -153,6 +152,10 @@ export async function* streamChat(
   const model = activeModel();
   const ai = client();
 
+  // One context for the whole turn: tools append the tasks they create and share
+  // a single workload build, so two calls in one turn see each other's effects.
+  const toolCtx: ToolContext = { ...deps, tasks: [...tasks], today, mutated: false };
+
   const contents: Content[] = [
     ...history.map((turn) => ({ role: turn.role, parts: [{ text: turn.content }] })),
     { role: "user", parts: [{ text: userMessage }] },
@@ -160,7 +163,7 @@ export async function* streamChat(
 
   const config = {
     systemInstruction: systemPrompt(projectKey, tasks, today),
-    tools: [{ functionDeclarations: [CREATE_PLAN] }],
+    tools: [{ functionDeclarations: TOOLS }],
     thinkingConfig: { includeThoughts: true },
     temperature: 0.3,
   };
@@ -218,27 +221,25 @@ export async function* streamChat(
     const responseParts: Array<Record<string, unknown>> = [];
 
     for (const call of calls) {
-      if (call.name !== CREATE_PLAN.name) {
-        responseParts.push({
-          functionResponse: { name: call.name, response: { error: "Công cụ không tồn tại." } },
-        });
-        continue;
-      }
-      yield { type: "tool", name: call.name, label: "Đang lập kế hoạch..." };
+      yield { type: "tool", name: call.name, label: labelFor(call.name) };
       try {
-        const brief = String(call.args.brief ?? "").trim();
-        const startDate = String(call.args.startDate ?? "").trim() || today;
-        const plan = await deps.createPlan(brief, startDate);
-        yield {
-          type: "plan",
-          runId: plan.runId,
-          itemCount: plan.itemCount,
-          warnings: plan.warnings,
-        };
+        const outcome = await runTool(call.name, call.args, toolCtx);
+        if (outcome.plan) {
+          yield {
+            type: "plan",
+            runId: outcome.plan.runId,
+            itemCount: outcome.plan.itemCount,
+            warnings: outcome.plan.warnings,
+          };
+        }
         responseParts.push({
-          functionResponse: { name: call.name, response: { result: plan.summary } },
+          functionResponse: { name: call.name, response: outcome.response },
         });
       } catch (err) {
+        // The model gets the failure too, not just the user: told that
+        // assign_task failed, it can explain or try someone else, whereas a
+        // silently dropped tool result makes it narrate a success that never
+        // happened.
         const message = (err as Error).message;
         yield { type: "error", message };
         responseParts.push({ functionResponse: { name: call.name, response: { error: message } } });
@@ -247,5 +248,6 @@ export async function* streamChat(
     contents.push({ role: "user", parts: responseParts as never });
   }
 
+  if (toolCtx.mutated) yield { type: "mutated" };
   yield { type: "usage", usage };
 }

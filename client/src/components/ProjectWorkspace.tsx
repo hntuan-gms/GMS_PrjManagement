@@ -329,6 +329,45 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
     }
   }
 
+  /**
+   * Drag-and-drop assignment from the resource tab: drop a task on a person to
+   * give it to them, drop it on the unassigned strip to take it back.
+   *
+   * Optimistic like every other mutation here, and for the same reason — the
+   * heatmap recolours from `tasks`, so waiting for Jira would leave the cell the
+   * user just dropped onto showing its old load for a second or two. `users` is
+   * consulted for the display name because the optimistic task has to carry one:
+   * the resource rows key off assigneeAccountId but the Gantt shows the name.
+   */
+  async function handleAssign(taskId: string, accountId: string | null) {
+    const task = tasks.find((t) => t.id === taskId);
+    if (!task || task.assigneeAccountId === accountId) return;
+
+    const seq = nextSeq();
+    const person = accountId ? users.find((u) => u.accountId === accountId) ?? null : null;
+    setTasks((prev) =>
+      prev.map((t) =>
+        t.id === taskId
+          ? {
+              ...t,
+              assigneeAccountId: accountId,
+              assigneeName: person?.displayName ?? null,
+              assigneeAvatarUrl: person?.avatarUrl ?? null,
+            }
+          : t
+      )
+    );
+    taskVersion.current.set(taskId, seq);
+    try {
+      const updated = await api.updateTask(taskId, { assigneeAccountId: accountId });
+      setTasks((prev) => applyTaskUpdate(prev, updated, seq));
+    } catch (e) {
+      if ((taskVersion.current.get(taskId) ?? 0) > seq) return;
+      setSyncError(e instanceof Error ? e.message : "Không thể gán người phụ trách.");
+      await refreshTasks();
+    }
+  }
+
   /** Drag-to-connect on the Gantt chart: successorId gets predecessorId added to its list. */
   async function handleAddDependency(successorId: string, predecessorId: string, type: DependencyType) {
     const successor = tasks.find((t) => t.id === successorId);
@@ -479,6 +518,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
             pool={pool}
             poolError={poolError}
             onPoolChange={setPool}
+            onAssign={handleAssign}
             onOpenEdit={setEditingTask}
           />
         )}
@@ -502,7 +542,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
         />
       )}
 
-      <ChatDock onOpenPlan={setReviewRunId} />
+      <ChatDock onOpenPlan={setReviewRunId} onProjectChanged={refreshTasks} />
 
       {reviewRunId && (
         <PlanReviewModal

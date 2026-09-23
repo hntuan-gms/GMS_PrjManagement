@@ -20,8 +20,25 @@ interface Props {
   pool: ResourcePool | null;
   poolError: string | null;
   onPoolChange: (next: ResourcePool) => void;
+  /** null as accountId means "take it off whoever holds it". */
+  onAssign: (taskId: string, accountId: string | null) => void;
   onOpenEdit: (task: Task) => void;
 }
+
+/**
+ * The dragged task, held in React state rather than read back out of the
+ * DataTransfer: `getData` is write-only during dragover in Chrome and Safari,
+ * and the drop targets need to know what is coming to decide whether to light
+ * up at all (dropping a task on the person who already holds it is a no-op).
+ */
+interface DragState {
+  taskId: string;
+  summary: string;
+  fromAccountId: string | null;
+}
+
+/** Sentinel for the "remove from whoever holds it" drop zone. */
+const UNASSIGNED_ZONE = "__unassigned__";
 
 /** Above this many days the heatmap switches to week columns — see aggregateWeeks. */
 const WEEK_THRESHOLD = 45;
@@ -56,8 +73,11 @@ export default function ResourceView({
   pool,
   poolError,
   onPoolChange,
+  onAssign,
   onOpenEdit,
 }: Props) {
+  const [drag, setDrag] = useState<DragState | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Everyone on the project by default. Showing only people who already hold
   // dated work makes the tab go blank on a project nobody has assigned yet,
@@ -131,8 +151,27 @@ export default function ResourceView({
     onPoolChange({ ...pool, absences: pool.absences.filter((a) => a.id !== id) });
   }
 
+  function beginDrag(task: Task) {
+    setDrag({ taskId: task.id, summary: task.summary, fromAccountId: task.assigneeAccountId });
+  }
+
+  function endDrag() {
+    setDrag(null);
+    setDropTarget(null);
+  }
+
+  /** A drop only counts when it would actually change who holds the task. */
+  function canDropOn(accountId: string | null): boolean {
+    return drag !== null && drag.fromAccountId !== accountId;
+  }
+
+  function dropOn(accountId: string | null) {
+    if (drag && canDropOn(accountId)) onAssign(drag.taskId, accountId);
+    endDrag();
+  }
+
   return (
-    <div className="resource-view">
+    <div className="resource-view" onDragEnd={endDrag}>
       <div className="rv-controls">
         <div className="rv-range">
           <label>
@@ -251,18 +290,54 @@ export default function ResourceView({
                 onSelect={() =>
                   setSelectedId((cur) => (cur === person.accountId ? null : person.accountId))
                 }
+                droppable={canDropOn(person.accountId)}
+                isDropTarget={dropTarget === person.accountId}
+                onDragOver={() => setDropTarget(person.accountId)}
+                onDrop={() => dropOn(person.accountId)}
               />
             ))}
           </div>
         </div>
       )}
 
-      {load.unassigned.length > 0 && (
-        <div className="rv-unassigned">
-          <strong>{load.unassigned.length} công việc chưa có người phụ trách</strong>
+      {/* Mounted whenever something is being dragged, even with nothing
+          unassigned: it is the only place to drop a task in order to take it
+          off someone, so it cannot appear only when it already has contents. */}
+      {(load.unassigned.length > 0 || drag !== null) && (
+        <div
+          className={`rv-unassigned ${canDropOn(null) ? "is-droppable" : ""} ${
+            dropTarget === UNASSIGNED_ZONE ? "is-drop-target" : ""
+          }`}
+          onDragOver={(e) => {
+            if (!canDropOn(null)) return;
+            e.preventDefault();
+            setDropTarget(UNASSIGNED_ZONE);
+          }}
+          onDragLeave={() => setDropTarget((cur) => (cur === UNASSIGNED_ZONE ? null : cur))}
+          onDrop={(e) => {
+            e.preventDefault();
+            dropOn(null);
+          }}
+        >
+          <strong>
+            {drag && canDropOn(null)
+              ? `Thả vào đây để bỏ gán "${drag.summary}"`
+              : `${load.unassigned.length} công việc chưa có người phụ trách`}
+          </strong>
           <div className="rv-unassigned-list">
             {load.unassigned.slice(0, 12).map((t) => (
-              <button key={t.id} className="rv-chip" onClick={() => onOpenEdit(t)}>
+              <button
+                key={t.id}
+                className="rv-chip"
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.effectAllowed = "move";
+                  e.dataTransfer.setData("text/plain", t.id);
+                  beginDrag(t);
+                }}
+                onClick={() => onOpenEdit(t)}
+                title="Kéo thả lên một thành viên để gán"
+              >
                 {t.id} · {t.summary}
               </button>
             ))}
@@ -284,6 +359,11 @@ export default function ResourceView({
           onProfileSaved={upsertProfile}
           onAbsenceAdded={addAbsence}
           onAbsenceRemoved={removeAbsence}
+          onDragTask={beginDrag}
+          droppable={canDropOn(selected.accountId)}
+          isDropTarget={dropTarget === selected.accountId}
+          onDragOverPanel={() => setDropTarget(selected.accountId)}
+          onDropOnPanel={() => dropOn(selected.accountId)}
         />
       )}
     </div>
@@ -402,12 +482,20 @@ function PersonRow({
   today,
   selected,
   onSelect,
+  droppable,
+  isDropTarget,
+  onDragOver,
+  onDrop,
 }: {
   person: PersonLoad;
   byWeek: boolean;
   today: string;
   selected: boolean;
   onSelect: () => void;
+  droppable: boolean;
+  isDropTarget: boolean;
+  onDragOver: () => void;
+  onDrop: () => void;
 }) {
   const cells = byWeek
     ? aggregateWeeks(person.days).map((w) => ({
@@ -432,7 +520,24 @@ function PersonRow({
       }));
 
   return (
-    <div className={`rv-row rv-row-person ${selected ? "is-selected" : ""}`} onClick={onSelect}>
+    <div
+      className={`rv-row rv-row-person ${selected ? "is-selected" : ""} ${
+        droppable ? "is-droppable" : ""
+      } ${isDropTarget ? "is-drop-target" : ""}`}
+      onClick={onSelect}
+      // preventDefault on dragover is what marks an element as a drop target at
+      // all; without it the browser refuses the drop and fires nothing.
+      onDragOver={(e) => {
+        if (!droppable) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        onDragOver();
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        onDrop();
+      }}
+    >
       <div className="rv-name">
         {person.avatarUrl ? (
           <img src={person.avatarUrl} alt="" className="rv-avatar" />

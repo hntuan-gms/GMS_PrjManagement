@@ -9,8 +9,8 @@
 import type { Request, Response } from "express";
 import {
   ACCESS_COOKIE,
-  OAUTH_COOKIE,
   SESSION_COOKIE,
+  oauthCookieName,
   parseCookies,
   setSealedCookie,
 } from "./cookies.js";
@@ -69,9 +69,14 @@ export function readAccess(req: Request, session: SessionData): AccessData | nul
   return access;
 }
 
-export function readOAuthFlow(req: Request): OAuthFlowData | null {
+/**
+ * `state` is what Atlassian echoes back on the callback query string — the
+ * caller must extract it from `req.query.state` itself before this can run,
+ * since it picks which of possibly several concurrent flows' cookies to read.
+ */
+export function readOAuthFlow(req: Request, state: string): OAuthFlowData | null {
   const cookies = parseCookies(req);
-  const flow = unseal<OAuthFlowData>(OAUTH_COOKIE, cookies[OAUTH_COOKIE]);
+  const flow = unseal<OAuthFlowData>("gms_oauth", cookies[oauthCookieName(state)]);
   if (!flow || flow.v !== 1) return null;
   if (Date.now() - flow.createdAt > OAUTH_MAX_AGE_MS) return null;
   return flow;
@@ -106,5 +111,8 @@ export function commitAccess(res: Response, access: AccessData): void {
 }
 
 export function commitOAuthFlow(res: Response, flow: OAuthFlowData): void {
-  setSealedCookie(res, OAUTH_COOKIE, flow, OAUTH_MAX_AGE_MS, "/api/auth");
+  // Named after this flow's own state (see oauthCookieName) so starting another
+  // login elsewhere — a second tab, a different Atlassian account — gets its own
+  // cookie instead of overwriting this one.
+  setSealedCookie(res, "gms_oauth", flow, OAUTH_MAX_AGE_MS, "/api/auth", oauthCookieName(flow.state));
 }

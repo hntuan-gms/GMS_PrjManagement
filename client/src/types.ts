@@ -8,6 +8,16 @@ export interface Predecessor {
 
 export type IssueTypeName = "Epic" | "Story" | "Task" | "Bug" | "Sub-task";
 
+/**
+ * An Epic is a container, not a unit of work, so it takes no assignee — the
+ * server rejects one either way (server/src/types.ts holds the same rule and
+ * the reasoning). The UI uses this to hide the field rather than let someone
+ * pick a person and have the save fail.
+ */
+export function isAssignableType(issueType: string | null | undefined): boolean {
+  return (issueType ?? "").toLowerCase() !== "epic";
+}
+
 export interface Task {
   id: string;
   wbsParentId: string | null;

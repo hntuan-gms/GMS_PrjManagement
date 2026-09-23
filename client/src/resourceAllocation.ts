@@ -1,3 +1,4 @@
+import { isAssignableType } from "./types";
 import type { JiraUser, ResourceAbsence, ResourceProfile, Task } from "./types";
 
 /**
@@ -218,7 +219,11 @@ export function buildResourceLoad(input: LoadInput): ResourceLoad {
     absencesByAccount.set(a.accountId, list);
   }
 
-  const open = input.tasks.filter((t) => t.statusCategory !== "done");
+  // Epics are excluded outright, not merely expected to be unassigned: an Epic
+  // spans its children's entire min/max range (ganttMapping.resolveRanges), so
+  // one left over from before this rule existed would book its owner solid for
+  // a whole phase on top of the child tasks they are actually doing.
+  const open = input.tasks.filter((t) => t.statusCategory !== "done" && isAssignableType(t.issueType));
   const byAccount = new Map<string, Task[]>();
   const unassigned: Task[] = [];
   for (const t of open) {

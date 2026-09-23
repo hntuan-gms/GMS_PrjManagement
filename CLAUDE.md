@@ -72,6 +72,12 @@ Dependencies are one row per edge in `task_dependency`, not a JSON array on the 
 
 `store` is deliberately **batch-first**: `getProjectOverlays()` loads a whole project in two queries and `setOverlays()` writes many rows in one. A per-task read was free against the old JSON file but is a round trip against Postgres, so `listTasks()` reconciles in memory and persists once — `reconcile()` is pure for exactly that reason, with the write left to its caller.
 
+### Epics carry no assignee
+
+`isAssignableType()` lives in **both** `server/src/types.ts` and `client/src/types.ts` and says the same thing: an Epic is a container, not work. It is enforced, not merely discouraged, because an assigned Epic corrupts every workload number downstream — an Epic's bar spans its children's full min/max (`ganttMapping.resolveRanges`), so one Epic would book its owner solid for the length of the whole phase *on top of* the children they are actually doing.
+
+Enforced at every entrance: `createTask` and `createFromPlan` drop the field (a caller saying "an Epic for phase 2, owner Minh" means Minh leads it — failing the creation over a field we ignore helps nobody), `planner.normalize()` clears it with a reviewer warning, and `updateTask` **rejects** it with a 400. That last one costs an extra `getIssue`, but only when someone is actually being put on a task: issue type is not in the overlay, and `updateTask` is the single choke point every assignment goes through — both modals, the resource tab's drag-and-drop and the assistant's `assign_task` alike. `buildResourceLoad`/`buildWorkload` also skip Epics outright rather than trusting the rule, so data predating it can't poison the heatmap.
+
 ### Authentication
 
 `server/src/auth/` holds the whole OAuth layer. Sessions are **stateless sealed cookies** (AES-256-GCM via `node:crypto` — no new dependencies) rather than a server-side map, because Cloud Run replaces the container on every deploy and scales to zero, so in-memory sessions would log everyone out several times a day.
@@ -81,6 +87,7 @@ Three things there are load-bearing and easy to "harden" into an outage:
 - **`SameSite=Lax`, never `Strict`.** The OAuth callback is a top-level cross-site navigation from `auth.atlassian.com`; `Strict` withholds the cookie and every single login fails the state check.
 - **Refresh happens eagerly in `requireAuth`, before `next()`.** Atlassian rotates refresh tokens, and `res.cookie()` after `res.json()` is a silent no-op — dropping a rotated token logs the user out on their next request with no way to diagnose it. `auth/tokens.ts` also single-flights concurrent refreshes and keeps a ~120s grace cache for the window where a second request still carries the pre-rotation cookie.
 - **`requireAuth` is mounted with `apiRouter.use`**, so a route added later is protected by default. The Cloud Run service is publicly invokable — it has to be, or the callback navigation is rejected by IAM before Express runs — which makes this middleware plus `ALLOWED_EMAIL_DOMAIN` the only access control in front of Jira.
+- **The OAuth flow cookie is keyed per `state`, not one fixed name.** `server/src/auth/cookies.ts`'s `oauthCookieName(state)` names it `gms_oauth_<state>`. A single fixed name used to mean exactly one login could be in flight per browser: starting a second `/login` (a new tab, trying a different Atlassian account) silently overwrote the first attempt's state+PKCE verifier, so the first tab's callback came back to a cookie that no longer matched — `invalid_state`, unrecoverable, because the redirect to Atlassian had already happened. `state` is already unguessable and cookie-name-safe (base64url), so it doubles as the lookup key with no hashing; the sealed cookie *value* is still what proves authenticity, this only decides which value to read. `/callback` clears only the one cookie named after the `state` Atlassian echoed back, so a login still in progress in another tab is untouched.
 
 `TaskService` is constructed **per request** from the session. There is no module-level singleton and no process-wide Jira identity.
 
@@ -95,6 +102,10 @@ Jira write failures during a cascade are collected and returned as `cascadeWarni
 All dates are `YYYY-MM-DD` strings. Server arithmetic (`addDays`, `diffDaysInclusive` in `taskService.ts`) is UTC-based. The client must **not** use `toISOString()` on a local-midnight `Date` — in UTC+7 that rolls back a day (BUG-04). `GanttView.toIso()` uses local getters deliberately; `TaskEditModal` computes in UTC to match the server. Duration is inclusive: due = start + duration − 1.
 
 ### Assistant (chat)
+
+`server/src/ai/tools.ts` is the tool registry, and the split inside it is the design. **Read tools** (`suggest_assignees`, `team_workload`) are free to call and are what make the write tools worth having — the prompt tells the model to consult them before putting anyone on anything. **Write tools** (`create_task`, `assign_task`, `unassign_task`) reach Jira directly, one issue at a time, because that is what "tạo giúp tôi một task" means and staging a single issue for approval is ceremony. `create_plan` remains the path for anything bigger: a whole breakdown still lands in `ai_plan_run` for a human, because forty issues created from a misread sentence is a different kind of mistake than one. Any write sets `mutated`, which the stream reports once per turn as a `mutated` event and `ChatDock` turns into a `refreshTasks()` — nothing else in the app would know a task appeared or changed owner.
+
+Auto-assignment (`autoAssign`, or `assign_task` with `auto: true`) ranks candidates by **fewest conflicting days first**, then by load. "Least loaded overall" is the obvious rule and the wrong one: someone at 40% for the month can still be double-booked in exactly the week the task needs, and a monthly average hides that completely. Nobody is filtered out for being busy — a fully booked team still has to do the work, and an empty list just makes the model invent something — so the conflict cost is reported instead and the model is told to say out loud why it picked someone. Tools share one `ToolContext` per turn, so a second `create_task` sees that the first already booked someone's week (`commitAssignment`).
 
 `ChatDock` docks bottom-right, collapsed to a pill. Planning is a **tool the assistant calls**, not a separate mode: "chia việc giúp tôi" and "dự án trễ mấy task?" are the same kind of request from the user's side, and making them pick a mode first pushes the classification onto them.
 
@@ -127,6 +138,10 @@ Two deliberate departures from a naive reading of "show who's overloaded":
 - **`percentComplete` does not scale demand.** It's an overlay field most teams never fill in, and halving someone's load off a number nobody maintains hides real overload. Tasks Jira calls *done* drop out entirely — a finished task is not a claim on anyone's time.
 
 `findOverlaps()` survives alongside the hours model because it answers a different question: two half-day tasks on the same day are not an overload, but they are still two things at once, and the detail grid marks them.
+
+`server/src/workload.ts` is the server's **mirror** of the same model, the arrangement `earliestStartFor`/`dependencyCascade.ts` already uses. The client copy owns everything about *presenting* load (colour bands, week aggregation, overlap pairs); the server copy owns only the numbers needed to answer "who should take this?", so the duplicated surface is three rules — zero capacity on weekends and absences, hours spread across a task's own working days, no estimate means one full day — and nothing else. Change those three in both files.
+
+**Assignment is drag-and-drop** in the resource tab: drop a task on a person's heatmap row or on the open detail panel to give it to them, drop it on the unassigned strip to take it back. That strip is mounted whenever a drag is in progress even when it is empty, since it is the only place to drop a task in order to unassign it. The drag payload is held in React state rather than read back from the `DataTransfer` — `getData` is write-only during `dragover` in Chrome and Safari, and the targets need to know what is coming to decide whether to light up at all. `handleAssign` in `ProjectWorkspace` is optimistic through the same `seq`/`taskVersion` guard as every other mutation, because the heatmap recolours from `tasks` and waiting for Jira would leave the cell the user just dropped onto showing its old load.
 
 ### AI planner
 

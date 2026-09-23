@@ -8,7 +8,30 @@ import { seal, type SealPurpose } from "./crypto.js";
 
 export const SESSION_COOKIE = "gms_sess";
 export const ACCESS_COOKIE = "gms_at";
+
+/**
+ * A prefix, not a cookie name — see `oauthCookieName`. A single fixed name here
+ * used to mean exactly one login could be in flight per browser at a time. That
+ * broke on a machine with more than one Atlassian account: starting a second
+ * /login (a new tab, "try a different account") overwrote the first attempt's
+ * state before its callback ran, so the first tab came back to /callback with a
+ * state the (now-overwritten) cookie no longer held — an `invalid_state` error,
+ * and unrecoverable since the redirect back to Atlassian had already happened.
+ */
 export const OAUTH_COOKIE = "gms_oauth";
+
+/**
+ * Each /login gets its own cookie, named after its own `state`. The callback
+ * reads `state` off the query string Atlassian echoes back and looks up that
+ * exact cookie, so N concurrent logins in N tabs each carry their own slot
+ * instead of sharing one — no tab can clobber another's in-flight attempt.
+ * `state` is already unguessable (32 random bytes) and base64url-safe, so it
+ * doubles as the lookup key with no extra hashing; the sealed cookie VALUE is
+ * still what proves authenticity, this only decides which value to read.
+ */
+export function oauthCookieName(state: string): string {
+  return `${OAUTH_COOKIE}_${state}`;
+}
 
 /**
  * Browsers cap a cookie at 4KB including name and attributes. Atlassian access
@@ -53,16 +76,21 @@ function baseOptions(path: string, maxAgeMs: number) {
 /** Returns false when the sealed value was too large to store (caller may care). */
 export function setSealedCookie(
   res: Response,
-  name: SealPurpose,
+  purpose: SealPurpose,
   value: unknown,
   maxAgeMs: number,
-  path = "/"
+  path = "/",
+  // Distinct from `purpose` only for the OAuth flow cookie, which is named per
+  // `state` (see oauthCookieName) while still sealed under the fixed "gms_oauth"
+  // AAD — the cookie's NAME is a lookup key, its sealed VALUE is what Express
+  // and the browser never get to see or tamper with.
+  cookieName: string = purpose
 ): boolean {
-  const blob = seal(name, value);
+  const blob = seal(purpose, value);
   if (Buffer.byteLength(blob, "utf8") > MAX_COOKIE_VALUE_BYTES) {
     return false;
   }
-  res.cookie(name, blob, baseOptions(path, maxAgeMs));
+  res.cookie(cookieName, blob, baseOptions(path, maxAgeMs));
   return true;
 }
 
@@ -75,8 +103,14 @@ export function clearCookie(res: Response, name: string, path = "/"): void {
   });
 }
 
+/**
+ * Logs the user out: session + access only. Deliberately does NOT touch any
+ * in-flight OAuth flow cookie — since those are now per-state (oauthCookieName),
+ * there is no single fixed name to clear, and an abandoned one is harmless: it
+ * expires on its own in OAUTH_MAX_AGE_MS and can't be used without the matching
+ * state round-tripping through Atlassian first.
+ */
 export function clearAuthCookies(res: Response): void {
   clearCookie(res, SESSION_COOKIE);
   clearCookie(res, ACCESS_COOKIE);
-  clearCookie(res, OAUTH_COOKIE, "/api/auth");
 }
