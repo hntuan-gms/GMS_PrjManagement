@@ -30,10 +30,26 @@ const CONFIG: Record<IssueTypeName, { fill: string; path: string }> = {
   },
 };
 
-export default function IssueTypeIcon({ type }: { type: IssueTypeName }) {
-  const cfg = CONFIG[type];
+/**
+ * `IssueTypeName` is a hard-coded union but the value is not: taskService maps
+ * Jira's own name through with an unchecked cast (`f.issuetype?.name as
+ * IssueTypeName`), so a team-managed or localised project delivers names this
+ * map has never seen — "Nhiệm vụ", "Improvement", "New Feature", anything an
+ * admin renamed. Indexing CONFIG directly returned undefined for those and threw
+ * on the next property read, which blanked the entire app: this renders inside
+ * every WBS row, and a throw during render unmounts the whole tree.
+ *
+ * Unknown types get a neutral glyph instead. The real Jira name still reaches
+ * the user through the <title> tooltip, so an unrecognised type is visibly
+ * "something else" rather than silently mislabelled as one of the five known ones.
+ */
+const UNKNOWN = { fill: "#6b778c", path: "M4.2 4.4h7.6v1.7H4.2zm0 3h7.6v1.7H4.2zm0 3h4.8v1.7H4.2z" };
+
+export default function IssueTypeIcon({ type }: { type: string }) {
+  const cfg = CONFIG[type as IssueTypeName] ?? UNKNOWN;
   return (
     <svg className="issue-icon" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+      <title>{type}</title>
       <rect width="16" height="16" rx="3.5" fill={cfg.fill} />
       <path d={cfg.path} fill="#fff" />
     </svg>
