@@ -23,6 +23,7 @@ export type ErrorCode =
   | "JIRA_UPSTREAM"
   | "NO_PROJECT_SELECTED"
   | "STAFF_ONLY"
+  | "RESOURCES_ADMIN_ONLY"
   | "BAD_REQUEST"
   | "INTERNAL";
 
@@ -48,6 +49,18 @@ export const staffOnly = () =>
     403,
     "STAFF_ONLY",
     "Tính năng trợ lý AI chỉ dành cho tài khoản nội bộ. Các tính năng còn lại vẫn dùng được bình thường."
+  );
+
+/**
+ * The resource tab is only as accurate as the member list, and the member list
+ * is only accurate for someone Jira lets read the project's roles. See
+ * requireResourceAccess in routes/resources.ts.
+ */
+export const resourcesAdminOnly = () =>
+  new AppError(
+    403,
+    "RESOURCES_ADMIN_ONLY",
+    "Trang Nguồn lực chỉ dành cho người có quyền Administer Projects trên dự án này."
   );
 
 export const badRequest = (message: string) => new AppError(400, "BAD_REQUEST", message);
@@ -83,6 +96,28 @@ function mapError(err: unknown): Mapped {
   }
 
   if (err instanceof JiraApiError) {
+    // Checked before the 401 branch: the gateway reports a missing scope as a
+    // 401, and mapping that to JIRA_REAUTH_REQUIRED logs the user out — into a
+    // loop, since the fresh login's token carries the same scopes.
+    if (err.scopeProblem) {
+      return {
+        status: 403,
+        code: "JIRA_SCOPE_MISSING",
+        error:
+          "Ứng dụng chưa được cấp đủ quyền trên Atlassian cho thao tác này. " +
+          "Cần đăng nhập lại để cấp quyền bổ sung.",
+      };
+    }
+    // Same trap as the scope case: Jira sends "no Administer Projects" as a 401,
+    // and treating it as a dead session would log a non-admin out for lacking a
+    // permission — every time, since a new login has the same permissions.
+    if (err.configRefused) {
+      return {
+        status: 403,
+        code: "JIRA_FORBIDDEN",
+        error: `Tài khoản của bạn không có quyền thực hiện thao tác này trên Jira. ${err.summary}`.trim(),
+      };
+    }
     if (err.status === 401) {
       return {
         status: 401,
@@ -91,19 +126,11 @@ function mapError(err: unknown): Mapped {
       };
     }
     if (err.status === 403) {
-      return err.scopeProblem
-        ? {
-            status: 403,
-            code: "JIRA_SCOPE_MISSING",
-            error:
-              "Ứng dụng chưa được cấp đủ quyền trên Atlassian cho thao tác này. " +
-              "Cần đăng nhập lại để cấp quyền bổ sung.",
-          }
-        : {
-            status: 403,
-            code: "JIRA_FORBIDDEN",
-            error: `Tài khoản của bạn không có quyền thực hiện thao tác này trên Jira. ${err.summary}`.trim(),
-          };
+      return {
+        status: 403,
+        code: "JIRA_FORBIDDEN",
+        error: `Tài khoản của bạn không có quyền thực hiện thao tác này trên Jira. ${err.summary}`.trim(),
+      };
     }
     if (err.status === 404) {
       return {

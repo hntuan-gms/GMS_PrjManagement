@@ -45,6 +45,11 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
   // does not refetch it.
   const [pool, setPool] = useState<ResourcePool | null>(null);
   const [poolError, setPoolError] = useState<string | null>(null);
+  // Whether this user may see the resource tab at all. The server decides (only
+  // project admins get an accurate member list — see requireResourceAccess), and
+  // answers it through the pool fetch, so "checking" hides the tab until then
+  // rather than flashing it at someone who is about to be refused.
+  const [resourceAccess, setResourceAccess] = useState<"checking" | "allowed" | "denied">("checking");
 
   const [view, setView] = useState<"gantt" | "resource">("gantt");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -108,8 +113,23 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
     let alive = true;
     api
       .getResourcePool()
-      .then((p) => alive && setPool(p))
-      .catch((e: Error) => alive && setPoolError(e.message));
+      .then((p) => {
+        if (!alive) return;
+        setPool(p);
+        setResourceAccess("allowed");
+      })
+      .catch((e: Error) => {
+        if (!alive) return;
+        if (e instanceof ApiError && e.code === "RESOURCES_ADMIN_ONLY") {
+          setResourceAccess("denied");
+          return;
+        }
+        // Any other failure keeps the old behaviour: the tab stays, with its
+        // notice, and capacity falls back to the default. A refusal is only ever
+        // reported through the code above, so this can't admit a non-admin.
+        setPoolError(e.message);
+        setResourceAccess("allowed");
+      });
     return () => {
       alive = false;
     };
@@ -456,6 +476,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
         view={view}
         onViewChange={setView}
         overloadedPeople={overloadedPeople}
+        showResources={resourceAccess === "allowed"}
         onAddTask={() => setCreating(true)}
         onSync={handleSync}
         syncing={syncing}
@@ -496,7 +517,9 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
       )}
 
       <div className="app-body">
-        {view === "gantt" ? (
+        {/* Gated on access as well as on the selected view, so nothing can
+            leave a refused user looking at the resource tab. */}
+        {view === "gantt" || resourceAccess !== "allowed" ? (
           <GanttView
             tasks={tasks}
             collapsed={collapsed}

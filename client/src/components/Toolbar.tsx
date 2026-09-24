@@ -7,6 +7,8 @@ interface Props {
   onViewChange: (v: "gantt" | "resource") => void;
   /** People overloaded in the near-term window — badged on the resource tab. */
   overloadedPeople: number;
+  /** False hides the resource tab: only project admins get an accurate member list. */
+  showResources: boolean;
   onAddTask: () => void;
   onSync: () => void;
   syncing: boolean;
@@ -29,6 +31,7 @@ export default function Toolbar({
   view,
   onViewChange,
   overloadedPeople,
+  showResources,
   onAddTask,
   onSync,
   syncing,
@@ -55,17 +58,20 @@ export default function Toolbar({
         <button className={view === "gantt" ? "active" : ""} onClick={() => onViewChange("gantt")}>
           Gantt / WBS
         </button>
-        <button className={view === "resource" ? "active" : ""} onClick={() => onViewChange("resource")}>
-          Nguồn lực
-          {/* The overload count lives on the tab, not inside it: the reason to
-              open this tab is that someone is overbooked, and that is exactly
-              what you cannot see from the Gantt. */}
-          {overloadedPeople > 0 && (
-            <span className="tab-badge" title={`${overloadedPeople} thành viên đang quá tải`}>
-              {overloadedPeople}
-            </span>
-          )}
-        </button>
+        {/* Project admins only — see requireResourceAccess on the server. */}
+        {showResources && (
+          <button className={view === "resource" ? "active" : ""} onClick={() => onViewChange("resource")}>
+            Nguồn lực
+            {/* The overload count lives on the tab, not inside it: the reason to
+                open this tab is that someone is overbooked, and that is exactly
+                what you cannot see from the Gantt. */}
+            {overloadedPeople > 0 && (
+              <span className="tab-badge" title={`${overloadedPeople} thành viên đang quá tải`}>
+                {overloadedPeople}
+              </span>
+            )}
+          </button>
+        )}
       </div>
       <div className="toolbar-right">
         {lastSyncedAt && (

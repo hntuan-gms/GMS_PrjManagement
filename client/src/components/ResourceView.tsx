@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import {
   aggregateWeeks,
   BAND_LABEL,
@@ -387,18 +387,72 @@ function MemberSourceNote({ pool, count }: { pool: ResourcePool | null; count: n
         {count} thành viên, lấy từ vai trò dự án trên Jira
         {pool.memberRoles.length > 0 && <> ({pool.memberRoles.join(", ")})</>}. Sửa danh sách này
         trong Jira: <b>Project settings → People</b>.
+        {pool.memberSkippedGroups > 0 && (
+          <>
+            {" "}
+            Chỉ gồm người được thêm trực tiếp vào vai trò — {pool.memberSkippedGroups} nhóm trong vai
+            trò không đọc được thành viên nên chưa được tính.
+          </>
+        )}
       </div>
     );
   }
 
   return (
     <div className="rv-source rv-source-warn">
-      {count} người, lấy từ danh sách <b>có thể được giao việc</b> — tài khoản của bạn không có
-      quyền <i>Administer Projects</i> nên không đọc được vai trò dự án. Danh sách này thường rộng
-      hơn đội thật.
+      {count} người, lấy từ danh sách <b>có thể được giao việc</b> — {fallbackReasonText(pool)}{" "}
+      Danh sách này thường rộng hơn đội thật.
       {pool.memberTruncated && " Jira đã cắt ở 100 người, có thể còn thiếu."}
     </div>
   );
+}
+
+/**
+ * One sentence per real cause. This used to blame Administer Projects for every
+ * fallback, which sent an admin whose lookup failed for a different reason to
+ * re-check the one permission they already had.
+ */
+function fallbackReasonText(pool: ResourcePool): ReactNode {
+  const fb = pool.memberFallback;
+  const status = fb?.status ? ` (HTTP ${fb.status})` : "";
+  switch (fb?.reason) {
+    case "roles-forbidden":
+      return (
+        <>
+          tài khoản của bạn không có quyền <i>Administer Projects</i> nên Jira từ chối đọc vai trò
+          dự án{status}.
+        </>
+      );
+    case "actors-unreadable":
+      return <>Jira liệt kê được vai trò dự án nhưng từ chối đọc thành viên của từng vai trò{status}.</>;
+    case "groups-unreadable":
+      return (
+        <>
+          vai trò dự án chỉ gồm nhóm, và tài khoản của bạn không có quyền toàn cục{" "}
+          <i>Browse users and groups</i> để xem thành viên nhóm{status}. Thêm từng người trực tiếp
+          vào vai trò sẽ khắc phục.
+        </>
+      );
+    case "groups-out-of-scope":
+      return (
+        <>
+          vai trò dự án chỉ gồm nhóm, và ứng dụng chưa được Atlassian cấp phạm vi truy cập để xem
+          thành viên nhóm{status}. Đây là cấu hình của ứng dụng, không phải quyền của bạn trên Jira.
+          Thêm từng người trực tiếp vào vai trò sẽ khắc phục.
+        </>
+      );
+    case "roles-empty":
+      return (
+        <>
+          đọc được vai trò dự án nhưng chưa vai trò nào có người. Thêm thành viên tại{" "}
+          <b>Project settings → People</b>.
+        </>
+      );
+    case "error":
+      return <>không đọc được vai trò dự án do lỗi khi gọi Jira{status}.</>;
+    default:
+      return <>không đọc được vai trò dự án.</>;
+  }
 }
 
 function Stat({

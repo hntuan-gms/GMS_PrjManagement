@@ -46,11 +46,25 @@ export interface AuthConfig {
  * granted by the "User identity API" permission in the developer console, which is
  * a SEPARATE product from the Jira API permission — enabling the Jira scopes alone
  * leaves /me at 403.
+ *
+ * `manage:jira-configuration` is here for exactly one call: GET /group/member,
+ * which projectMembers.ts needs to expand the groups a project role is granted
+ * to. Without it the gateway answers 401 "scope does not match", and the tab can
+ * only show role members added one by one. It is broad — it covers Jira-admin
+ * configuration writes — but a token can never do more than its user's own Jira
+ * permissions allow, so for a non-admin it adds nothing beyond reading groups.
+ *
+ * Every scope here must ALSO be enabled on the app in the developer console, on
+ * BOTH apps (dev and production, see .env.example). Requesting a scope the app
+ * doesn't have fails the authorize step itself, so a mismatch is a login outage
+ * for everyone, not a degraded member list. And a scope added here only reaches a
+ * user after they log in again: existing refresh tokens keep their old scopes.
  */
 export const SCOPES = [
   "read:jira-work",
   "write:jira-work",
   "read:jira-user",
+  "manage:jira-configuration",
   "read:me",
   "offline_access",
 ].join(" ");

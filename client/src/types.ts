@@ -79,6 +79,25 @@ export interface ResourcePool {
    * User permission, which on a company-managed site is most of the site.
    */
   memberSource: "project-roles" | "assignable";
+  /**
+   * Why roles couldn't be used, when memberSource is "assignable". Mirrors
+   * FallbackReason in server/src/projectMembers.ts.
+   */
+  memberFallback: {
+    reason:
+      | "roles-forbidden"
+      | "actors-unreadable"
+      | "groups-unreadable"
+      | "groups-out-of-scope"
+      | "roles-empty"
+      | "error";
+    status?: number;
+  } | null;
+  /**
+   * Role groups whose members couldn't be listed while memberSource is still
+   * "project-roles" — the list is then only the individually-added people.
+   */
+  memberSkippedGroups: number;
   /** Which roles contributed, when memberSource is "project-roles". */
   memberRoles: string[];
   /** The assignable fallback hit Jira's 100-user cap and may be incomplete. */

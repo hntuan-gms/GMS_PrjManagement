@@ -99,6 +99,7 @@ export function requireProject(req: Request, _res: Response, next: NextFunction)
   }
   auth.taskService = new TaskService(auth.jira, {
     cloudId: auth.session.cloudId,
+    accountId: auth.session.accountId,
     siteUrl: auth.session.siteUrl,
     projectKey: auth.session.projectKey,
     startDateFieldId: auth.startDateFieldId,

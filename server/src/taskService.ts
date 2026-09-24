@@ -42,6 +42,12 @@ function statusCategoryKey(key: string): "new" | "indeterminate" | "done" {
  */
 export interface TaskContext {
   cloudId: string;
+  /**
+   * The acting user. Only the member-list cache needs it: what Jira reveals
+   * about a project's roles depends on who is asking, so a list resolved with
+   * one user's permissions must never be served to another.
+   */
+  accountId: string;
   /** Human site URL — browse links only, never the api.atlassian.com gateway. */
   siteUrl: string;
   projectKey: string;
@@ -89,7 +95,7 @@ export class TaskService {
 
   /** Same list, plus where it came from, for UI that needs to say so. */
   async listMembers(): Promise<ProjectMembers> {
-    return getProjectMembers(this.jira, this.ctx.cloudId, this.ctx.projectKey);
+    return getProjectMembers(this.jira, this.ctx.cloudId, this.ctx.projectKey, this.ctx.accountId);
   }
 
   async listTasks(): Promise<Task[]> {
