@@ -8,6 +8,25 @@ interface Props {
 /** Never shown — the "session expired" notice is suppressed on this screen. */
 const SESSION_EXPIRED_MESSAGE = "Phiên làm việc đã hết hạn. Vui lòng đăng nhập lại.";
 
+/**
+ * Atlassian's own logout page, for switching account.
+ *
+ * "Đăng xuất" in this app only ends the app's session. The browser stays signed
+ * in to Atlassian, so the next login goes straight to the consent screen for the
+ * same account — `prompt=consent` re-shows consent, it does not ask who you are.
+ * Ending the Atlassian session is the only way to get an account choice.
+ *
+ * Deliberately a separate link, not what "Đăng xuất" does: it also signs the
+ * browser out of Jira and Confluence in every other tab, which someone who just
+ * wants to leave this app would not expect.
+ *
+ * Opened in a NEW tab, with no return URL. `?continue=` is undocumented, and in
+ * testing Atlassian ignored it for this app's origin and left the user stranded
+ * on Atlassian's own pages. A second tab needs no redirect back: this login
+ * screen is still here, waiting, when the user closes the Atlassian one.
+ */
+const ATLASSIAN_LOGOUT_URL = "https://id.atlassian.com/logout";
+
 export default function LoginScreen({ onLogin, error }: Props) {
   const [redirecting, setRedirecting] = useState(false);
 
@@ -60,6 +79,23 @@ export default function LoginScreen({ onLogin, error }: Props) {
           dự án Jira mà tài khoản của bạn có quyền, và mọi thay đổi được ghi nhận dưới tên
           bạn.
         </p>
+
+        <div className="auth-switch">
+          <a href={ATLASSIAN_LOGOUT_URL} target="_blank" rel="noopener noreferrer">
+            Đăng nhập bằng tài khoản Atlassian khác ↗
+          </a>
+          <span>
+            Trình duyệt vẫn đang đăng nhập Atlassian bằng tài khoản cũ. Liên kết mở trang đăng xuất
+            Atlassian trong tab mới — việc này đăng xuất cả các tab Jira, Confluence đang mở.
+          </span>
+          <ol className="auth-switch-steps">
+            <li>Đăng xuất ở tab vừa mở, rồi đóng tab đó.</li>
+            <li>
+              Quay lại đây, bấm <b>Đăng nhập bằng Atlassian</b> và chọn tài khoản mới. Nếu đăng nhập
+              Atlassian bằng Google, hãy chọn đúng tài khoản Google.
+            </li>
+          </ol>
+        </div>
       </div>
     </div>
   );
