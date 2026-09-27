@@ -2092,6 +2092,31 @@ button.danger:hover:not(:disabled) {
   line-height: 1.5;
 }
 
+/* Secondary on purpose: switching account signs the browser out of Atlassian
+   everywhere, so it must not compete with the main login button. */
+.auth-switch {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+}
+.auth-switch a {
+  color: var(--color-primary);
+  font-weight: 600;
+  text-decoration: none;
+}
+.auth-switch a:hover {
+  text-decoration: underline;
+}
+.auth-switch-steps {
+  margin: 0;
+  padding-left: 18px;
+}
+
 .auth-btn {
   width: 100%;
   padding: 10px 16px;

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { requireProject } from "../auth/middleware.js";
+import { requireProject, requireStaff } from "../auth/middleware.js";
 import { notFound } from "../errors.js";
 import { createProgressReport } from "../ai/progressReport.js";
 import { getReport, latestReport, reportHistory } from "../ai/reportStore.js";
@@ -46,7 +46,11 @@ progressRouter.get("/", requireProject, async (req, res, next) => {
   }
 });
 
-progressRouter.post("/reports", requireProject, async (req, res, next) => {
+// Staff only, like everything under /api/ai: this is the one route here that
+// calls Gemini on the shared key. Live metrics and saved reports stay readable
+// by guests — they cost nothing and cover only a project the guest can already
+// browse in Jira (requireProject has checked that).
+progressRouter.post("/reports", requireProject, requireStaff, async (req, res, next) => {
   const { session, taskService } = req.auth!;
   try {
     const tasks = await taskService!.listTasks();

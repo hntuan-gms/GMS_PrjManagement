@@ -16,6 +16,11 @@ interface Props {
   tasks: Task[];
   /** A report to open on arrival — set when the user clicks a report card in the chat. */
   focusReportId: string | null;
+  /**
+   * Internal staff only: generating a report calls Gemini, which the server
+   * gates with requireStaff. Guests still see live numbers and saved reports.
+   */
+  canGenerate: boolean;
   onOpenEdit: (task: Task) => void;
 }
 
@@ -68,7 +73,7 @@ function signed(n: number): string {
   return v > 0 ? `+${v}` : `${v}`;
 }
 
-export default function ProgressReportView({ tasks, focusReportId, onOpenEdit }: Props) {
+export default function ProgressReportView({ tasks, focusReportId, canGenerate, onOpenEdit }: Props) {
   const [overview, setOverview] = useState<ProgressOverview | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [shown, setShown] = useState<ProgressReport | null>(null);
@@ -185,9 +190,13 @@ export default function ProgressReportView({ tasks, focusReportId, onOpenEdit }:
             Số liệu tính trực tiếp từ Jira tới ngày {fmtDate(m.asOf)} · {m.counts.total} công việc
           </span>
         </div>
-        <button className="primary" onClick={generate} disabled={generating}>
-          {generating ? "AI đang viết báo cáo..." : report ? "✦ Tạo báo cáo mới" : "✦ Tạo báo cáo AI"}
-        </button>
+        {/* Hidden rather than disabled for guests, like the chat dock: the route
+            403s for them, and a button that always fails is worse than none. */}
+        {canGenerate && (
+          <button className="primary" onClick={generate} disabled={generating}>
+            {generating ? "AI đang viết báo cáo..." : report ? "✦ Tạo báo cáo mới" : "✦ Tạo báo cáo AI"}
+          </button>
+        )}
       </div>
 
       <HealthBanner metrics={m} />
@@ -260,8 +269,15 @@ export default function ProgressReportView({ tasks, focusReportId, onOpenEdit }:
             <div className="pr-empty">
               <b>Chưa có báo cáo AI nào.</b>
               <p>
-                Các con số bên trên luôn được tính trực tiếp. Bấm <i>Tạo báo cáo AI</i> để có phần nhận định:
-                tóm tắt tình hình, rủi ro chính và việc cần làm ngay — viết dựa trên đúng những con số này.
+                Các con số bên trên luôn được tính trực tiếp.{" "}
+                {canGenerate ? (
+                  <>
+                    Bấm <i>Tạo báo cáo AI</i> để có phần nhận định: tóm tắt tình hình, rủi ro chính và việc cần làm
+                    ngay — viết dựa trên đúng những con số này.
+                  </>
+                ) : (
+                  "Phần nhận định AI do thành viên nội bộ tạo và sẽ hiện ở đây khi có."
+                )}
               </p>
             </div>
           )}

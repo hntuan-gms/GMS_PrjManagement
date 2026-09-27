@@ -25,9 +25,16 @@ export const OAUTH_MAX_AGE_MS = 10 * 60 * 1000;
  * the refresh token, the one field here with no size ceiling, lives in Postgres
  * instead (auth/refreshTokenStore.ts) and is looked up by (cloudId, accountId)
  * when a route actually needs it, rather than carried on every request.
+ *
+ * v2 covers two shape changes that landed together: the refresh token leaving,
+ * and `staff` arriving. Either alone would have been survivable — a pre-migration
+ * cookie has no Postgres row and fails its next refresh anyway — but a missing
+ * `staff` would read as `false` and quietly take the AI features away from the
+ * whole team for the cookie's remaining 30 days. Rejecting the old shape outright
+ * turns that into one re-login.
  */
 export interface SessionData {
-  v: 1;
+  v: 2;
   cloudId: string;
   /** Human site URL; browse links must use this, never api.atlassian.com. */
   siteUrl: string;
@@ -38,6 +45,12 @@ export interface SessionData {
   /** Chosen by the user after login; null until then. */
   projectKey: string | null;
   projectName: string | null;
+  /**
+   * Internal staff, decided once at login from the email domain. The email itself
+   * is deliberately NOT stored — the privacy policy says so, and a boolean is all
+   * the AI gate needs.
+   */
+  staff: boolean;
 }
 
 /** Volatile half — a cache, never authoritative. */
@@ -62,7 +75,7 @@ export function readSession(req: Request): SessionData | null {
   const session = unseal<SessionData>(SESSION_COOKIE, cookies[SESSION_COOKIE]);
   // accountId matters as much as cloudId now — together they're the lookup key
   // for the refresh token in Postgres, not just a display value.
-  if (!session || session.v !== 1 || !session.cloudId || !session.accountId) return null;
+  if (!session || session.v !== 2 || !session.cloudId || !session.accountId) return null;
   return session;
 }
 

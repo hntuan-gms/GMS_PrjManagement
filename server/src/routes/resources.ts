@@ -1,9 +1,38 @@
-import { Router } from "express";
+import { Router, type NextFunction, type Request, type Response } from "express";
 import { requireProject } from "../auth/middleware.js";
-import { badRequest } from "../errors.js";
+import { badRequest, resourcesAdminOnly } from "../errors.js";
 import * as resources from "../resourceStore.js";
 
 export const resourcesRouter = Router();
+
+/**
+ * Project admins only — anyone Jira lets read this project's roles.
+ *
+ * Not a secrecy rule first: the tab is only correct for those users. Everyone
+ * else gets the assignable-users fallback, which on a company-managed site is
+ * most of the licensed staff, so the tab would show them a "team" of strangers
+ * and a heatmap built on it. Hiding a wrong answer beats explaining it.
+ *
+ * It is enforced here, not just by hiding the tab, because these routes also
+ * serve absence dates (when someone is away) and accept capacity/absence writes.
+ * Mounted router-wide, like requireAuth on the API router, so a route added here
+ * later is covered by default. The check reuses the member list the GET needs
+ * anyway, cached per user for five minutes, so it costs no extra Jira call.
+ */
+async function requireResourceAccess(req: Request, _res: Response, next: NextFunction) {
+  try {
+    const members = await req.auth!.taskService!.listMembers();
+    if (!members.rolesReadable) {
+      next(resourcesAdminOnly());
+      return;
+    }
+    next();
+  } catch (err) {
+    next(err);
+  }
+}
+
+resourcesRouter.use(requireProject, requireResourceAccess);
 
 /**
  * The resource pool behind the "Nguồn lực" tab.
@@ -33,7 +62,11 @@ resourcesRouter.get("/", requireProject, async (req, res, next) => {
       // account could not read the project's roles and this is everyone Jira
       // will let it assign — a superset, usually a large one.
       memberSource: members.source,
+      // Why the role lookup failed, when it did — so the tab names the actual
+      // missing piece instead of always blaming Administer Projects.
+      memberFallback: members.fallback ?? null,
       memberRoles: members.roles,
+      memberSkippedGroups: members.skippedGroups,
       memberTruncated: members.truncated,
       profiles,
       absences,

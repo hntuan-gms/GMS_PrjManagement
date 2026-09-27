@@ -28,11 +28,28 @@ export class JiraApiError extends Error {
   }
 
   /**
-   * A 403 whose body carries this marker means the app lacks an OAuth scope, not
-   * that the user lacks a Jira permission. Retrying it would loop forever.
+   * The app lacks an OAuth scope — not that the user lacks a Jira permission, and
+   * not that the session died. Retrying loops forever, and logging in again
+   * yields a token with the same scopes. Atlassian reports it two ways: a 403
+   * from Jira itself, and a 401 from the api.atlassian.com gateway (seen on
+   * GET /group/member, which needs manage:jira-configuration).
    */
   get scopeProblem(): boolean {
-    return this.status === 403 && /OAuth 2\.0 is not enabled for this method/i.test(this.body);
+    return (
+      (this.status === 403 && /OAuth 2\.0 is not enabled for this method/i.test(this.body)) ||
+      (this.status === 401 && /scope does not match/i.test(this.body))
+    );
+  }
+
+  /**
+   * Jira refusing a project-admin endpoint (e.g. GET /project/{key}/role) to a
+   * user without Administer Projects. Jira sends this as a 401, not a 403 — seen
+   * in practice, not documented — so it looks exactly like a dead session to
+   * anything that only reads the status. It is a permission refusal: logging in
+   * again changes nothing.
+   */
+  get configRefused(): boolean {
+    return this.status === 401 && /cannot edit the configuration/i.test(this.body);
   }
 
   /** Jira's own message, extracted from errorMessages/errors, for showing to users. */

@@ -237,9 +237,29 @@ export function buildResourceLoad(input: LoadInput): ResourceLoad {
     byAccount.set(t.assigneeAccountId, list);
   }
 
-  const candidates = input.includeIdle
-    ? input.users
-    : input.users.filter((u) => (byAccount.get(u.accountId)?.length ?? 0) > 0);
+  // Anyone holding open, dated work gets a row even when the member list doesn't
+  // name them. `users` is only as good as what Jira let us read — role members
+  // hidden inside an unexpandable group, someone removed from the project with
+  // tasks still assigned — and dropping a holder here used to make their whole
+  // workload vanish: not on anyone's row, not counted as unassigned, invisible
+  // even while overloaded. The task itself carries the name and avatar.
+  const known = new Set(input.users.map((u) => u.accountId));
+  const holders: JiraUser[] = [];
+  for (const [accountId, held] of byAccount) {
+    if (known.has(accountId)) continue;
+    holders.push({
+      accountId,
+      displayName: held[0].assigneeName ?? accountId,
+      avatarUrl: held[0].assigneeAvatarUrl,
+    });
+  }
+
+  const candidates = [
+    ...(input.includeIdle
+      ? input.users
+      : input.users.filter((u) => (byAccount.get(u.accountId)?.length ?? 0) > 0)),
+    ...holders,
+  ];
 
   const people = candidates.map((user) => {
     const profile = profileByAccount.get(user.accountId) ?? null;

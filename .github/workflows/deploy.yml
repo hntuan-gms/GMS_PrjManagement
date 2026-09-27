@@ -11,7 +11,15 @@ name: Deploy to Cloud Run
 #     GCP_WIF_PROVIDER         projects/NNN/locations/global/workloadIdentityPools/POOL/providers/PROVIDER
 #     ATLASSIAN_CLIENT_ID      from developer.atlassian.com/console/myapps
 #     APP_BASE_URL             https://gms-prjmanagement-ftlpeveyxa-as.a.run.app
-#     ALLOWED_EMAIL_DOMAIN     gimasys.com
+#     ALLOWED_SITE_HOSTS       gimasys.atlassian.net — who may log in AT ALL. Anyone
+#                              invited to this Jira site, guests included; everyone
+#                              else is rejected at the callback. Comma-separate for
+#                              several sites. Required: unset means the server won't
+#                              boot, which beats a publicly-invokable service that
+#                              accepts any Atlassian account on earth.
+#     STAFF_EMAIL_DOMAIN       gimasys.com — NOT a login gate. Marks internal staff,
+#                              who alone may use /api/ai/* (it bills against the
+#                              shared Gemini key). Unset = everyone counts as staff.
 #     GEMINI_MODEL             optional; the AI planner's model, e.g. gemini-3.6-flash.
 #                              Leave the variable unset to take the default in
 #                              server/src/ai/planner.ts. It has to live here rather
@@ -109,7 +117,8 @@ jobs:
           env_vars: |-
             ATLASSIAN_CLIENT_ID=${{ vars.ATLASSIAN_CLIENT_ID }}
             APP_BASE_URL=${{ vars.APP_BASE_URL }}
-            ALLOWED_EMAIL_DOMAIN=${{ vars.ALLOWED_EMAIL_DOMAIN }}
+            ALLOWED_SITE_HOSTS=${{ vars.ALLOWED_SITE_HOSTS }}
+            STAFF_EMAIL_DOMAIN=${{ vars.STAFF_EMAIL_DOMAIN }}
             GEMINI_MODEL=${{ vars.GEMINI_MODEL }}
           # The runtime service account needs roles/secretmanager.secretAccessor on
           # both. Rotate session-encryption-keys by PREPENDING a new key — replacing
@@ -139,7 +148,7 @@ jobs:
           # navigation cannot carry a Google-signed ID token, so Cloud Run IAM would
           # reject it before Express ever runs. The consequence is that the app's own
           # requireAuth middleware (mounted via apiRouter.use, so it is fail-closed)
-          # plus ALLOWED_EMAIL_DOMAIN are the only access control in front of Jira.
+          # plus ALLOWED_SITE_HOSTS are the only access control in front of Jira.
           #
           # add-cloudsql-instances mounts the instance's unix socket at
           # /cloudsql/<connection name>, which is what the socket form of
