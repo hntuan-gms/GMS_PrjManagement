@@ -338,12 +338,35 @@ export interface ProgressMetrics {
   }>;
 }
 
+export type InsightKind = "bottleneck" | "dependency" | "people" | "scope" | "data" | "momentum";
+export type ActionPriority = "now" | "this_week" | "later";
+
+/**
+ * Mirrors server/src/ai/report.ts. `outlook`, `insights`, `mitigation`,
+ * `priority`, `owner` and `expectedImpact` are optional because reports saved
+ * before the reasoning pass don't have them — old history must still open.
+ */
 export interface ReportNarrative {
   headline: string;
   summary: string;
+  outlook?: { verdict: "on_time" | "at_risk" | "late"; confidence: "high" | "medium" | "low"; reasoning: string };
+  insights?: Array<{ kind: InsightKind; title: string; detail: string; issueKeys: string[] }>;
   highlights: string[];
-  risks: Array<{ title: string; detail: string; severity: "high" | "medium" | "low"; issueKeys: string[] }>;
-  recommendations: Array<{ action: string; rationale: string; issueKeys: string[] }>;
+  risks: Array<{
+    title: string;
+    detail: string;
+    severity: "high" | "medium" | "low";
+    issueKeys: string[];
+    mitigation?: string;
+  }>;
+  recommendations: Array<{
+    action: string;
+    rationale: string;
+    issueKeys: string[];
+    priority?: ActionPriority;
+    owner?: string | null;
+    expectedImpact?: string;
+  }>;
 }
 
 export interface ProgressReport {

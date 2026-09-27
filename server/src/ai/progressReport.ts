@@ -2,6 +2,7 @@ import { badRequest } from "../errors.js";
 import { computeProgress } from "../progress.js";
 import type { Task } from "../types.js";
 import { generateReport } from "./report.js";
+import { buildEvidence } from "./reportContext.js";
 import { latestReport, saveReport, type StoredReport } from "./reportStore.js";
 
 /**
@@ -18,16 +19,24 @@ export async function createProgressReport(input: {
   projectKey: string;
   createdBy: string;
   asOf: string;
+  /**
+   * The project team's display names, so the model can suggest someone with
+   * nothing assigned yet as an owner. Optional: the report is still worth
+   * writing if the member lookup failed — owners then come from assignees only.
+   */
+  teamNames?: string[];
 }): Promise<{ report: StoredReport; warnings: string[] }> {
   const metrics = computeProgress(input.tasks, input.asOf);
   if (metrics.counts.total === 0) {
     throw badRequest("Dự án chưa có công việc nào để lập báo cáo tiến độ.");
   }
 
+  const evidence = buildEvidence(input.tasks, input.asOf, input.teamNames ?? []);
   const previous = await latestReport(input.cloudId, input.projectKey);
   const generated = await generateReport(
     input.projectKey,
     metrics,
+    evidence,
     new Set(input.tasks.map((t) => t.id)),
     previous
       ? {
@@ -36,6 +45,8 @@ export async function createProgressReport(input: {
           actualPct: previous.actualPct,
           plannedPct: previous.plannedPct,
           health: previous.health,
+          headline: previous.narrative.headline,
+          topRisks: previous.narrative.risks.slice(0, 3).map((r) => r.title),
         }
       : null
   );

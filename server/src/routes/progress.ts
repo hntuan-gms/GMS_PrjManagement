@@ -53,13 +53,19 @@ progressRouter.get("/", requireProject, async (req, res, next) => {
 progressRouter.post("/reports", requireProject, requireStaff, async (req, res, next) => {
   const { session, taskService } = req.auth!;
   try {
-    const tasks = await taskService!.listTasks();
+    const [tasks, team] = await Promise.all([
+      taskService!.listTasks(),
+      // Best-effort: a failed member lookup costs the model some owner
+      // suggestions, not the whole report.
+      taskService!.listUsers().catch(() => []),
+    ]);
     const { report, warnings } = await createProgressReport({
       tasks,
       cloudId: session.cloudId,
       projectKey: session.projectKey!,
       createdBy: session.accountId,
       asOf: asOfFrom((req.body as { asOf?: unknown })?.asOf),
+      teamNames: team.map((u) => u.displayName),
     });
     res.status(201).json({
       report,

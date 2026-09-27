@@ -567,6 +567,9 @@ async function runProjectProgress(args: Record<string, unknown>, ctx: ToolContex
             asOf: latest.asOf,
             health: HEALTH_LABEL[latest.health],
             headline: latest.narrative.headline,
+            outlook: latest.narrative.outlook ?? null,
+            insights: (latest.narrative.insights ?? []).map((i) => `${i.title}: ${i.detail}`),
+            topActions: latest.narrative.recommendations.slice(0, 3).map((r) => r.action),
             actualPct: latest.actualPct,
           }
         : null,
@@ -578,12 +581,14 @@ async function runProjectProgress(args: Record<string, unknown>, ctx: ToolContex
 }
 
 async function runCreateProgressReport(ctx: ToolContext): Promise<ToolOutcome> {
+  const team = await ctx.taskService.listUsers().catch(() => []);
   const { report, warnings } = await createProgressReport({
     tasks: ctx.tasks,
     cloudId: ctx.cloudId,
     projectKey: ctx.projectKey,
     createdBy: ctx.accountId,
     asOf: ctx.today,
+    teamNames: team.map((u) => u.displayName),
   });
   return {
     response: {
@@ -592,7 +597,9 @@ async function runCreateProgressReport(ctx: ToolContext): Promise<ToolOutcome> {
       headline: report.narrative.headline,
       actualPct: report.actualPct,
       plannedPct: report.plannedPct,
+      outlook: report.narrative.outlook ?? null,
       topRisks: report.narrative.risks.slice(0, 3).map((r) => r.title),
+      topActions: report.narrative.recommendations.slice(0, 3).map((r) => r.action),
       ...(warnings.length > 0 ? { warnings } : {}),
       instruction:
         "Tóm tắt báo cáo trong 2–3 câu và nhắc người dùng bấm vào thẻ báo cáo (hoặc tab Báo cáo) để xem đầy đủ.",
