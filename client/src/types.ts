@@ -404,3 +404,141 @@ export interface ProgressOverview {
   latest: ProgressReport | null;
   history: ReportPoint[];
 }
+
+/* ----------------------------------------------------------------------------
+ * Boards & sprints — mirror server/src/agile/boardTypes.ts and ai/sprintAi.ts.
+ * -------------------------------------------------------------------------- */
+
+export type StatusCategory = "new" | "indeterminate" | "done";
+
+export interface BoardSummary {
+  id: number;
+  name: string;
+  type: string;
+}
+
+export interface BoardColumn {
+  name: string;
+  statusIds: string[];
+  min: number | null;
+  max: number | null;
+}
+
+export interface BoardStatus {
+  id: string;
+  name: string;
+  category: StatusCategory;
+}
+
+export interface Sprint {
+  id: number;
+  name: string;
+  state: "active" | "future" | "closed";
+  goal: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  completeDate: string | null;
+}
+
+export interface BoardIssue {
+  key: string;
+  summary: string;
+  issueType: string;
+  subtask: boolean;
+  statusId: string;
+  statusName: string;
+  statusCategory: StatusCategory;
+  assigneeAccountId: string | null;
+  assigneeName: string | null;
+  priority: string | null;
+  estimate: number | null;
+  sprintId: number | null;
+  epicKey: string | null;
+  epicSummary: string | null;
+  parentKey: string | null;
+  flagged: boolean;
+  labels: string[];
+  dueDate: string | null;
+  resolutionDate: string | null;
+  updated: string | null;
+  blockedBy: string[];
+}
+
+export interface VelocityPoint {
+  sprintId: number;
+  name: string;
+  startDate: string | null;
+  completeDate: string | null;
+  completed: number;
+  completedCount: number;
+}
+
+export interface BoardSnapshot {
+  mode: "agile" | "status";
+  fallback: { reason: "disabled" | "scope" | "no_board"; message: string } | null;
+  boards: BoardSummary[];
+  board: BoardSummary | null;
+  columns: BoardColumn[];
+  statuses: BoardStatus[];
+  estimation: { fieldId: string; name: string; unit: "points" | "hours" } | null;
+  sprints: Sprint[];
+  velocity: VelocityPoint[];
+  throughput: Array<{ weekStart: string; count: number }>;
+  issues: BoardIssue[];
+  truncated: boolean;
+}
+
+export interface AiUsage {
+  promptTokens: number | null;
+  outputTokens: number | null;
+  thoughtTokens: number | null;
+}
+
+export interface SprintPlanProposal {
+  goal: string;
+  rationale: string;
+  picks: Array<{ key: string; reason: string }>;
+  deferred: Array<{ key: string; reason: string }>;
+  risks: string[];
+  totals: { weight: number; count: number; budget: number | null; unit: string; unestimated: number };
+  warnings: string[];
+  model: string;
+  usage: AiUsage;
+}
+
+export interface EstimateSuggestion {
+  key: string;
+  value: number;
+  confidence: "high" | "medium" | "low";
+  reason: string;
+  similar: string[];
+}
+
+export interface SprintFacts {
+  sprint: { id: number; name: string; goal: string | null; start: string | null; end: string | null };
+  days: { total: number; elapsed: number; left: number };
+  elapsedPct: number;
+  unit: string;
+  scope: { count: number; weight: number; unestimated: number };
+  done: { count: number; weight: number };
+  inProgress: { count: number; weight: number };
+  todo: { count: number; weight: number };
+  donePct: number;
+  pace: "ahead" | "on_pace" | "behind" | "not_started";
+  people: Array<{ name: string; open: number; openWeight: number; inProgress: number; done: number }>;
+  blocked: Array<{ key: string; summary: string; blockedBy: string[] }>;
+  flagged: Array<{ key: string; summary: string }>;
+  stale: Array<{ key: string; summary: string; assignee: string | null; idleDays: number }>;
+  unassigned: string[];
+  unestimated: string[];
+}
+
+export interface SprintInsight {
+  headline: string;
+  forecast: { verdict: "will_meet" | "at_risk" | "will_miss"; confidence: "high" | "medium" | "low"; reasoning: string };
+  actions: Array<{ title: string; detail: string; owner: string | null; issueKeys: string[] }>;
+  descope: Array<{ key: string; reason: string }>;
+  facts: SprintFacts;
+  model: string;
+  usage: AiUsage;
+}

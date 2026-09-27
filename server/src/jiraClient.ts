@@ -169,11 +169,143 @@ export class JiraClient {
     });
   }
 
-  async getTransitions(key: string): Promise<Array<{ id: string; name: string }>> {
-    const res = await this.request<{ transitions: Array<{ id: string; name: string }> }>(
-      `/rest/api/3/issue/${encodeURIComponent(key)}/transitions`
-    );
+  async getTransitions(
+    key: string
+  ): Promise<Array<{ id: string; name: string; to?: { id: string; name: string; statusCategory?: { key: string } } }>> {
+    const res = await this.request<{
+      transitions: Array<{ id: string; name: string; to?: { id: string; name: string; statusCategory?: { key: string } } }>;
+    }>(`/rest/api/3/issue/${encodeURIComponent(key)}/transitions`);
     return res.transitions;
+  }
+
+  async transitionIssueById(key: string, transitionId: string): Promise<void> {
+    await this.request(`/rest/api/3/issue/${encodeURIComponent(key)}/transitions`, {
+      method: "POST",
+      body: JSON.stringify({ transition: { id: transitionId } }),
+    });
+  }
+
+  /** Every status each issue type of the project can be in — the status board's columns. */
+  async getProjectStatuses(
+    projectKey: string
+  ): Promise<Array<{ name: string; statuses: Array<{ id: string; name: string; statusCategory?: { key: string } }> }>> {
+    return this.request(`/rest/api/3/project/${encodeURIComponent(projectKey)}/statuses`);
+  }
+
+  /* ---------------------------------------------------------------------------
+   * Jira Software (Agile) API. Needs the granular AGILE_SCOPES in auth/config.ts;
+   * without them every call here is a 401 "scope does not match", which
+   * JiraApiError.scopeProblem recognises and boardService turns into a fallback.
+   * ------------------------------------------------------------------------- */
+
+  async listBoards(projectKey: string): Promise<Array<{ id: number; name: string; type: string }>> {
+    const out: Array<{ id: number; name: string; type: string }> = [];
+    let startAt = 0;
+    for (let page = 0; page < 10; page++) {
+      const res = await this.request<{ values: Array<{ id: number; name: string; type: string }>; isLast: boolean }>(
+        `/rest/agile/1.0/board?projectKeyOrId=${encodeURIComponent(projectKey)}&maxResults=50&startAt=${startAt}`
+      );
+      out.push(...(res.values ?? []));
+      if (res.isLast || (res.values?.length ?? 0) === 0) break;
+      startAt += res.values.length;
+    }
+    return out;
+  }
+
+  async getBoardConfiguration(boardId: number): Promise<{
+    columnConfig?: { columns?: Array<{ name: string; statuses?: Array<{ id: string }>; min?: number; max?: number }>; constraintType?: string };
+    estimation?: { type?: string; field?: { fieldId?: string; displayName?: string } };
+    ranking?: { rankCustomFieldId?: number };
+  }> {
+    return this.request(`/rest/agile/1.0/board/${boardId}/configuration`);
+  }
+
+  async listSprints(boardId: number, states: string): Promise<any[]> {
+    const out: any[] = [];
+    let startAt = 0;
+    for (let page = 0; page < 20; page++) {
+      const res = await this.request<{ values: any[]; isLast: boolean }>(
+        `/rest/agile/1.0/board/${boardId}/sprint?state=${encodeURIComponent(states)}&maxResults=50&startAt=${startAt}`
+      );
+      out.push(...(res.values ?? []));
+      if (res.isLast || (res.values?.length ?? 0) === 0) break;
+      startAt += res.values.length;
+    }
+    return out;
+  }
+
+  async getSprint(sprintId: number): Promise<any> {
+    return this.request(`/rest/agile/1.0/sprint/${sprintId}`);
+  }
+
+  /**
+   * Issues on a board, in the board's rank order, narrowed by `jql` (AND-ed with
+   * the board's own filter). The agile endpoints add sprint, closedSprints and
+   * flagged to the requested fields. Capped at `limit` so a board with years of
+   * history can't turn one page load into dozens of round trips.
+   */
+  async getBoardIssues(boardId: number, jql: string, fields: string[], limit = 1000): Promise<any[]> {
+    const out: any[] = [];
+    let startAt = 0;
+    while (out.length < limit) {
+      const res = await this.request<{ issues: any[]; total: number }>(
+        `/rest/agile/1.0/board/${boardId}/issue?jql=${encodeURIComponent(jql)}` +
+          `&fields=${encodeURIComponent(fields.join(","))}&maxResults=100&startAt=${startAt}`
+      );
+      const batch = res.issues ?? [];
+      out.push(...batch);
+      startAt += batch.length;
+      if (batch.length === 0 || startAt >= (res.total ?? 0)) break;
+    }
+    return out.slice(0, limit);
+  }
+
+  async createSprint(input: { name: string; originBoardId: number; goal?: string; startDate?: string; endDate?: string }): Promise<any> {
+    return this.request(`/rest/agile/1.0/sprint`, { method: "POST", body: JSON.stringify(input) });
+  }
+
+  /** Partial update. state "active" starts a future sprint (needs dates); "closed" completes an active one. */
+  async updateSprint(sprintId: number, patch: Record<string, unknown>): Promise<any> {
+    return this.request(`/rest/agile/1.0/sprint/${sprintId}`, { method: "POST", body: JSON.stringify(patch) });
+  }
+
+  /** At most 50 per call — Jira's limit; callers chunk. */
+  async moveIssuesToSprint(sprintId: number, issues: string[], rank?: { before?: string; after?: string }): Promise<void> {
+    await this.request(`/rest/agile/1.0/sprint/${sprintId}/issue`, {
+      method: "POST",
+      body: JSON.stringify({
+        issues,
+        ...(rank?.before ? { rankBeforeIssue: rank.before } : {}),
+        ...(rank?.after ? { rankAfterIssue: rank.after } : {}),
+      }),
+    });
+  }
+
+  async moveIssuesToBacklog(issues: string[]): Promise<void> {
+    await this.request(`/rest/agile/1.0/backlog/issue`, { method: "POST", body: JSON.stringify({ issues }) });
+  }
+
+  async rankIssues(issues: string[], rank: { before?: string; after?: string }): Promise<void> {
+    await this.request(`/rest/agile/1.0/issue/rank`, {
+      method: "PUT",
+      body: JSON.stringify({
+        issues,
+        ...(rank.before ? { rankBeforeIssue: rank.before } : { rankAfterIssue: rank.after }),
+      }),
+    });
+  }
+
+  /**
+   * Writes the board's own estimation field, whatever it is on this site
+   * ("Story Points", team-managed "Story point estimate", or time). The agile
+   * endpoint resolves which field from the board, which is why this is used
+   * instead of guessing a customfield id for PUT /issue.
+   */
+  async setEstimation(key: string, boardId: number, value: string): Promise<void> {
+    await this.request(`/rest/agile/1.0/issue/${encodeURIComponent(key)}/estimation?boardId=${boardId}`, {
+      method: "PUT",
+      body: JSON.stringify({ value }),
+    });
   }
 
   async transitionIssue(key: string, transitionName: string): Promise<void> {

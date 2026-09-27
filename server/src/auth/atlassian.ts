@@ -5,7 +5,7 @@
 import {
   ACCESSIBLE_RESOURCES_URL,
   AUTHORIZE_URL,
-  SCOPES,
+  requestedScopes,
   TOKEN_URL,
   loadAuthConfig,
 } from "./config.js";
@@ -48,7 +48,7 @@ export function buildAuthorizeUrl(opts: { state: string; codeChallenge: string }
   const params = new URLSearchParams({
     audience: "api.atlassian.com",
     client_id: cfg.clientId,
-    scope: SCOPES,
+    scope: requestedScopes().join(" "),
     redirect_uri: cfg.redirectUri,
     state: opts.state,
     response_type: "code",
@@ -107,7 +107,7 @@ export async function exchangeCode(code: string, codeVerifier: string): Promise<
 
   // Fail the login now rather than with an opaque 403 twenty minutes later.
   const granted = new Set(bundle.scope.split(/\s+/).filter(Boolean));
-  const missing = SCOPES.split(" ").filter((s) => !granted.has(s));
+  const missing = requestedScopes().filter((s) => !granted.has(s));
   if (granted.size > 0 && missing.length > 0) {
     throw new AtlassianAuthError(
       "insufficient_scope",

@@ -1,4 +1,9 @@
 import type {
+  BoardSnapshot,
+  EstimateSuggestion,
+  Sprint,
+  SprintInsight,
+  SprintPlanProposal,
   BulkTaskCreateInput,
   BulkTaskCreateResult,
   ChatMessage,
@@ -183,6 +188,55 @@ export const api = {
     ),
   discardPlan: (runId: string) =>
     request<void>(`/ai/plans/${encodeURIComponent(runId)}/discard`, { method: "POST" }),
+
+  // Boards & sprints. Every call writes to Jira directly (see server/src/routes/board.ts).
+  getBoard: (boardId: number | null) =>
+    request<BoardSnapshot>(`/board${boardId ? `?boardId=${boardId}` : ""}`),
+  getTransitions: (key: string) =>
+    request<Array<{ id: string; name: string; toStatusId: string }>>(
+      `/board/issues/${encodeURIComponent(key)}/transitions`
+    ),
+  moveCard: (key: string, body: { toStatusIds?: string[]; before?: string | null; after?: string | null }) =>
+    request<{ statusId: string | null }>(`/board/issues/${encodeURIComponent(key)}/move`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  rankIssues: (issues: string[], rank: { before?: string; after?: string }) =>
+    request<void>("/board/rank", { method: "POST", body: JSON.stringify({ issues, ...rank }) }),
+  moveToBacklog: (issues: string[], rank?: { before?: string; after?: string }) =>
+    request<void>("/board/backlog", { method: "POST", body: JSON.stringify({ issues, ...rank }) }),
+  moveToSprint: (sprintId: number, issues: string[], rank?: { before?: string; after?: string }) =>
+    request<void>(`/board/sprints/${sprintId}/issues`, { method: "POST", body: JSON.stringify({ issues, ...rank }) }),
+  createSprint: (input: { boardId: number; name: string; goal?: string | null; startDate?: string; endDate?: string }) =>
+    request<Sprint>("/board/sprints", { method: "POST", body: JSON.stringify(input) }),
+  updateSprint: (id: number, patch: { name?: string; goal?: string | null; startDate?: string; endDate?: string }) =>
+    request<Sprint>(`/board/sprints/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  startSprint: (id: number, input: { startDate: string; endDate: string; name?: string; goal?: string }) =>
+    request<Sprint>(`/board/sprints/${id}/start`, { method: "POST", body: JSON.stringify(input) }),
+  completeSprint: (id: number, moveTo: number | "backlog" | "new") =>
+    request<{ moved: number }>(`/board/sprints/${id}/complete`, { method: "POST", body: JSON.stringify({ moveTo }) }),
+  setEstimate: (key: string, boardId: number, value: number | null, unit: "points" | "hours") =>
+    request<void>(`/board/issues/${encodeURIComponent(key)}/estimate`, {
+      method: "PUT",
+      body: JSON.stringify({ boardId, value, unit }),
+    }),
+
+  // Board AI — proposals only; applying goes through the calls above.
+  planSprint: (boardId: number, sprintId: number, clock: { today: string; tzOffsetMinutes: number }) =>
+    request<SprintPlanProposal>("/ai/board/plan", {
+      method: "POST",
+      body: JSON.stringify({ boardId, sprintId, ...clock }),
+    }),
+  estimateIssues: (boardId: number, keys?: string[]) =>
+    request<{ items: EstimateSuggestion[]; unit: "points" | "hours" }>("/ai/board/estimate", {
+      method: "POST",
+      body: JSON.stringify({ boardId, keys }),
+    }),
+  sprintInsight: (boardId: number, sprintId: number, clock: { today: string; tzOffsetMinutes: number }) =>
+    request<SprintInsight>("/ai/board/insight", {
+      method: "POST",
+      body: JSON.stringify({ boardId, sprintId, ...clock }),
+    }),
 
   getChat: (sessionId: string) =>
     request<{ sessionId: string; messages: ChatMessage[]; usage: UsageStats }>(

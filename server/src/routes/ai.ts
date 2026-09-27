@@ -7,8 +7,13 @@ import * as chatStore from "../ai/chatStore.js";
 import * as plans from "../ai/planStore.js";
 import * as resources from "../resourceStore.js";
 import type { Predecessor } from "../types.js";
+import { boardAiRouter } from "./boardAi.js";
+import { boardServiceFor } from "./board.js";
 
 export const aiRouter = Router();
+
+// Sprint planning, estimation and sprint insight — see routes/boardAi.ts.
+aiRouter.use("/board", boardAiRouter);
 
 /**
  * The AI planner. Every route here is mounted under the same requireAuth as the
@@ -104,7 +109,7 @@ aiRouter.post("/plans", requireProject, async (req, res, next) => {
  */
 aiRouter.post("/chat", requireProject, async (req, res) => {
   const { session, taskService } = req.auth!;
-  const body = req.body as { message?: unknown; sessionId?: unknown; today?: unknown };
+  const body = req.body as { message?: unknown; sessionId?: unknown; today?: unknown; tzOffsetMinutes?: unknown };
   const message = String(body?.message ?? "").trim();
   // The browser's local date, when it sends one: server UTC is a day behind in
   // Vietnam until 07:00, and "overdue" in the chat must match "overdue" on the
@@ -157,6 +162,11 @@ aiRouter.post("/chat", requireProject, async (req, res) => {
       cloudId: session.cloudId,
       projectKey: session.projectKey!,
       accountId: session.accountId,
+      boardService: boardServiceFor(req),
+      tzOffsetMinutes: (() => {
+        const n = Number(body?.tzOffsetMinutes);
+        return Number.isFinite(n) && Math.abs(n) <= 14 * 60 ? n : 0;
+      })(),
       createPlan: async (brief, startDate) => {
         const runId = await plans.createRun(session.cloudId, session.projectKey!, session.accountId, brief);
         try {

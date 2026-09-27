@@ -60,14 +60,52 @@ export interface AuthConfig {
  * for everyone, not a degraded member list. And a scope added here only reaches a
  * user after they log in again: existing refresh tokens keep their old scopes.
  */
-export const SCOPES = [
+const BASE_SCOPES = [
   "read:jira-work",
   "write:jira-work",
   "read:jira-user",
   "manage:jira-configuration",
   "read:me",
   "offline_access",
-].join(" ");
+];
+
+/**
+ * Jira Software (boards, sprints, rank, estimation) — granular only: the Jira
+ * Software docs state it "doesn't support classic scopes", so `read:jira-work`
+ * does not reach /rest/agile/1.0 and the gateway answers 401 "scope does not
+ * match". The list is exactly what the endpoints boardService.ts calls declare
+ * in Atlassian's OpenAPI spec (`read:project:jira` for GET /board,
+ * `read:board-scope.admin` for column configuration, `read:jql` for sprint
+ * issue queries, `write:issue:jira-software` for rank and estimation).
+ *
+ * Behind an explicit switch, not always on, because of the rule above: a scope
+ * the app doesn't have fails /authorize itself — a login outage for everyone.
+ * The order is: enable these on BOTH Atlassian apps in the developer console,
+ * then set JIRA_AGILE=on (a repo variable, see deploy.yml). Until then the Bảng
+ * tab still works, as a status board over the platform API (boardService's
+ * fallback), and says what is missing.
+ */
+export const AGILE_SCOPES = [
+  "read:board-scope:jira-software",
+  "read:board-scope.admin:jira-software",
+  "write:board-scope:jira-software",
+  "read:sprint:jira-software",
+  "write:sprint:jira-software",
+  "read:issue:jira-software",
+  "write:issue:jira-software",
+  "read:project:jira",
+  "read:issue-details:jira",
+  "read:jql:jira",
+];
+
+export function agileEnabled(): boolean {
+  return /^(on|true|1|yes)$/i.test(process.env.JIRA_AGILE?.trim() ?? "");
+}
+
+/** Everything /authorize asks for. A function, not a constant, so it reads JIRA_AGILE after dotenv. */
+export function requestedScopes(): string[] {
+  return agileEnabled() ? [...BASE_SCOPES, ...AGILE_SCOPES] : BASE_SCOPES;
+}
 
 export const AUTHORIZE_URL = "https://auth.atlassian.com/authorize";
 export const TOKEN_URL = "https://auth.atlassian.com/oauth/token";

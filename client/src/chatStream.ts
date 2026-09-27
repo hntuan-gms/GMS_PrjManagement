@@ -36,7 +36,9 @@ export async function* streamChat(
     headers: { "Content-Type": "application/json" },
     // The local date travels with the message so "overdue" in the chat matches
     // the report page, which also uses the browser's date (see todayIso).
-    body: JSON.stringify({ message, sessionId, today: todayIso() }),
+    // tzOffsetMinutes: sprint dates are Jira datetimes, and which calendar day
+    // 17:00Z falls on depends on where the team is (sprint_status tool).
+    body: JSON.stringify({ message, sessionId, today: todayIso(), tzOffsetMinutes: -new Date().getTimezoneOffset() }),
     signal,
   });
 

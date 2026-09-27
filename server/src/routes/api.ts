@@ -2,6 +2,7 @@ import { Router } from "express";
 import { aiRouter } from "./ai.js";
 import { resourcesRouter } from "./resources.js";
 import { progressRouter } from "./progress.js";
+import { boardRouter } from "./board.js";
 import { requireAuth, requireProject, requireStaff } from "../auth/middleware.js";
 import { badRequest } from "../errors.js";
 import type { BulkTaskCreateInput, TaskCreateInput, TaskUpdateInput } from "../types.js";
@@ -20,6 +21,7 @@ apiRouter.use(requireAuth);
 apiRouter.use("/ai", requireStaff, aiRouter);
 apiRouter.use("/resources", resourcesRouter);
 apiRouter.use("/progress", progressRouter);
+apiRouter.use("/board", boardRouter);
 
 // GET /meta used to live here, returning the same SessionMeta as
 // /api/auth/me. Nothing ever fetched it, and having two copies of that object is

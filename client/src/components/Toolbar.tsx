@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { Session } from "../types";
 
-export type WorkspaceView = "gantt" | "resource" | "report";
+export type WorkspaceView = "gantt" | "board" | "resource" | "report";
 
 interface Props {
   session: Session;
@@ -59,6 +59,9 @@ export default function Toolbar({
       <div className="toolbar-tabs">
         <button className={view === "gantt" ? "active" : ""} onClick={() => onViewChange("gantt")}>
           Gantt / WBS
+        </button>
+        <button className={view === "board" ? "active" : ""} onClick={() => onViewChange("board")}>
+          Bảng
         </button>
         {/* Project admins only — see requireResourceAccess on the server. */}
         {showResources && (

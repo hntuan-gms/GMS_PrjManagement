@@ -1,4 +1,6 @@
 import { Type, type FunctionDeclaration } from "@google/genai";
+import type { BoardService } from "../agile/boardService.js";
+import { sprintFacts, velocityStats } from "../agile/sprintMetrics.js";
 import type { TaskService } from "../taskService.js";
 import { isAssignableType, type IssueTypeName, type Task } from "../types.js";
 import * as resources from "../resourceStore.js";
@@ -57,6 +59,10 @@ export interface ToolContext {
   mutated: boolean;
   /** Lazily built once per turn — it costs a database round trip. */
   workload?: Map<string, PersonWorkload>;
+  /** Jira Software board access for sprint questions. */
+  boardService: BoardService;
+  /** The browser's minutes east of UTC — sprint dates are Jira datetimes. */
+  tzOffsetMinutes: number;
 }
 
 export interface ToolOutcome {
@@ -227,8 +233,22 @@ const CREATE_PROGRESS_REPORT: FunctionDeclaration = {
   parameters: { type: Type.OBJECT, properties: {} },
 };
 
+const SPRINT_STATUS: FunctionDeclaration = {
+  name: "sprint_status",
+  description:
+    "The Scrum/Kanban board, computed: the active sprint's goal, days left, % done vs % of time elapsed " +
+    "(pace), work by person, blocked / flagged / stale items, unassigned and unestimated work, velocity of " +
+    "past sprints, future sprints and backlog size. Read-only and free. Call it for ANY question about " +
+    "sprints, the board, the backlog, velocity or 'sprint này thế nào'.",
+  parameters: {
+    type: Type.OBJECT,
+    properties: { boardId: { type: Type.NUMBER, description: "Optional; defaults to the project's first scrum board." } },
+  },
+};
+
 export const TOOLS: FunctionDeclaration[] = [
   PROJECT_PROGRESS,
+  SPRINT_STATUS,
   CREATE_PROGRESS_REPORT,
   CREATE_PLAN,
   CREATE_TASK,
@@ -257,6 +277,8 @@ export function labelFor(name: string): string {
       return "Đang tính tiến độ dự án...";
     case CREATE_PROGRESS_REPORT.name:
       return "Đang viết báo cáo tiến độ...";
+    case SPRINT_STATUS.name:
+      return "Đang xem board và sprint...";
     default:
       return "Đang xử lý...";
   }
@@ -331,6 +353,8 @@ export async function runTool(
       return runProjectProgress(args, ctx);
     case CREATE_PROGRESS_REPORT.name:
       return runCreateProgressReport(ctx);
+    case SPRINT_STATUS.name:
+      return runSprintStatus(args, ctx);
     default:
       return { response: { error: `Công cụ "${name}" không tồn tại.` } };
   }
@@ -605,5 +629,40 @@ async function runCreateProgressReport(ctx: ToolContext): Promise<ToolOutcome> {
         "Tóm tắt báo cáo trong 2–3 câu và nhắc người dùng bấm vào thẻ báo cáo (hoặc tab Báo cáo) để xem đầy đủ.",
     },
     report: { id: report.id, headline: report.narrative.headline, health: report.health },
+  };
+}
+
+async function runSprintStatus(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolOutcome> {
+  const boardId = Number(args.boardId);
+  const snapshot = await ctx.boardService.snapshot(Number.isInteger(boardId) && boardId > 0 ? boardId : null);
+  if (snapshot.mode !== "agile" || !snapshot.board) {
+    return { response: { available: false, message: snapshot.fallback?.message ?? "Chưa có board Jira Software." } };
+  }
+  const active = snapshot.sprints.find((s) => s.state === "active");
+  const backlog = snapshot.issues.filter((i) => i.sprintId === null && !i.subtask && i.statusCategory !== "done");
+  return {
+    response: {
+      board: snapshot.board,
+      boards: snapshot.boards,
+      activeSprint: active ? sprintFacts(snapshot, active, ctx.today, ctx.tzOffsetMinutes) : null,
+      futureSprints: snapshot.sprints
+        .filter((s) => s.state === "future")
+        .map((s) => ({
+          id: s.id,
+          name: s.name,
+          goal: s.goal,
+          issues: snapshot.issues.filter((i) => i.sprintId === s.id && !i.subtask).length,
+        })),
+      velocity: velocityStats(snapshot),
+      velocityHistory: snapshot.velocity.map((v) => ({ name: v.name, completed: v.completed, completedCount: v.completedCount })),
+      backlog: {
+        count: backlog.length,
+        unestimated: snapshot.estimation ? backlog.filter((i) => i.estimate === null).length : null,
+        top: backlog.slice(0, 10).map((i) => ({ key: i.key, summary: i.summary, estimate: i.estimate })),
+      },
+      note:
+        "Mọi con số đã được tính sẵn — trích nguyên văn. Lập kế hoạch sprint, ước lượng điểm và phân tích sprint " +
+        "bằng AI có sẵn trong tab Bảng (nút ✦); gợi ý người dùng mở tab đó khi họ muốn áp dụng thay đổi.",
+    },
   };
 }

@@ -114,6 +114,7 @@ function systemPrompt(projectKey: string, tasks: Task[], today: string): string 
     "- Trước khi gán ai, hãy gọi suggest_assignees để xem ai ít trùng lịch nhất; đừng đoán.",
     "  Hỏi 'ai đang rảnh', 'ai quá tải' → team_workload.",
     "- Mọi câu hỏi về tiến độ, trễ hạn, rủi ro, 'dự án thế nào', giai đoạn nào chậm, ai đang trễ → project_progress.",
+    "- Câu hỏi về sprint, board, backlog, vận tốc, 'sprint này có kịp không' → sprint_status.",
     "  Trích NGUYÊN VĂN số liệu nó trả về (%, SPI, số ngày trễ, mã issue); tuyệt đối không tự đếm hay tự ước lượng từ danh sách bên dưới.",
     "  Tình trạng (Đúng tiến độ / Có rủi ro / Chậm tiến độ) đã được tính sẵn kèm lý do — giải thích nó, không tự phán khác.",
     "- Người dùng bảo 'tạo/làm báo cáo tiến độ' → create_progress_report (lưu vào tab Báo cáo). Câu hỏi nhanh thì KHÔNG cần tạo báo cáo.",

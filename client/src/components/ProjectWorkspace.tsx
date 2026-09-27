@@ -13,6 +13,7 @@ import type {
   Task,
   TaskUpdateResponse,
 } from "../types";
+import BoardView from "./BoardView";
 import ChatDock from "./ChatDock";
 import CreateTaskModal from "./CreateTaskModal";
 import GanttView from "./GanttView";
@@ -537,6 +538,14 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
             onAddDependency={handleAddDependency}
             onEditDependency={handleEditDependency}
             onDeleteDependency={handleDeleteDependency}
+          />
+        ) : view === "board" ? (
+          <BoardView
+            session={session}
+            tasks={tasks}
+            users={users}
+            onOpenEdit={setEditingTask}
+            onTasksChanged={refreshTasks}
           />
         ) : view === "resource" ? (
           <ResourceView
