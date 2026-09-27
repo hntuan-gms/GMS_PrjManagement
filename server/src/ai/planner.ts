@@ -183,8 +183,11 @@ function systemPrompt(input: PlannerInput): string {
   ].join("\n");
 }
 
-/** Reads GEMINI_API_KEY lazily so the rest of the app boots without it. */
-function client(): GoogleGenAI {
+/**
+ * Reads GEMINI_API_KEY lazily so the rest of the app boots without it. Exported
+ * for the progress report (ai/report.ts), which needs the same key and error.
+ */
+export function client(): GoogleGenAI {
   const apiKey = process.env.GEMINI_API_KEY?.trim();
   if (!apiKey) {
     throw new Error(

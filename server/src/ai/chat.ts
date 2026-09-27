@@ -1,4 +1,5 @@
 import { GoogleGenAI, type Content } from "@google/genai";
+import { computeProgress, progressHeadline } from "../progress.js";
 import type { Task } from "../types.js";
 import { activeModel } from "./planner.js";
 import { TOOLS, labelFor, runTool, type ToolContext } from "./tools.js";
@@ -39,6 +40,8 @@ export type ChatEvent =
   | { type: "plan"; runId: string; itemCount: number; warnings: string[] }
   /** A tool wrote to Jira; the client must reload the project. */
   | { type: "mutated" }
+  /** A progress report was generated; the bubble renders a card linking to it. */
+  | { type: "report"; reportId: string; headline: string; health: string }
   | { type: "usage"; usage: ChatUsage }
   | { type: "error"; message: string };
 
@@ -110,6 +113,10 @@ function systemPrompt(projectKey: string, tasks: Task[], today: string): string 
     "- Gán/đổi người phụ trách → assign_task. Bỏ gán → unassign_task.",
     "- Trước khi gán ai, hãy gọi suggest_assignees để xem ai ít trùng lịch nhất; đừng đoán.",
     "  Hỏi 'ai đang rảnh', 'ai quá tải' → team_workload.",
+    "- Mọi câu hỏi về tiến độ, trễ hạn, rủi ro, 'dự án thế nào', giai đoạn nào chậm, ai đang trễ → project_progress.",
+    "  Trích NGUYÊN VĂN số liệu nó trả về (%, SPI, số ngày trễ, mã issue); tuyệt đối không tự đếm hay tự ước lượng từ danh sách bên dưới.",
+    "  Tình trạng (Đúng tiến độ / Có rủi ro / Chậm tiến độ) đã được tính sẵn kèm lý do — giải thích nó, không tự phán khác.",
+    "- Người dùng bảo 'tạo/làm báo cáo tiến độ' → create_progress_report (lưu vào tab Báo cáo). Câu hỏi nhanh thì KHÔNG cần tạo báo cáo.",
     "",
     "Quy tắc gán người:",
     "- TUYỆT ĐỐI không gán người cho Epic. Epic là vùng chứa, trải dài toàn bộ thời gian của các công việc con,",
@@ -118,6 +125,9 @@ function systemPrompt(projectKey: string, tasks: Task[], today: string): string 
     "  Người tải trung bình thấp vẫn có thể kẹt cứng đúng tuần cần làm — hãy đọc conflictDays, đừng chỉ nhìn loadPercent.",
     "- Nói rõ vì sao chọn người đó (số ngày trùng, giờ còn trống) để người dùng phản biện được.",
     "- Sau khi tạo hoặc gán xong, nhắc lại mã issue vừa tác động.",
+    "",
+    "Tiến độ tóm tắt (đã tính sẵn, dùng project_progress để xem chi tiết):",
+    progressHeadline(computeProgress(tasks, today)),
     "",
     "Dữ liệu dự án:",
     projectSnapshot(tasks, today),
@@ -230,6 +240,14 @@ export async function* streamChat(
             runId: outcome.plan.runId,
             itemCount: outcome.plan.itemCount,
             warnings: outcome.plan.warnings,
+          };
+        }
+        if (outcome.report) {
+          yield {
+            type: "report",
+            reportId: outcome.report.id,
+            headline: outcome.report.headline,
+            health: outcome.report.health,
           };
         }
         responseParts.push({

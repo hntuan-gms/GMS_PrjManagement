@@ -6,6 +6,8 @@ import type { ChatMessage, UsageStats } from "../types";
 interface Props {
   /** Opens the human-check table for a plan the assistant produced. */
   onOpenPlan: (runId: string) => void;
+  /** Switches the workspace to the Báo cáo tab showing this report. */
+  onOpenReport: (reportId: string) => void;
   /**
    * The assistant's write tools (create_task, assign_task) change Jira behind
    * the workspace's back, so it has to reload — nothing else in the app knows
@@ -21,9 +23,23 @@ interface LiveTurn {
   toolLabel: string | null;
   planRunId: string | null;
   planItemCount: number;
+  report: { id: string; headline: string; health: string } | null;
 }
 
-const EMPTY_LIVE: LiveTurn = { thinking: "", text: "", toolLabel: null, planRunId: null, planItemCount: 0 };
+const EMPTY_LIVE: LiveTurn = {
+  thinking: "",
+  text: "",
+  toolLabel: null,
+  planRunId: null,
+  planItemCount: 0,
+  report: null,
+};
+
+const HEALTH_TEXT: Record<string, string> = {
+  on_track: "Đúng tiến độ",
+  at_risk: "Có rủi ro",
+  off_track: "Chậm tiến độ",
+};
 const SESSION_KEY = "gms.chat.sessionId";
 
 function formatTokens(n: number): string {
@@ -43,7 +59,7 @@ function formatTokens(n: number): string {
  * real answer can be ten seconds away when the model is thinking or building a
  * plan, and an empty panel for that long reads as a hang.
  */
-export default function ChatDock({ onOpenPlan, onProjectChanged }: Props) {
+export default function ChatDock({ onOpenPlan, onOpenReport, onProjectChanged }: Props) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(() => localStorage.getItem(SESSION_KEY));
@@ -131,6 +147,12 @@ export default function ChatDock({ onOpenPlan, onProjectChanged }: Props) {
           turn = { ...turn, planRunId: event.runId, planItemCount: event.itemCount, toolLabel: null };
         } else if (event.type === "mutated") {
           onProjectChanged();
+        } else if (event.type === "report") {
+          turn = {
+            ...turn,
+            report: { id: event.reportId, headline: event.headline, health: event.health },
+            toolLabel: null,
+          };
         } else if (event.type === "done") {
           setUsage(event.usage);
         } else if (event.type === "error") {
@@ -149,6 +171,9 @@ export default function ChatDock({ onOpenPlan, onProjectChanged }: Props) {
           content: turn.text,
           thinking: turn.thinking || null,
           planRunId: turn.planRunId,
+          reportId: turn.report?.id ?? null,
+          reportHeadline: turn.report?.headline ?? null,
+          reportHealth: turn.report?.health ?? null,
           model: null,
           usage: { promptTokens: 0, outputTokens: 0, thoughtTokens: 0, cachedTokens: 0 },
           createdAt: new Date().toISOString(),
@@ -235,6 +260,16 @@ export default function ChatDock({ onOpenPlan, onProjectChanged }: Props) {
           <div key={m.id} className={`chat-msg chat-msg-${m.role}`}>
             {m.thinking && <ThinkingBlock text={m.thinking} />}
             {m.content && <div className="chat-bubble">{m.content}</div>}
+            {m.reportId && (
+              <button className="chat-plan-card chat-report-card" onClick={() => onOpenReport(m.reportId!)}>
+                <span className="chat-plan-icon">▤</span>
+                <span>
+                  <strong>Báo cáo tiến độ · {HEALTH_TEXT[m.reportHealth ?? ""] ?? ""}</strong>
+                  <br />
+                  {m.reportHeadline}
+                </span>
+              </button>
+            )}
             {m.planRunId && (
               <button className="chat-plan-card" onClick={() => onOpenPlan(m.planRunId!)}>
                 <span className="chat-plan-icon">▦</span>
@@ -257,6 +292,16 @@ export default function ChatDock({ onOpenPlan, onProjectChanged }: Props) {
               </div>
             )}
             {live.text && <div className="chat-bubble">{live.text}</div>}
+            {live.report && (
+              <button className="chat-plan-card chat-report-card" onClick={() => onOpenReport(live.report!.id)}>
+                <span className="chat-plan-icon">▤</span>
+                <span>
+                  <strong>Báo cáo tiến độ · {HEALTH_TEXT[live.report.health ?? ""] ?? ""}</strong>
+                  <br />
+                  {live.report.headline}
+                </span>
+              </button>
+            )}
             {live.planRunId && (
               <button className="chat-plan-card" onClick={() => onOpenPlan(live.planRunId!)}>
                 <span className="chat-plan-icon">▦</span>

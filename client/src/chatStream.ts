@@ -1,3 +1,4 @@
+import { todayIso } from "./resourceAllocation";
 import type { UsageStats } from "./types";
 
 /**
@@ -16,6 +17,8 @@ export type ChatStreamEvent =
   | { type: "plan"; runId: string; itemCount: number; warnings: string[] }
   /** A tool wrote to Jira this turn — the workspace must reload its tasks. */
   | { type: "mutated" }
+  /** A progress report was generated and saved this turn. */
+  | { type: "report"; reportId: string; headline: string; health: string }
   | { type: "usage"; usage: UsageStats & { model: string } }
   | { type: "done"; messageId: string; usage: UsageStats }
   | { type: "error"; message: string };
@@ -31,7 +34,9 @@ export async function* streamChat(
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, sessionId }),
+    // The local date travels with the message so "overdue" in the chat matches
+    // the report page, which also uses the browser's date (see todayIso).
+    body: JSON.stringify({ message, sessionId, today: todayIso() }),
     signal,
   });
 

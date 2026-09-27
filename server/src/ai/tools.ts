@@ -2,6 +2,9 @@ import { Type, type FunctionDeclaration } from "@google/genai";
 import type { TaskService } from "../taskService.js";
 import { isAssignableType, type IssueTypeName, type Task } from "../types.js";
 import * as resources from "../resourceStore.js";
+import { computeProgress, HEALTH_LABEL } from "../progress.js";
+import { createProgressReport } from "./progressReport.js";
+import { latestReport } from "./reportStore.js";
 import {
   buildWorkload,
   commitAssignment,
@@ -16,9 +19,11 @@ import {
  *
  * Two classes of tool live here and the difference is deliberate:
  *
- * - **Read tools** (`suggest_assignees`, `team_workload`) are free to call and
- *   are what make the write tools worth having. The model is told to consult
- *   them before assigning anyone.
+ * - **Read tools** (`suggest_assignees`, `team_workload`, `project_progress`)
+ *   are free to call and are what make the write tools worth having. The model
+ *   is told to consult them before assigning anyone, and to answer progress
+ *   questions from `project_progress` rather than from its own reading of the
+ *   task list — the same computed figures the report page shows.
  * - **Write tools** (`create_task`, `assign_task`, `unassign_task`) reach Jira
  *   directly, one issue at a time, because that is what "tạo giúp tôi một task"
  *   means and staging a single issue for approval is ceremony. `create_plan`
@@ -41,6 +46,8 @@ export interface ToolContext {
   taskService: TaskService;
   cloudId: string;
   projectKey: string;
+  /** Who is asking — recorded as the author of a report generated from chat. */
+  accountId: string;
   today: string;
   /** The turn's project snapshot. Tools that create tasks append to it so a
    *  later tool in the same turn can see what an earlier one just made. */
@@ -55,6 +62,8 @@ export interface ToolContext {
 export interface ToolOutcome {
   response: Record<string, unknown>;
   plan?: { runId: string; itemCount: number; warnings: string[] };
+  /** A progress report was generated and stored; the chat shows a link to it. */
+  report?: { id: string; headline: string; health: string };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -194,7 +203,33 @@ const TEAM_WORKLOAD: FunctionDeclaration = {
   },
 };
 
+const PROJECT_PROGRESS: FunctionDeclaration = {
+  name: "project_progress",
+  description:
+    "The project's progress, computed: % done vs % planned, SPI, health verdict with reasons, forecast end " +
+    "vs baseline, overdue / slipped / not-started / due-this-week tasks, progress per phase (Epic) and per " +
+    "person, plus the latest saved AI report. Read-only and free. Call it for ANY question about progress, " +
+    "delay, risk or 'dự án thế nào' — quote its numbers, never estimate your own.",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      asOf: { type: Type.STRING, description: "YYYY-MM-DD. Defaults to today." },
+    },
+  },
+};
+
+const CREATE_PROGRESS_REPORT: FunctionDeclaration = {
+  name: "create_progress_report",
+  description:
+    "Write and save a full AI progress report (headline, summary, risks, recommendations) that appears in " +
+    "the Báo cáo tab and its history. Costs a model call, so only when the user asks for a report to be " +
+    "created or refreshed — for a quick question, use project_progress instead.",
+  parameters: { type: Type.OBJECT, properties: {} },
+};
+
 export const TOOLS: FunctionDeclaration[] = [
+  PROJECT_PROGRESS,
+  CREATE_PROGRESS_REPORT,
   CREATE_PLAN,
   CREATE_TASK,
   ASSIGN_TASK,
@@ -218,6 +253,10 @@ export function labelFor(name: string): string {
       return "Đang so tải để chọn người...";
     case TEAM_WORKLOAD.name:
       return "Đang xem tải của team...";
+    case PROJECT_PROGRESS.name:
+      return "Đang tính tiến độ dự án...";
+    case CREATE_PROGRESS_REPORT.name:
+      return "Đang viết báo cáo tiến độ...";
     default:
       return "Đang xử lý...";
   }
@@ -288,6 +327,10 @@ export async function runTool(
       return runSuggestAssignees(args, ctx);
     case TEAM_WORKLOAD.name:
       return runTeamWorkload(args, ctx);
+    case PROJECT_PROGRESS.name:
+      return runProjectProgress(args, ctx);
+    case CREATE_PROGRESS_REPORT.name:
+      return runCreateProgressReport(ctx);
     default:
       return { response: { error: `Công cụ "${name}" không tồn tại.` } };
   }
@@ -497,5 +540,63 @@ async function runTeamWorkload(args: Record<string, unknown>, ctx: ToolContext):
         overloadedDays: c.conflictDays,
       })),
     },
+  };
+}
+
+/** Lists trimmed for the prompt; `counts` in the metrics still carries every total. */
+const PROMPT_LIST_CAP = 10;
+
+async function runProjectProgress(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolOutcome> {
+  const asOf = ISO_DATE.test(str(args, "asOf")) ? str(args, "asOf") : ctx.today;
+  const m = computeProgress(ctx.tasks, asOf);
+  const latest = await latestReport(ctx.cloudId, ctx.projectKey);
+  const trim = <T>(xs: T[]) => xs.slice(0, PROMPT_LIST_CAP);
+
+  return {
+    response: {
+      ...m,
+      healthLabel: HEALTH_LABEL[m.health],
+      overdue: trim(m.overdue),
+      slipped: trim(m.slipped),
+      dueSoon: trim(m.dueSoon),
+      notStarted: trim(m.notStarted),
+      unassigned: trim(m.unassigned),
+      latestReport: latest
+        ? {
+            createdAt: latest.createdAt,
+            asOf: latest.asOf,
+            health: HEALTH_LABEL[latest.health],
+            headline: latest.narrative.headline,
+            actualPct: latest.actualPct,
+          }
+        : null,
+      note:
+        "Mọi con số ở đây đã được tính sẵn. Trích dẫn nguyên văn; mã issue lấy từ các danh sách. " +
+        "counts.* là tổng thật, các danh sách có thể đã bị cắt bớt.",
+    },
+  };
+}
+
+async function runCreateProgressReport(ctx: ToolContext): Promise<ToolOutcome> {
+  const { report, warnings } = await createProgressReport({
+    tasks: ctx.tasks,
+    cloudId: ctx.cloudId,
+    projectKey: ctx.projectKey,
+    createdBy: ctx.accountId,
+    asOf: ctx.today,
+  });
+  return {
+    response: {
+      created: report.id,
+      health: HEALTH_LABEL[report.health],
+      headline: report.narrative.headline,
+      actualPct: report.actualPct,
+      plannedPct: report.plannedPct,
+      topRisks: report.narrative.risks.slice(0, 3).map((r) => r.title),
+      ...(warnings.length > 0 ? { warnings } : {}),
+      instruction:
+        "Tóm tắt báo cáo trong 2–3 câu và nhắc người dùng bấm vào thẻ báo cáo (hoặc tab Báo cáo) để xem đầy đủ.",
+    },
+    report: { id: report.id, headline: report.narrative.headline, health: report.health },
   };
 }

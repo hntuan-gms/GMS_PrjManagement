@@ -104,8 +104,13 @@ aiRouter.post("/plans", requireProject, async (req, res, next) => {
  */
 aiRouter.post("/chat", requireProject, async (req, res) => {
   const { session, taskService } = req.auth!;
-  const body = req.body as { message?: unknown; sessionId?: unknown };
+  const body = req.body as { message?: unknown; sessionId?: unknown; today?: unknown };
   const message = String(body?.message ?? "").trim();
+  // The browser's local date, when it sends one: server UTC is a day behind in
+  // Vietnam until 07:00, and "overdue" in the chat must match "overdue" on the
+  // report page, which uses the browser's date for the same reason.
+  const clientToday = typeof body?.today === "string" ? body.today.trim() : "";
+  const today = /^\d{4}-\d{2}-\d{2}$/.test(clientToday) ? clientToday : todayIso();
 
   if (!message) {
     res.status(400).json({ error: "Tin nhắn trống." });
@@ -147,10 +152,11 @@ aiRouter.post("/chat", requireProject, async (req, res) => {
     let planRunId: string | null = null;
     let usage: ChatUsage | null = null;
 
-    const stream = streamChat(session.projectKey!, tasks, priorTurns, message, todayIso(), {
+    const stream = streamChat(session.projectKey!, tasks, priorTurns, message, today, {
       taskService: taskService!,
       cloudId: session.cloudId,
       projectKey: session.projectKey!,
+      accountId: session.accountId,
       createPlan: async (brief, startDate) => {
         const runId = await plans.createRun(session.cloudId, session.projectKey!, session.accountId, brief);
         try {

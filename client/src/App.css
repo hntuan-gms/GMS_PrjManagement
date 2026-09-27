@@ -2626,3 +2626,593 @@ button.danger:hover:not(:disabled) {
 svg text._3zRJQ {
   fill: #2a2a33 !important;
 }
+
+/* ==========================================================================
+   Progress report
+   Chart colours are the validated set from the dataviz pass: accent blue for
+   "actual", de-emphasis gray for "planned" (emphasis form: the gray is meant
+   to recede, so its low chroma is by design, not a categorical slot). Status
+   colours are reserved for health/severity and always ship with icon + label.
+   Text never wears a data colour.
+   ========================================================================== */
+.progress-view {
+  flex: 1;
+  overflow: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+
+  --pr-actual: #2a78d6;
+  --pr-planned: #898781;
+  --pr-track: #cde2fb;
+  --pr-grid: #e1e0d9;
+  --pr-axis: #c3c2b7;
+  --pr-surface: #ffffff;
+  --st-good: #0ca30c;
+  --st-warn: #fab219;
+  --st-serious: #ec835a;
+  --st-crit: #d03b3b;
+}
+
+.pr-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  padding: 24px;
+}
+
+.pr-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.pr-header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+.pr-sub,
+.pr-muted {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+/* --- health --- */
+.pr-health {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+}
+.pr-health-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-full);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+}
+.pr-health-on_track .pr-health-icon {
+  background: var(--st-good);
+}
+/* Warning yellow is too light for white text: ink on it instead. */
+.pr-health-at_risk .pr-health-icon {
+  background: var(--st-warn);
+  color: #0b0b0b;
+}
+.pr-health-off_track .pr-health-icon {
+  background: var(--st-crit);
+}
+.pr-health-small {
+  font-size: 12px;
+  font-weight: 600;
+}
+.pr-health-small .pr-health-icon {
+  width: 16px;
+  height: 16px;
+  font-size: 10px;
+}
+
+.pr-banner {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-left-width: 4px;
+  border-radius: var(--radius-lg);
+  padding: 12px 16px;
+}
+.pr-banner-on_track {
+  border-left-color: var(--st-good);
+}
+.pr-banner-at_risk {
+  border-left-color: var(--st-warn);
+}
+.pr-banner-off_track {
+  border-left-color: var(--st-crit);
+}
+.pr-banner ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* --- KPI row --- */
+.pr-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+.pr-kpi {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.pr-kpi-label {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+.pr-kpi-value {
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1.15;
+  color: var(--color-text-primary);
+}
+/* Exactly one hero figure on the page. */
+.pr-kpi-hero .pr-kpi-value {
+  font-size: 48px;
+  line-height: 1;
+}
+.pr-kpi-sub {
+  font-size: 11.5px;
+  color: var(--color-text-secondary);
+}
+.pr-bad {
+  color: var(--st-crit) !important;
+}
+
+.pr-quality {
+  font-size: 12.5px;
+  color: #92400e;
+  background: var(--color-warning-light);
+  border: 1px solid var(--color-warning-border);
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+}
+
+/* --- layout --- */
+.pr-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 14px;
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .pr-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.pr-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+  min-width: 0;
+}
+.pr-card h3 {
+  margin: 0 0 10px;
+  font-size: 14px;
+}
+.pr-card h4 {
+  margin: 14px 0 6px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--color-text-muted);
+}
+
+/* --- narrative --- */
+.pr-narr-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.pr-card .pr-headline {
+  font-size: 17px;
+  margin: 10px 0 6px;
+  line-height: 1.4;
+}
+.pr-summary {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+}
+.pr-drift {
+  margin-top: 10px;
+  font-size: 12.5px;
+  color: #92400e;
+  background: var(--color-warning-light);
+  border: 1px solid var(--color-warning-border);
+  border-radius: var(--radius-md);
+  padding: 7px 10px;
+}
+.pr-bullets,
+.pr-recs {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pr-recs p,
+.pr-risk p {
+  margin: 2px 0 0;
+  color: var(--color-text-secondary);
+  font-size: 12.5px;
+}
+.pr-risks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pr-risk {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 10px;
+  font-size: 13px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+.pr-sev {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  align-self: start;
+}
+.pr-sev span {
+  font-size: 10px;
+}
+.pr-sev-high span {
+  color: var(--st-crit);
+}
+.pr-sev-medium span {
+  color: var(--st-serious);
+}
+.pr-sev-low span {
+  color: var(--color-text-muted);
+}
+.pr-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 5px;
+}
+.pr-issue {
+  padding: 1px 7px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background: #f8fafc;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--color-primary);
+  cursor: pointer;
+  box-shadow: none;
+}
+.pr-issue:hover {
+  border-color: var(--color-primary-border);
+  background: var(--color-primary-light);
+}
+.pr-issue-missing {
+  color: var(--color-text-muted);
+  cursor: default;
+  text-decoration: line-through;
+}
+.pr-warnings {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+.pr-foot {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-border);
+  font-size: 11.5px;
+  color: var(--color-text-muted);
+}
+.pr-empty p {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+/* --- trend chart --- */
+.pr-trend {
+  margin-bottom: 10px;
+}
+.pr-legend {
+  display: flex;
+  gap: 14px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  margin-bottom: 4px;
+}
+.pr-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+/* Line keys, not boxes: the legend mirrors the mark. */
+.pr-key {
+  display: inline-block;
+  width: 14px;
+  height: 2px;
+  border-radius: 1px;
+}
+.pr-key-actual {
+  background: var(--pr-actual);
+}
+.pr-key-planned {
+  background: var(--pr-planned);
+}
+.pr-trend-plot {
+  position: relative;
+}
+.pr-trend-plot svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  cursor: crosshair;
+}
+.pr-grid {
+  stroke: var(--pr-grid);
+  stroke-width: 1;
+}
+.pr-axis {
+  stroke: var(--pr-axis);
+  stroke-width: 1;
+}
+.pr-tick {
+  font-size: 10px;
+  fill: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.pr-line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.pr-line-actual {
+  stroke: var(--pr-actual);
+}
+.pr-line-planned {
+  stroke: var(--pr-planned);
+}
+.pr-dot {
+  stroke: var(--pr-surface);
+  stroke-width: 2;
+}
+.pr-dot-actual {
+  fill: var(--pr-actual);
+}
+.pr-dot-planned {
+  fill: var(--pr-planned);
+}
+.pr-endlabel {
+  font-size: 11px;
+  font-weight: 600;
+  fill: var(--color-text-primary);
+}
+.pr-endlabel-muted {
+  fill: var(--color-text-secondary);
+  font-weight: 500;
+}
+.pr-crosshair {
+  stroke: var(--pr-axis);
+  stroke-width: 1;
+}
+.pr-tooltip {
+  position: absolute;
+  top: 4px;
+  transform: translateX(-50%);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  padding: 7px 10px;
+  font-size: 12px;
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 2;
+}
+.pr-tooltip-date {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  margin-bottom: 3px;
+}
+.pr-tooltip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pr-tooltip-row b {
+  color: var(--color-text-primary);
+}
+.pr-tooltip-row span {
+  color: var(--color-text-secondary);
+}
+.pr-tooltip-hint {
+  margin-top: 4px;
+  font-size: 10.5px;
+  color: var(--color-text-muted);
+}
+
+/* --- tables --- */
+.pr-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.pr-table th {
+  text-align: left;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--color-border);
+}
+.pr-table td {
+  padding: 7px 8px;
+  border-bottom: 1px solid #f1f5f9;
+  vertical-align: middle;
+}
+.pr-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.pr-history-table tr.is-current td {
+  background: var(--color-primary-light);
+}
+.pr-phase-name {
+  color: var(--color-text-primary);
+}
+.pr-slip {
+  font-size: 11.5px;
+  color: var(--st-crit);
+}
+.pr-key-col {
+  width: 1%;
+  white-space: nowrap;
+}
+.pr-extra {
+  white-space: nowrap;
+  color: var(--color-text-secondary);
+  text-align: right;
+}
+.pr-critical {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--st-crit);
+  color: var(--st-crit);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+.pr-list-empty {
+  padding: 12px 4px;
+}
+
+/* --- phase meter: actual fill + planned tick on a same-ramp track --- */
+.pr-meter-col {
+  width: 44%;
+}
+.pr-meter-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.pr-meter {
+  position: relative;
+  flex: 1;
+  height: 10px;
+  border-radius: 5px;
+  background: var(--pr-track);
+}
+.pr-meter-fill {
+  height: 100%;
+  border-radius: 5px;
+}
+.pr-meter-ok {
+  background: var(--pr-actual);
+}
+.pr-meter-warn {
+  background: var(--st-warn);
+}
+.pr-meter-crit {
+  background: var(--st-crit);
+}
+.pr-meter-plan {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--color-text-primary);
+  border-radius: 1px;
+}
+.pr-meter-text {
+  min-width: 150px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary);
+}
+.pr-gap {
+  font-weight: 600;
+}
+.pr-gap-warn,
+.pr-gap-crit {
+  color: var(--st-crit);
+}
+
+/* --- list tabs --- */
+.pr-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.pr-tabs button {
+  padding: 5px 10px;
+  font-size: 12px;
+  box-shadow: none;
+}
+.pr-tabs button.active {
+  background: var(--color-primary-light);
+  border-color: var(--color-primary-border);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+.pr-count {
+  display: inline-block;
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: var(--radius-full);
+  background: #f1f5f9;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  text-align: center;
+}
+
+/* --- chat report card --- */
+.chat-report-card .chat-plan-icon {
+  font-size: 16px;
+}

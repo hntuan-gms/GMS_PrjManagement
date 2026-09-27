@@ -17,9 +17,10 @@ import ChatDock from "./ChatDock";
 import CreateTaskModal from "./CreateTaskModal";
 import GanttView from "./GanttView";
 import PlanReviewModal from "./PlanReviewModal";
+import ProgressReportView from "./ProgressReportView";
 import ResourceView from "./ResourceView";
 import TaskEditModal from "./TaskEditModal";
-import Toolbar from "./Toolbar";
+import Toolbar, { type WorkspaceView } from "./Toolbar";
 
 interface Props {
   session: Session;
@@ -46,7 +47,9 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
   const [pool, setPool] = useState<ResourcePool | null>(null);
   const [poolError, setPoolError] = useState<string | null>(null);
 
-  const [view, setView] = useState<"gantt" | "resource">("gantt");
+  const [view, setView] = useState<WorkspaceView>("gantt");
+  // The report the Báo cáo tab should open on — set by a report card in the chat.
+  const [focusReportId, setFocusReportId] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Multi-select, file-list style. `selectedIds` is the real selection;
@@ -511,7 +514,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
             onEditDependency={handleEditDependency}
             onDeleteDependency={handleDeleteDependency}
           />
-        ) : (
+        ) : view === "resource" ? (
           <ResourceView
             tasks={tasks}
             users={users}
@@ -521,6 +524,8 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
             onAssign={handleAssign}
             onOpenEdit={setEditingTask}
           />
+        ) : (
+          <ProgressReportView tasks={tasks} focusReportId={focusReportId} onOpenEdit={setEditingTask} />
         )}
       </div>
 
@@ -542,7 +547,14 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
         />
       )}
 
-      <ChatDock onOpenPlan={setReviewRunId} onProjectChanged={refreshTasks} />
+      <ChatDock
+        onOpenPlan={setReviewRunId}
+        onOpenReport={(id) => {
+          setFocusReportId(id);
+          setView("report");
+        }}
+        onProjectChanged={refreshTasks}
+      />
 
       {reviewRunId && (
         <PlanReviewModal

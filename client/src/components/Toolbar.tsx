@@ -1,10 +1,12 @@
 import { useState } from "react";
 import type { Session } from "../types";
 
+export type WorkspaceView = "gantt" | "resource" | "report";
+
 interface Props {
   session: Session;
-  view: "gantt" | "resource";
-  onViewChange: (v: "gantt" | "resource") => void;
+  view: WorkspaceView;
+  onViewChange: (v: WorkspaceView) => void;
   /** People overloaded in the near-term window — badged on the resource tab. */
   overloadedPeople: number;
   onAddTask: () => void;
@@ -65,6 +67,9 @@ export default function Toolbar({
               {overloadedPeople}
             </span>
           )}
+        </button>
+        <button className={view === "report" ? "active" : ""} onClick={() => onViewChange("report")}>
+          Báo cáo
         </button>
       </div>
       <div className="toolbar-right">

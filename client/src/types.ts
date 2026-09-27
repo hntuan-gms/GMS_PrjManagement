@@ -198,6 +198,14 @@ export interface ChatMessage {
   thinking: string | null;
   /** Set when this turn produced a plan — the bubble renders a clickable table card. */
   planRunId: string | null;
+  /**
+   * Set when this turn generated a progress report. Client-side only: it is not
+   * a chat_message column, so a transcript reloaded from the server shows the
+   * reply text (which points at the Báo cáo tab) without the card.
+   */
+  reportId?: string | null;
+  reportHeadline?: string | null;
+  reportHealth?: string | null;
   model: string | null;
   usage: Omit<UsageStats, "messages" | "totalTokens">;
   createdAt: string;
@@ -232,4 +240,119 @@ export interface Session {
   startDateFieldId: string | null;
   /** True while schedule overlays live on the server's ephemeral disk. */
   overlayEphemeral: boolean;
+}
+
+/* ----------------------------------------------------------------------------
+ * Progress report — shapes mirror server/src/progress.ts and ai/reportStore.ts.
+ * Every number here is computed server-side; the AI only writes `narrative`.
+ * -------------------------------------------------------------------------- */
+
+export type Health = "on_track" | "at_risk" | "off_track";
+
+export interface ProgressTaskRef {
+  id: string;
+  summary: string;
+  assignee: string | null;
+  startDate: string | null;
+  dueDate: string | null;
+  statusName: string;
+  critical: boolean;
+}
+
+export interface ProgressMetrics {
+  asOf: string;
+  counts: {
+    total: number;
+    done: number;
+    inProgress: number;
+    todo: number;
+    overdue: number;
+    slipped: number;
+    notStarted: number;
+    unassigned: number;
+    undated: number;
+    noBaseline: number;
+    criticalOpen: number;
+  };
+  actualPct: number;
+  plannedPct: number;
+  spi: number | null;
+  health: Health;
+  healthReasons: string[];
+  schedule: {
+    start: string | null;
+    plannedEnd: string | null;
+    baselineEnd: string | null;
+    slipDays: number | null;
+    daysRemaining: number | null;
+  };
+  overdue: Array<ProgressTaskRef & { daysLate: number }>;
+  slipped: Array<ProgressTaskRef & { baselineDue: string; slipDays: number }>;
+  dueSoon: ProgressTaskRef[];
+  notStarted: ProgressTaskRef[];
+  unassigned: ProgressTaskRef[];
+  phases: Array<{
+    id: string | null;
+    summary: string;
+    total: number;
+    done: number;
+    actualPct: number;
+    plannedPct: number;
+    start: string | null;
+    end: string | null;
+    baselineEnd: string | null;
+    overdue: number;
+  }>;
+  people: Array<{
+    accountId: string | null;
+    name: string;
+    open: number;
+    inProgress: number;
+    done: number;
+    overdue: number;
+  }>;
+}
+
+export interface ReportNarrative {
+  headline: string;
+  summary: string;
+  highlights: string[];
+  risks: Array<{ title: string; detail: string; severity: "high" | "medium" | "low"; issueKeys: string[] }>;
+  recommendations: Array<{ action: string; rationale: string; issueKeys: string[] }>;
+}
+
+export interface ProgressReport {
+  id: string;
+  createdAt: string;
+  createdBy: string;
+  asOf: string;
+  health: Health;
+  actualPct: number;
+  plannedPct: number;
+  /** Snapshot of the numbers the narrative was written from. */
+  metrics: ProgressMetrics;
+  narrative: ReportNarrative;
+  model: string | null;
+  usage: {
+    promptTokens: number | null;
+    outputTokens: number | null;
+    thoughtTokens: number | null;
+    cachedTokens: number | null;
+  };
+}
+
+export interface ReportPoint {
+  id: string;
+  createdAt: string;
+  asOf: string;
+  health: Health;
+  actualPct: number;
+  plannedPct: number;
+  headline: string;
+}
+
+export interface ProgressOverview {
+  metrics: ProgressMetrics;
+  latest: ProgressReport | null;
+  history: ReportPoint[];
 }

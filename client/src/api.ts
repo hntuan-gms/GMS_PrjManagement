@@ -4,6 +4,9 @@ import type {
   ChatMessage,
   JiraUser,
   PlanResponse,
+  ProgressOverview,
+  ProgressReport,
+  ReportPoint,
   ResourceAbsence,
   ResourcePool,
   ResourceProfile,
@@ -120,6 +123,17 @@ export const api = {
     }),
   deleteTask: (id: string) =>
     request<void>(`/tasks/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  // Progress report. The overview is free (computed, no model call); generating a
+  // report waits on Gemini and can take several seconds.
+  getProgress: (asOf: string) =>
+    request<ProgressOverview>(`/progress?asOf=${encodeURIComponent(asOf)}`),
+  generateProgressReport: (asOf: string) =>
+    request<{ report: ProgressReport; warnings: string[]; history: ReportPoint[] }>("/progress/reports", {
+      method: "POST",
+      body: JSON.stringify({ asOf }),
+    }),
+  getProgressReport: (id: string) => request<ProgressReport>(`/progress/reports/${encodeURIComponent(id)}`),
+
   getResourcePool: () => request<ResourcePool>("/resources"),
   saveResourceProfile: (
     accountId: string,
