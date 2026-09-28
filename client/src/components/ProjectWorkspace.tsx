@@ -139,6 +139,8 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
     };
   }, []);
 
+  const taskKeys = useMemo(() => new Set(tasks.map((t) => t.id)), [tasks]);
+
   // The toolbar's overload count, over the same default window the resource tab
   // opens on — so the badge and the tab can never contradict each other.
   const overloadedPeople = useMemo(() => {
@@ -599,6 +601,11 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
             setView("report");
           }}
           onProjectChanged={refreshTasks}
+          knownKeys={taskKeys}
+          onOpenIssue={(key) => {
+            const task = tasks.find((t) => t.id === key);
+            if (task) setEditingTask(task);
+          }}
         />
       )}
 

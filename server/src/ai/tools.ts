@@ -5,7 +5,9 @@ import type { TaskService } from "../taskService.js";
 import { isAssignableType, type IssueTypeName, type JiraUser, type Task } from "../types.js";
 import * as resources from "../resourceStore.js";
 import { computeProgress, HEALTH_LABEL } from "../progress.js";
+import { EDIT_TOOLS, editLabelFor, runEditTool } from "./editTools.js";
 import { createProgressReport } from "./progressReport.js";
+import { addDays, ISO_DATE, resolvePerson, str } from "./toolUtils.js";
 import { latestReport } from "./reportStore.js";
 import {
   buildWorkload,
@@ -263,6 +265,7 @@ const SPRINT_STATUS: FunctionDeclaration = {
 export const TOOLS: FunctionDeclaration[] = [
   PROJECT_PROGRESS,
   SPRINT_STATUS,
+  ...EDIT_TOOLS,
   CREATE_PROGRESS_REPORT,
   CREATE_PLAN,
   CREATE_TASK,
@@ -294,24 +297,13 @@ export function labelFor(name: string): string {
     case SPRINT_STATUS.name:
       return "Đang xem board và sprint...";
     default:
-      return "Đang xử lý...";
+      return editLabelFor(name) ?? "Đang xử lý...";
   }
 }
 
 /* -------------------------------------------------------------------------- */
 /* Dispatch                                                                   */
 /* -------------------------------------------------------------------------- */
-
-function addDays(iso: string, days: number): string {
-  const ms = Date.UTC(Number(iso.slice(0, 4)), Number(iso.slice(5, 7)) - 1, Number(iso.slice(8, 10)));
-  return new Date(ms + days * 86_400_000).toISOString().slice(0, 10);
-}
-
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-
-function str(args: Record<string, unknown>, key: string): string {
-  return String(args[key] ?? "").trim();
-}
 
 async function workloadOf(ctx: ToolContext): Promise<Map<string, PersonWorkload>> {
   if (ctx.workload) return ctx.workload;
@@ -327,53 +319,6 @@ async function workloadOf(ctx: ToolContext): Promise<Map<string, PersonWorkload>
 function findTask(ctx: ToolContext, id: string): Task | undefined {
   const needle = id.trim().toUpperCase();
   return ctx.tasks.find((t) => t.id.toUpperCase() === needle);
-}
-
-/** Lowercase, no diacritics, single spaces — "Võ Đình  Quang" and "vo dinh quang" fold to the same string. */
-function fold(name: string): string {
-  return name
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[đĐ]/g, "d")
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-/**
- * A name as the user typed it → one team member, or a reason why not.
- *
- * Users type Vietnamese names without diacritics, drop the family name, or use
- * just the given name, and none of that should need the model to go fetch the
- * team first. Exact (folded) match wins; otherwise every typed word must appear
- * in the name. More than one hit is returned as a question, never guessed —
- * assigning the wrong "Quang" is worse than asking which one.
- */
-function resolvePerson(
-  team: JiraUser[],
-  raw: string
-): { person: JiraUser } | { error: string; candidates?: string[] } {
-  const q = fold(raw);
-  if (!q) return { error: "Chưa có tên người phụ trách." };
-  const exact = team.filter((u) => fold(u.displayName) === q);
-  if (exact.length === 1) return { person: exact[0] };
-  const words = q.split(" ");
-  const partial = team.filter((u) => {
-    const name = fold(u.displayName).split(" ");
-    return words.every((w) => name.includes(w));
-  });
-  const hits = exact.length > 1 ? exact : partial;
-  if (hits.length === 1) return { person: hits[0] };
-  if (hits.length > 1) {
-    return {
-      error: `Có ${hits.length} người khớp với "${raw}". Hỏi lại người dùng muốn chọn ai.`,
-      candidates: hits.map((u) => `${u.displayName} (${u.accountId})`),
-    };
-  }
-  return {
-    error: `Không có ai tên "${raw}" trong nhóm dự án.`,
-    candidates: team.slice(0, 40).map((u) => u.displayName),
-  };
 }
 
 /** Trimmed for the model: full Candidate objects are mostly noise in a prompt. */
@@ -417,7 +362,7 @@ export async function runTool(
     case SPRINT_STATUS.name:
       return runSprintStatus(args, ctx);
     default:
-      return { response: { error: `Công cụ "${name}" không tồn tại.` } };
+      return (await runEditTool(name, args, ctx)) ?? { response: { error: `Công cụ "${name}" không tồn tại.` } };
   }
 }
 

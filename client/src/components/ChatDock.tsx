@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { streamChat } from "../chatStream";
+import ChatMarkdown from "./ChatMarkdown";
 import type { ChatMessage, ChatSessionSummary, UsageStats } from "../types";
 
 interface Props {
@@ -20,6 +21,9 @@ interface Props {
    * a task appeared or changed owner.
    */
   onProjectChanged: () => void;
+  /** This project's issue keys — those in a reply become buttons that open the task. */
+  knownKeys?: Set<string>;
+  onOpenIssue?: (key: string) => void;
 }
 
 /** A turn being streamed right now — not yet in the persisted transcript. */
@@ -95,7 +99,7 @@ function formatTokens(n: number): string {
  * real answer can be ten seconds away when the model is thinking or building a
  * plan, and an empty panel for that long reads as a hang.
  */
-export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProjectChanged }: Props) {
+export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProjectChanged, knownKeys, onOpenIssue }: Props) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(() => readStored(storageKey));
@@ -421,7 +425,12 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
         {messages.map((m) => (
           <div key={m.id} className={`chat-msg chat-msg-${m.role}`}>
             {m.thinking && <ThinkingBlock text={m.thinking} />}
-            {m.content && <div className="chat-bubble">{m.content}</div>}
+            {m.content && (
+              <div className="chat-bubble">
+                {/* The user's own words stay verbatim; the model's are rendered. */}
+                {m.role === "model" ? <ChatMarkdown text={m.content} knownKeys={knownKeys} onOpenIssue={onOpenIssue} /> : m.content}
+              </div>
+            )}
             {m.reportId && (
               <button className="chat-plan-card chat-report-card" onClick={() => onOpenReport(m.reportId!)}>
                 <span className="chat-plan-icon">▤</span>
@@ -453,7 +462,11 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
                 <span className="chat-spinner" /> {live.toolLabel}
               </div>
             )}
-            {live.text && <div className="chat-bubble">{live.text}</div>}
+            {live.text && (
+              <div className="chat-bubble">
+                <ChatMarkdown text={live.text} knownKeys={knownKeys} onOpenIssue={onOpenIssue} />
+              </div>
+            )}
             {live.report && (
               <button className="chat-plan-card chat-report-card" onClick={() => onOpenReport(live.report!.id)}>
                 <span className="chat-plan-icon">▤</span>

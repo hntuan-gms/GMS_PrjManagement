@@ -345,10 +345,20 @@ export class BoardService {
   /* -------------------------------------------------------------- writes */
 
   /** What the card can move to right now — the drop targets light up from this. */
-  async transitionsFor(key: string): Promise<Array<{ id: string; name: string; toStatusId: string }>> {
+  async transitionsFor(
+    key: string
+  ): Promise<Array<{ id: string; name: string; toStatusId: string; toStatusName: string; toCategory: StatusCategory }>> {
     this.assertProjectKeys([key]);
     const transitions = await this.jira.getTransitions(key);
-    return transitions.filter((t) => t.to?.id).map((t) => ({ id: t.id, name: t.name, toStatusId: String(t.to!.id) }));
+    return transitions
+      .filter((t) => t.to?.id)
+      .map((t) => ({
+        id: t.id,
+        name: t.name,
+        toStatusId: String(t.to!.id),
+        toStatusName: t.to!.name,
+        toCategory: category(t.to!.statusCategory?.key),
+      }));
   }
 
   /**

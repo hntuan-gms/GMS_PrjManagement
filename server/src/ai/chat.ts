@@ -69,14 +69,16 @@ function projectSnapshot(tasks: Task[], today: string, limit = 150): string {
     const who = t.assigneeName ?? "chưa gán";
     const dates = t.startDate ? `${t.startDate}..${t.dueDate ?? "?"}` : "chưa có ngày";
     const overdue = t.dueDate && t.dueDate < today && t.statusCategory !== "done" ? " [TRỄ]" : "";
-    return `${t.id} | ${t.summary} | ${t.issueType} | ${t.statusName} | ${t.percentComplete}% | ${who} | ${dates}${overdue}`;
+    // Predecessors on the line, so "A đang chờ gì?" and "đã nối chưa?" need no tool call.
+    const deps = t.predecessors.length > 0 ? ` | chờ ${t.predecessors.map((p) => `${p.taskId}(${p.type}${p.lagDays ? `${p.lagDays > 0 ? "+" : ""}${p.lagDays}` : ""})`).join(",")}` : "";
+    return `${t.id} | ${t.summary} | ${t.issueType} | ${t.statusName} | ${t.percentComplete}% | ${who} | ${dates}${overdue}${deps}`;
   });
 
   return [
     `Tổng: ${tasks.length} công việc — ${done} xong, ${inProgress} đang làm, ${late.length} quá hạn. Hôm nay: ${today}.`,
     tasks.length > limit ? `(hiển thị ${limit} công việc đáng chú ý nhất)` : "",
     "",
-    "id | tên | loại | trạng thái | % | phụ trách | ngày",
+    "id | tên | loại | trạng thái | % | phụ trách | ngày | chờ (việc đi trước, kiểu phụ thuộc)",
     ...lines,
   ]
     .filter(Boolean)
@@ -115,6 +117,7 @@ function systemPrompt(projectKey: string, tasks: Task[], today: string, team: Ji
     `Bạn là trợ lý quản lý dự án cho project Jira "${projectKey}". Trả lời bằng tiếng Việt, ngắn gọn, đi thẳng vào việc.`,
     "Suy nghĩ (phần reasoning) cũng bằng tiếng Việt.",
     "Mỗi lượt PHẢI kết thúc bằng một câu trả lời bằng chữ cho người dùng — kể cả sau khi đã gọi công cụ: nói đã làm gì, kết quả ra sao.",
+    "Định dạng: câu ngắn, xuống dòng; được dùng **in đậm** cho điểm chính và gạch đầu dòng '- ' cho danh sách. Không dùng bảng, không dùng tiêu đề #.",
     "",
     "Nguyên tắc:",
     "- Chỉ trả lời dựa trên dữ liệu dự án bên dưới hoặc kết quả công cụ. Không có dữ liệu thì nói thẳng là không biết, tuyệt đối không bịa số.",
@@ -136,6 +139,18 @@ function systemPrompt(projectKey: string, tasks: Task[], today: string, team: Ji
     "  Trích NGUYÊN VĂN số liệu nó trả về (%, SPI, số ngày trễ, mã issue); tuyệt đối không tự đếm hay tự ước lượng từ danh sách bên dưới.",
     "  Tình trạng (Đúng tiến độ / Có rủi ro / Chậm tiến độ) đã được tính sẵn kèm lý do — giải thích nó, không tự phán khác.",
     "- Người dùng bảo 'tạo/làm báo cáo tiến độ' → create_progress_report (lưu vào tab Báo cáo). Câu hỏi nhanh thì KHÔNG cần tạo báo cáo.",
+    "- Sửa một việc (tên, mô tả, trạng thái, ngày bắt đầu/kết thúc, thời lượng, dời N ngày, % hoàn thành) → update_task.",
+    "  Trạng thái nói sao truyền vậy ('xong', 'đang làm', 'In Review'); hệ thống tự khớp với quy trình Jira.",
+    "  Nhiều việc thì gọi update_task nhiều lần trong CÙNG một lượt (song song).",
+    "- Nối phụ thuộc / liên kết / 'A xong mới làm B' → add_dependency (predecessor = việc làm trước). Gỡ → remove_dependency.",
+    "  Lịch các việc phía sau tự dời theo; hãy báo lại việc nào đã bị dời (alsoMoved).",
+    "- Cần chi tiết một việc (mô tả, việc con, phụ thuộc, trạng thái được phép) → get_task. Tìm việc theo chữ/người/trạng thái → search_tasks.",
+    "- Chốt / lưu / đặt lại baseline → set_baseline.",
+    "- Xoá việc → delete_task: gọi lần đầu KHÔNG có confirmed để xem sẽ xoá gì, hỏi người dùng; chỉ khi họ đồng ý rõ ràng mới gọi lại với confirmed=true.",
+    "- Đưa việc vào sprint / về backlog → move_to_sprint. Đặt story point → set_estimate.",
+    "  Tạo / bắt đầu / hoàn thành / đổi tên-mục tiêu sprint → sprint_action (hoàn thành sprint cũng phải hỏi xác nhận trước).",
+    "- Yêu cầu có nhiều bước ('dời GPM-3 sang thứ 2 rồi nối với GPM-5') → làm lần lượt từng bước bằng công cụ, rồi tóm tắt kết quả.",
+    "- Mơ hồ (không rõ việc nào, người nào, sprint nào) → hỏi lại một câu ngắn thay vì đoán.",
     "",
     "Quy tắc gán người:",
     "- TUYỆT ĐỐI không gán người cho Epic. Epic là vùng chứa, trải dài toàn bộ thời gian của các công việc con,",
