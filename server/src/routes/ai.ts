@@ -222,16 +222,66 @@ aiRouter.post("/chat", requireProject, async (req, res) => {
   }
 });
 
-/** Transcript of one session, for reopening the panel. */
+/**
+ * This account's conversations in this project. Sessions are private to the
+ * account that started them — see chatStore.ownsSession. Registered before
+ * /chat/:sessionId, which would otherwise match "sessions" as an id.
+ */
+aiRouter.get("/chat/sessions", requireProject, async (req, res, next) => {
+  try {
+    const { session } = req.auth!;
+    res.json(await chatStore.listSessions(session.cloudId, session.projectKey!, session.accountId));
+  } catch (err) {
+    next(err);
+  }
+});
+
+aiRouter.patch("/chat/sessions/:sessionId", requireProject, async (req, res, next) => {
+  try {
+    const { session } = req.auth!;
+    const title = String((req.body as { title?: unknown })?.title ?? "").trim();
+    if (!title) {
+      next(badRequest("Tên cuộc trò chuyện không được để trống."));
+      return;
+    }
+    const ok = await chatStore.renameSession(session.cloudId, session.projectKey!, session.accountId, req.params.sessionId, title);
+    if (!ok) {
+      next(notFound("Không tìm thấy cuộc trò chuyện này."));
+      return;
+    }
+    res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+aiRouter.delete("/chat/sessions/:sessionId", requireProject, async (req, res, next) => {
+  try {
+    const { session } = req.auth!;
+    const ok = await chatStore.deleteSession(session.cloudId, session.projectKey!, session.accountId, req.params.sessionId);
+    if (!ok) {
+      next(notFound("Không tìm thấy cuộc trò chuyện này."));
+      return;
+    }
+    res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Transcript of one session, for reopening the panel. 404 unless this account
+ * owns it — this used to call ensureSession, which quietly created a new empty
+ * session for an unknown id, and only checked the project, not the owner.
+ */
 aiRouter.get("/chat/:sessionId", requireProject, async (req, res, next) => {
   try {
     const { session } = req.auth!;
-    const sessionId = await chatStore.ensureSession(
-      session.cloudId,
-      session.projectKey!,
-      session.accountId,
-      req.params.sessionId
-    );
+    const sessionId = req.params.sessionId;
+    if (!(await chatStore.ownsSession(session.cloudId, session.projectKey!, session.accountId, sessionId))) {
+      next(notFound("Không tìm thấy cuộc trò chuyện này."));
+      return;
+    }
     res.json({
       sessionId,
       messages: await chatStore.listMessages(sessionId),
@@ -246,7 +296,9 @@ aiRouter.get("/chat/:sessionId", requireProject, async (req, res, next) => {
 aiRouter.get("/usage", requireProject, async (req, res, next) => {
   try {
     const { session } = req.auth!;
-    const sessionId = typeof req.query.sessionId === "string" ? req.query.sessionId : null;
+    const raw = typeof req.query.sessionId === "string" ? req.query.sessionId : null;
+    const sessionId =
+      raw && (await chatStore.ownsSession(session.cloudId, session.projectKey!, session.accountId, raw)) ? raw : null;
     res.json({
       model: activeModel(),
       session: sessionId ? await chatStore.sessionUsage(sessionId) : null,

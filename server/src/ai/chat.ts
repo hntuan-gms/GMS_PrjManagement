@@ -1,6 +1,6 @@
-import { GoogleGenAI, type Content } from "@google/genai";
+import { FunctionCallingConfigMode, GoogleGenAI, type Content } from "@google/genai";
 import { computeProgress, progressHeadline } from "../progress.js";
-import type { Task } from "../types.js";
+import type { JiraUser, Task } from "../types.js";
 import { activeModel } from "./planner.js";
 import { TOOLS, labelFor, runTool, type ToolContext } from "./tools.js";
 
@@ -96,9 +96,25 @@ function issueTypesInUse(tasks: Task[]): string {
   return names.length > 0 ? names.join(", ") : "Task, Story, Bug, Epic";
 }
 
-function systemPrompt(projectKey: string, tasks: Task[], today: string): string {
+/**
+ * The team, by name and accountId, in every prompt.
+ *
+ * Without it the model has no way to turn "giao cho Quang" into an accountId
+ * except calling suggest_assignees or team_workload first — one extra tool pass
+ * for every assignment, which is exactly what used to exhaust the pass budget
+ * and end the turn with thoughts and no answer. It is a few hundred tokens.
+ */
+function teamRoster(team: JiraUser[], limit = 60): string {
+  if (team.length === 0) return "(không lấy được danh sách thành viên — dùng suggest_assignees)";
+  const lines = team.slice(0, limit).map((u) => `${u.displayName} — ${u.accountId}`);
+  return [...lines, team.length > limit ? `(và ${team.length - limit} người nữa)` : ""].filter(Boolean).join("\n");
+}
+
+function systemPrompt(projectKey: string, tasks: Task[], today: string, team: JiraUser[]): string {
   return [
     `Bạn là trợ lý quản lý dự án cho project Jira "${projectKey}". Trả lời bằng tiếng Việt, ngắn gọn, đi thẳng vào việc.`,
+    "Suy nghĩ (phần reasoning) cũng bằng tiếng Việt.",
+    "Mỗi lượt PHẢI kết thúc bằng một câu trả lời bằng chữ cho người dùng — kể cả sau khi đã gọi công cụ: nói đã làm gì, kết quả ra sao.",
     "",
     "Nguyên tắc:",
     "- Chỉ trả lời dựa trên dữ liệu dự án bên dưới hoặc kết quả công cụ. Không có dữ liệu thì nói thẳng là không biết, tuyệt đối không bịa số.",
@@ -111,6 +127,8 @@ function systemPrompt(projectKey: string, tasks: Task[], today: string): string 
     "- Người dùng yêu cầu thêm ĐÚNG MỘT công việc cụ thể → create_task. Cái này ghi thẳng lên Jira,",
     `  nên chỉ gọi khi người dùng thực sự bảo tạo. Loại issue đang dùng trong dự án: ${issueTypesInUse(tasks)}.`,
     "- Gán/đổi người phụ trách → assign_task. Bỏ gán → unassign_task.",
+    "  Người dùng gọi tên (kể cả viết không dấu, ví dụ 'vo dinh quang') → truyền nguyên tên vào tham số assignee;",
+    "  hệ thống tự tra ra đúng người, không cần gọi công cụ khác để tìm accountId trước.",
     "- Trước khi gán ai, hãy gọi suggest_assignees để xem ai ít trùng lịch nhất; đừng đoán.",
     "  Hỏi 'ai đang rảnh', 'ai quá tải' → team_workload.",
     "- Mọi câu hỏi về tiến độ, trễ hạn, rủi ro, 'dự án thế nào', giai đoạn nào chậm, ai đang trễ → project_progress.",
@@ -127,6 +145,9 @@ function systemPrompt(projectKey: string, tasks: Task[], today: string): string 
     "- Nói rõ vì sao chọn người đó (số ngày trùng, giờ còn trống) để người dùng phản biện được.",
     "- Sau khi tạo hoặc gán xong, nhắc lại mã issue vừa tác động.",
     "",
+    "Thành viên dự án (tên — accountId):",
+    teamRoster(team),
+    "",
     "Tiến độ tóm tắt (đã tính sẵn, dùng project_progress để xem chi tiết):",
     progressHeadline(computeProgress(tasks, today)),
     "",
@@ -142,7 +163,10 @@ function client(): GoogleGenAI {
 }
 
 /** Everything the tools need that this module has no business knowing about. */
-export type ChatDeps = Omit<ToolContext, "tasks" | "today" | "mutated" | "workload">;
+export type ChatDeps = Omit<ToolContext, "tasks" | "today" | "mutated" | "workload" | "team">;
+
+/** Tool rounds per turn before a final, tool-free pass forces an answer. */
+const MAX_TOOL_PASSES = 5;
 
 /**
  * Streams one assistant turn, yielding events as they arrive.
@@ -163,9 +187,13 @@ export async function* streamChat(
   const model = activeModel();
   const ai = client();
 
+  // Cached per project for five minutes (projectMembers.ts), so this is usually
+  // free. A failure costs the roster, not the turn.
+  const team = await deps.taskService.listUsers().catch(() => [] as JiraUser[]);
+
   // One context for the whole turn: tools append the tasks they create and share
   // a single workload build, so two calls in one turn see each other's effects.
-  const toolCtx: ToolContext = { ...deps, tasks: [...tasks], today, mutated: false };
+  const toolCtx: ToolContext = { ...deps, tasks: [...tasks], today, mutated: false, team };
 
   const contents: Content[] = [
     ...history.map((turn) => ({ role: turn.role, parts: [{ text: turn.content }] })),
@@ -173,7 +201,7 @@ export async function* streamChat(
   ];
 
   const config = {
-    systemInstruction: systemPrompt(projectKey, tasks, today),
+    systemInstruction: systemPrompt(projectKey, tasks, today, team),
     tools: [{ functionDeclarations: TOOLS }],
     thinkingConfig: { includeThoughts: true },
     temperature: 0.3,
@@ -187,11 +215,24 @@ export async function* streamChat(
     model,
   };
 
-  // At most two passes: the answer, and — if the model called the tool — the
-  // follow-up that turns the tool's result into a reply. A loop without a bound
-  // is a loop that can bill forever on a model that keeps re-calling its tool.
-  for (let pass = 0; pass < 2; pass++) {
-    const stream = await ai.models.generateContentStream({ model, contents, config });
+  // Bounded, but not at two. Two passes was "answer, or one tool then answer" —
+  // and a normal request needs more: "đổi GPM-104 cho Quang" was look up the
+  // person, assign, then reply. The second pass's call was never executed and
+  // the turn ended on thoughts with no answer, which is what users saw as the
+  // assistant "thinking out loud" forever. Now every call the model makes is
+  // executed, and once the budget is spent one last pass runs with tools OFF,
+  // so a turn always ends in words. The bound still stops a model that keeps
+  // re-calling tools from billing forever.
+  let answered = false;
+  for (let pass = 0; pass <= MAX_TOOL_PASSES; pass++) {
+    const finalPass = pass === MAX_TOOL_PASSES;
+    const stream = await ai.models.generateContentStream({
+      model,
+      contents,
+      config: finalPass
+        ? { ...config, toolConfig: { functionCallingConfig: { mode: FunctionCallingConfigMode.NONE } } }
+        : config,
+    });
 
     let answer = "";
     const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
@@ -224,7 +265,17 @@ export async function* streamChat(
       }
     }
 
-    if (calls.length === 0) break;
+    if (answer.trim()) answered = true;
+    if (calls.length === 0 || finalPass) {
+      // A pass with neither text nor a call (thoughts only) gets one forced,
+      // tool-free retry rather than ending the turn silently.
+      // Same contents, tools off: the model can only answer in words.
+      if (!answered && !finalPass) {
+        pass = MAX_TOOL_PASSES - 1;
+        continue;
+      }
+      break;
+    }
 
     // Feed the tool result back in the shape Gemini expects, keeping the
     // model's own parts so the call and its response stay paired.
@@ -267,6 +318,11 @@ export async function* streamChat(
     contents.push({ role: "user", parts: responseParts as never });
   }
 
+  if (!answered) {
+    // Should not happen after the forced pass, but an empty bubble is the one
+    // outcome the user can't interpret — say so plainly instead.
+    yield { type: "text", text: "Mình chưa trả lời được yêu cầu này. Bạn thử nói lại cụ thể hơn nhé." };
+  }
   if (toolCtx.mutated) yield { type: "mutated" };
   yield { type: "usage", usage };
 }

@@ -542,3 +542,12 @@ export interface SprintInsight {
   model: string;
   usage: AiUsage;
 }
+
+/** One of this account's conversations with the assistant (private to its owner). */
+export interface ChatSessionSummary {
+  id: string;
+  title: string;
+  messageCount: number;
+  createdAt: string;
+  updatedAt: string;
+}

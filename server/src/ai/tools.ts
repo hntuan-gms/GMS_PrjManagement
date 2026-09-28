@@ -2,7 +2,7 @@ import { Type, type FunctionDeclaration } from "@google/genai";
 import type { BoardService } from "../agile/boardService.js";
 import { sprintFacts, velocityStats } from "../agile/sprintMetrics.js";
 import type { TaskService } from "../taskService.js";
-import { isAssignableType, type IssueTypeName, type Task } from "../types.js";
+import { isAssignableType, type IssueTypeName, type JiraUser, type Task } from "../types.js";
 import * as resources from "../resourceStore.js";
 import { computeProgress, HEALTH_LABEL } from "../progress.js";
 import { createProgressReport } from "./progressReport.js";
@@ -63,6 +63,8 @@ export interface ToolContext {
   boardService: BoardService;
   /** The browser's minutes east of UTC — sprint dates are Jira datetimes. */
   tzOffsetMinutes: number;
+  /** The project team, loaded once per turn — what a spoken name is resolved against. */
+  team: JiraUser[];
 }
 
 export interface ToolOutcome {
@@ -134,6 +136,12 @@ const CREATE_TASK: FunctionDeclaration = {
           "Who does it, as an accountId from the team list. Never set this for an Epic. " +
           "Leave empty and set autoAssign instead when the user said 'ai rảnh thì giao' or did not name anyone.",
       },
+      assignee: {
+        type: Type.STRING,
+        description:
+          "Alternative to assigneeAccountId: the person's name exactly as the user said it, with or " +
+          "without Vietnamese diacritics ('vo dinh quang'). Resolved against the team server-side.",
+      },
       autoAssign: {
         type: Type.BOOLEAN,
         description:
@@ -148,13 +156,19 @@ const CREATE_TASK: FunctionDeclaration = {
 const ASSIGN_TASK: FunctionDeclaration = {
   name: "assign_task",
   description:
-    "Put a person on an existing task in Jira, or move it to someone else. Give either accountId, or " +
-    "auto=true to let the workload model pick whoever has the fewest conflicts. Epics cannot be assigned.",
+    "Put a person on an existing task in Jira, or move it to someone else. Give accountId, or assignee " +
+    "(a name), or auto=true to let the workload model pick whoever has the fewest conflicts. Epics cannot be assigned.",
   parameters: {
     type: Type.OBJECT,
     properties: {
       taskId: { type: Type.STRING, description: "The Jira issue key, e.g. GPM-12." },
       accountId: { type: Type.STRING, description: "Who to assign, from the team list." },
+      assignee: {
+        type: Type.STRING,
+        description:
+          "Or the person's name as the user said it, diacritics optional ('vo dinh quang', 'Quang'). " +
+          "Resolved against the team server-side; an ambiguous name comes back as a list to ask about.",
+      },
       auto: {
         type: Type.BOOLEAN,
         description: "Choose the least-conflicted person automatically instead of naming one.",
@@ -315,6 +329,53 @@ function findTask(ctx: ToolContext, id: string): Task | undefined {
   return ctx.tasks.find((t) => t.id.toUpperCase() === needle);
 }
 
+/** Lowercase, no diacritics, single spaces — "Võ Đình  Quang" and "vo dinh quang" fold to the same string. */
+function fold(name: string): string {
+  return name
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[đĐ]/g, "d")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * A name as the user typed it → one team member, or a reason why not.
+ *
+ * Users type Vietnamese names without diacritics, drop the family name, or use
+ * just the given name, and none of that should need the model to go fetch the
+ * team first. Exact (folded) match wins; otherwise every typed word must appear
+ * in the name. More than one hit is returned as a question, never guessed —
+ * assigning the wrong "Quang" is worse than asking which one.
+ */
+function resolvePerson(
+  team: JiraUser[],
+  raw: string
+): { person: JiraUser } | { error: string; candidates?: string[] } {
+  const q = fold(raw);
+  if (!q) return { error: "Chưa có tên người phụ trách." };
+  const exact = team.filter((u) => fold(u.displayName) === q);
+  if (exact.length === 1) return { person: exact[0] };
+  const words = q.split(" ");
+  const partial = team.filter((u) => {
+    const name = fold(u.displayName).split(" ");
+    return words.every((w) => name.includes(w));
+  });
+  const hits = exact.length > 1 ? exact : partial;
+  if (hits.length === 1) return { person: hits[0] };
+  if (hits.length > 1) {
+    return {
+      error: `Có ${hits.length} người khớp với "${raw}". Hỏi lại người dùng muốn chọn ai.`,
+      candidates: hits.map((u) => `${u.displayName} (${u.accountId})`),
+    };
+  }
+  return {
+    error: `Không có ai tên "${raw}" trong nhóm dự án.`,
+    candidates: team.slice(0, 40).map((u) => u.displayName),
+  };
+}
+
 /** Trimmed for the model: full Candidate objects are mostly noise in a prompt. */
 function describeCandidate(c: Candidate): Record<string, unknown> {
   return {
@@ -383,6 +444,12 @@ async function runCreateTask(args: Record<string, unknown>, ctx: ToolContext): P
   const dueDate = addDays(startDate, durationDays - 1);
 
   let assigneeAccountId: string | null = str(args, "assigneeAccountId") || null;
+  if (!assigneeAccountId && str(args, "assignee")) {
+    const found = resolvePerson(ctx.team, str(args, "assignee"));
+    // Refuse rather than create an unassigned task the user thinks is assigned.
+    if ("error" in found) return { response: found };
+    assigneeAccountId = found.person.accountId;
+  }
   let pickedReason: string | undefined;
 
   if (!isAssignableType(issueType)) {
@@ -448,8 +515,14 @@ async function runAssignTask(args: Record<string, unknown>, ctx: ToolContext): P
   let accountId = str(args, "accountId") || null;
   let reason: string | undefined;
 
+  if (!accountId && str(args, "assignee")) {
+    const found = resolvePerson(ctx.team, str(args, "assignee"));
+    if ("error" in found) return { response: found };
+    accountId = found.person.accountId;
+  }
+
   if (!accountId) {
-    if (args.auto !== true) return { response: { error: "Cần accountId hoặc auto=true." } };
+    if (args.auto !== true) return { response: { error: "Cần assignee (tên), accountId hoặc auto=true." } };
     const from = task.startDate ?? ctx.today;
     const to = task.dueDate ?? addDays(from, Math.max(0, task.durationDays - 1));
     const workload = await workloadOf(ctx);

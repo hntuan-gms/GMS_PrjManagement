@@ -589,6 +589,10 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
           visible assistant that always errors is worse than no assistant. */}
       {session.staff && (
         <ChatDock
+          // Per account AND project: a conversation belongs to the person who
+          // started it, and two people sharing one browser must not continue
+          // each other's chat (the server enforces the same, see ownsSession).
+          storageKey={`gms.chat.${session.site.cloudId}.${session.user.accountId}.${session.project?.key ?? ""}`}
           onOpenPlan={setReviewRunId}
           onOpenReport={(id) => {
             setFocusReportId(id);

@@ -1,9 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { streamChat } from "../chatStream";
-import type { ChatMessage, UsageStats } from "../types";
+import type { ChatMessage, ChatSessionSummary, UsageStats } from "../types";
 
 interface Props {
+  /**
+   * Where this account's current conversation id is remembered in this browser.
+   * Keyed by site + account + project, never one key per machine: a session is
+   * private to the person who started it.
+   */
+  storageKey: string;
   /** Opens the human-check table for a plan the assistant produced. */
   onOpenPlan: (runId: string) => void;
   /** Switches the workspace to the Báo cáo tab showing this report. */
@@ -40,7 +46,37 @@ const HEALTH_TEXT: Record<string, string> = {
   at_risk: "Có rủi ro",
   off_track: "Chậm tiến độ",
 };
-const SESSION_KEY = "gms.chat.sessionId";
+/** The old single key, shared by everyone on the machine — cleared, never read. */
+const LEGACY_SESSION_KEY = "gms.chat.sessionId";
+
+function readStored(key: string): string | null {
+  try {
+    localStorage.removeItem(LEGACY_SESSION_KEY);
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStored(key: string, value: string | null) {
+  try {
+    if (value) localStorage.setItem(key, value);
+    else localStorage.removeItem(key);
+  } catch {
+    // Private mode: the conversation still works, it just isn't reopened next visit.
+  }
+}
+
+function relativeTime(iso: string): string {
+  const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60_000);
+  if (mins < 1) return "vừa xong";
+  if (mins < 60) return `${mins} phút trước`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours} giờ trước`;
+  const days = Math.round(hours / 24);
+  if (days < 7) return `${days} ngày trước`;
+  return new Date(iso).toLocaleDateString("vi-VN");
+}
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
@@ -59,10 +95,13 @@ function formatTokens(n: number): string {
  * real answer can be ten seconds away when the model is thinking or building a
  * plan, and an empty panel for that long reads as a hang.
  */
-export default function ChatDock({ onOpenPlan, onOpenReport, onProjectChanged }: Props) {
+export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProjectChanged }: Props) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [sessionId, setSessionId] = useState<string | null>(() => localStorage.getItem(SESSION_KEY));
+  const [sessionId, setSessionId] = useState<string | null>(() => readStored(storageKey));
+  const [sessions, setSessions] = useState<ChatSessionSummary[] | null>(null);
+  const [showSessions, setShowSessions] = useState(false);
+  const [renaming, setRenaming] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [live, setLive] = useState<LiveTurn | null>(null);
   const [usage, setUsage] = useState<UsageStats | null>(null);
@@ -86,11 +125,11 @@ export default function ChatDock({ onOpenPlan, onOpenReport, onProjectChanged }:
         setUsage(res.usage);
       })
       .catch(() => {
-        // A session id from a project that no longer matches just starts fresh.
-        localStorage.removeItem(SESSION_KEY);
+        // Deleted, or not this account's: start fresh rather than show an error.
+        writeStored(storageKey, null);
         setSessionId(null);
       });
-  }, [open, sessionId, messages.length]);
+  }, [open, sessionId, messages.length, storageKey]);
 
   useEffect(() => {
     if (!showUsage) return;
@@ -103,6 +142,67 @@ export default function ChatDock({ onOpenPlan, onOpenReport, onProjectChanged }:
       })
       .catch(() => {});
   }, [showUsage, sessionId]);
+
+  // The list is fetched when opened, and again after each turn (a new
+  // conversation gets its title from its first question).
+  useEffect(() => {
+    if (!showSessions) return;
+    api
+      .listChatSessions()
+      .then(setSessions)
+      .catch(() => setSessions([]));
+  }, [showSessions]);
+
+  function refreshSessions() {
+    if (showSessions) api.listChatSessions().then(setSessions).catch(() => {});
+  }
+
+  function newChat() {
+    abortRef.current?.abort();
+    setLive(null);
+    setMessages([]);
+    setUsage(null);
+    setError(null);
+    setSessionId(null);
+    writeStored(storageKey, null);
+    setShowSessions(false);
+  }
+
+  function openSession(id: string) {
+    if (id === sessionId) return setShowSessions(false);
+    abortRef.current?.abort();
+    setLive(null);
+    setError(null);
+    setUsage(null);
+    // Emptying the list is what makes the transcript effect load the new one.
+    setMessages([]);
+    setSessionId(id);
+    writeStored(storageKey, id);
+    setShowSessions(false);
+  }
+
+  async function renameSession(id: string, title: string) {
+    setRenaming(null);
+    const clean = title.trim();
+    if (!clean) return;
+    setSessions((prev) => prev?.map((x) => (x.id === id ? { ...x, title: clean } : x)) ?? prev);
+    await api.renameChatSession(id, clean).catch((e: Error) => setError(e.message));
+  }
+
+  async function deleteSession(id: string) {
+    if (!window.confirm("Xoá cuộc trò chuyện này? Bạn sẽ không mở lại được.")) return;
+    setSessions((prev) => prev?.filter((x) => x.id !== id) ?? prev);
+    await api.deleteChatSession(id).catch((e: Error) => setError(e.message));
+    if (id === sessionId) {
+      newChat();
+      setShowSessions(true);
+    }
+  }
+
+  const currentTitle =
+    sessions?.find((x) => x.id === sessionId)?.title ??
+    messages.find((m) => m.role === "user")?.content.slice(0, 60) ??
+    "Cuộc trò chuyện mới";
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -136,7 +236,7 @@ export default function ChatDock({ onOpenPlan, onOpenReport, onProjectChanged }:
       for await (const event of streamChat(text, sessionId, controller.signal)) {
         if (event.type === "session") {
           setSessionId(event.sessionId);
-          localStorage.setItem(SESSION_KEY, event.sessionId);
+          writeStored(storageKey, event.sessionId);
         } else if (event.type === "thinking") {
           turn = { ...turn, thinking: turn.thinking + event.text };
         } else if (event.type === "text") {
@@ -186,6 +286,7 @@ export default function ChatDock({ onOpenPlan, onOpenReport, onProjectChanged }:
     } finally {
       setLive(null);
       abortRef.current = null;
+      refreshSessions();
     }
   }
 
@@ -207,8 +308,19 @@ export default function ChatDock({ onOpenPlan, onOpenReport, onProjectChanged }:
   return (
     <div className="chat-dock">
       <div className="chat-dock-header">
-        <strong>Trợ lý dự án</strong>
+        <button
+          className={`chat-session-btn ${showSessions ? "is-open" : ""}`}
+          onClick={() => setShowSessions((v) => !v)}
+          title="Các cuộc trò chuyện của bạn"
+          aria-expanded={showSessions}
+        >
+          <span aria-hidden="true">☰</span>
+          <span className="chat-session-title">{currentTitle}</span>
+        </button>
         <div className="chat-dock-header-actions">
+          <button className="chat-icon-btn" onClick={newChat} title="Cuộc trò chuyện mới" aria-label="Cuộc trò chuyện mới">
+            ＋
+          </button>
           <button className="chat-icon-btn" onClick={() => setShowUsage((v) => !v)} title="Thống kê token">
             ◷
           </button>
@@ -217,6 +329,56 @@ export default function ChatDock({ onOpenPlan, onOpenReport, onProjectChanged }:
           </button>
         </div>
       </div>
+
+      {showSessions && (
+        <div className="chat-sessions">
+          <button className="chat-sessions-new" onClick={newChat}>
+            ＋ Cuộc trò chuyện mới
+          </button>
+          {sessions === null ? (
+            <div className="chat-sessions-empty">
+              <span className="chat-spinner" /> Đang tải...
+            </div>
+          ) : sessions.length === 0 ? (
+            <div className="chat-sessions-empty">Chưa có cuộc trò chuyện nào.</div>
+          ) : (
+            <ul>
+              {sessions.map((x) => (
+                <li key={x.id} className={x.id === sessionId ? "is-current" : ""}>
+                  {renaming === x.id ? (
+                    <input
+                      autoFocus
+                      defaultValue={x.title}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") renameSession(x.id, (e.target as HTMLInputElement).value);
+                        if (e.key === "Escape") {
+                          e.stopPropagation();
+                          setRenaming(null);
+                        }
+                      }}
+                      onBlur={(e) => renameSession(x.id, e.target.value)}
+                    />
+                  ) : (
+                    <button className="chat-sessions-item" onClick={() => openSession(x.id)}>
+                      <span className="chat-sessions-name">{x.title}</span>
+                      <span className="chat-sessions-meta">
+                        {relativeTime(x.updatedAt)} · {Math.ceil(x.messageCount / 2)} lượt
+                      </span>
+                    </button>
+                  )}
+                  <button className="chat-icon-btn" onClick={() => setRenaming(x.id)} title="Đổi tên" aria-label="Đổi tên">
+                    ✎
+                  </button>
+                  <button className="chat-icon-btn" onClick={() => deleteSession(x.id)} title="Xoá" aria-label="Xoá">
+                    ✕
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="chat-sessions-note">Chỉ bạn thấy các cuộc trò chuyện này.</p>
+        </div>
+      )}
 
       {showUsage && (
         <div className="chat-usage-panel">

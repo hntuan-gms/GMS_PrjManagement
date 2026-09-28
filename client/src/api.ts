@@ -1,5 +1,6 @@
 import type {
   BoardSnapshot,
+  ChatSessionSummary,
   EstimateSuggestion,
   Sprint,
   SprintInsight,
@@ -238,6 +239,11 @@ export const api = {
       body: JSON.stringify({ boardId, sprintId, ...clock }),
     }),
 
+  listChatSessions: () => request<ChatSessionSummary[]>("/ai/chat/sessions"),
+  renameChatSession: (id: string, title: string) =>
+    request<void>(`/ai/chat/sessions/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ title }) }),
+  deleteChatSession: (id: string) =>
+    request<void>(`/ai/chat/sessions/${encodeURIComponent(id)}`, { method: "DELETE" }),
   getChat: (sessionId: string) =>
     request<{ sessionId: string; messages: ChatMessage[]; usage: UsageStats }>(
       `/ai/chat/${encodeURIComponent(sessionId)}`
