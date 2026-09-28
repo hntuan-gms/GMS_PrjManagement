@@ -29,7 +29,7 @@ import type {
 import BacklogView, { type SectionId } from "./BacklogView";
 import KanbanBoard from "./KanbanBoard";
 import SprintHeader from "./SprintHeader";
-import { CompleteSprintModal, SprintFormModal, SprintPlanModal } from "./SprintModals";
+import { CompleteSprintModal, CreateBoardModal, SprintFormModal, SprintPlanModal } from "./SprintModals";
 
 interface Props {
   session: Session;
@@ -53,6 +53,7 @@ interface Props {
  */
 
 type Modal =
+  | { kind: "createBoard"; type: "scrum" | "kanban" }
   | { kind: "start" | "edit"; sprint: Sprint }
   | { kind: "complete"; sprint: Sprint }
   | { kind: "plan"; sprint: Sprint };
@@ -426,6 +427,11 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
               </button>
             </div>
           )}
+          {agile || snapshot.fallback?.reason === "no_board" ? (
+            <button className="bl-icon" onClick={() => setModal({ kind: "createBoard", type: "scrum" })} title="Tạo board mới">
+              + Board
+            </button>
+          ) : null}
           {activeSprints.length > 1 && view === "board" && (
             <select className="bd-select" value={activeSprint?.id ?? ""} onChange={(e) => setActiveSprintId(Number(e.target.value))}>
               {activeSprints.map((s) => (
@@ -449,7 +455,26 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
         </div>
       </div>
 
-      {snapshot.fallback && <div className="bd-fallback">ℹ {snapshot.fallback.message}</div>}
+      {snapshot.fallback && (
+        <div className="bd-fallback">
+          ℹ {snapshot.fallback.message}
+          {snapshot.fallback.reason === "no_board" && (
+            <button className="link-btn" onClick={() => setModal({ kind: "createBoard", type: "scrum" })}>
+              Tạo board Scrum
+            </button>
+          )}
+        </div>
+      )}
+      {/* Kanban-only project: sprints need a Scrum board, and saying so beats
+          leaving the user to wonder where the Sprint tab went. */}
+      {agile && !snapshot.boards.some((b) => b.type === "scrum") && (
+        <div className="bd-fallback">
+          ℹ Board này là Kanban nên không có Sprint — Jira chỉ gắn sprint với board Scrum.
+          <button className="link-btn" onClick={() => setModal({ kind: "createBoard", type: "scrum" })}>
+            Tạo board Scrum cho dự án
+          </button>
+        </div>
+      )}
       {snapshot.truncated && <div className="bd-fallback">Board có quá nhiều việc — chỉ hiển thị 800 việc đầu theo thứ hạng.</div>}
       {notice && (
         <div className="notice notice-error bd-notice">
@@ -592,6 +617,18 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
         />
       )}
 
+      {modal?.kind === "createBoard" && (
+        <CreateBoardModal
+          projectKey={projectKey}
+          defaultType={modal.type}
+          onClose={() => setModal(null)}
+          onSubmit={async (name, type) => {
+            const board = await api.createBoard(name, type);
+            chooseBoard(board.id);
+            setView(type === "scrum" ? "backlog" : "board");
+          }}
+        />
+      )}
       {modal && (modal.kind === "start" || modal.kind === "edit") && (
         <SprintFormModal
           mode={modal.kind}

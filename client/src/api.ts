@@ -193,6 +193,11 @@ export const api = {
   // Boards & sprints. Every call writes to Jira directly (see server/src/routes/board.ts).
   getBoard: (boardId: number | null) =>
     request<BoardSnapshot>(`/board${boardId ? `?boardId=${boardId}` : ""}`),
+  createBoard: (name: string, type: "scrum" | "kanban") =>
+    request<{ id: number; name: string; type: string }>("/board/boards", {
+      method: "POST",
+      body: JSON.stringify({ name, type }),
+    }),
   getTransitions: (key: string) =>
     request<Array<{ id: string; name: string; toStatusId: string }>>(
       `/board/issues/${encodeURIComponent(key)}/transitions`

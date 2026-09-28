@@ -76,6 +76,35 @@ export class BoardService {
     return boards;
   }
 
+  /**
+   * Create a board for this project — the only way to get sprints on a project
+   * that so far has just a Kanban board, since Jira ties sprints to Scrum boards.
+   *
+   * Two calls, because a Jira board is always a view over a saved filter: the
+   * filter is `project = KEY ORDER BY Rank ASC` (Rank is what makes the board
+   * reorderable), located on the project so it shows up under the project's
+   * boards rather than as someone's personal board. The existing boards are
+   * untouched — a project can have a Kanban and a Scrum board side by side.
+   */
+  async createBoard(input: { name: string; type: "scrum" | "kanban" }): Promise<BoardSummary> {
+    if (!agileEnabled()) throw badRequest(FALLBACK_MESSAGES.disabled);
+    const name = input.name.trim();
+    if (!name) throw badRequest("Board cần có tên.");
+    const filter = await this.jira.createFilter(
+      `${name} (bộ lọc board)`,
+      `project = "${this.ctx.projectKey}" ORDER BY Rank ASC`
+    );
+    const created = await this.jira.createBoard({
+      name,
+      type: input.type,
+      filterId: filter.id,
+      projectKey: this.ctx.projectKey,
+    });
+    // The cached list predates this board; the next snapshot must see it.
+    boardsCache.delete(`${this.ctx.cloudId}:${this.ctx.projectKey}`);
+    return { id: created.id, name: created.name, type: created.type };
+  }
+
   async snapshot(boardId: number | null): Promise<BoardSnapshot> {
     if (!agileEnabled()) return this.statusBoard("disabled");
     let boards: BoardSummary[];

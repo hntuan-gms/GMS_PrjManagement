@@ -50,6 +50,17 @@ boardRouter.get("/", async (req, res, next) => {
   }
 });
 
+/** A new board for this project (and its backing filter). Jira's own permissions decide who may. */
+boardRouter.post("/boards", async (req, res, next) => {
+  try {
+    const b = req.body ?? {};
+    const type = b.type === "kanban" ? "kanban" : "scrum";
+    res.status(201).json(await boardServiceFor(req).createBoard({ name: String(b.name ?? ""), type }));
+  } catch (err) {
+    next(err);
+  }
+});
+
 boardRouter.get("/issues/:key/transitions", async (req, res, next) => {
   try {
     res.json(await boardServiceFor(req).transitionsFor(req.params.key));

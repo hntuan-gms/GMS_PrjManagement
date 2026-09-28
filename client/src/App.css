@@ -5827,3 +5827,36 @@ button.chat-issue:hover:not(:disabled) {
   background: #f1f5f9;
   font-weight: 600;
 }
+
+/* --- board: create-board dialog --- */
+.bd-fallback .link-btn {
+  margin-left: 8px;
+  font-weight: 600;
+}
+.bd-type-pick {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.bd-type-pick button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 10px 12px;
+  white-space: normal;
+  text-align: left;
+  box-shadow: none;
+}
+.bd-type-pick button span {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  line-height: 1.4;
+}
+.bd-type-pick button.is-active {
+  border: 2px solid var(--color-primary);
+  background: var(--color-primary-light);
+}
+.bd-type-pick button.is-active b {
+  color: var(--color-primary);
+}

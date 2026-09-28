@@ -198,6 +198,34 @@ export class JiraClient {
    * JiraApiError.scopeProblem recognises and boardService turns into a fallback.
    * ------------------------------------------------------------------------- */
 
+  /**
+   * A saved filter, the thing every board (Scrum or Kanban) is backed by. Jira
+   * has no "create board for this project" shortcut — creating one is always
+   * two calls, filter then board — and `ORDER BY Rank` is what lets the new
+   * board's issues be reordered at all; a board on an un-ranked filter can
+   * never be dragged into an order (Atlassian's own note on the endpoint).
+   *
+   * This is the *platform* filter API (`/rest/api/2/filter`, no v3 equivalent
+   * exists) and needs only the classic `write:jira-work` scope already
+   * requested — unlike the board it backs, it does not need JIRA_AGILE.
+   */
+  async createFilter(name: string, jql: string): Promise<{ id: string }> {
+    return this.request(`/rest/api/2/filter`, { method: "POST", body: JSON.stringify({ name, jql }) });
+  }
+
+  /** Needs `write:board-scope:jira-software` — see AGILE_SCOPES, behind JIRA_AGILE. */
+  async createBoard(input: { name: string; type: "scrum" | "kanban"; filterId: string; projectKey: string }): Promise<{ id: number; name: string; type: string }> {
+    return this.request(`/rest/agile/1.0/board`, {
+      method: "POST",
+      body: JSON.stringify({
+        name: input.name,
+        type: input.type,
+        filterId: Number(input.filterId),
+        location: { type: "project", projectKeyOrId: input.projectKey },
+      }),
+    });
+  }
+
   async listBoards(projectKey: string): Promise<Array<{ id: number; name: string; type: string }>> {
     const out: Array<{ id: number; name: string; type: string }> = [];
     let startAt = 0;

@@ -130,6 +130,82 @@ export function SprintFormModal({
   );
 }
 
+/* ---------------------------------------------------------------- new board */
+
+/**
+ * A new board for this project. Scrum is the default because the reason to be
+ * here is almost always "I want sprints and my project only has a Kanban board".
+ */
+export function CreateBoardModal({
+  projectKey,
+  defaultType,
+  onClose,
+  onSubmit,
+}: {
+  projectKey: string;
+  defaultType: "scrum" | "kanban";
+  onClose: () => void;
+  onSubmit: (name: string, type: "scrum" | "kanban") => Promise<void>;
+}) {
+  const [type, setType] = useState<"scrum" | "kanban">(defaultType);
+  const [name, setName] = useState(`${projectKey} ${defaultType === "scrum" ? "Scrum" : "Kanban"}`);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit() {
+    if (!name.trim()) return setError("Board cần có tên.");
+    setSaving(true);
+    setError(null);
+    try {
+      await onSubmit(name.trim(), type);
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Không tạo được board.");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal bd-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <span className="modal-id">Tạo board mới</span>
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
+        <div className="field">
+          <span>Kiểu board</span>
+          <div className="bd-type-pick">
+            <button className={type === "scrum" ? "is-active" : ""} onClick={() => setType("scrum")}>
+              <b>Scrum</b>
+              <span>Làm theo sprint: backlog, lập kế hoạch, burndown, vận tốc.</span>
+            </button>
+            <button className={type === "kanban" ? "is-active" : ""} onClick={() => setType("kanban")}>
+              <b>Kanban</b>
+              <span>Luồng liên tục, giới hạn WIP, không chia sprint.</span>
+            </button>
+          </div>
+        </div>
+        <label className="field">
+          <span>Tên board</span>
+          <input value={name} onChange={(e) => setName(e.target.value)} />
+        </label>
+        <p className="bd-muted">
+          Board sẽ hiển thị toàn bộ công việc của dự án {projectKey}. Board hiện có vẫn giữ nguyên — một dự án có thể có
+          cả Kanban lẫn Scrum.
+        </p>
+        {error && <div className="modal-error">{error}</div>}
+        <div className="modal-footer">
+          <span className="bd-spacer" />
+          <button onClick={onClose}>Huỷ</button>
+          <button className="primary" onClick={submit} disabled={saving}>
+            {saving ? "Đang tạo trên Jira..." : "Tạo board"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------ complete sprint */
 
 export function CompleteSprintModal({
