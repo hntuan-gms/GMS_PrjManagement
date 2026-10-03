@@ -43,6 +43,9 @@ export interface Task {
   baselineDue: string | null;
   /** Jira's original estimate in hours, when the team fills one in. */
   estimateHours: number | null;
+  /** Hours logged against the issue (Jira's `timespent`), across everyone. */
+  spentHours: number | null;
+  priority: string | null;
   jiraUrl: string;
 }
 
@@ -90,7 +93,10 @@ export interface TaskUpdateInput {
   predecessors?: Predecessor[];
   baselineStart?: string | null;
   baselineDue?: string | null;
-  statusTransition?: string; // Jira transition name, e.g. "Done"
+  /** A transition id from GET /tasks/:id/transitions, or a transition/status name. */
+  statusTransition?: string;
+  /** Jira's Original estimate, in hours. Must be > 0; it is written through `timetracking`. */
+  estimateHours?: number;
 }
 
 export interface TaskCreateInput {
@@ -102,6 +108,7 @@ export interface TaskCreateInput {
   dueDate?: string | null;
   durationDays?: number;
   assigneeAccountId?: string | null;
+  estimateHours?: number | null;
 }
 
 /** One shared set of fields, applied to N summaries — mirrors Jira's own "create several issues" bulk dialog. */
@@ -113,9 +120,12 @@ export interface BulkTaskCreateInput {
   startDate?: string | null;
   durationDays?: number;
   assigneeAccountId?: string | null;
+  estimateHours?: number | null;
 }
 
 export interface BulkTaskCreateResult {
   created: Task[];
   errors: Array<{ summary: string; message: string }>;
+  /** Created, but something secondary (the estimate) didn't stick. */
+  warnings: string[];
 }

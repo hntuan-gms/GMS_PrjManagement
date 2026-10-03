@@ -10,7 +10,7 @@
 import type { NextFunction, Request, Response } from "express";
 import { AtlassianAuthError } from "./auth/atlassian.js";
 import { SessionTooLargeError } from "./auth/session.js";
-import { JiraApiError } from "./jiraClient.js";
+import { JiraApiError, JiraTransitionError } from "./jiraClient.js";
 
 export type ErrorCode =
   | "AUTH_REQUIRED"
@@ -77,6 +77,10 @@ interface Mapped {
 function mapError(err: unknown): Mapped {
   if (err instanceof AppError) {
     return { status: err.status, code: err.code, error: err.message };
+  }
+
+  if (err instanceof JiraTransitionError) {
+    return { status: 400, code: "BAD_REQUEST", error: err.message };
   }
 
   if (err instanceof SessionTooLargeError) {

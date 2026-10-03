@@ -1,8 +1,9 @@
-import { Router } from "express";
+import express, { Router } from "express";
 import { aiRouter } from "./ai.js";
 import { resourcesRouter } from "./resources.js";
 import { progressRouter } from "./progress.js";
 import { boardRouter } from "./board.js";
+import { timesheetRouter } from "./timesheet.js";
 import { requireAuth, requireProject, requireStaff } from "../auth/middleware.js";
 import { badRequest } from "../errors.js";
 import type { BulkTaskCreateInput, TaskCreateInput, TaskUpdateInput } from "../types.js";
@@ -22,6 +23,12 @@ apiRouter.use("/ai", requireStaff, aiRouter);
 apiRouter.use("/resources", resourcesRouter);
 apiRouter.use("/progress", progressRouter);
 apiRouter.use("/board", boardRouter);
+apiRouter.use("/timesheet", timesheetRouter);
+
+// Jira's own default attachment limit is 10 MB; this only has to sit above it
+// and below Cloud Run's 32 MB request cap, so Jira's message is the one people see.
+const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+const LINK_URL = /^https?:\/\/\S+$/i;
 
 // GET /meta used to live here, returning the same SessionMeta as
 // /api/auth/me. Nothing ever fetched it, and having two copies of that object is
@@ -99,6 +106,86 @@ apiRouter.patch("/tasks/:id", requireProject, async (req, res, next) => {
     // following up with a separate GET /tasks that used to arrive a moment later
     // and visibly snap the chart to the confirmed values.
     res.json({ ...task, cascaded, ...(cascadeWarnings.length > 0 ? { cascadeWarnings } : {}) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** What the issue's workflow allows next — the edit modal lists exactly these. */
+apiRouter.get("/tasks/:id/transitions", requireProject, async (req, res, next) => {
+  try {
+    res.json(await req.auth!.taskService!.listTransitions(req.params.id));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Existing attachments and web links, for the edit modal's list. */
+apiRouter.get("/tasks/:id/attachments", requireProject, async (req, res, next) => {
+  try {
+    const service = req.auth!.taskService!;
+    service.assertOwnKey(req.params.id);
+    const jira = req.auth!.jira;
+    const [files, links] = await Promise.all([
+      jira.getAttachments(req.params.id),
+      jira.getRemoteLinks(req.params.id).catch(() => []),
+    ]);
+    res.json({
+      files: files.map((f) => ({
+        id: String(f.id),
+        filename: f.filename,
+        size: f.size,
+        mimeType: f.mimeType,
+        created: f.created,
+        author: f.author?.displayName ?? null,
+      })),
+      links: links
+        .filter((l) => l.object?.url)
+        .map((l) => ({ id: String(l.id), url: l.object!.url!, title: l.object?.title || l.object!.url! })),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * One file per request, as the raw body — no multipart parser on our side (and
+ * no new dependency): the browser sends the File as-is with its name in a
+ * header, and jiraClient re-wraps it in the multipart form Jira requires.
+ */
+apiRouter.post(
+  "/tasks/:id/attachments",
+  requireProject,
+  express.raw({ type: () => true, limit: MAX_ATTACHMENT_BYTES }),
+  async (req, res, next) => {
+    try {
+      req.auth!.taskService!.assertOwnKey(req.params.id);
+      const data = req.body;
+      if (!Buffer.isBuffer(data) || data.length === 0) throw badRequest("Tệp đính kèm rỗng.");
+      const rawName = String(req.get("x-file-name") ?? "tep-dinh-kem");
+      let name: string;
+      try {
+        name = decodeURIComponent(rawName);
+      } catch {
+        name = rawName;
+      }
+      const type = String(req.get("x-file-type") ?? "") || "application/octet-stream";
+      const created = await req.auth!.jira.addAttachment(req.params.id, { name: name.slice(0, 200), type, data });
+      res.status(201).json(created.map((f) => ({ id: String(f.id), filename: f.filename, size: f.size })));
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+apiRouter.post("/tasks/:id/links", requireProject, async (req, res, next) => {
+  try {
+    req.auth!.taskService!.assertOwnKey(req.params.id);
+    const url = String(req.body?.url ?? "").trim();
+    if (!LINK_URL.test(url)) throw badRequest("Liên kết phải bắt đầu bằng http:// hoặc https://");
+    const title = String(req.body?.title ?? "").trim() || url;
+    const created = await req.auth!.jira.addRemoteLink(req.params.id, url, title.slice(0, 255));
+    res.status(201).json({ id: String(created.id), url, title });
   } catch (err) {
     next(err);
   }

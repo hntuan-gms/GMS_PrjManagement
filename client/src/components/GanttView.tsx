@@ -1,6 +1,6 @@
 import { Gantt, ViewMode, type Task as GanttTaskT } from "gantt-task-react";
 import "gantt-task-react/dist/index.css";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { computeCriticalPath } from "../criticalPath";
 import { orderByWbs, resolveRanges, toGanttTasks } from "../ganttMapping";
 import type { DependencyType, Task } from "../types";
@@ -84,6 +84,90 @@ function pickScale(pixelsPerDay: number): { viewMode: ViewMode; columnWidth: num
   };
 }
 
+/* ---------------------------------------------------------------- columns */
+
+type ColumnId = "type" | "status" | "priority" | "assignee" | "start" | "due" | "duration" | "estimate" | "spent" | "pct";
+
+interface ColumnDef {
+  id: ColumnId;
+  label: string;
+  /** Spelled out in the chooser, where there is room. */
+  long: string;
+  width: number;
+  align?: "right";
+  /** `range` is the bar's own span — an Epic's rolls up its children, so its columns must too. */
+  cell: (task: Task, range: { start: string; end: string } | undefined) => ReactNode;
+}
+
+const dm = (iso: string | null | undefined) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(2, 4)}` : "—");
+const hours = (h: number | null) => (h === null ? "—" : `${Math.round(h * 10) / 10}h`);
+const spanDays = (r: { start: string; end: string }) =>
+  Math.round((Date.parse(r.end + "T00:00:00Z") - Date.parse(r.start + "T00:00:00Z")) / DAY_MS) + 1;
+
+const COLUMNS: ColumnDef[] = [
+  { id: "type", label: "Loại", long: "Loại issue", width: 70, cell: (t) => t.issueType },
+  {
+    id: "status",
+    label: "Trạng thái",
+    long: "Trạng thái Jira",
+    width: 112,
+    cell: (t) => <span className={`wbs-status is-${t.statusCategory}`}>{t.statusName}</span>,
+  },
+  { id: "priority", label: "Ưu tiên", long: "Độ ưu tiên", width: 76, cell: (t) => t.priority ?? "—" },
+  { id: "assignee", label: "Phụ trách", long: "Người phụ trách", width: 110, cell: (t) => t.assigneeName ?? "—" },
+  { id: "start", label: "Bắt đầu", long: "Ngày bắt đầu", width: 76, cell: (t, r) => dm(r?.start ?? t.startDate) },
+  { id: "due", label: "Kết thúc", long: "Ngày kết thúc", width: 76, cell: (t, r) => dm(r?.end ?? t.dueDate) },
+  {
+    id: "duration",
+    label: "T.lượng",
+    long: "Thời lượng (ngày)",
+    width: 66,
+    align: "right",
+    cell: (t, r) => `${r ? spanDays(r) : t.durationDays}d`,
+  },
+  { id: "estimate", label: "Ước lượng", long: "Ước lượng (Original estimate)", width: 76, align: "right", cell: (t) => hours(t.estimateHours) },
+  {
+    id: "spent",
+    label: "Đã ghi",
+    long: "Giờ đã ghi (worklog)",
+    width: 66,
+    align: "right",
+    cell: (t) =>
+      t.estimateHours !== null && (t.spentHours ?? 0) > t.estimateHours ? (
+        <span className="wbs-over" title={`Vượt ước lượng ${hours((t.spentHours ?? 0) - t.estimateHours)}`}>
+          ▲ {hours(t.spentHours)}
+        </span>
+      ) : (
+        hours(t.spentHours)
+      ),
+  },
+  { id: "pct", label: "%", long: "% hoàn thành", width: 48, align: "right", cell: (t) => `${t.percentComplete}%` },
+];
+
+// What the table always showed, so nobody's Gantt changes until they ask.
+const DEFAULT_COLUMNS: ColumnId[] = ["assignee", "pct"];
+const COLUMNS_KEY = "gms.gantt.columns";
+const KEY_COL_WIDTH = 75;
+const MIN_NAME_WIDTH = 200;
+
+function loadColumns(): ColumnId[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(COLUMNS_KEY) ?? "null");
+    if (Array.isArray(raw)) return raw.filter((id): id is ColumnId => COLUMNS.some((c) => c.id === id));
+  } catch {
+    // Private mode or a mangled value — the defaults are a fine answer.
+  }
+  return DEFAULT_COLUMNS;
+}
+
+function saveColumns(ids: ColumnId[]): void {
+  try {
+    localStorage.setItem(COLUMNS_KEY, JSON.stringify(ids));
+  } catch {
+    // Not remembered across reloads; still applies now.
+  }
+}
+
 interface Props {
   tasks: Task[];
   collapsed: Set<string>;
@@ -143,6 +227,39 @@ export default function GanttView({
   const [showCriticalPath, setShowCriticalPath] = useState(false);
   const [showDependencies, setShowDependencies] = useState(true);
   const [query, setQuery] = useState("");
+  // Per browser, not per project: which columns someone reads is a habit, not a property of the plan.
+  const [columnIds, setColumnIds] = useState<ColumnId[]>(loadColumns);
+  const [chooserOpen, setChooserOpen] = useState(false);
+  const chooserRef = useRef<HTMLDivElement>(null);
+  // Kept in COLUMNS order whatever order they were ticked in, so the table never reshuffles.
+  const columns = useMemo(() => COLUMNS.filter((c) => columnIds.includes(c.id)), [columnIds]);
+  const columnsWidth = columns.reduce((s, c) => s + c.width, 0);
+
+  function toggleColumn(id: ColumnId) {
+    setColumnIds((prev) => {
+      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
+      saveColumns(next);
+      return next;
+    });
+    // Let the divider re-fit the new set of columns.
+    setListWidthOverride(null);
+  }
+
+  useEffect(() => {
+    if (!chooserOpen) return;
+    function onDown(e: MouseEvent) {
+      if (chooserRef.current && !chooserRef.current.contains(e.target as Node)) setChooserOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setChooserOpen(false);
+    }
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [chooserOpen]);
   const criticalIds = useMemo(() => computeCriticalPath(tasks), [tasks]);
   const byId = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
 
@@ -169,7 +286,10 @@ export default function GanttView({
 
   // Defaults to the middle of the visible Gantt area; a manual drag (listWidthOverride)
   // always wins over that default once set.
-  const defaultListWidth = bodySize.width > 0 ? Math.round(bodySize.width / 2) : 320;
+  // Wide enough for the chosen columns plus a readable name — more columns
+  // push the divider right rather than squeezing the task names to nothing.
+  const neededListWidth = KEY_COL_WIDTH + MIN_NAME_WIDTH + columnsWidth;
+  const defaultListWidth = Math.max(bodySize.width > 0 ? Math.round(bodySize.width / 2) : 320, neededListWidth);
   const maxListWidth = Math.max(MIN_LIST_WIDTH, bodySize.width - MIN_CHART_WIDTH);
   const listWidth = Math.min(maxListWidth, Math.max(MIN_LIST_WIDTH, listWidthOverride ?? defaultListWidth));
   const ganttHeight = Math.max(ROW_HEIGHT, bodySize.height - HEADER_HEIGHT - SCROLLBAR_RESERVE);
@@ -352,8 +472,16 @@ export default function GanttView({
     <div className="wbs-header" style={{ height: HEADER_HEIGHT, width: listWidth }}>
       <div className="wbs-col wbs-col-key">Mã</div>
       <div className="wbs-col wbs-col-name">Tên công việc</div>
-      <div className="wbs-col wbs-col-assignee">Phụ trách</div>
-      <div className="wbs-col wbs-col-pct">%</div>
+      {columns.map((c) => (
+        <div
+          key={c.id}
+          className={`wbs-col wbs-col-extra ${c.align === "right" ? "is-right" : ""}`}
+          style={{ width: c.width }}
+          title={c.long}
+        >
+          {c.label}
+        </div>
+      ))}
     </div>
   );
 
@@ -401,8 +529,15 @@ export default function GanttView({
               {task.summary}
             </span>
           </div>
-          <div className="wbs-col wbs-col-assignee">{task.assigneeName ?? "—"}</div>
-          <div className="wbs-col wbs-col-pct">{task.percentComplete}%</div>
+          {columns.map((c) => (
+            <div
+              key={c.id}
+              className={`wbs-col wbs-col-extra wbs-cell-${c.id} ${c.align === "right" ? "is-right" : ""}`}
+              style={{ width: c.width }}
+            >
+              {c.cell(task, ranges.get(task.id))}
+            </div>
+          ))}
         </div>
       ))}
     </div>
@@ -435,6 +570,48 @@ export default function GanttView({
         >
           Phụ thuộc
         </button>
+        <div className="col-chooser" ref={chooserRef}>
+          <button
+            className={chooserOpen ? "active" : ""}
+            onClick={() => setChooserOpen((v) => !v)}
+            aria-expanded={chooserOpen}
+            title="Chọn cột hiển thị trong bảng WBS"
+          >
+            Cột ({columns.length}) ▾
+          </button>
+          {chooserOpen && (
+            <div className="col-chooser-menu" role="menu">
+              <div className="col-chooser-title">Hiển thị cột</div>
+              {COLUMNS.map((c) => (
+                <label key={c.id} className="col-chooser-item">
+                  <input type="checkbox" checked={columnIds.includes(c.id)} onChange={() => toggleColumn(c.id)} />
+                  {c.long}
+                </label>
+              ))}
+              <div className="col-chooser-foot">
+                <button
+                  className="text-btn"
+                  onClick={() => {
+                    setColumnIds(DEFAULT_COLUMNS);
+                    saveColumns(DEFAULT_COLUMNS);
+                  }}
+                >
+                  Mặc định
+                </button>
+                <button
+                  className="text-btn"
+                  onClick={() => {
+                    const all = COLUMNS.map((c) => c.id);
+                    setColumnIds(all);
+                    saveColumns(all);
+                  }}
+                >
+                  Tất cả
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
 
         <div className="gantt-search">
           <input

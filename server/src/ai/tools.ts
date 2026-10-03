@@ -1,4 +1,5 @@
 import { Type, type FunctionDeclaration } from "@google/genai";
+import type { TimesheetService } from "../timesheet.js";
 import type { BoardService } from "../agile/boardService.js";
 import { sprintFacts, velocityStats } from "../agile/sprintMetrics.js";
 import type { TaskService } from "../taskService.js";
@@ -67,6 +68,8 @@ export interface ToolContext {
   tzOffsetMinutes: number;
   /** The project team, loaded once per turn — what a spoken name is resolved against. */
   team: JiraUser[];
+  /** Jira worklogs: the Timesheet tab's reads and writes. */
+  timesheet: TimesheetService;
 }
 
 export interface ToolOutcome {

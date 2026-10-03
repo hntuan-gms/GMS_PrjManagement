@@ -23,6 +23,10 @@ import type {
   TaskCreateInput,
   TaskUpdateInput,
   TaskUpdateResponse,
+  TaskTransition,
+  TaskAttachments,
+  Timesheet,
+  WorklogEntry,
 } from "./types";
 
 // Always same-origin: in production this process also serves the UI, and in dev
@@ -129,6 +133,41 @@ export const api = {
     }),
   deleteTask: (id: string) =>
     request<void>(`/tasks/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  getTaskTransitions: (id: string) =>
+    request<TaskTransition[]>(`/tasks/${encodeURIComponent(id)}/transitions`),
+  getTaskAttachments: (id: string) =>
+    request<TaskAttachments>(`/tasks/${encodeURIComponent(id)}/attachments`),
+  // The file goes up as the raw body, its name in a header — see routes/api.ts.
+  uploadAttachment: (id: string, file: File) =>
+    request<Array<{ id: string; filename: string; size: number }>>(`/tasks/${encodeURIComponent(id)}/attachments`, {
+      method: "POST",
+      body: file,
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "X-File-Name": encodeURIComponent(file.name || "anh-dan.png"),
+        "X-File-Type": file.type || "application/octet-stream",
+      },
+    }),
+  addTaskLink: (id: string, url: string, title: string) =>
+    request<{ id: string; url: string; title: string }>(`/tasks/${encodeURIComponent(id)}/links`, {
+      method: "POST",
+      body: JSON.stringify({ url, title }),
+    }),
+
+  // Timesheet — Jira worklogs, read and written directly.
+  getTimesheet: (from: string, to: string) =>
+    request<Timesheet>(
+      `/timesheet?from=${from}&to=${to}&tz=${-new Date().getTimezoneOffset()}`
+    ),
+  logWork: (input: { issueKey: string; date: string; hours: number; comment?: string | null }) =>
+    request<WorklogEntry>("/timesheet/worklogs", {
+      method: "POST",
+      body: JSON.stringify({ ...input, tzOffsetMinutes: -new Date().getTimezoneOffset() }),
+    }),
+  deleteWorklog: (issueKey: string, id: string) =>
+    request<void>(`/timesheet/worklogs/${encodeURIComponent(issueKey)}/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
   // Progress report. The overview is free (computed, no model call); generating a
   // report waits on Gemini and can take several seconds.
   getProgress: (asOf: string) =>

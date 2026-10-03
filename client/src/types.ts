@@ -43,6 +43,9 @@ export interface Task {
    * usable heatmap rather than an empty one.
    */
   estimateHours: number | null;
+  /** Hours logged against the issue by everyone (Jira's `timespent`). */
+  spentHours: number | null;
+  priority: string | null;
   jiraUrl: string;
 }
 
@@ -118,7 +121,10 @@ export interface TaskUpdateInput {
   predecessors?: Predecessor[];
   baselineStart?: string | null;
   baselineDue?: string | null;
+  /** A transition id from GET /tasks/:id/transitions (a name also works). */
   statusTransition?: string;
+  /** Jira's Original estimate, in hours (> 0). */
+  estimateHours?: number;
 }
 
 export interface TaskCreateInput {
@@ -130,6 +136,7 @@ export interface TaskCreateInput {
   dueDate?: string | null;
   durationDays?: number;
   assigneeAccountId?: string | null;
+  estimateHours?: number | null;
 }
 
 /** One shared set of fields, applied to N summaries — mirrors Jira's own "create several issues" bulk dialog. */
@@ -141,11 +148,56 @@ export interface BulkTaskCreateInput {
   startDate?: string | null;
   durationDays?: number;
   assigneeAccountId?: string | null;
+  estimateHours?: number | null;
 }
 
 export interface BulkTaskCreateResult {
   created: Task[];
   errors: Array<{ summary: string; message: string }>;
+  /** Created, but something secondary (estimate, an attachment) didn't stick. */
+  warnings?: string[];
+}
+
+/** A move the issue's workflow allows from where it is now. */
+export interface TaskTransition {
+  id: string;
+  name: string;
+  toStatusName: string;
+  toCategory: "new" | "indeterminate" | "done";
+}
+
+export interface TaskAttachments {
+  files: Array<{ id: string; filename: string; size: number; mimeType: string; created: string; author: string | null }>;
+  links: Array<{ id: string; url: string; title: string }>;
+}
+
+export interface WorklogEntry {
+  id: string;
+  issueKey: string;
+  summary: string;
+  issueType: string;
+  authorAccountId: string | null;
+  authorName: string;
+  date: string;
+  hours: number;
+  comment: string | null;
+  mine: boolean;
+}
+
+export interface TimesheetPerson {
+  accountId: string;
+  displayName: string;
+  avatarUrl: string | null;
+  capacityHoursPerDay: number;
+  absences: Array<{ from: string; to: string }>;
+  outsider: boolean;
+}
+
+export interface Timesheet {
+  from: string;
+  to: string;
+  people: TimesheetPerson[];
+  entries: WorklogEntry[];
 }
 
 /**
@@ -422,6 +474,8 @@ export interface BoardColumn {
   statusIds: string[];
   min: number | null;
   max: number | null;
+  /** A status no Jira board column maps — shown so its cards don't vanish. */
+  unmapped?: boolean;
 }
 
 export interface BoardStatus {

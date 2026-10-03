@@ -17,6 +17,24 @@ export interface JiraClientOptions {
   onUnauthorized?: () => Promise<string | null>;
 }
 
+/** A transition the workflow doesn't offer — the user's request, not Jira's failure. */
+export class JiraTransitionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "JiraTransitionError";
+  }
+}
+
+/** "In-Progress", "in progress", "Đang làm " → comparable keys. */
+export function foldName(s: string): string {
+  return s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/gi, "d")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+}
+
 export class JiraApiError extends Error {
   constructor(
     public readonly status: number,
@@ -96,12 +114,14 @@ export class JiraClient {
 
   private async request<T>(path: string, init: RequestInit = {}, isRetry = false): Promise<T> {
     const token = await this.opts.getAccessToken();
+    // A multipart upload must let fetch write its own Content-Type, boundary included.
+    const multipart = typeof FormData !== "undefined" && init.body instanceof FormData;
     const res = await fetch(`${JIRA_API_BASE}/ex/jira/${this.opts.cloudId}${path}`, {
       ...init,
       headers: {
         Authorization: `Bearer ${token}`,
         Accept: "application/json",
-        "Content-Type": "application/json",
+        ...(multipart ? {} : { "Content-Type": "application/json" }),
         ...(init.headers ?? {}),
       },
     });
@@ -336,20 +356,108 @@ export class JiraClient {
     });
   }
 
-  async transitionIssue(key: string, transitionName: string): Promise<void> {
+  /**
+   * Move an issue by transition id, transition name or target status name.
+   *
+   * Matching only the transition *name* exactly was BUG-05: a workflow's
+   * transitions are named by whoever drew it ("Start progress", "In-Progress",
+   * "Đang làm"), so "In Progress" failed on a site whose status is "In-Progress"
+   * even though Jira's own UI moved the same issue fine. Names are compared with
+   * case, spacing, punctuation and diacritics folded away, and the target status
+   * counts as much as the transition's own label.
+   */
+  async transitionIssue(key: string, wanted: string): Promise<{ id: string; name: string; toStatusName: string | null }> {
     const transitions = await this.getTransitions(key);
-    const match = transitions.find((t) => t.name.toLowerCase() === transitionName.toLowerCase());
+    const want = foldName(wanted);
+    const match =
+      transitions.find((t) => t.id === wanted) ??
+      transitions.find((t) => foldName(t.to?.name ?? "") === want) ??
+      transitions.find((t) => foldName(t.name) === want);
     if (!match) {
-      throw new Error(
-        `No transition named "${transitionName}" available for ${key}. Available: ${transitions
-          .map((t) => t.name)
-          .join(", ")}`
+      const allowed = [...new Set(transitions.map((t) => t.to?.name ?? t.name))];
+      throw new JiraTransitionError(
+        `Quy trình của ${key} không cho chuyển sang "${wanted}" từ trạng thái hiện tại. ` +
+          (allowed.length ? `Có thể chuyển sang: ${allowed.join(", ")}.` : "Không có bước chuyển nào khả dụng.")
       );
     }
-    await this.request(`/rest/api/3/issue/${encodeURIComponent(key)}/transitions`, {
+    await this.transitionIssueById(key, match.id);
+    return { id: match.id, name: match.name, toStatusName: match.to?.name ?? null };
+  }
+
+  /* --------------------------------------------- attachments and web links */
+
+  /**
+   * Multipart upload to an existing issue. `X-Atlassian-Token: no-check` is
+   * mandatory — without it Jira rejects the request as a possible XSRF.
+   * Covered by the classic `write:jira-work` scope already requested.
+   */
+  async addAttachment(key: string, file: { name: string; type: string; data: Buffer }): Promise<Array<{ id: string; filename: string; size: number }>> {
+    const form = new FormData();
+    form.append("file", new Blob([new Uint8Array(file.data)], { type: file.type || "application/octet-stream" }), file.name);
+    return this.request(`/rest/api/3/issue/${encodeURIComponent(key)}/attachments`, {
       method: "POST",
-      body: JSON.stringify({ transition: { id: match.id } }),
+      body: form,
+      headers: { "X-Atlassian-Token": "no-check" },
     });
+  }
+
+  async getAttachments(key: string): Promise<Array<{ id: string; filename: string; size: number; mimeType: string; created: string; author?: { displayName?: string } }>> {
+    const issue = await this.request<any>(`/rest/api/3/issue/${encodeURIComponent(key)}?fields=attachment`);
+    return issue.fields?.attachment ?? [];
+  }
+
+  /** A "web link" on the issue — what Jira's own "Add link → Web link" creates. */
+  async addRemoteLink(key: string, url: string, title: string): Promise<{ id: number }> {
+    return this.request(`/rest/api/3/issue/${encodeURIComponent(key)}/remotelink`, {
+      method: "POST",
+      body: JSON.stringify({ object: { url, title } }),
+    });
+  }
+
+  async getRemoteLinks(key: string): Promise<Array<{ id: number; object?: { url?: string; title?: string } }>> {
+    return this.request(`/rest/api/3/issue/${encodeURIComponent(key)}/remotelink`);
+  }
+
+  /* --------------------------------------------------------------- worklogs */
+
+  /** All worklogs on one issue started inside [afterMs, beforeMs), paged. */
+  async getWorklogs(key: string, afterMs: number, beforeMs: number): Promise<any[]> {
+    const out: any[] = [];
+    let startAt = 0;
+    for (let page = 0; page < 20; page++) {
+      const res = await this.request<{ worklogs: any[]; total: number }>(
+        `/rest/api/3/issue/${encodeURIComponent(key)}/worklog?startedAfter=${afterMs}&startedBefore=${beforeMs}` +
+          `&maxResults=1000&startAt=${startAt}`
+      );
+      const batch = res.worklogs ?? [];
+      out.push(...batch);
+      startAt += batch.length;
+      if (batch.length === 0 || startAt >= (res.total ?? 0)) break;
+    }
+    return out;
+  }
+
+  /**
+   * `started` must be Jira's own format, `yyyy-MM-dd'T'HH:mm:ss.SSSZ` with the
+   * offset written +0700 (no colon) — an ISO string with `Z` or `+07:00` is a 400.
+   * adjustEstimate=leave keeps the original estimate a plan, not a countdown.
+   */
+  async addWorklog(key: string, input: { seconds: number; started: string; comment?: string | null }): Promise<any> {
+    return this.request(`/rest/api/3/issue/${encodeURIComponent(key)}/worklog?adjustEstimate=leave`, {
+      method: "POST",
+      body: JSON.stringify({
+        timeSpentSeconds: input.seconds,
+        started: input.started,
+        ...(input.comment ? { comment: textToAdf(input.comment) } : {}),
+      }),
+    });
+  }
+
+  async deleteWorklog(key: string, worklogId: string): Promise<void> {
+    await this.request(
+      `/rest/api/3/issue/${encodeURIComponent(key)}/worklog/${encodeURIComponent(worklogId)}?adjustEstimate=leave`,
+      { method: "DELETE" }
+    );
   }
 
   async createIssue(input: {

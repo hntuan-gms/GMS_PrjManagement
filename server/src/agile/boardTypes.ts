@@ -24,6 +24,8 @@ export interface BoardColumn {
   /** WIP limits from the board configuration, when the team set them. */
   min: number | null;
   max: number | null;
+  /** Not a column on the Jira board: a status no column maps, shown so its cards don't vanish. */
+  unmapped?: boolean;
 }
 
 export interface BoardStatus {

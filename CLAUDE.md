@@ -173,6 +173,24 @@ Writes are scoped to the session's project: keys must carry its prefix and a spr
 - **sprintInsight**: the stand-up brief over computed pace (done% vs elapsed%, ±10 points), blocked, flagged and stale (in progress, untouched ≥3 working days) work; forecast, today's actions with owners, and descope candidates that move to the backlog in one click.
 The chat's `sprint_status` tool returns the same computed facts.
 
+### Status, duration, estimate, attachments
+
+**Statuses come from the issue's workflow, never a list in the client.** The edit modal used to offer a fixed Backlog/To Do/In Progress/Done, and `transitionIssue` matched the transition *name* exactly — BUG-05: on a site whose status is "In-Progress" (or "Pending") the move failed with an English error while Jira's own UI did it fine, and "Pending" was never offered at all. Now the modal lists `GET /tasks/:id/transitions` (target status names) and sends the transition **id**; `transitionIssue` still accepts a name and compares with `foldName` (case, spaces, hyphens, diacritics removed) against the target status first, then the transition label. A refused move is a `JiraTransitionError` → 400 with the allowed targets, not a 500. On the board, a status no column maps — Jira hides it too, under "Unmapped statuses" — gets a trailing `unmapped` column when issues sit in it, so those cards don't silently vanish.
+
+**Duration is whole calendar days; effort is the estimate.** `due = start + duration − 1` has no meaning for 1.5, so the server `ceil`s every duration. The forms accept a fraction anyway and say what happens (`DurationHint`): the bar takes the next whole day and, if no estimate was typed, the Original estimate is filled with days × 8h — which is what the resource heatmap reads. Number fields use `NumberInput`, which keeps a text draft and commits only parseable, in-range values: the old `Math.max(1, Number(v))` on every keystroke snapped an emptied box back to 1 with the caret after it, so typing "1.5" produced "11.5". It also accepts a comma decimal.
+
+**Original estimate is written through `timetracking`** (`setOriginalEstimate`), on its own call and *before* the rest of an update, so a project whose screens lack Time tracking fails with a message about the estimate and changes nothing else. On create it never fails the creation (the issue already exists — failing would invite duplicate retries); it comes back as a bulk-create `warning`.
+
+**Attachments go up one file per request as the raw body** (`express.raw`, name in `X-File-Name`), re-wrapped by `jiraClient.addAttachment` into the multipart form Jira wants, with `X-Atlassian-Token: no-check` (without it Jira rejects the upload as XSRF). That avoids a multipart parser dependency, and one rejected file doesn't lose the rest. Links are Jira *web links* (`/remotelink`), not text in the description. Both need only `write:jira-work`. A create form holds them as `PendingAttachments` until the issue keys exist, then attaches the same set to every task in the batch; pasting a screenshot anywhere in either modal adds it. Attachment *content* is not proxied — the list shows names and Jira has the files.
+
+**The WBS table's columns are chosen per browser** (`gms.gantt.columns`): type, status, priority, assignee, start, due, duration, estimate, spent, %. Dates and duration read the bar's resolved range, so an Epic's columns roll up its children like its bar does. `spentHours` and `priority` ride on the existing task search.
+
+### Timesheet
+
+`server/src/timesheet.ts` reads and writes **Jira worklogs only** — no table of ours, for the same reason the board has none: a second copy of logged time would disagree with Jira's own reports. A range is fetched by JQL `worklogDate` widened a day each side (it's evaluated in the Jira profile's timezone, not the browser's), then cut exactly on each worklog's `started` instant in the browser's `tzOffsetMinutes`; issues with more than the 20 worklogs a search hit embeds are re-read per issue. Every project member gets a row even with nothing logged — "who hasn't logged" is half the point — plus anyone who logged without being a member (flagged). Capacity and leave come from `resource_profile`/`resource_absence`, defaulting to 8h. "Expected" counts working days up to today; "chưa ghi" marks only days *before* today.
+
+**Time is always logged as the signed-in user** — Jira records the token's owner as author and offers no "log for someone else" to a 3LO app, so the UI and the chat's `log_work` say so rather than pretending. `started` must be `yyyy-MM-ddTHH:mm:ss.SSS+0700` (offset without a colon) or Jira 400s; work is stamped 09:00 local so it stays on the chosen day in every view. `adjustEstimate=leave` keeps the Original estimate a plan rather than a countdown. The chat has `log_work`, `timesheet` (who logged what, who has gaps) and `update_task.estimateHours`.
+
 ### Progress report
 
 The Báo cáo tab applies the planner's rule to reporting: **`server/src/progress.ts` computes every figure, the model only explains them.** Asked "how far along are we?", a model produces a confident percentage with nothing behind it. `computeProgress(tasks, asOf)` is pure and is the one source for the report page, the AI narrative and the chat assistant (`project_progress` tool, plus a one-line `progressHeadline` in every chat system prompt), so a number on the page and a number in the chat cannot disagree.
@@ -238,7 +256,6 @@ WBS hierarchy is ours, not the Gantt library's: `ganttMapping.orderByWbs()` does
 
 ## Known constraints
 
-- `STATUS_OPTIONS` in `client/src/components/TaskEditModal.tsx` is a hard-coded list (Backlog/To Do/In Progress/Done). Real HHBJ workflow transitions are *Backlog, Selected for development, In Progress, Done*, so "To Do" fails (BUG-05, open). `JiraClient.getTransitions()` already exists if you want to fetch them per issue.
 - `IssueTypeName` is a hard-coded union (`Epic|Story|Task|Bug|Sub-task`). Team-managed projects rename or omit these, so `createIssue` will 400 on the first project that does.
 - Cross-project predecessors are rejected with a 400. The cascade only loads issues from the session's project, so a foreign key would appear to exist while never being enforced.
 - An overlay-only PATCH (%, predecessors, baselines) touches no Jira field. `updateTask` does a `getIssue` visibility check in that case so a user who cannot see the issue cannot rewrite shared schedule data, but there is no write-level permission check.

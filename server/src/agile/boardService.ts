@@ -197,6 +197,22 @@ export class BoardService {
       // nothing can be dropped into it, so it only costs width.
       .filter((c) => c.statusIds.length > 0);
 
+    // A status no column maps (a "Pending" added to the workflow after the board
+    // was set up) is invisible on Jira's own board too — Jira parks it under
+    // "Unmapped statuses" in board settings. Here it gets a column of its own at
+    // the end, so its cards stay on screen and can be dragged out (or in) instead
+    // of silently missing from the board while Jira still shows them on the issue.
+    const mapped = new Set(columns.flatMap((c) => c.statusIds));
+    const unmappedIds = new Set<string>();
+    for (const raw of rawIssues) {
+      const id = String(raw.fields?.status?.id ?? "");
+      if (id && !mapped.has(id)) unmappedIds.add(id);
+    }
+    for (const id of unmappedIds) {
+      const s = statusMap.get(id);
+      columns.push({ name: s?.name ?? id, statusIds: [id], min: null, max: null, unmapped: true });
+    }
+
     const issues = this.toIssues(rawIssues.slice(0, ISSUE_LIMIT), estimation, predecessors);
 
     const sprints: Sprint[] = openSprints.map(toSprint);

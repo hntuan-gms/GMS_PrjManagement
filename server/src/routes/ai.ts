@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { TimesheetService } from "../timesheet.js";
 import { requireProject } from "../auth/middleware.js";
 import { badRequest, notFound } from "../errors.js";
 import { activeModel, generatePlan, layoutSchedule, listAvailableModels, toPlannerResources } from "../ai/planner.js";
@@ -163,6 +164,11 @@ aiRouter.post("/chat", requireProject, async (req, res) => {
       projectKey: session.projectKey!,
       accountId: session.accountId,
       boardService: boardServiceFor(req),
+      timesheet: new TimesheetService(req.auth!.jira, {
+        cloudId: session.cloudId,
+        projectKey: session.projectKey!,
+        accountId: session.accountId,
+      }),
       tzOffsetMinutes: (() => {
         const n = Number(body?.tzOffsetMinutes);
         return Number.isFinite(n) && Math.abs(n) <= 14 * 60 ? n : 0;

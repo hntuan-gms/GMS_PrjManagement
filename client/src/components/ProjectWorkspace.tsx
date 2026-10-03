@@ -22,6 +22,7 @@ import ProgressReportView from "./ProgressReportView";
 import ResourceView from "./ResourceView";
 import TaskEditModal from "./TaskEditModal";
 import Toolbar, { type WorkspaceView } from "./Toolbar";
+import TimesheetView from "./TimesheetView";
 
 interface Props {
   session: Session;
@@ -541,6 +542,8 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
             onEditDependency={handleEditDependency}
             onDeleteDependency={handleDeleteDependency}
           />
+        ) : view === "timesheet" ? (
+          <TimesheetView session={session} tasks={tasks} onOpenEdit={setEditingTask} onTasksChanged={refreshTasks} />
         ) : view === "board" ? (
           <BoardView
             session={session}
@@ -584,6 +587,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
             await api.deleteTask(editingTask.id);
             await refreshTasks();
           }}
+          onWorkLogged={refreshTasks}
         />
       )}
 

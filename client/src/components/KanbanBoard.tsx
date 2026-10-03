@@ -122,8 +122,19 @@ export default function KanbanBoard({ snapshot, issues, swimlane, today, onMove,
           const over = c.max !== null && inCol.length > c.max;
           const under = c.min !== null && inCol.length < c.min;
           return (
-            <div key={c.name} className={`bd-colhead ${over ? "is-over" : ""} ${under ? "is-under" : ""}`}>
-              <span className="bd-colname">{c.name}</span>
+            <div
+              key={c.name}
+              className={`bd-colhead ${over ? "is-over" : ""} ${under ? "is-under" : ""} ${c.unmapped ? "is-unmapped" : ""}`}
+              title={
+                c.unmapped
+                  ? "Trạng thái này chưa được gắn vào cột nào trong cấu hình board trên Jira (Board settings → Columns), nên board của Jira không hiển thị nó. Hiện ở đây để các việc không bị mất."
+                  : undefined
+              }
+            >
+              <span className="bd-colname">
+                {c.name}
+                {c.unmapped && <span className="bd-unmapped-tag">chưa gắn cột</span>}
+              </span>
               <span className="bd-colcount" title={c.max !== null ? `Giới hạn WIP: tối đa ${c.max}` : undefined}>
                 {inCol.length}
                 {c.max !== null && <span className="bd-wip">/{c.max}</span>}

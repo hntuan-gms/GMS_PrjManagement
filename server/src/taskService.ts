@@ -28,6 +28,8 @@ const SEARCH_FIELDS = [
   "duedate",
   "parent",
   "timeoriginalestimate",
+  "timespent",
+  "priority",
 ];
 
 function statusCategoryKey(key: string): "new" | "indeterminate" | "done" {
@@ -166,6 +168,8 @@ export class TaskService {
       // and every capacity figure in this app work in.
       estimateHours:
         typeof f.timeoriginalestimate === "number" ? f.timeoriginalestimate / 3600 : null,
+      spentHours: typeof f.timespent === "number" ? f.timespent / 3600 : null,
+      priority: f.priority?.name ?? null,
       jiraUrl: `${this.ctx.siteUrl}/browse/${issue.key}`,
     };
   }
@@ -257,8 +261,57 @@ export class TaskService {
     return fields;
   }
 
+  /** What the issue's workflow allows from its current status — the edit modal's status list. */
+  async listTransitions(
+    id: string
+  ): Promise<Array<{ id: string; name: string; toStatusName: string; toCategory: "new" | "indeterminate" | "done" }>> {
+    this.assertOwnKey(id);
+    const transitions = await this.jira.getTransitions(id);
+    return transitions
+      .filter((t) => t.to?.name)
+      .map((t) => ({
+        id: t.id,
+        name: t.name,
+        toStatusName: t.to!.name,
+        toCategory: statusCategoryKey(t.to!.statusCategory?.key ?? "new"),
+      }));
+  }
+
+  /** Issue keys outside the session's project are refused before Jira is asked anything. */
+  assertOwnKey(id: string): void {
+    if (!new RegExp(`^${this.ctx.projectKey}-\\d+$`).test(id)) {
+      throw badRequest(`Chỉ thao tác được với công việc của dự án ${this.ctx.projectKey}.`);
+    }
+  }
+
+  /**
+   * Original estimate goes through `timetracking`, the only writable form of it.
+   * Written on its own call so a project without time tracking on its screens
+   * fails with a message about the estimate, not about whatever else was saved.
+   */
+  async setOriginalEstimate(id: string, hours: number): Promise<void> {
+    const minutes = Math.round(hours * 60);
+    if (!Number.isFinite(minutes) || minutes <= 0) throw badRequest("Ước lượng phải lớn hơn 0 giờ.");
+    try {
+      await this.jira.updateIssueFields(id, { timetracking: { originalEstimate: `${minutes}m` } });
+    } catch (err) {
+      if (err instanceof JiraApiError && err.status === 400) {
+        throw badRequest(
+          `Jira không nhận Original estimate cho ${id}: ${err.summary || "trường Time tracking không có trên màn hình chỉnh sửa"}. ` +
+            "Cần bật Time tracking và thêm trường này vào màn hình của loại issue."
+        );
+      }
+      throw err;
+    }
+  }
+
   async updateTask(id: string, input: TaskUpdateInput): Promise<UpdateResult> {
     const current = await store.getOverlay(this.ctx.cloudId, id);
+    // Duration is whole calendar days end to end (due = start + duration − 1);
+    // a fraction would make every date downstream ambiguous.
+    if (input.durationDays !== undefined) input = { ...input, durationDays: Math.max(1, Math.ceil(input.durationDays)) };
+    // First, so a refused estimate leaves the task exactly as it was.
+    if (input.estimateHours !== undefined) await this.setOriginalEstimate(id, input.estimateHours);
 
     // Schedule (start/duration/due) is edited on the local overlay and the resulting
     // due date is always pushed back to Jira's native `duedate` field.
@@ -286,7 +339,8 @@ export class TaskService {
       await this.jira.updateIssueFields(id, fields);
     } else if (
       input.assigneeAccountId === undefined &&
-      input.statusTransition === undefined
+      input.statusTransition === undefined &&
+      input.estimateHours === undefined
     ) {
       // Overlay-only edit (%, predecessors, baseline) touches no Jira field, so it
       // would otherwise skip every permission check. Read the issue first so a user
@@ -573,7 +627,7 @@ export class TaskService {
     return { warnings, changed: [...changed.values()] };
   }
 
-  async createTask(input: TaskCreateInput): Promise<Task> {
+  async createTask(input: TaskCreateInput, warnings?: string[]): Promise<Task> {
     // An Epic never carries an assignee (see isAssignableType). Dropped rather
     // than rejected here: a caller asking for "an Epic for phase 2, owner Minh"
     // means Minh leads it, and failing the whole creation over a field we are
@@ -581,7 +635,7 @@ export class TaskService {
     const assigneeAccountId = isAssignableType(input.issueType)
       ? input.assigneeAccountId ?? null
       : null;
-    const durationDays = input.durationDays ?? 3;
+    const durationDays = Math.max(1, Math.ceil(input.durationDays ?? 3));
     const startDate = input.startDate ?? null;
     const dueDate =
       input.dueDate ?? (startDate ? addDays(startDate, durationDays - 1) : null);
@@ -598,6 +652,16 @@ export class TaskService {
       assigneeAccountId,
     });
     const key = created.key;
+    if (input.estimateHours && input.estimateHours > 0) {
+      // Never fails the creation: the issue already exists in Jira, and losing
+      // it over a secondary field would leave the user retrying into duplicates.
+      try {
+        await this.setOriginalEstimate(key, input.estimateHours);
+      } catch (err) {
+        if (err instanceof JiraApiError && err.status === 401) throw err;
+        warnings?.push(`${key}: ${(err as Error).message}`);
+      }
+    }
 
     await store.setOverlay(this.ctx.cloudId, key, {
       startDate,
@@ -684,18 +748,23 @@ export class TaskService {
   async createTasksBulk(input: BulkTaskCreateInput): Promise<BulkTaskCreateResult> {
     const created: Task[] = [];
     const errors: Array<{ summary: string; message: string }> = [];
+    const warnings: string[] = [];
     for (const summary of input.summaries) {
       try {
         created.push(
-          await this.createTask({
-            summary,
-            issueType: input.issueType,
-            description: input.description ?? null,
-            wbsParentId: input.wbsParentId ?? null,
-            startDate: input.startDate ?? null,
-            durationDays: input.durationDays,
-            assigneeAccountId: input.assigneeAccountId ?? null,
-          })
+          await this.createTask(
+            {
+              summary,
+              issueType: input.issueType,
+              description: input.description ?? null,
+              wbsParentId: input.wbsParentId ?? null,
+              startDate: input.startDate ?? null,
+              durationDays: input.durationDays,
+              assigneeAccountId: input.assigneeAccountId ?? null,
+              estimateHours: input.estimateHours ?? null,
+            },
+            warnings
+          )
         );
       } catch (err) {
         if (err instanceof JiraApiError && err.status === 401) throw err;
@@ -703,7 +772,7 @@ export class TaskService {
         errors.push({ summary, message });
       }
     }
-    return { created, errors };
+    return { created, errors, warnings };
   }
 
   async deleteTask(id: string): Promise<void> {

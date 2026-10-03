@@ -1,6 +1,11 @@
 import { useState } from "react";
 import { isAssignableType } from "../types";
 import type { BulkTaskCreateInput, BulkTaskCreateResult, IssueTypeName, JiraUser, Task } from "../types";
+import { filesFromClipboard, hasPending, NO_ATTACHMENTS, uploadPending, type PendingAttachments } from "../attachments";
+import { HOURS_PER_DAY, localToday, roundHours } from "../taskForm";
+import AttachmentPicker from "./AttachmentPicker";
+import DurationHint from "./DurationHint";
+import NumberInput from "./NumberInput";
 
 interface Props {
   tasks: Task[];
@@ -20,9 +25,12 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate }: Pro
   const [description, setDescription] = useState("");
   const [issueType, setIssueType] = useState<IssueTypeName>("Task");
   const [wbsParentId, setWbsParentId] = useState("");
-  const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10));
+  const [startDate, setStartDate] = useState(localToday());
   const [durationDays, setDurationDays] = useState(3);
+  const [estimate, setEstimate] = useState<number | null>(null);
+  const [estimateTouched, setEstimateTouched] = useState(false);
   const [assigneeAccountId, setAssigneeAccountId] = useState("");
+  const [attachments, setAttachments] = useState<PendingAttachments>(NO_ATTACHMENTS);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -100,13 +108,22 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate }: Pro
         issueType,
         wbsParentId: wbsParentId || null,
         startDate,
-        durationDays,
+        // The bar is whole days; a fractional duration's effort rides on the estimate.
+        durationDays: Math.max(1, Math.ceil(durationDays)),
         assigneeAccountId: assigneeAccountId || null,
+        estimateHours: estimate && estimate > 0 ? estimate : null,
       });
 
-      // If there are failures in bulk creation, show results view; otherwise close
-      if (res.errors.length > 0) {
-        setResult(res);
+      // Attachments need an issue key, so they go up once each issue exists —
+      // the same files and links on every task created in this batch.
+      const warnings = [...(res.warnings ?? [])];
+      if (hasPending(attachments)) {
+        for (const task of res.created) warnings.push(...(await uploadPending(task.id, attachments)));
+      }
+
+      // If anything failed or only half-stuck, show the results view; otherwise close
+      if (res.errors.length > 0 || warnings.length > 0) {
+        setResult({ ...res, warnings });
       } else {
         onClose();
       }
@@ -137,6 +154,17 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate }: Pro
             <strong>{result.created.length + result.errors.length}</strong> task trên Jira.
           </div>
 
+          {(result.warnings?.length ?? 0) > 0 && (
+            <div className="import-errors-wrap">
+              <div className="import-errors-title">Đã tạo nhưng chưa đầy đủ ({result.warnings!.length}):</div>
+              <ul className="import-error-list">
+                {result.warnings!.map((w, i) => (
+                  <li key={i}>{w}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {result.errors.length > 0 && (
             <div className="import-errors-wrap">
               <div className="import-errors-title">Công việc chưa tạo được ({result.errors.length}):</div>
@@ -163,7 +191,18 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate }: Pro
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="modal"
+        onClick={(e) => e.stopPropagation()}
+        onPaste={(e) => {
+          // A screenshot pasted anywhere in the form becomes an attachment;
+          // pasting a list of names into the bulk box is left alone.
+          const files = filesFromClipboard(e.clipboardData);
+          if (files.length === 0) return;
+          e.preventDefault();
+          setAttachments((a) => ({ ...a, files: [...a.files, ...files] }));
+        }}
+      >
         <div className="modal-header">
           <div className="modal-title-wrap">
             <span className="modal-id">
@@ -301,11 +340,30 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate }: Pro
           </label>
           <label className="field">
             <span className="field-label-text">Thời lượng (ngày)</span>
-            <input
-              type="number"
-              min={1}
+            <NumberInput
               value={durationDays}
-              onChange={(e) => setDurationDays(Math.max(1, Number(e.target.value)))}
+              min={0.1}
+              max={3650}
+              onChange={(n) => {
+                if (n === null) return;
+                setDurationDays(n);
+                if (!estimateTouched && !Number.isInteger(n)) setEstimate(roundHours(n * HOURS_PER_DAY));
+              }}
+            />
+            <DurationHint days={durationDays} />
+          </label>
+          <label className="field">
+            <span className="field-label-text">Ước lượng (giờ)</span>
+            <NumberInput
+              value={estimate}
+              min={0.01}
+              max={10000}
+              allowEmpty
+              placeholder="Original estimate"
+              onChange={(n) => {
+                setEstimate(n);
+                setEstimateTouched(true);
+              }}
             />
           </label>
           <label className="field">
@@ -325,6 +383,13 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate }: Pro
               </span>
             )}
           </label>
+        </div>
+
+        <div className="field">
+          <span className="field-label-text">
+            Đính kèm &amp; liên kết {taskCount > 1 ? "(gắn vào tất cả task)" : ""}
+          </span>
+          <AttachmentPicker value={attachments} onChange={setAttachments} />
         </div>
 
         {error && <div className="modal-error">{error}</div>}

@@ -148,6 +148,7 @@ function systemPrompt(projectKey: string, tasks: Task[], today: string, team: Ji
     "- Chốt / lưu / đặt lại baseline → set_baseline.",
     "- Xoá việc → delete_task: gọi lần đầu KHÔNG có confirmed để xem sẽ xoá gì, hỏi người dùng; chỉ khi họ đồng ý rõ ràng mới gọi lại với confirmed=true.",
     "- Đưa việc vào sprint / về backlog → move_to_sprint. Đặt story point → set_estimate.",
+    "- Original estimate (giờ) → update_task.estimateHours. Ghi giờ đã làm → log_work (luôn ghi dưới tên người đang đăng nhập; không ghi hộ người khác được). Ai đã log bao nhiêu giờ, ai chưa log → timesheet.",
     "  Tạo / bắt đầu / hoàn thành / đổi tên-mục tiêu sprint → sprint_action (hoàn thành sprint cũng phải hỏi xác nhận trước).",
     "- Yêu cầu có nhiều bước ('dời GPM-3 sang thứ 2 rồi nối với GPM-5') → làm lần lượt từng bước bằng công cụ, rồi tóm tắt kết quả.",
     "- Mơ hồ (không rõ việc nào, người nào, sprint nào) → hỏi lại một câu ngắn thay vì đoán.",

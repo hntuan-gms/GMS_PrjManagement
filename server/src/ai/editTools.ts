@@ -88,8 +88,44 @@ const UPDATE_TASK: FunctionDeclaration = {
         description: "Move the whole task by N calendar days (negative = earlier), keeping its duration.",
       },
       percentComplete: { type: Type.NUMBER, description: "0–100." },
+      estimateHours: {
+        type: Type.NUMBER,
+        description: "Jira Original estimate in hours ('ước lượng 12 tiếng', '1.5 ngày công' = 12). > 0.",
+      },
     },
     required: ["taskId"],
+  },
+};
+
+const LOG_WORK: FunctionDeclaration = {
+  name: "log_work",
+  description:
+    "Log time spent on a task in Jira, as the signed-in user (Jira always records the person logged in as " +
+    "the author — you cannot log for someone else). 'hôm nay tôi làm GPM-5 3 tiếng'.",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      taskId: { type: Type.STRING },
+      hours: { type: Type.NUMBER, description: "Hours, e.g. 1.5. A day of work = 8." },
+      date: { type: Type.STRING, description: "YYYY-MM-DD; default today." },
+      comment: { type: Type.STRING, description: "What was done, if the user said." },
+    },
+    required: ["taskId", "hours"],
+  },
+};
+
+const TIMESHEET: FunctionDeclaration = {
+  name: "timesheet",
+  description:
+    "Hours each team member logged in Jira over a date range, per day and per task, against their daily " +
+    "capacity — 'tuần này ai chưa log giờ?', 'Quang làm bao nhiêu giờ tháng này?'. Defaults to this week.",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      from: { type: Type.STRING, description: "YYYY-MM-DD." },
+      to: { type: Type.STRING, description: "YYYY-MM-DD, at most 62 days after from." },
+      person: { type: Type.STRING, description: "Optional name to narrow to one person." },
+    },
   },
 };
 
@@ -220,6 +256,8 @@ export const EDIT_TOOLS: FunctionDeclaration[] = [
   MOVE_TO_SPRINT,
   SET_ESTIMATE,
   SPRINT_ACTION,
+  LOG_WORK,
+  TIMESHEET,
 ];
 
 const LABELS: Record<string, string> = {
@@ -233,6 +271,8 @@ const LABELS: Record<string, string> = {
   move_to_sprint: "Đang chuyển việc giữa sprint...",
   set_estimate: "Đang lưu ước lượng...",
   sprint_action: "Đang thao tác sprint...",
+  log_work: "Đang ghi giờ lên Jira...",
+  timesheet: "Đang xem bảng chấm công...",
 };
 
 export function editLabelFor(name: string): string | null {
@@ -265,6 +305,10 @@ export async function runEditTool(
       return runSetEstimate(args, ctx);
     case "sprint_action":
       return runSprintAction(args, ctx);
+    case "log_work":
+      return runLogWork(args, ctx);
+    case "timesheet":
+      return runTimesheet(args, ctx);
     default:
       return null;
   }
@@ -433,6 +477,11 @@ async function runUpdateTask(args: Record<string, unknown>, ctx: ToolContext): P
     const pct = Number(args.percentComplete);
     if (!Number.isFinite(pct) || pct < 0 || pct > 100) return { response: { error: "percentComplete phải từ 0 đến 100." } };
     input.percentComplete = Math.round(pct);
+  }
+  if (args.estimateHours !== undefined && args.estimateHours !== null) {
+    const h = Number(args.estimateHours);
+    if (!Number.isFinite(h) || h <= 0) return { response: { error: "estimateHours phải lớn hơn 0." } };
+    input.estimateHours = h;
   }
 
   // Schedule: resolved to (start, duration) — the pair updateTask and the
@@ -750,4 +799,75 @@ async function runSprintAction(args: Record<string, unknown>, ctx: ToolContext):
   }
 
   return { response: { error: `Không hiểu thao tác "${action}".` } };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Time                                                                       */
+/* -------------------------------------------------------------------------- */
+
+async function runLogWork(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolOutcome> {
+  const t = findTaskIn(ctx.tasks, str(args, "taskId"));
+  if (!t) return notFound(str(args, "taskId"));
+  const hours = Number(args.hours);
+  if (!Number.isFinite(hours) || hours <= 0) return { response: { error: "Số giờ phải lớn hơn 0." } };
+  const date = str(args, "date") || ctx.today;
+  if (!ISO_DATE.test(date)) return { response: { error: "date phải ở dạng YYYY-MM-DD." } };
+  const entry = await ctx.timesheet.log({
+    issueKey: t.id,
+    date,
+    hours,
+    comment: str(args, "comment") || null,
+    tz: ctx.tzOffsetMinutes,
+  });
+  ctx.mutated = true;
+  return { response: { logged: { task: t.id, summary: t.summary, date: entry.date, hours: entry.hours, author: entry.authorName } } };
+}
+
+/** Monday of the week containing `iso`. */
+function weekStart(iso: string): string {
+  const day = new Date(iso + "T00:00:00Z").getUTCDay();
+  return addDays(iso, -((day + 6) % 7));
+}
+
+async function runTimesheet(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolOutcome> {
+  const from = str(args, "from") || weekStart(ctx.today);
+  const to = str(args, "to") || addDays(weekStart(ctx.today), 6);
+  if (!ISO_DATE.test(from) || !ISO_DATE.test(to)) return { response: { error: "from/to phải ở dạng YYYY-MM-DD." } };
+  const sheet = await ctx.timesheet.read(from, to, ctx.tzOffsetMinutes);
+  const want = fold(str(args, "person"));
+  const people = sheet.people.filter((p) => !want || fold(p.displayName).includes(want));
+  // Working days in range that have passed (or are today) — the honest
+  // denominator for "should have logged by now".
+  const days: string[] = [];
+  for (let d = from; d <= to; d = addDays(d, 1)) {
+    const wd = new Date(d + "T00:00:00Z").getUTCDay();
+    if (wd !== 0 && wd !== 6 && d <= ctx.today) days.push(d);
+  }
+  return {
+    response: {
+      from,
+      to,
+      workingDaysSoFar: days.length,
+      people: people.map((p) => {
+        const mine = sheet.entries.filter((e) => e.authorAccountId === p.accountId);
+        const byTask = new Map<string, number>();
+        const byDay = new Map<string, number>();
+        for (const e of mine) {
+          byTask.set(e.issueKey, (byTask.get(e.issueKey) ?? 0) + e.hours);
+          byDay.set(e.date, (byDay.get(e.date) ?? 0) + e.hours);
+        }
+        const away = days.filter((d) => p.absences.some((a) => a.from <= d && d <= a.to));
+        return {
+          name: p.displayName,
+          loggedHours: Math.round(mine.reduce((s, e) => s + e.hours, 0) * 100) / 100,
+          expectedHoursSoFar: (days.length - away.length) * p.capacityHoursPerDay,
+          daysWithoutLog: days.filter((d) => !byDay.has(d) && !away.includes(d)),
+          daysAway: away,
+          perDay: Object.fromEntries(byDay),
+          perTask: [...byTask].map(([task, hours]) => ({ task, hours: Math.round(hours * 100) / 100 })),
+          ...(p.outsider ? { note: "Không có trong danh sách thành viên dự án." } : {}),
+        };
+      }),
+    },
+  };
 }

@@ -459,7 +459,7 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
         <div className="bd-fallback">
           ℹ {snapshot.fallback.message}
           {snapshot.fallback.reason === "no_board" && (
-            <button className="link-btn" onClick={() => setModal({ kind: "createBoard", type: "scrum" })}>
+            <button className="text-btn" onClick={() => setModal({ kind: "createBoard", type: "scrum" })}>
               Tạo board Scrum
             </button>
           )}
@@ -470,7 +470,7 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
       {agile && !snapshot.boards.some((b) => b.type === "scrum") && (
         <div className="bd-fallback">
           ℹ Board này là Kanban nên không có Sprint — Jira chỉ gắn sprint với board Scrum.
-          <button className="link-btn" onClick={() => setModal({ kind: "createBoard", type: "scrum" })}>
+          <button className="text-btn" onClick={() => setModal({ kind: "createBoard", type: "scrum" })}>
             Tạo board Scrum cho dự án
           </button>
         </div>
