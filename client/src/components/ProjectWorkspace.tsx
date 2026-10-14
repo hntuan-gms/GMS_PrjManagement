@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { ApiError, NetworkError, api } from "../api";
 import { computeOptimisticCascade } from "../dependencyCascade";
-import { buildResourceLoad, defaultWindow, todayIso } from "../resourceAllocation";
+import { useTaskFilter } from "../taskFilter";
+import { addDays, buildResourceLoad, defaultWindow, todayIso } from "../resourceAllocation";
 import type {
   BulkTaskCreateResult,
   DependencyType,
@@ -11,8 +12,10 @@ import type {
   ResourcePool,
   Session,
   Task,
+  TaskUpdateInput,
   TaskUpdateResponse,
 } from "../types";
+import { isAssignableType } from "../types";
 import BoardView from "./BoardView";
 import ChatDock from "./ChatDock";
 import CreateTaskModal from "./CreateTaskModal";
@@ -54,6 +57,11 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
   // rather than flashing it at someone who is about to be refused.
   const [resourceAccess, setResourceAccess] = useState<"checking" | "allowed" | "denied">("checking");
 
+  // One filter for the Gantt and the resource heatmap, remembered per project.
+  const [taskFilter, setTaskFilter] = useTaskFilter(
+    `gms.taskFilter.${session.site.cloudId}.${session.project?.key ?? ""}`
+  );
+
   const [view, setView] = useState<WorkspaceView>("gantt");
   // The report the Báo cáo tab should open on — set by a report card in the chat.
   const [focusReportId, setFocusReportId] = useState<string | null>(null);
@@ -64,8 +72,12 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
   // doubles as the anchor a Shift range measures from.
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
+  // Progress text while a bulk action runs ("Đang gán 3/10…"); null when idle.
+  const [bulkBusy, setBulkBusy] = useState<string | null>(null);
+  const [shiftDays, setShiftDays] = useState(1);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
-  const [creating, setCreating] = useState(false);
+  // Open with an optional parent: "+ Sub-task" in the edit modal pre-fills it.
+  const [creating, setCreating] = useState<false | { parentId?: string }>(false);
   // The plan being reviewed, opened from the assistant's table card.
   const [reviewRunId, setReviewRunId] = useState<string | null>(null);
   // A single global counter, bumped once per mutating request (schedule change,
@@ -239,7 +251,17 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
    * permission, a sub-task whose parent went first) doesn't hide the rest.
    */
   async function handleDeleteSelected() {
-    const ids = [...selectedIds];
+    // Jira deletes a parent's SUB-TASKS along with it (deleteSubtasks=true), so a
+    // sub-task selected next to its own parent is already gone by the time its
+    // turn comes — and would be reported as a failure. Only sub-tasks: deleting an
+    // Epic leaves its stories and tasks behind, so those must still be deleted.
+    const picked = new Set(selectedIds);
+    const byId = new Map(tasks.map((t) => [t.id, t]));
+    const ids = [...picked].filter((id) => {
+      const self = byId.get(id);
+      if (self?.issueType !== "Sub-task") return true;
+      return !(self.wbsParentId && picked.has(self.wbsParentId));
+    });
     if (ids.length === 0) return;
     const ok = window.confirm(
       ids.length === 1
@@ -269,6 +291,70 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
   async function refreshTasks() {
     const t = await api.listTasks();
     setTasks(t);
+  }
+
+  /**
+   * Runs one edit over every selected task, one after another — the same reason
+   * delete is sequential: each is a Jira write (and possibly a cascade), and a
+   * burst of thirty would rate-limit and interleave. A refusal on one task (a
+   * status its workflow can't reach, say) is collected, not thrown, so it doesn't
+   * hide the rest. `skipped` carries tasks the action doesn't apply to, so the
+   * summary can say why the count is short.
+   */
+  async function runBulk(
+    verb: string,
+    ids: string[],
+    edit: (id: string) => TaskUpdateInput,
+    skipped: string[] = []
+  ) {
+    if (ids.length === 0) {
+      setSyncError(`Không có công việc nào phù hợp để ${verb}.`);
+      return;
+    }
+    const failed: string[] = [];
+    for (let i = 0; i < ids.length; i++) {
+      setBulkBusy(`Đang ${verb} ${i + 1}/${ids.length}…`);
+      try {
+        await api.updateTask(ids[i], edit(ids[i]));
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 401) return;
+        failed.push(`${ids[i]} (${e instanceof Error ? e.message : "lỗi"})`);
+      }
+    }
+    setBulkBusy(null);
+    const notes: string[] = [];
+    if (failed.length > 0) notes.push(`Không ${verb} được ${failed.length} công việc: ${failed.join("; ")}.`);
+    if (skipped.length > 0) notes.push(`Bỏ qua ${skipped.join(", ")} vì không áp dụng được.`);
+    setSyncError(notes.length > 0 ? notes.join(" ") : null);
+    await refreshTasks();
+  }
+
+  const selectedTasks = () => tasks.filter((t) => selectedIds.has(t.id));
+
+  function handleBulkAssign(accountId: string | null) {
+    const picked = selectedTasks();
+    // An Epic never carries an owner (see isAssignableType); say so up front
+    // rather than let the server refuse it once per Epic.
+    const ok = picked.filter((t) => accountId === null || isAssignableType(t.issueType));
+    const skipped = picked.filter((t) => !ok.includes(t)).map((t) => `${t.id} (Epic)`);
+    return runBulk(accountId ? "gán" : "bỏ gán", ok.map((t) => t.id), () => ({ assigneeAccountId: accountId }), skipped);
+  }
+
+  function handleBulkStatus(statusName: string) {
+    const picked = selectedTasks().filter((t) => t.statusName !== statusName);
+    return runBulk("đổi trạng thái", picked.map((t) => t.id), () => ({ statusTransition: statusName }));
+  }
+
+  function handleBulkShift(days: number) {
+    const parentIds = new Set(tasks.map((t) => t.wbsParentId).filter(Boolean));
+    const picked = selectedTasks();
+    // An Epic's bar is its children's span, so its own dates mean nothing to move.
+    const movable = picked.filter(
+      (t) => t.startDate && !(t.issueType.toLowerCase() === "epic" && parentIds.has(t.id))
+    );
+    const skipped = picked.filter((t) => !movable.includes(t)).map((t) => t.id);
+    const starts = new Map(movable.map((t) => [t.id, t.startDate as string]));
+    return runBulk("dời ngày", movable.map((t) => t.id), (id) => ({ startDate: addDays(starts.get(id)!, days) }), skipped);
   }
 
   /**
@@ -484,7 +570,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
         onViewChange={setView}
         overloadedPeople={overloadedPeople}
         showResources={resourceAccess === "allowed"}
-        onAddTask={() => setCreating(true)}
+        onAddTask={() => setCreating({})}
         onSync={handleSync}
         syncing={syncing}
         lastSyncedAt={lastSyncedAt}
@@ -516,10 +602,70 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
             Đã chọn <strong>{selectedIds.size}</strong> công việc
           </span>
           <button onClick={() => setSelectedIds(new Set())}>Bỏ chọn</button>
-          <button className="danger" onClick={handleDeleteSelected} disabled={deleting}>
+          <select
+            className="selection-select"
+            value=""
+            disabled={deleting || bulkBusy !== null}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v) handleBulkAssign(v === "__none__" ? null : v);
+            }}
+            aria-label="Gán người phụ trách cho các công việc đã chọn"
+          >
+            <option value="">Gán cho…</option>
+            <option value="__none__">— Bỏ gán —</option>
+            {users.map((u) => (
+              <option key={u.accountId} value={u.accountId}>
+                {u.displayName}
+              </option>
+            ))}
+          </select>
+          <select
+            className="selection-select"
+            value=""
+            disabled={deleting || bulkBusy !== null}
+            onChange={(e) => {
+              if (e.target.value) handleBulkStatus(e.target.value);
+            }}
+            aria-label="Đổi trạng thái các công việc đã chọn"
+          >
+            <option value="">Đổi trạng thái…</option>
+            {[...new Set(tasks.map((t) => t.statusName))].sort((a, b) => a.localeCompare(b, "vi")).map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+          <span className="selection-shift">
+            <button
+              disabled={deleting || bulkBusy !== null}
+              onClick={() => handleBulkShift(-shiftDays)}
+              title="Dời ngày bắt đầu lùi lại (giữ nguyên thời lượng)"
+            >
+              ◀
+            </button>
+            <input
+              type="number"
+              min={1}
+              max={365}
+              value={shiftDays}
+              onChange={(e) => setShiftDays(Math.max(1, Math.min(365, Math.floor(Number(e.target.value)) || 1)))}
+              aria-label="Số ngày dời"
+            />
+            <span>ngày</span>
+            <button
+              disabled={deleting || bulkBusy !== null}
+              onClick={() => handleBulkShift(shiftDays)}
+              title="Dời ngày bắt đầu tiến tới (giữ nguyên thời lượng)"
+            >
+              ▶
+            </button>
+          </span>
+          <button className="danger" onClick={handleDeleteSelected} disabled={deleting || bulkBusy !== null}>
             {deleting ? "Đang xoá..." : `Xoá ${selectedIds.size} công việc`}
           </button>
-          <span className="selection-hint">Ctrl/Cmd để chọn thêm · Shift để chọn cả dải</span>
+          {bulkBusy && <span className="selection-hint">{bulkBusy}</span>}
+          {!bulkBusy && <span className="selection-hint">Ctrl/Cmd để chọn thêm · Shift để chọn cả dải</span>}
         </div>
       )}
 
@@ -535,6 +681,11 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
             selectedId={selectedId}
             onSelect={handleSelect}
             selectedIds={selectedIds}
+            filter={taskFilter}
+            onFilterChange={setTaskFilter}
+            myAccountId={session.user.accountId}
+            today={todayIso()}
+            onSetCollapsed={(ids) => setCollapsed(new Set(ids))}
             onOpenEdit={setEditingTask}
             onScheduleChange={handleScheduleChange}
             onProgressChange={handleProgressChange}
@@ -561,6 +712,9 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
             onPoolChange={setPool}
             onAssign={handleAssign}
             onOpenEdit={setEditingTask}
+            filter={taskFilter}
+            onFilterChange={setTaskFilter}
+            myAccountId={session.user.accountId}
           />
         ) : (
           <ProgressReportView
@@ -588,6 +742,11 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
             await refreshTasks();
           }}
           onWorkLogged={refreshTasks}
+          myAccountId={session.user.accountId}
+          onAddSubtask={(parent) => {
+            setEditingTask(null);
+            setCreating({ parentId: parent.id });
+          }}
         />
       )}
 
@@ -626,6 +785,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
         <CreateTaskModal
           tasks={tasks}
           users={users}
+          initialParentId={creating.parentId}
           onClose={() => setCreating(false)}
           onCreate={async (input): Promise<BulkTaskCreateResult> => {
             if (input.summaries.length === 1) {

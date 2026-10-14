@@ -182,6 +182,49 @@ export class JiraClient {
     });
   }
 
+  async getComments(key: string): Promise<any[]> {
+    const res = await this.request<{ comments?: any[] }>(
+      `/rest/api/3/issue/${encodeURIComponent(key)}/comment?orderBy=-created&maxResults=100`
+    );
+    return res.comments ?? [];
+  }
+
+  async addComment(key: string, body: unknown): Promise<any> {
+    return this.request(`/rest/api/3/issue/${encodeURIComponent(key)}/comment`, {
+      method: "POST",
+      body: JSON.stringify({ body }),
+    });
+  }
+
+  async updateComment(key: string, commentId: string, body: unknown): Promise<any> {
+    return this.request(
+      `/rest/api/3/issue/${encodeURIComponent(key)}/comment/${encodeURIComponent(commentId)}`,
+      { method: "PUT", body: JSON.stringify({ body }) }
+    );
+  }
+
+  async deleteComment(key: string, commentId: string): Promise<void> {
+    await this.request(
+      `/rest/api/3/issue/${encodeURIComponent(key)}/comment/${encodeURIComponent(commentId)}`,
+      { method: "DELETE" }
+    );
+  }
+
+  async getChangelog(key: string, startAt = 0): Promise<{ values?: any[]; isLast?: boolean }> {
+    return this.request(
+      `/rest/api/3/issue/${encodeURIComponent(key)}/changelog?startAt=${startAt}&maxResults=100`
+    );
+  }
+
+  async getPriorities(): Promise<Array<{ id: string; name: string }>> {
+    return this.request(`/rest/api/3/priority`);
+  }
+
+  async getLabels(): Promise<string[]> {
+    const res = await this.request<{ values?: string[] }>(`/rest/api/3/label?maxResults=1000`);
+    return res.values ?? [];
+  }
+
   async assignIssue(key: string, accountId: string | null): Promise<void> {
     await this.request(`/rest/api/3/issue/${encodeURIComponent(key)}/assignee`, {
       method: "PUT",
@@ -470,6 +513,7 @@ export class JiraClient {
     startDate?: string | null;
     startDateFieldId?: string | null;
     assigneeAccountId?: string | null;
+    labels?: string[];
   }): Promise<{ id: string; key: string }> {
     const fields: Record<string, unknown> = {
       project: { key: input.projectKey },
@@ -481,6 +525,7 @@ export class JiraClient {
     if (input.dueDate) fields.duedate = input.dueDate;
     if (input.startDate && input.startDateFieldId) fields[input.startDateFieldId] = input.startDate;
     if (input.assigneeAccountId) fields.assignee = { accountId: input.assigneeAccountId };
+    if (input.labels && input.labels.length > 0) fields.labels = input.labels;
     return this.request(`/rest/api/3/issue`, { method: "POST", body: JSON.stringify({ fields }) });
   }
 

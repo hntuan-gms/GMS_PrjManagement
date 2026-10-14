@@ -6,6 +6,7 @@ import { boardRouter } from "./board.js";
 import { timesheetRouter } from "./timesheet.js";
 import { requireAuth, requireProject, requireStaff } from "../auth/middleware.js";
 import { badRequest } from "../errors.js";
+import { TaskActivity } from "../taskActivity.js";
 import type { BulkTaskCreateInput, TaskCreateInput, TaskUpdateInput } from "../types.js";
 
 export const apiRouter = Router();
@@ -52,6 +53,31 @@ apiRouter.get("/users", requireProject, async (req, res, next) => {
   }
 });
 
+apiRouter.get("/priorities", requireProject, async (req, res, next) => {
+  try {
+    res.json(await req.auth!.taskService!.listPriorities());
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** The issue types this project really has — a plan row can only be created as one of these. */
+apiRouter.get("/issue-types", requireProject, async (req, res, next) => {
+  try {
+    res.json(await req.auth!.taskService!.listIssueTypes());
+  } catch (err) {
+    next(err);
+  }
+});
+
+apiRouter.get("/labels", requireProject, async (req, res, next) => {
+  try {
+    res.json(await req.auth!.taskService!.listLabels());
+  } catch (err) {
+    next(err);
+  }
+});
+
 apiRouter.post("/tasks", requireProject, async (req, res, next) => {
   try {
     const input = req.body as TaskCreateInput;
@@ -84,6 +110,15 @@ apiRouter.patch("/tasks/:id", requireProject, async (req, res, next) => {
     const input = req.body as TaskUpdateInput;
     const projectKey = req.auth!.session.projectKey!;
 
+    if (input.labels !== undefined && (!Array.isArray(input.labels) || input.labels.some((l) => typeof l !== "string"))) {
+      next(badRequest("Nhãn phải là danh sách chuỗi."));
+      return;
+    }
+    if (input.priority !== undefined && typeof input.priority !== "string") {
+      next(badRequest("Độ ưu tiên không hợp lệ."));
+      return;
+    }
+
     // Cross-project predecessors can't be enforced: the cascade only loads issues
     // from the session's project, so a foreign key would be silently ignored and
     // the dependency would appear to exist without ever being applied.
@@ -106,6 +141,67 @@ apiRouter.patch("/tasks/:id", requireProject, async (req, res, next) => {
     // following up with a separate GET /tasks that used to arrive a moment later
     // and visibly snap the chart to the confirmed values.
     res.json({ ...task, cascaded, ...(cascadeWarnings.length > 0 ? { cascadeWarnings } : {}) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Comments and history. They read and write Jira directly (see taskActivity.ts),
+ * so what a person sees here is what Jira shows — and Jira, not this app, sends
+ * the notification when someone is @mentioned.
+ */
+function activityFor(req: express.Request): TaskActivity {
+  return new TaskActivity(req.auth!.jira, req.auth!.session.accountId);
+}
+
+/** Keys outside the session's project are refused up front, as the board routes do. */
+function ownKey(req: express.Request): string {
+  const id = req.params.id;
+  if (!id.startsWith(`${req.auth!.session.projectKey}-`)) {
+    throw badRequest(`${id} không thuộc dự án ${req.auth!.session.projectKey}.`);
+  }
+  return id;
+}
+
+apiRouter.get("/tasks/:id/comments", requireProject, async (req, res, next) => {
+  try {
+    res.json(await activityFor(req).listComments(ownKey(req)));
+  } catch (err) {
+    next(err);
+  }
+});
+
+apiRouter.post("/tasks/:id/comments", requireProject, async (req, res, next) => {
+  try {
+    const text = String((req.body as { text?: unknown })?.text ?? "");
+    res.status(201).json(await activityFor(req).addComment(ownKey(req), text));
+  } catch (err) {
+    next(err);
+  }
+});
+
+apiRouter.put("/tasks/:id/comments/:commentId", requireProject, async (req, res, next) => {
+  try {
+    const text = String((req.body as { text?: unknown })?.text ?? "");
+    res.json(await activityFor(req).updateComment(ownKey(req), req.params.commentId, text));
+  } catch (err) {
+    next(err);
+  }
+});
+
+apiRouter.delete("/tasks/:id/comments/:commentId", requireProject, async (req, res, next) => {
+  try {
+    await activityFor(req).deleteComment(ownKey(req), req.params.commentId);
+    res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+apiRouter.get("/tasks/:id/activity", requireProject, async (req, res, next) => {
+  try {
+    res.json(await activityFor(req).listActivity(ownKey(req)));
   } catch (err) {
     next(err);
   }

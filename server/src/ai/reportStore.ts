@@ -104,7 +104,7 @@ export async function saveReport(input: {
 export async function latestReport(cloudId: string, projectKey: string): Promise<StoredReport | null> {
   const { rows } = await db().query<Row>(
     `SELECT * FROM ai_progress_report
-      WHERE cloud_id = $1 AND project_key = $2
+      WHERE cloud_id = $1 AND project_key = $2 AND deleted_at IS NULL
       ORDER BY created_at DESC LIMIT 1`,
     [cloudId, projectKey]
   );
@@ -114,10 +114,21 @@ export async function latestReport(cloudId: string, projectKey: string): Promise
 /** Scoped by cloud and project, so an id from another project can't be read here. */
 export async function getReport(cloudId: string, projectKey: string, id: string): Promise<StoredReport | null> {
   const { rows } = await db().query<Row>(
-    `SELECT * FROM ai_progress_report WHERE cloud_id = $1 AND project_key = $2 AND id = $3`,
+    `SELECT * FROM ai_progress_report
+      WHERE cloud_id = $1 AND project_key = $2 AND id = $3 AND deleted_at IS NULL`,
     [cloudId, projectKey, id]
   );
   return rows.length > 0 ? toReport(rows[0]) : null;
+}
+
+/** Hides a report from the page; the row (and its token counts) stays. False when there was none to hide. */
+export async function deleteReport(cloudId: string, projectKey: string, id: string): Promise<boolean> {
+  const { rowCount } = await db().query(
+    `UPDATE ai_progress_report SET deleted_at = now()
+      WHERE cloud_id = $1 AND project_key = $2 AND id = $3 AND deleted_at IS NULL`,
+    [cloudId, projectKey, id]
+  );
+  return (rowCount ?? 0) > 0;
 }
 
 /** Oldest first — the order a trend line is drawn in. */
@@ -133,7 +144,7 @@ export async function reportHistory(cloudId: string, projectKey: string, limit =
   }>(
     `SELECT id, created_at, as_of, health, actual_pct, planned_pct, narrative->>'headline' AS headline
        FROM (SELECT * FROM ai_progress_report
-              WHERE cloud_id = $1 AND project_key = $2
+              WHERE cloud_id = $1 AND project_key = $2 AND deleted_at IS NULL
               ORDER BY created_at DESC LIMIT $3) recent
       ORDER BY created_at ASC`,
     [cloudId, projectKey, limit]

@@ -30,7 +30,18 @@ const SEARCH_FIELDS = [
   "timeoriginalestimate",
   "timespent",
   "priority",
+  "labels",
 ];
+
+/** Jira labels cannot contain whitespace; fold it to a hyphen rather than 400 on a typo. */
+function cleanLabels(labels: string[]): string[] {
+  const seen = new Set<string>();
+  for (const l of labels) {
+    const v = l.trim().replace(/\s+/g, "-");
+    if (v) seen.add(v);
+  }
+  return [...seen];
+}
 
 function statusCategoryKey(key: string): "new" | "indeterminate" | "done" {
   if (key === "done") return "done";
@@ -158,7 +169,7 @@ export class TaskService {
       summary: f.summary,
       description: f.description ? adfToText(f.description) : null,
       issueType: f.issuetype?.name as IssueTypeName,
-      statusName: f.status?.name ?? "Unknown",
+      statusName: f.status?.name ?? "Không rõ",
       statusCategory: statusCategoryKey(f.status?.statusCategory?.key ?? "new"),
       assigneeAccountId: f.assignee?.accountId ?? null,
       assigneeName: f.assignee?.displayName ?? null,
@@ -170,6 +181,7 @@ export class TaskService {
         typeof f.timeoriginalestimate === "number" ? f.timeoriginalestimate / 3600 : null,
       spentHours: typeof f.timespent === "number" ? f.timespent / 3600 : null,
       priority: f.priority?.name ?? null,
+      labels: Array.isArray(f.labels) ? f.labels : [],
       jiraUrl: `${this.ctx.siteUrl}/browse/${issue.key}`,
     };
   }
@@ -334,6 +346,8 @@ export class TaskService {
     const fields: Record<string, unknown> = {};
     if (input.summary !== undefined) fields.summary = input.summary;
     if (input.description !== undefined) fields.description = textToAdf(input.description ?? "");
+    if (input.priority) fields.priority = { name: input.priority };
+    if (input.labels !== undefined) fields.labels = cleanLabels(input.labels);
     if (scheduleTouched) Object.assign(fields, this.scheduleFields(newDue, newStart));
     if (Object.keys(fields).length > 0) {
       await this.jira.updateIssueFields(id, fields);
@@ -650,6 +664,7 @@ export class TaskService {
       startDate,
       startDateFieldId: this.ctx.startDateFieldId,
       assigneeAccountId,
+      labels: input.labels ? cleanLabels(input.labels) : undefined,
     });
     const key = created.key;
     if (input.estimateHours && input.estimateHours > 0) {
@@ -678,6 +693,16 @@ export class TaskService {
     // fetchable by key.
     const issue = await this.jira.getIssue(key);
     return this.hydrate(key, this.fromJiraIssue(issue), this.jiraStartDateOf(issue));
+  }
+
+  /** Priority names the site defines, highest first (Jira's own order). */
+  async listPriorities(): Promise<string[]> {
+    return (await this.jira.getPriorities()).map((p) => p.name);
+  }
+
+  /** Labels already in use on the site, for autocomplete. */
+  async listLabels(): Promise<string[]> {
+    return this.jira.getLabels();
   }
 
   /** The issue types this project actually accepts — used to validate an AI plan. */

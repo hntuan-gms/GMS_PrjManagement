@@ -2,8 +2,8 @@ import { Router } from "express";
 import { requireProject, requireStaff } from "../auth/middleware.js";
 import { notFound } from "../errors.js";
 import { createProgressReport } from "../ai/progressReport.js";
-import { getReport, latestReport, reportHistory } from "../ai/reportStore.js";
-import { computeProgress } from "../progress.js";
+import { deleteReport, getReport, latestReport, reportHistory } from "../ai/reportStore.js";
+import { computeProgress, type ProgressScope } from "../progress.js";
 
 export const progressRouter = Router();
 
@@ -31,6 +31,20 @@ function asOfFrom(raw: unknown): string {
   return ISO_DATE.test(value) ? value : new Date().toISOString().slice(0, 10);
 }
 
+/** Short free-text query values only; anything else is ignored rather than trusted. */
+function scopeFrom(query: Record<string, unknown>): ProgressScope {
+  const one = (v: unknown) => (typeof v === "string" && v.trim() && v.length <= 100 ? v.trim() : undefined);
+  const types =
+    typeof query.type === "string"
+      ? query.type
+          .split(",")
+          .map((t) => t.trim())
+          .filter((t) => t && t.length <= 60)
+          .slice(0, 20)
+      : [];
+  return { assignee: one(query.assignee), epic: one(query.epic), ...(types.length > 0 ? { types } : {}) };
+}
+
 progressRouter.get("/", requireProject, async (req, res, next) => {
   const { session, taskService } = req.auth!;
   try {
@@ -40,7 +54,9 @@ progressRouter.get("/", requireProject, async (req, res, next) => {
       latestReport(session.cloudId, session.projectKey!),
       reportHistory(session.cloudId, session.projectKey!),
     ]);
-    res.json({ metrics: computeProgress(tasks, asOf), latest, history });
+    // The scope narrows the live dashboard only. Saved reports are written over
+    // the whole project and stay that way.
+    res.json({ metrics: computeProgress(tasks, asOf, scopeFrom(req.query)), latest, history });
   } catch (err) {
     next(err);
   }
@@ -77,10 +93,27 @@ progressRouter.post("/reports", requireProject, requireStaff, async (req, res, n
   }
 });
 
+// Staff only, like generating one: the report page is shared by everyone on the
+// project, and guests have no business tidying away what staff paid to produce.
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+progressRouter.delete("/reports/:id", requireProject, requireStaff, async (req, res, next) => {
+  const { session } = req.auth!;
+  try {
+    if (!UUID.test(req.params.id) || !(await deleteReport(session.cloudId, session.projectKey!, req.params.id))) {
+      next(notFound("Không tìm thấy báo cáo này."));
+      return;
+    }
+    res.json({ history: await reportHistory(session.cloudId, session.projectKey!) });
+  } catch (err) {
+    next(err);
+  }
+});
+
 progressRouter.get("/reports/:id", requireProject, async (req, res, next) => {
   const { session } = req.auth!;
   try {
-    const report = await getReport(session.cloudId, session.projectKey!, req.params.id);
+    const report = !UUID.test(req.params.id) ? null : await getReport(session.cloudId, session.projectKey!, req.params.id);
     if (!report) {
       next(notFound("Không tìm thấy báo cáo này."));
       return;

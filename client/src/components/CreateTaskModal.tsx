@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { api } from "../api";
 import { isAssignableType } from "../types";
 import type { BulkTaskCreateInput, BulkTaskCreateResult, IssueTypeName, JiraUser, Task } from "../types";
 import { filesFromClipboard, hasPending, NO_ATTACHMENTS, uploadPending, type PendingAttachments } from "../attachments";
@@ -12,20 +13,30 @@ interface Props {
   users: JiraUser[];
   onClose: () => void;
   onCreate: (input: BulkTaskCreateInput) => Promise<BulkTaskCreateResult>;
+  /** Opened from "+ Sub-task": the parent is chosen and the type defaults to a sub-task type. */
+  initialParentId?: string;
 }
 
 const ISSUE_TYPES: IssueTypeName[] = ["Task", "Story", "Epic", "Bug", "Sub-task"];
 
-export default function CreateTaskModal({ tasks, users, onClose, onCreate }: Props) {
+export default function CreateTaskModal({ tasks, users, onClose, onCreate, initialParentId }: Props) {
   // Input modes: "list" (interactive row-by-row) or "bulk" (multi-line text)
   const [mode, setMode] = useState<"list" | "bulk">("list");
   const [taskItems, setTaskItems] = useState<string[]>([""]);
   const [bulkText, setBulkText] = useState("");
 
   const [description, setDescription] = useState("");
-  const [issueType, setIssueType] = useState<IssueTypeName>("Task");
-  const [wbsParentId, setWbsParentId] = useState("");
-  const [startDate, setStartDate] = useState(localToday());
+  // An Epic's children are stories and tasks — Jira refuses a sub-task directly under one.
+  const parent = initialParentId ? tasks.find((t) => t.id === initialParentId) : undefined;
+  const wantSubtask = !!parent && parent.issueType.toLowerCase() !== "epic";
+  const [issueType, setIssueType] = useState<string>(wantSubtask ? "Sub-task" : "Task");
+  // What this project's Jira really calls its types. Until it answers (or if it
+  // fails) the old fixed list stands, so the form never waits on it.
+  const [projectTypes, setProjectTypes] = useState<Array<{ name: string; subtask: boolean }> | null>(null);
+  const [wbsParentId, setWbsParentId] = useState(initialParentId ?? "");
+  const [startDate, setStartDate] = useState(
+    () => parent?.startDate ?? localToday()
+  );
   const [durationDays, setDurationDays] = useState(3);
   const [estimate, setEstimate] = useState<number | null>(null);
   const [estimateTouched, setEstimateTouched] = useState(false);
@@ -35,6 +46,26 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate }: Pro
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<BulkTaskCreateResult | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .listIssueTypes()
+      .then((types) => {
+        if (!alive || types.length === 0) return;
+        setProjectTypes(types);
+        // Keep the choice if this project has it; otherwise fall to its first
+        // sensible type (a sub-task type when opened from a parent).
+        setIssueType((cur) => {
+          if (types.some((t) => t.name === cur)) return cur;
+          return (types.find((t) => t.subtask === wantSubtask) ?? types[0]).name;
+        });
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [wantSubtask]);
 
   // Switch between interactive list and bulk textarea while preserving content
   function handleModeChange(nextMode: "list" | "bulk") {
@@ -105,7 +136,7 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate }: Pro
       const res = await onCreate({
         summaries: effectiveSummaries,
         description: description.trim() || null,
-        issueType,
+        issueType: issueType as IssueTypeName,
         wbsParentId: wbsParentId || null,
         startDate,
         // The bar is whole days; a fractional duration's effort rides on the estimate.
@@ -312,8 +343,8 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate }: Pro
         <div className="field-row">
           <label className="field">
             <span className="field-label-text">Loại</span>
-            <select value={issueType} onChange={(e) => setIssueType(e.target.value as IssueTypeName)}>
-              {ISSUE_TYPES.map((t) => (
+            <select value={issueType} onChange={(e) => setIssueType(e.target.value)}>
+              {(projectTypes ? projectTypes.map((t) => t.name) : ISSUE_TYPES).map((t) => (
                 <option key={t} value={t}>
                   {t}
                 </option>
@@ -359,7 +390,7 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate }: Pro
               min={0.01}
               max={10000}
               allowEmpty
-              placeholder="Original estimate"
+              placeholder="Ước lượng ban đầu"
               onChange={(n) => {
                 setEstimate(n);
                 setEstimateTouched(true);

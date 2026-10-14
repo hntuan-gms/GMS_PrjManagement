@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "../api";
+import { csvName, downloadCsv } from "../csv";
 import { localToday, roundHours } from "../taskForm";
 import type { Session, Task, Timesheet, TimesheetPerson, WorklogEntry } from "../types";
 import NumberInput from "./NumberInput";
@@ -84,6 +85,11 @@ export default function TimesheetView({
   const [logFor, setLogFor] = useState<{ date: string; issueKey?: string } | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const me = session.user.accountId;
+  // "" = everyone, "me" = only the signed-in user, otherwise an account id.
+  const [personFilter, setPersonFilter] = useState("");
+  // Deleting a worklog asks first, in the app rather than in a browser dialog.
+  const [confirmDelete, setConfirmDelete] = useState<WorklogEntry | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // Loading and error are derived from which request the last result answered,
   // rather than reset in the effect. A reload of the same range keeps showing
@@ -115,14 +121,16 @@ export default function TimesheetView({
   const grid = useMemo(() => {
     const cell = new Map<string, number>();
     const dayTotal = new Map<string, number>();
+    const shown = (id: string | null) => !personFilter || id === (personFilter === "me" ? me : personFilter);
     for (const e of sheet?.entries ?? []) {
+      if (!shown(e.authorAccountId)) continue;
       const k = `${e.authorAccountId}|${e.date}`;
       cell.set(k, (cell.get(k) ?? 0) + e.hours);
       dayTotal.set(e.date, (dayTotal.get(e.date) ?? 0) + e.hours);
     }
     // "Expected" counts only working days already reached: a Wednesday view of
     // this week shouldn't call Thursday and Friday missing.
-    const rows = (sheet?.people ?? []).map((p) => {
+    const rows = (sheet?.people ?? []).filter((p) => shown(p.accountId)).map((p) => {
       let total = 0;
       let expected = 0;
       const missing: string[] = [];
@@ -137,7 +145,7 @@ export default function TimesheetView({
       return { person: p, total: roundHours(total), expected, missing };
     });
     return { cell, dayTotal, rows };
-  }, [sheet, days, today]);
+  }, [sheet, days, today, personFilter, me]);
 
   const totals = useMemo(() => {
     const logged = grid.rows.reduce((s, r) => s + r.total, 0);
@@ -173,14 +181,26 @@ export default function TimesheetView({
   }
 
   async function removeEntry(e: WorklogEntry) {
-    if (!confirm(`Xoá ${e.hours}h đã ghi cho ${e.issueKey} ngày ${dm(e.date)}?`)) return;
+    setConfirmDelete(null);
+    setActionError(null);
     try {
       await api.deleteWorklog(e.issueKey, e.id);
       setReloadKey((k) => k + 1);
       onTasksChanged();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Không xoá được.");
+      setActionError(err instanceof Error ? err.message : "Không xoá được.");
     }
+  }
+
+  function exportCsv() {
+    const header = ["Thành viên", ...days, "Tổng (giờ)", "Kỳ vọng (giờ)"];
+    const rows = grid.rows.map((r) => [
+      r.person.displayName,
+      ...days.map((d) => roundHours(grid.cell.get(`${r.person.accountId}|${d}`) ?? 0)),
+      r.total,
+      r.expected,
+    ]);
+    downloadCsv(csvName("cham-cong", from), [header, ...rows]);
   }
 
   const rangeLabel = mode === "week" ? `${dm(from)} – ${dm(to)}/${to.slice(0, 4)}` : `Tháng ${Number(from.slice(5, 7))}/${from.slice(0, 4)}`;
@@ -203,14 +223,40 @@ export default function TimesheetView({
         <button onClick={() => setAnchor(today)} disabled={today >= from && today <= to}>
           Hôm nay
         </button>
+        <select
+          className="ts-person-filter"
+          value={personFilter}
+          onChange={(e) => {
+            setPersonFilter(e.target.value);
+            setSelection(null);
+          }}
+          aria-label="Lọc theo thành viên"
+        >
+          <option value="">Mọi người</option>
+          <option value="me">Của tôi</option>
+          {(sheet?.people ?? []).map((p) => (
+            <option key={p.accountId} value={p.accountId}>
+              {p.displayName}
+            </option>
+          ))}
+        </select>
         <span className="bd-spacer" />
         {loading && <span className="bd-muted">Đang tải từ Jira...</span>}
+        <button onClick={exportCsv} disabled={!sheet || grid.rows.length === 0} title="Tải bảng chấm công về file CSV mở được bằng Excel">
+          Xuất CSV
+        </button>
         <button className="primary" onClick={() => setLogFor({ date: today >= from && today <= to ? today : from })}>
           + Ghi giờ
         </button>
       </div>
 
       {error && <div className="notice notice-error"><span>{error}</span></div>}
+      {actionError && (
+        <div className="notice notice-error">
+          <span>{actionError}</span>
+          <button className="link-btn" onClick={() => setActionError(null)}>Đóng</button>
+        </div>
+      )}
 
       {sheet && (
         <>
@@ -369,7 +415,7 @@ export default function TimesheetView({
                         {e.comment && <span className="ts-entry-comment" title={e.comment}>“{e.comment}”</span>}
                         <b className="ts-entry-h">{e.hours}h</b>
                         {e.mine && (
-                          <button className="att-remove" onClick={() => removeEntry(e)} aria-label="Xoá giờ đã ghi" title="Xoá">
+                          <button className="att-remove" onClick={() => setConfirmDelete(e)} aria-label="Xoá giờ đã ghi" title="Xoá">
                             ✕
                           </button>
                         )}
@@ -381,6 +427,23 @@ export default function TimesheetView({
             </div>
           )}
         </>
+      )}
+
+      {confirmDelete && (
+        <div className="modal-overlay" onClick={() => setConfirmDelete(null)}>
+          <div className="modal modal-confirm" onClick={(e) => e.stopPropagation()} role="alertdialog" aria-label="Xoá giờ đã ghi">
+            <p>
+              Xoá <b>{confirmDelete.hours}h</b> đã ghi cho <b>{confirmDelete.issueKey}</b> ngày {dm(confirmDelete.date)}? Việc này xoá luôn trên Jira.
+            </p>
+            <div className="modal-footer">
+              <div className="spacer" />
+              <button onClick={() => setConfirmDelete(null)}>Huỷ</button>
+              <button className="danger" onClick={() => removeEntry(confirmDelete)}>
+                Xoá
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {logFor && (

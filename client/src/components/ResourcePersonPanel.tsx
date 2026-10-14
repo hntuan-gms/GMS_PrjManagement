@@ -11,6 +11,9 @@ interface Props {
   defaultCapacityHours: number;
   onClose: () => void;
   onOpenEdit: (task: Task) => void;
+  /** Who a task can be handed to from this panel. */
+  members: Array<{ accountId: string; displayName: string }>;
+  onAssign: (taskId: string, accountId: string | null) => void;
   onProfileSaved: (profile: ResourceProfile) => void;
   onAbsenceAdded: (absence: ResourceAbsence) => void;
   onAbsenceRemoved: (id: string) => void;
@@ -47,6 +50,8 @@ export default function ResourcePersonPanel({
   defaultCapacityHours,
   onClose,
   onOpenEdit,
+  members,
+  onAssign,
   onProfileSaved,
   onAbsenceAdded,
   onAbsenceRemoved,
@@ -325,6 +330,27 @@ export default function ResourcePersonPanel({
                   {conflictIds.has(task.id) && <span className="rv-warn">⚠</span>}
                   <span className="rv-tl-key">{task.id}</span>
                   <span className="rv-tl-summary">{task.summary}</span>
+                  <span className={`wbs-status is-${task.statusCategory} rv-tl-status`}>{task.statusName}</span>
+                  <select
+                    className="rv-assign-select"
+                    value=""
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v) onAssign(task.id, v === "__none__" ? null : v);
+                    }}
+                    aria-label={`Chuyển ${task.id} cho người khác`}
+                  >
+                    <option value="">Chuyển…</option>
+                    <option value="__none__">— Bỏ gán —</option>
+                    {members
+                      .filter((m) => m.accountId !== person.accountId)
+                      .map((m) => (
+                        <option key={m.accountId} value={m.accountId}>
+                          {m.displayName}
+                        </option>
+                      ))}
+                  </select>
                 </div>
                 <div className="rv-tl-track">
                   {/* Shading sits inside every track rather than once behind the

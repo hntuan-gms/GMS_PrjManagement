@@ -6,6 +6,7 @@ import {
   isFiltering,
   matchesFilter,
   nextSprintName,
+  priorityRank,
   rankTarget,
   reorder,
   tzOffsetMinutes,
@@ -25,8 +26,11 @@ import type {
   SprintInsight,
   SprintPlanProposal,
   Task,
+  TaskCreateInput,
 } from "../types";
 import BacklogView, { type SectionId } from "./BacklogView";
+import { MultiSelect, type Option } from "./FilterBar";
+import type { QuickOptions } from "./QuickCreateOptions";
 import KanbanBoard from "./KanbanBoard";
 import SprintHeader from "./SprintHeader";
 import { CompleteSprintModal, CreateBoardModal, SprintFormModal, SprintPlanModal } from "./SprintModals";
@@ -191,6 +195,36 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
     [snapshot, filter, today]
   );
 
+  // Offered on every filter dropdown, built from the whole board so an option
+  // doesn't vanish the moment it is ticked.
+  const filterOptions = useMemo(() => {
+    const issues = snapshot?.issues ?? [];
+    const plain = (vals: Iterable<string>): Option[] =>
+      [...new Set(vals)].sort((a, b) => a.localeCompare(b, "vi")).map((v) => ({ value: v, label: v }));
+    const epics = new Map<string, string>();
+    for (const i of issues) if (i.epicKey) epics.set(i.epicKey, i.epicSummary ?? i.epicKey);
+    const priorities = [...new Set(issues.map((i) => i.priority ?? "none"))].sort(
+      (a, b) => priorityRank(a === "none" ? null : a) - priorityRank(b === "none" ? null : b) || a.localeCompare(b)
+    );
+    return {
+      types: plain(issues.map((i) => i.issueType)),
+      statuses: plain(issues.map((i) => i.statusName)),
+      epics: [
+        ...[...epics].sort((a, b) => a[1].localeCompare(b[1], "vi")).map(([value, label]) => ({ value, label: `${value} · ${label}` })),
+        { value: "none", label: "Không thuộc Epic" },
+      ],
+      priorities: priorities.map((p) => ({ value: p, label: p === "none" ? "Không đặt" : p })),
+    };
+  }, [snapshot]);
+
+  // Types the quick-create box offers: what this project's board already uses,
+  // minus sub-tasks (they need a parent), so a site that renamed "Task" still works.
+  const createTypes = useMemo(() => {
+    const seen = new Set((snapshot?.issues ?? []).filter((i) => !i.subtask).map((i) => i.issueType));
+    return seen.size > 0 ? [...seen] : ["Task"];
+  }, [snapshot]);
+  const members = useMemo(() => users.map((u) => ({ accountId: u.accountId, displayName: u.displayName })), [users]);
+
   const people = useMemo(() => {
     const src = view === "backlog" ? plannable : scoped;
     const map = new Map<string, string>();
@@ -287,11 +321,28 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
     );
   }
 
-  async function quickCreate(summary: string, to: SectionId) {
+  function assignIssue(key: string, accountId: string | null) {
+    const person = accountId ? users.find((u) => u.accountId === accountId) : null;
+    // Through updateTask like every other assignment, so the Epic rule applies.
+    return mutate(
+      patchIssues((i) =>
+        i.key === key ? { ...i, assigneeAccountId: accountId, assigneeName: person?.displayName ?? null } : i
+      ),
+      () => api.updateTask(key, { assigneeAccountId: accountId }),
+      { failure: `Không đổi được người phụ trách của ${key}`, touchesTasks: true }
+    );
+  }
+
+  async function quickCreate(summary: string, to: SectionId, opts: QuickOptions) {
     await mutate(
       null,
       async () => {
-        const task = await api.createTask({ summary, issueType: "Task" });
+        const task = await api.createTask({
+          summary,
+          // Same fallback the pickers show when the remembered type is gone.
+          issueType: (createTypes.includes(opts.issueType) ? opts.issueType : createTypes[0]) as TaskCreateInput["issueType"],
+          ...(opts.assigneeAccountId ? { assigneeAccountId: opts.assigneeAccountId } : {}),
+        });
         if (to !== "backlog") await api.moveToSprint(to, [task.id]);
       },
       { failure: "Không tạo được công việc", touchesTasks: true }
@@ -429,7 +480,7 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
           )}
           {agile || snapshot.fallback?.reason === "no_board" ? (
             <button className="bl-icon" onClick={() => setModal({ kind: "createBoard", type: "scrum" })} title="Tạo board mới">
-              + Board
+              + Bảng
             </button>
           ) : null}
           {activeSprints.length > 1 && view === "board" && (
@@ -529,6 +580,10 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
         <button className={`bd-chipbtn ${filter.onlyOverdue ? "is-on" : ""}`} onClick={() => setFilter({ ...filter, onlyOverdue: !filter.onlyOverdue })}>
           Quá hạn
         </button>
+        <MultiSelect label="Loại" options={filterOptions.types} selected={filter.types} onChange={(types) => setFilter({ ...filter, types })} />
+        <MultiSelect label="Trạng thái" options={filterOptions.statuses} selected={filter.statuses} onChange={(statuses) => setFilter({ ...filter, statuses })} />
+        <MultiSelect label="Epic" options={filterOptions.epics} selected={filter.epics} onChange={(epics) => setFilter({ ...filter, epics })} />
+        <MultiSelect label="Ưu tiên" options={filterOptions.priorities} selected={filter.priorities} onChange={(priorities) => setFilter({ ...filter, priorities })} />
         {isFiltering(filter) && (
           <button className="link-btn" onClick={() => setFilter(EMPTY_FILTER)}>
             Xoá lọc
@@ -564,7 +619,15 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
         />
       )}
 
+      {view === "board" && isFiltering(filter) && scoped.length > 0 && shown.length === 0 && (
+        <div className="bd-empty">
+          <b>Không có thẻ nào khớp bộ lọc.</b>
+          <button className="primary" onClick={() => setFilter(EMPTY_FILTER)}>Xoá lọc</button>
+        </div>
+      )}
+
       {view === "board" &&
+        !(isFiltering(filter) && scoped.length > 0 && shown.length === 0) &&
         (scrum && !activeSprint ? (
           <div className="bd-empty">
             <b>Chưa có sprint nào đang chạy.</b>
@@ -579,7 +642,10 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
             today={today}
             onMove={moveCard}
             onOpen={open}
-            onQuickCreate={(summary) => quickCreate(summary, scrum && activeSprint ? activeSprint.id : "backlog")}
+            onQuickCreate={(summary, opts) => quickCreate(summary, scrum && activeSprint ? activeSprint.id : "backlog", opts)}
+            members={members}
+            createTypes={createTypes}
+            onAssign={assignIssue}
           />
         ))}
 
@@ -599,6 +665,9 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
           onPlanSprint={openPlan}
           onSetEstimate={setEstimate}
           onQuickCreate={quickCreate}
+          members={members}
+          createTypes={createTypes}
+          onAssign={assignIssue}
           suggestions={suggestions}
           estimating={estimating}
           onRequestEstimates={requestEstimates}

@@ -135,6 +135,15 @@ aiRouter.post("/chat", requireProject, async (req, res) => {
     res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   };
 
+  // The client's Stop button (and a closed tab) end the connection before the
+  // turn is over. Without this the server kept calling Gemini and running tools
+  // for a reader that had gone. `res`, not `req`: a request's "close" fires as
+  // soon as its body is read, which is long before anyone disconnects.
+  const abort = new AbortController();
+  res.on("close", () => {
+    if (!res.writableFinished) abort.abort();
+  });
+
   try {
     const sessionId = await chatStore.ensureSession(
       session.cloudId,
@@ -204,13 +213,19 @@ aiRouter.post("/chat", requireProject, async (req, res) => {
           throw err;
         }
       },
-    });
+    }, abort.signal);
 
-    for await (const event of stream) {
-      if (event.type === "text") answer += event.text;
-      if (event.type === "thinking") thinking += event.text;
-      if (event.type === "usage") usage = event.usage;
-      send(event.type, event);
+    try {
+      for await (const event of stream) {
+        if (event.type === "text") answer += event.text;
+        if (event.type === "thinking") thinking += event.text;
+        if (event.type === "usage") usage = event.usage;
+        send(event.type, event);
+      }
+    } catch (err) {
+      // A stop surfaces as an abort error from the model client; what was
+      // streamed so far is still worth saving, so carry on to the store.
+      if (!abort.signal.aborted) throw err;
     }
 
     const messageId = await chatStore.addModelMessage(

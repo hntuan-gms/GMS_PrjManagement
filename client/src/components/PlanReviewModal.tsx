@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
-import type { JiraUser, PlanResponse } from "../types";
+import { isAssignableType, type JiraUser, type PlanResponse } from "../types";
 
 interface Props {
   /** The staged plan to review, produced by the assistant's create_plan tool. */
@@ -24,6 +24,9 @@ export default function PlanReviewModal({ runId, users, onClose, onApplied }: Pr
   const [plan, setPlan] = useState<PlanResponse | null>(null);
   const [busy, setBusy] = useState<"loading" | "saving" | "applying" | null>("loading");
   const [error, setError] = useState<string | null>(null);
+  // What this project's Jira calls its issue types; empty until loaded, in which
+  // case the row's own type is the only choice offered.
+  const [issueTypes, setIssueTypes] = useState<string[]>([]);
   const [result, setResult] = useState<{
     created: string[];
     errors: Array<{ summary: string; message: string }>;
@@ -46,6 +49,17 @@ export default function PlanReviewModal({ runId, users, onClose, onApplied }: Pr
       cancelled = true;
     };
   }, [runId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .listIssueTypes()
+      .then((t) => !cancelled && setIssueTypes(t.map((x) => x.name)))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Children indented under their parent, so a forty-row WBS reads as a tree
   // rather than a flat list.
@@ -84,6 +98,21 @@ export default function PlanReviewModal({ runId, users, onClose, onApplied }: Pr
     } catch (e) {
       setError(e instanceof Error ? e.message : "Không xoá được dòng này.");
     } finally {
+      setBusy(null);
+    }
+  }
+
+  /** Throws the whole staged plan away. Nothing was created yet, so nothing in Jira changes. */
+  async function discard() {
+    if (!plan) return;
+    if (!window.confirm("Huỷ kế hoạch này? Các dòng chưa tạo sẽ bị bỏ và không khôi phục được.")) return;
+    setBusy("saving");
+    setError(null);
+    try {
+      await api.discardPlan(plan.run.id);
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Không huỷ được kế hoạch.");
       setBusy(null);
     }
   }
@@ -180,12 +209,46 @@ export default function PlanReviewModal({ runId, users, onClose, onApplied }: Pr
                         style={{ paddingLeft: 8 + depthOf(item.tempId) * 18 }}
                         title={item.rationale ?? ""}
                       >
-                        {item.summary}
-                        {item.appliedIssueKey && (
-                          <span className="ai-applied-key"> {item.appliedIssueKey}</span>
+                        {item.appliedIssueKey ? (
+                          <>
+                            {item.summary}
+                            <span className="ai-applied-key"> {item.appliedIssueKey}</span>
+                          </>
+                        ) : (
+                          <input
+                            className="ai-summary-input"
+                            value={item.summary}
+                            aria-label="Tên công việc"
+                            onChange={(e) =>
+                              setPlan({
+                                ...plan,
+                                items: plan.items.map((i) => (i.id === item.id ? { ...i, summary: e.target.value } : i)),
+                              })
+                            }
+                            onBlur={(e) => {
+                              const v = e.target.value.trim();
+                              if (v) patchItem(item.id, { summary: v });
+                            }}
+                          />
                         )}
                       </td>
-                      <td>{item.issueType}</td>
+                      <td>
+                        {item.appliedIssueKey ? (
+                          item.issueType
+                        ) : (
+                          <select
+                            value={item.issueType}
+                            aria-label="Loại"
+                            onChange={(e) => patchItem(item.id, { issueType: e.target.value })}
+                          >
+                            {[...new Set([item.issueType, ...issueTypes])].map((t) => (
+                              <option key={t} value={t}>
+                                {t}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </td>
                       <td>
                         <input
                           type="number"
@@ -206,7 +269,8 @@ export default function PlanReviewModal({ runId, users, onClose, onApplied }: Pr
                       <td>
                         <select
                           value={item.assigneeAccountId ?? ""}
-                          disabled={!!item.appliedIssueKey}
+                          // An Epic is a container and never takes an owner.
+                          disabled={!!item.appliedIssueKey || !isAssignableType(item.issueType)}
                           onChange={(e) => patchItem(item.id, { assigneeAccountId: e.target.value || null })}
                         >
                           <option value="">— chưa gán —</option>
@@ -251,6 +315,10 @@ export default function PlanReviewModal({ runId, users, onClose, onApplied }: Pr
             </p>
 
             <div className="modal-footer">
+              <button className="danger" onClick={discard} disabled={busy !== null}>
+                Huỷ kế hoạch
+              </button>
+              <div className="spacer" />
               <button onClick={onClose}>Để sau</button>
               <button
                 className="primary"

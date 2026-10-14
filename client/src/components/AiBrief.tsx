@@ -18,7 +18,12 @@ import type { ActionPriority, Health, InsightKind, ProgressMetrics, ProgressRepo
 
 interface Props {
   report: ProgressReport | null;
-  live: ProgressMetrics;
+  /**
+   * The live figures to compare the report against. Null while the dashboard is
+   * showing a slice of the project or another date: the report was written over
+   * the whole project as of its own day, so a comparison would be a false alarm.
+   */
+  live: ProgressMetrics | null;
   isLatest: boolean;
   warnings: string[];
   canGenerate: boolean;
@@ -201,7 +206,8 @@ export default function AiBrief({
   const n = report.narrative;
   const insights = n.insights ?? [];
   const drifted =
-    report.asOf !== live.asOf || Math.abs(report.actualPct - live.actualPct) >= 0.1 || report.health !== live.health;
+    live !== null &&
+    (report.asOf !== live.asOf || Math.abs(report.actualPct - live.actualPct) >= 0.1 || report.health !== live.health);
   const outlook = n.outlook;
   const disagrees = outlook && outlook.verdict !== HEALTH_AS_OUTLOOK[report.health];
   const tokens =
@@ -226,7 +232,7 @@ export default function AiBrief({
         {error && <div className="ai-error">{error}</div>}
         {drifted && (
           <div className="ai-drift">
-            Viết ngày {fmtDate(report.asOf)} khi dự án ở {report.actualPct}% — nay là {live.actualPct}%.
+            Viết ngày {fmtDate(report.asOf)} khi dự án ở {report.actualPct}% — nay là {live!.actualPct}%.
             {canGenerate && " Phân tích lại để cập nhật."}
           </div>
         )}

@@ -191,7 +191,7 @@ export function client(): GoogleGenAI {
   const apiKey = process.env.GEMINI_API_KEY?.trim();
   if (!apiKey) {
     throw new Error(
-      "Missing GEMINI_API_KEY. The AI planner needs it; everything else in the app works without it."
+      "Thiếu GEMINI_API_KEY. Trợ lý lập kế hoạch AI cần khoá này; các phần khác của ứng dụng vẫn dùng bình thường."
     );
   }
   return new GoogleGenAI({ apiKey });
@@ -257,18 +257,18 @@ export async function generatePlan(input: PlannerInput): Promise<PlannerResult> 
   });
 
   const text = response.text;
-  if (!text) throw new Error("The planner returned an empty response.");
+  if (!text) throw new Error("Trợ lý lập kế hoạch trả về nội dung rỗng.");
 
   let parsed: { items?: unknown };
   try {
     parsed = JSON.parse(text);
   } catch {
-    throw new Error("The planner returned a response that was not valid JSON.");
+    throw new Error("Trợ lý lập kế hoạch trả về dữ liệu không phải JSON hợp lệ.");
   }
 
   const warnings: string[] = [];
   const items = normalize(Array.isArray(parsed.items) ? parsed.items : [], input, warnings);
-  if (items.length === 0) throw new Error("The planner produced no tasks. Try describing the project in more detail.");
+  if (items.length === 0) throw new Error("Trợ lý không dựng được công việc nào. Hãy mô tả dự án chi tiết hơn.");
 
   return {
     items: layoutSchedule(items, input.startDate),
@@ -306,13 +306,13 @@ function normalize(raw: unknown[], input: PlannerInput, warnings: string[]): Dra
     const proposedType = String(row.issueType ?? "").trim();
     const matched = allowedTypes.get(proposedType.toLowerCase());
     if (!matched && fallbackType) {
-      warnings.push(`"${summary}": issue type "${proposedType}" is not in this project; used "${fallbackType}".`);
+      warnings.push(`"${summary}": dự án không có loại issue "${proposedType}"; đã dùng "${fallbackType}".`);
     }
 
     const resolvedType = matched?.name ?? fallbackType ?? proposedType;
     let assignee = String(row.assigneeAccountId ?? "").trim();
     if (assignee && !knownAccounts.has(assignee)) {
-      warnings.push(`"${summary}": assignee was not on the team list and has been cleared.`);
+      warnings.push(`"${summary}": người phụ trách không có trong danh sách thành viên nên đã bỏ trống.`);
       assignee = "";
     }
     // A phase-level container never carries a person; the model is told so in
@@ -339,7 +339,7 @@ function normalize(raw: unknown[], input: PlannerInput, warnings: string[]): Dra
   const byId = new Map(items.map((i) => [i.tempId, i]));
   for (const item of items) {
     if (item.parentTempId && !byId.has(item.parentTempId)) {
-      warnings.push(`"${item.summary}": parent referenced an unknown item and was made top-level.`);
+      warnings.push(`"${item.summary}": công việc cha không tồn tại nên đã đưa lên cấp cao nhất.`);
       item.parentTempId = null;
     }
   }
@@ -356,7 +356,7 @@ function normalize(raw: unknown[], input: PlannerInput, warnings: string[]): Dra
       const predId = String(d.tempId ?? "").trim();
       const type = String(d.type ?? "FS").toUpperCase() as Predecessor["type"];
       if (!byId.has(predId) || predId === item.tempId) {
-        warnings.push(`"${item.summary}": dropped a dependency on an unknown item.`);
+        warnings.push(`"${item.summary}": đã bỏ một phụ thuộc trỏ tới công việc không tồn tại.`);
         continue;
       }
       if (!DEPENDENCY_TYPES.includes(type)) continue;
@@ -384,7 +384,7 @@ function breakCycles(items: DraftItem[], warnings: string[]): DraftItem[] {
     state.set(id, "visiting");
     item.dependencies = item.dependencies.filter((dep) => {
       if (state.get(dep.tempId) === "visiting") {
-        warnings.push(`"${item.summary}": dropped a dependency that formed a loop.`);
+        warnings.push(`"${item.summary}": đã bỏ một phụ thuộc tạo thành vòng lặp.`);
         return false;
       }
       visit(dep.tempId);

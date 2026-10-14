@@ -1,5 +1,7 @@
 import { useState, type DragEvent, type MouseEvent } from "react";
-import { initials, localDate, shortDate, totalWeight, typeClass, velocityAverage, weightOf } from "../boardModel";
+import { localDate, priorityTone, shortDate, totalWeight, typeClass, velocityAverage, weightOf } from "../boardModel";
+import AssigneePicker, { type Member } from "./AssigneePicker";
+import QuickCreateOptions, { type QuickOptions } from "./QuickCreateOptions";
 import type { BoardIssue, BoardSnapshot, EstimateSuggestion, Sprint } from "../types";
 
 /**
@@ -33,7 +35,10 @@ interface Props {
   onEditSprint: (sprint: Sprint) => void;
   onPlanSprint: (sprint: Sprint) => void;
   onSetEstimate: (key: string, value: number | null) => void;
-  onQuickCreate: (summary: string, to: SectionId) => Promise<void>;
+  onQuickCreate: (summary: string, to: SectionId, opts: QuickOptions) => Promise<void>;
+  members: Member[];
+  createTypes: string[];
+  onAssign: (key: string, accountId: string | null) => void;
   suggestions: Map<string, EstimateSuggestion>;
   estimating: boolean;
   onRequestEstimates: () => void;
@@ -57,6 +62,7 @@ export default function BacklogView(props: Props) {
   const [editing, setEditing] = useState<string | null>(null);
   const [creatingIn, setCreatingIn] = useState<SectionId | null>(null);
   const [draft, setDraft] = useState("");
+  const [quickOpts, setQuickOpts] = useState<QuickOptions>({ issueType: props.createTypes[0] ?? "Task", assigneeAccountId: null });
 
   const budget = velocityAverage(snapshot);
   const sprints = snapshot.sprints;
@@ -149,7 +155,7 @@ export default function BacklogView(props: Props) {
     const summary = draft.trim();
     if (!summary) return;
     setDraft("");
-    await props.onQuickCreate(summary, to);
+    await props.onQuickCreate(summary, to, quickOpts);
   }
 
   return (
@@ -303,9 +309,18 @@ export default function BacklogView(props: Props) {
                           </span>
                         )}
                         <span className={`bl-status bl-status-${issue.statusCategory}`}>{issue.statusName}</span>
-                        <span className={`bd-avatar ${issue.assigneeName ? "" : "is-none"}`} title={issue.assigneeName ?? "Chưa gán"}>
-                          {initials(issue.assigneeName)}
-                        </span>
+                        {priorityTone(issue.priority) && (
+                          <span className={`bd-prio bd-prio-${priorityTone(issue.priority)}`} title={`Ưu tiên: ${issue.priority}`}>
+                            {priorityTone(issue.priority) === "high" ? "▲" : priorityTone(issue.priority) === "low" ? "▼" : "■"}
+                          </span>
+                        )}
+                        <AssigneePicker
+                          issueType={issue.issueType}
+                          accountId={issue.assigneeAccountId}
+                          name={issue.assigneeName}
+                          members={props.members}
+                          onAssign={(accountId) => props.onAssign(issue.key, accountId)}
+                        />
                         {suggestion && issue.estimate === null && (
                           <span className={`bl-suggest bl-conf-${suggestion.confidence}`} title={suggestion.reason} onClick={(e) => e.stopPropagation()}>
                             ✦ {suggestion.value}
@@ -365,7 +380,12 @@ export default function BacklogView(props: Props) {
                 {isHint && hint!.beforeKey === null && items.length > 0 && <div className="bd-dropline" />}
 
                 {creatingIn === section.id ? (
-                  <div className="bl-quick">
+                  <div
+                    className="bl-quick"
+                    onBlur={(e) => {
+                      if (!e.currentTarget.contains(e.relatedTarget as Node | null) && !draft.trim()) setCreatingIn(null);
+                    }}
+                  >
                     <input
                       autoFocus
                       value={draft}
@@ -379,8 +399,8 @@ export default function BacklogView(props: Props) {
                           setDraft("");
                         }
                       }}
-                      onBlur={() => !draft.trim() && setCreatingIn(null)}
                     />
+                    <QuickCreateOptions types={props.createTypes} members={props.members} value={quickOpts} onChange={setQuickOpts} />
                   </div>
                 ) : (
                   sprint?.state !== "closed" && (

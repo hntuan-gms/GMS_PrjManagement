@@ -44,7 +44,7 @@ export async function* streamChat(
 
   if (!res.ok || !res.body) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(body.error ?? `Chat failed: ${res.status}`);
+    throw new Error(body.error ?? `Trợ lý không phản hồi (mã ${res.status})`);
   }
 
   const reader = res.body.getReader();

@@ -11,6 +11,9 @@ import {
   type PersonLoad,
 } from "../resourceAllocation";
 import type { JiraUser, ResourceAbsence, ResourceProfile, ResourcePool, Task } from "../types";
+import { csvName, downloadCsv } from "../csv";
+import { buildEpicIndex, isTaskFiltering, matchesTaskFilter, type TaskFilter } from "../taskFilter";
+import FilterBar from "./FilterBar";
 import ResourcePersonPanel from "./ResourcePersonPanel";
 
 interface Props {
@@ -23,6 +26,10 @@ interface Props {
   /** null as accountId means "take it off whoever holds it". */
   onAssign: (taskId: string, accountId: string | null) => void;
   onOpenEdit: (task: Task) => void;
+  /** Shared with the Gantt. Its `people` and `text` facets are ignored here. */
+  filter: TaskFilter;
+  onFilterChange: (f: TaskFilter) => void;
+  myAccountId: string;
 }
 
 /**
@@ -75,6 +82,9 @@ export default function ResourceView({
   onPoolChange,
   onAssign,
   onOpenEdit,
+  filter,
+  onFilterChange,
+  myAccountId,
 }: Props) {
   const [drag, setDrag] = useState<DragState | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
@@ -86,6 +96,7 @@ export default function ResourceView({
   const [onlyBusy, setOnlyBusy] = useState(false);
   const [query, setQuery] = useState("");
   const [range, setRange] = useState<{ from: string; to: string } | null>(null);
+  const [showAllUnassigned, setShowAllUnassigned] = useState(false);
 
   const today = useMemo(() => todayIso(), []);
 
@@ -94,10 +105,20 @@ export default function ResourceView({
   // reading out from under them.
   const span = useMemo(() => range ?? defaultWindow(tasks, today), [range, tasks, today]);
 
+  // The heatmap has its own member search, and a person picked on the Gantt would
+  // blank everyone else's rows here — so only the task facets apply.
+  const taskFacets = useMemo<TaskFilter>(() => ({ ...filter, text: "", people: new Set() }), [filter]);
+  const filtering = isTaskFiltering(taskFacets);
+  const filteredTasks = useMemo(() => {
+    if (!filtering) return tasks;
+    const ctx = { today, epicOf: buildEpicIndex(tasks) };
+    return tasks.filter((t) => matchesTaskFilter(t, taskFacets, ctx));
+  }, [tasks, taskFacets, filtering, today]);
+
   const load = useMemo(
     () =>
       buildResourceLoad({
-        tasks,
+        tasks: filteredTasks,
         users,
         profiles: pool?.profiles ?? [],
         absences: pool?.absences ?? [],
@@ -106,7 +127,7 @@ export default function ResourceView({
         to: span.to,
         includeIdle: !onlyBusy,
       }),
-    [tasks, users, pool, span, onlyBusy]
+    [filteredTasks, users, pool, span, onlyBusy]
   );
 
   const byWeek = diffDays(span.from, span.to) > WEEK_THRESHOLD;
@@ -122,6 +143,24 @@ export default function ResourceView({
   }, [load.people, query]);
 
   const selected = load.people.find((p) => p.accountId === selectedId) ?? null;
+
+  // Everyone on the project, not just the rows on screen: with "only people with
+  // work" on, the idle members are exactly who you would hand something to.
+  const assignable = useMemo(
+    () => users.map((u) => ({ accountId: u.accountId, displayName: u.displayName })),
+    [users]
+  );
+
+  function exportCsv() {
+    const header = ["Thành viên", "Vai trò", "Giờ/ngày", ...load.dates];
+    const rows = visiblePeople.map((p) => [
+      p.displayName,
+      p.role,
+      p.capacityHoursPerDay,
+      ...p.days.map((d) => Math.round(d.allocatedHours * 10) / 10),
+    ]);
+    downloadCsv(csvName("nguon-luc", today), [header, ...rows]);
+  }
 
   function applyPreset(days: number | null) {
     if (days === null) {
@@ -172,6 +211,20 @@ export default function ResourceView({
 
   return (
     <div className="resource-view" onDragEnd={endDrag}>
+      <FilterBar
+        tasks={tasks}
+        filter={taskFacets}
+        onChange={(f) => onFilterChange({ ...filter, ...f, text: filter.text, people: filter.people })}
+        myAccountId={myAccountId}
+        facets={["statuses", "types", "epics", "labels", "overdue"]}
+        matched={filteredTasks.length}
+        total={tasks.length}
+      />
+      {filtering && (
+        <div className="rv-notice">
+          Đang lọc: mức tải bên dưới chỉ tính các công việc khớp bộ lọc, không phải toàn bộ khối lượng của mỗi người.
+        </div>
+      )}
       <div className="rv-controls">
         <div className="rv-range">
           <label>
@@ -216,6 +269,9 @@ export default function ResourceView({
             placeholder="Tìm thành viên..."
             aria-label="Tìm thành viên"
           />
+          <button className="rv-preset" onClick={exportCsv} title="Tải giờ phân bổ từng người theo ngày về file CSV">
+            Xuất CSV
+          </button>
           <label className="rv-toggle">
             <input
               type="checkbox"
@@ -325,24 +381,42 @@ export default function ResourceView({
               : `${load.unassigned.length} công việc chưa có người phụ trách`}
           </strong>
           <div className="rv-unassigned-list">
-            {load.unassigned.slice(0, 12).map((t) => (
-              <button
-                key={t.id}
-                className="rv-chip"
-                draggable
-                onDragStart={(e) => {
-                  e.dataTransfer.effectAllowed = "move";
-                  e.dataTransfer.setData("text/plain", t.id);
-                  beginDrag(t);
-                }}
-                onClick={() => onOpenEdit(t)}
-                title="Kéo thả lên một thành viên để gán"
-              >
-                {t.id} · {t.summary}
-              </button>
+            {(showAllUnassigned ? load.unassigned : load.unassigned.slice(0, 12)).map((t) => (
+              <span key={t.id} className="rv-chip-wrap">
+                <button
+                  className="rv-chip"
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.effectAllowed = "move";
+                    e.dataTransfer.setData("text/plain", t.id);
+                    beginDrag(t);
+                  }}
+                  onClick={() => onOpenEdit(t)}
+                  title="Kéo thả lên một thành viên để gán"
+                >
+                  {t.id} · {t.summary}
+                </button>
+                {/* Drag-and-drop is the fast path; this is the one that works
+                    from a keyboard or a touch screen. */}
+                <select
+                  className="rv-assign-select"
+                  value=""
+                  onChange={(e) => e.target.value && onAssign(t.id, e.target.value)}
+                  aria-label={`Gán ${t.id} cho`}
+                >
+                  <option value="">Gán…</option>
+                  {assignable.map((p) => (
+                    <option key={p.accountId} value={p.accountId}>
+                      {p.displayName}
+                    </option>
+                  ))}
+                </select>
+              </span>
             ))}
             {load.unassigned.length > 12 && (
-              <span className="rv-chip-more">+{load.unassigned.length - 12} nữa</span>
+              <button className="rv-chip-more link-btn" onClick={() => setShowAllUnassigned((v) => !v)}>
+                {showAllUnassigned ? "Thu gọn" : `+${load.unassigned.length - 12} nữa`}
+              </button>
             )}
           </div>
         </div>
@@ -350,12 +424,15 @@ export default function ResourceView({
 
       {selected && (
         <ResourcePersonPanel
+          key={selected.accountId}
           person={selected}
           dates={load.dates}
           today={today}
           defaultCapacityHours={pool?.defaultCapacityHours ?? 8}
           onClose={() => setSelectedId(null)}
           onOpenEdit={onOpenEdit}
+          members={assignable}
+          onAssign={onAssign}
           onProfileSaved={upsertProfile}
           onAbsenceAdded={addAbsence}
           onAbsenceRemoved={removeAbsence}

@@ -46,6 +46,8 @@ export interface Task {
   /** Hours logged against the issue by everyone (Jira's `timespent`). */
   spentHours: number | null;
   priority: string | null;
+  /** Jira labels — free-form tags, no spaces. */
+  labels: string[];
   jiraUrl: string;
 }
 
@@ -125,10 +127,15 @@ export interface TaskUpdateInput {
   statusTransition?: string;
   /** Jira's Original estimate, in hours (> 0). */
   estimateHours?: number;
+  /** A priority name from GET /priorities. */
+  priority?: string;
+  /** The full label set the task should end up with (replaces, not merges). */
+  labels?: string[];
 }
 
 export interface TaskCreateInput {
   summary: string;
+  labels?: string[];
   issueType: IssueTypeName;
   description?: string | null;
   wbsParentId?: string | null;
@@ -449,6 +456,43 @@ export interface ReportPoint {
   actualPct: number;
   plannedPct: number;
   headline: string;
+}
+
+/** A Jira comment. Mentions are `@[Name](accountId)` inside `text` — mirrors server/src/taskActivity.ts. */
+export interface TaskComment {
+  id: string;
+  authorAccountId: string | null;
+  authorName: string;
+  authorAvatarUrl: string | null;
+  text: string;
+  created: string;
+  updated: string;
+  /** Written by the signed-in user — the only ones Jira lets them edit or delete. */
+  mine: boolean;
+}
+
+export interface ActivityChange {
+  /** Jira's own field name; the client translates the common ones. */
+  field: string;
+  from: string | null;
+  to: string | null;
+}
+
+export interface ActivityEntry {
+  id: string;
+  authorName: string;
+  authorAccountId: string | null;
+  created: string;
+  changes: ActivityChange[];
+}
+
+/** Narrows the live dashboard to part of the project — mirrors server/src/progress.ts. */
+export interface ProgressScope {
+  /** An account id, or "none" for work nobody owns. */
+  assignee?: string;
+  /** An Epic key. */
+  epic?: string;
+  types?: string[];
 }
 
 export interface ProgressOverview {

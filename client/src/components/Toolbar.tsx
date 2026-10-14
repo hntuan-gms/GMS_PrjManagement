@@ -64,7 +64,7 @@ export default function Toolbar({
           Bảng
         </button>
         <button className={view === "timesheet" ? "active" : ""} onClick={() => onViewChange("timesheet")}>
-          Timesheet
+          Chấm công
         </button>
         {/* Project admins only — see requireResourceAccess on the server. */}
         {showResources && (

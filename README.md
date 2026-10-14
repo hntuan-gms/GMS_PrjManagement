@@ -171,11 +171,9 @@ rồi bỏ chú thích hai flag `--add-volume` / `--add-volume-mount` trong
 
 ## Giới hạn đã biết
 
-- Chưa tính **critical path** / so sánh baseline trực quan trên Gantt.
+- Gantt đã tô **đường găng** nhưng chưa vẽ baseline trên thanh; baseline mới đặt được qua trợ lý AI.
 - Cascade phụ thuộc là forward-only (không phải full CPM 2 chiều).
 - Phụ thuộc chỉ trong cùng một dự án; predecessor ở dự án khác bị từ chối.
-- Trạng thái Jira lấy từ danh sách cố định trong `TaskEditModal.tsx`; nếu workflow
-  của dự án có transition tên khác thì cần sửa danh sách đó.
 - Danh sách loại issue cũng cố định (`Epic/Story/Task/Bug/Sub-task`); dự án
   team-managed đổi tên hoặc bỏ bớt sẽ gặp lỗi khi tạo task.
 - Xoá issue trên Jira Cloud yêu cầu quyền tương ứng của chính tài khoản đăng nhập.

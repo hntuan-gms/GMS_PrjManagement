@@ -90,12 +90,51 @@ export interface BoardFilter {
   onlyBlocked: boolean;
   onlyOverdue: boolean;
   types: Set<string>;
+  /** Status names, not ids: two columns can map the same-named status. */
+  statuses: Set<string>;
+  /** Epic keys; "none" stands for cards outside any Epic. */
+  epics: Set<string>;
+  priorities: Set<string>;
 }
 
-export const EMPTY_FILTER: BoardFilter = { text: "", people: new Set(), onlyBlocked: false, onlyOverdue: false, types: new Set() };
+export const EMPTY_FILTER: BoardFilter = {
+  text: "",
+  people: new Set(),
+  onlyBlocked: false,
+  onlyOverdue: false,
+  types: new Set(),
+  statuses: new Set(),
+  epics: new Set(),
+  priorities: new Set(),
+};
 
 export function isFiltering(f: BoardFilter): boolean {
-  return !!f.text.trim() || f.people.size > 0 || f.onlyBlocked || f.onlyOverdue || f.types.size > 0;
+  return (
+    !!f.text.trim() ||
+    f.people.size > 0 ||
+    f.onlyBlocked ||
+    f.onlyOverdue ||
+    f.types.size > 0 ||
+    f.statuses.size > 0 ||
+    f.epics.size > 0 ||
+    f.priorities.size > 0
+  );
+}
+
+const PRIORITY_ORDER = ["highest", "high", "medium", "low", "lowest"];
+
+/** Jira's stock priorities, highest first; a site's own names sort after them. */
+export function priorityRank(name: string | null): number {
+  const i = PRIORITY_ORDER.indexOf((name ?? "").toLowerCase());
+  return i === -1 ? PRIORITY_ORDER.length : i;
+}
+
+export function priorityTone(name: string | null): "high" | "mid" | "low" | null {
+  if (!name) return null;
+  const n = name.toLowerCase();
+  if (n === "highest" || n === "high" || n === "blocker" || n === "critical" || n === "major") return "high";
+  if (n === "low" || n === "lowest" || n === "minor" || n === "trivial") return "low";
+  return "mid";
 }
 
 export function isOverdue(issue: BoardIssue, today: string): boolean {
@@ -109,6 +148,9 @@ export function matchesFilter(issue: BoardIssue, f: BoardFilter, today: string):
   }
   if (f.people.size > 0 && !f.people.has(issue.assigneeAccountId ?? "none")) return false;
   if (f.types.size > 0 && !f.types.has(issue.issueType)) return false;
+  if (f.statuses.size > 0 && !f.statuses.has(issue.statusName)) return false;
+  if (f.epics.size > 0 && !f.epics.has(issue.epicKey ?? "none")) return false;
+  if (f.priorities.size > 0 && !f.priorities.has(issue.priority ?? "none")) return false;
   if (f.onlyBlocked && issue.blockedBy.length === 0 && !issue.flagged) return false;
   if (f.onlyOverdue && !isOverdue(issue, today)) return false;
   return true;

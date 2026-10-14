@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { computeCriticalPath } from "../criticalPath";
 import { todayIso } from "../resourceAllocation";
-import { isAssignableType, type Health, type ProgressOverview, type ProgressReport, type Task } from "../types";
+import { csvName, downloadCsv } from "../csv";
+import { isAssignableType, type Health, type ProgressOverview, type ProgressReport, type ProgressScope, type Task } from "../types";
 import AiBrief from "./AiBrief";
+import { MultiSelect } from "./FilterBar";
 import ProgressTrendChart from "./ProgressTrendChart";
 import { PeopleBars, PhaseBars, ProgressGauge, ScheduleTimeline, StatusDonut, type WorkState } from "./progressCharts";
 
@@ -84,6 +86,19 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
   const [warnings, setWarnings] = useState<string[]>([]);
   const [drill, setDrill] = useState<Drill | null>(null);
   const [showReasons, setShowReasons] = useState(false);
+  // What the dashboard is looking at. The AI report beside it is always the whole
+  // project as of its own day; only the live figures follow these.
+  const today = useMemo(() => todayIso(), []);
+  const [asOf, setAsOf] = useState(today);
+  const [assignee, setAssignee] = useState("");
+  const [epic, setEpic] = useState("");
+  const [types, setTypes] = useState<Set<string>>(new Set());
+  const [reloadTick, setReloadTick] = useState(0);
+  const scope = useMemo<ProgressScope>(
+    () => ({ assignee: assignee || undefined, epic: epic || undefined, types: [...types] }),
+    [assignee, epic, types]
+  );
+  const scoped = !!(assignee || epic || types.size > 0);
 
   const taskById = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
   const critical = useMemo(() => computeCriticalPath(tasks), [tasks]);
@@ -94,7 +109,7 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
   useEffect(() => {
     let alive = true;
     api
-      .getProgress(todayIso())
+      .getProgress(asOf, scope)
       .then((data) => {
         if (!alive) return;
         setOverview(data);
@@ -104,7 +119,7 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
     return () => {
       alive = false;
     };
-  }, [tasks]);
+  }, [tasks, asOf, scope, reloadTick]);
 
   // Which report the AI panel shows: an explicitly requested one (chat card,
   // history click) wins; otherwise the latest.
@@ -134,6 +149,18 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
       setGenError(e instanceof Error ? e.message : "Không tạo được báo cáo.");
     } finally {
       setGenerating(false);
+    }
+  }
+
+  async function removeReport(id: string) {
+    if (!window.confirm("Xoá báo cáo này khỏi lịch sử? Không hoàn tác được.")) return;
+    try {
+      await api.deleteProgressReport(id);
+      setShown((s) => (s?.id === id ? null : s));
+      // `latest` may have been the one deleted, so re-read rather than patch.
+      setReloadTick((n) => n + 1);
+    } catch (e) {
+      setGenError(e instanceof Error ? e.message : "Không xoá được báo cáo.");
     }
   }
 
@@ -181,8 +208,20 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
   }
 
   const m = overview.metrics;
+  const people = new Map<string, string>();
+  const epics: Array<{ id: string; label: string }> = [];
+  const workTypes = new Set<string>();
+  for (const t of tasks) {
+    if (!isAssignableType(t.issueType)) {
+      epics.push({ id: t.id, label: `${t.id} · ${t.summary}` });
+      continue;
+    }
+    workTypes.add(t.issueType);
+    if (t.assigneeAccountId) people.set(t.assigneeAccountId, t.assigneeName ?? t.assigneeAccountId);
+  }
   const latestPoint = overview.history.at(-1) ?? null;
-  const moved = latestPoint && latestPoint.asOf !== m.asOf ? m.actualPct - latestPoint.actualPct : null;
+  // History points are whole-project, so the delta means nothing on a slice.
+  const moved = !scoped && latestPoint && latestPoint.asOf !== m.asOf ? m.actualPct - latestPoint.actualPct : null;
 
   const attention: Array<{ kind: Drill["kind"]; label: string; value: number; tone: "crit" | "serious" | "warn" | "neutral"; icon: string }> = [
     { kind: "overdue", label: "Quá hạn", value: m.counts.overdue, tone: "crit", icon: "!" },
@@ -225,6 +264,61 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
             <span className="pr-status-why">{showReasons ? "Ẩn lý do" : "Vì sao?"}</span>
           </button>
         </header>
+
+        <div className="pr-filters">
+          <label className="pr-filter">
+            Người phụ trách
+            <select value={assignee} onChange={(e) => setAssignee(e.target.value)}>
+              <option value="">Tất cả</option>
+              <option value="none">Chưa gán</option>
+              {[...people].sort((a, b) => a[1].localeCompare(b[1], "vi")).map(([id, name]) => (
+                <option key={id} value={id}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="pr-filter">
+            Giai đoạn (Epic)
+            <select value={epic} onChange={(e) => setEpic(e.target.value)}>
+              <option value="">Tất cả</option>
+              {epics.map((x) => (
+                <option key={x.id} value={x.id}>
+                  {x.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <MultiSelect
+            label="Loại"
+            options={[...workTypes].sort((a, b) => a.localeCompare(b, "vi")).map((v) => ({ value: v, label: v }))}
+            selected={types}
+            onChange={setTypes}
+          />
+          <label className="pr-filter">
+            Tính đến ngày
+            <input type="date" value={asOf} onChange={(e) => e.target.value && setAsOf(e.target.value)} />
+          </label>
+          {(scoped || asOf !== today) && (
+            <button
+              className="text-btn"
+              onClick={() => {
+                setAssignee("");
+                setEpic("");
+                setTypes(new Set());
+                setAsOf(today);
+              }}
+            >
+              Đặt lại
+            </button>
+          )}
+        </div>
+        {(scoped || asOf !== today) && (
+          <div className="rv-notice">
+            Đang xem {scoped ? "một phần của dự án" : "toàn dự án"}
+            {asOf !== today ? ` tính đến ${fmtDate(asOf)}` : ""}. Báo cáo AI bên phải vẫn viết cho toàn dự án theo ngày của nó.
+          </div>
+        )}
 
         {showReasons && (
           <ul className={`pr-reasons pr-reasons-${m.health}`}>
@@ -351,16 +445,22 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
           {overview.history.length > 0 && (
             <div className="pr-history">
               {[...overview.history].reverse().map((p) => (
-                <button
-                  key={p.id}
-                  className={`pr-history-chip ${report?.id === p.id ? "is-current" : ""}`}
-                  onClick={() => openReport(p.id)}
-                  title={p.headline}
-                >
-                  <span className={`pr-dot-status pr-dot-${p.health}`} aria-hidden="true" />
-                  {short(p.asOf)}
-                  <b>{p.actualPct}%</b>
-                </button>
+                <span key={p.id} className="pr-history-item">
+                  <button
+                    className={`pr-history-chip ${report?.id === p.id ? "is-current" : ""}`}
+                    onClick={() => openReport(p.id)}
+                    title={p.headline}
+                  >
+                    <span className={`pr-dot-status pr-dot-${p.health}`} aria-hidden="true" />
+                    {short(p.asOf)}
+                    <b>{p.actualPct}%</b>
+                  </button>
+                  {canGenerate && (
+                    <button className="pr-history-del" onClick={() => removeReport(p.id)} aria-label={`Xoá báo cáo ngày ${short(p.asOf)}`} title="Xoá báo cáo này">
+                      ×
+                    </button>
+                  )}
+                </span>
               ))}
             </div>
           )}
@@ -370,7 +470,7 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
       <AiBrief
         key={report?.id ?? "none"}
         report={report}
-        live={m}
+        live={scoped || asOf !== today ? null : m}
         isLatest={report?.id === overview.latest?.id}
         warnings={warnings}
         canGenerate={canGenerate}
@@ -386,6 +486,7 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
           drill={drill}
           tasks={tasks}
           asOf={m.asOf}
+          scope={scope}
           critical={critical}
           onClose={() => setDrill(null)}
           onOpenEdit={onOpenEdit}
@@ -406,6 +507,7 @@ function TaskDrawer({
   drill,
   tasks,
   asOf,
+  scope,
   critical,
   onClose,
   onOpenEdit,
@@ -413,6 +515,7 @@ function TaskDrawer({
   drill: Drill;
   tasks: Task[];
   asOf: string;
+  scope: ProgressScope;
   critical: Set<string>;
   onClose: () => void;
   onOpenEdit: (task: Task) => void;
@@ -426,7 +529,37 @@ function TaskDrawer({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const { title, rows } = useMemo(() => resolveDrill(drill, tasks, asOf), [drill, tasks, asOf]);
+  const { title, rows: all } = useMemo(() => resolveDrill(drill, tasks, asOf, scope), [drill, tasks, asOf, scope]);
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<"urgency" | "due" | "assignee" | "key">("urgency");
+  const rows = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const list = q
+      ? all.filter((t) => `${t.id} ${t.summary} ${t.assigneeName ?? ""} ${t.statusName}`.toLowerCase().includes(q))
+      : [...all];
+    // "urgency" is the order resolveDrill already returned.
+    if (sort === "due") list.sort((a, b) => (a.dueDate ?? "9999").localeCompare(b.dueDate ?? "9999"));
+    else if (sort === "assignee") list.sort((a, b) => (a.assigneeName ?? "￿").localeCompare(b.assigneeName ?? "￿", "vi"));
+    else if (sort === "key") list.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+    return list;
+  }, [all, query, sort]);
+
+  function exportCsv() {
+    downloadCsv(csvName("bao-cao", asOf), [
+      ["Mã", "Tên công việc", "Trạng thái", "Phụ trách", "Bắt đầu", "Hạn", "Hạn baseline", "% hoàn thành", "Đường găng"],
+      ...rows.map((t) => [
+        t.id,
+        t.summary,
+        t.statusName,
+        t.assigneeName,
+        t.startDate,
+        t.dueDate,
+        t.baselineDue,
+        t.statusCategory === "done" ? 100 : t.percentComplete,
+        critical.has(t.id) && t.statusCategory !== "done" ? "x" : "",
+      ]),
+    ]);
+  }
 
   return (
     <div className="pr-drawer-backdrop" onClick={onClose}>
@@ -434,14 +567,34 @@ function TaskDrawer({
         <div className="pr-drawer-head">
           <div>
             <b>{title}</b>
-            <span className="pr-muted">{rows.length} công việc</span>
+            <span className="pr-muted">
+              {rows.length === all.length ? `${all.length} công việc` : `${rows.length}/${all.length} công việc`}
+            </span>
           </div>
           <button className="pr-drawer-close" onClick={onClose} aria-label="Đóng">
             ✕
           </button>
         </div>
+        <div className="pr-drawer-tools">
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Tìm trong danh sách…"
+            aria-label="Tìm trong danh sách"
+          />
+          <select value={sort} onChange={(e) => setSort(e.target.value as typeof sort)} aria-label="Sắp xếp">
+            <option value="urgency">Khẩn cấp trước</option>
+            <option value="due">Theo hạn</option>
+            <option value="assignee">Theo người</option>
+            <option value="key">Theo mã</option>
+          </select>
+          <button className="text-btn" onClick={exportCsv} disabled={rows.length === 0}>
+            Xuất CSV
+          </button>
+        </div>
         {rows.length === 0 ? (
-          <p className="pr-muted pr-drawer-empty">Không có công việc nào.</p>
+          <p className="pr-muted pr-drawer-empty">{all.length > 0 ? "Không có công việc nào khớp tìm kiếm." : "Không có công việc nào."}</p>
         ) : (
           <ul className="pr-drawer-list">
             {rows.map((t) => {
@@ -476,7 +629,7 @@ function TaskDrawer({
   );
 }
 
-function resolveDrill(drill: Drill, tasks: Task[], asOf: string): { title: string; rows: Task[] } {
+function resolveDrill(drill: Drill, tasks: Task[], asOf: string, scope: ProgressScope): { title: string; rows: Task[] } {
   const byId = new Map(tasks.map((t) => [t.id, t]));
 
   if (drill.kind === "keys") {
@@ -487,9 +640,6 @@ function resolveDrill(drill: Drill, tasks: Task[], asOf: string): { title: strin
   }
 
   const parentIds = new Set(tasks.map((t) => t.wbsParentId).filter((p): p is string => !!p));
-  const work = tasks.filter((t) => isAssignableType(t.issueType) && !parentIds.has(t.id));
-  const open = work.filter((t) => t.statusCategory !== "done");
-  const weekAhead = new Date(toUtc(asOf) + 7 * 86_400_000).toISOString().slice(0, 10);
 
   const epicOf = (t: Task): string | null => {
     let cursor = t.wbsParentId ? byId.get(t.wbsParentId) : undefined;
@@ -499,6 +649,18 @@ function resolveDrill(drill: Drill, tasks: Task[], asOf: string): { title: strin
     }
     return null;
   };
+
+  // The same narrowing server/src/progress.ts applies, after the leaf test, so a
+  // drawer opened from a filtered dashboard lists exactly the tasks counted there.
+  const work = tasks.filter((t) => {
+    if (!isAssignableType(t.issueType) || parentIds.has(t.id)) return false;
+    if (scope.assignee && (t.assigneeAccountId ?? "none") !== scope.assignee) return false;
+    if (scope.epic && epicOf(t) !== scope.epic) return false;
+    if (scope.types && scope.types.length > 0 && !scope.types.includes(t.issueType)) return false;
+    return true;
+  });
+  const open = work.filter((t) => t.statusCategory !== "done");
+  const weekAhead = new Date(toUtc(asOf) + 7 * 86_400_000).toISOString().slice(0, 10);
 
   // Late first, then by due date: the drawer is usually opened to act.
   const urgency = (a: Task, b: Task) => {

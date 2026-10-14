@@ -1,6 +1,8 @@
 import { useRef, useState, type DragEvent } from "react";
 import { api } from "../api";
-import { idleDays, initials, isOverdue, lanesOf, shortDate, totalWeight, typeClass, type Swimlane } from "../boardModel";
+import { idleDays, initials, isOverdue, lanesOf, priorityTone, shortDate, totalWeight, typeClass, type Swimlane } from "../boardModel";
+import AssigneePicker, { type Member } from "./AssigneePicker";
+import QuickCreateOptions, { type QuickOptions } from "./QuickCreateOptions";
 import type { BoardColumn, BoardIssue, BoardSnapshot } from "../types";
 
 interface Props {
@@ -11,7 +13,11 @@ interface Props {
   today: string;
   onMove: (key: string, column: BoardColumn, beforeKey: string | null, laneAccountId: string | null | undefined) => void;
   onOpen: (key: string) => void;
-  onQuickCreate?: (summary: string) => Promise<void>;
+  onQuickCreate?: (summary: string, opts: QuickOptions) => Promise<void>;
+  members: Member[];
+  /** Issue types offered by quick create. */
+  createTypes: string[];
+  onAssign: (key: string, accountId: string | null) => void;
 }
 
 /**
@@ -39,11 +45,12 @@ interface Hint {
   beforeKey: string | null;
 }
 
-export default function KanbanBoard({ snapshot, issues, swimlane, today, onMove, onOpen, onQuickCreate }: Props) {
+export default function KanbanBoard({ snapshot, issues, swimlane, today, onMove, onOpen, onQuickCreate, members, createTypes, onAssign }: Props) {
   const [drag, setDrag] = useState<DragState | null>(null);
   const [hint, setHint] = useState<Hint | null>(null);
   const [creating, setCreating] = useState(false);
   const [draft, setDraft] = useState("");
+  const [quickOpts, setQuickOpts] = useState<QuickOptions>({ issueType: createTypes[0] ?? "Task", assigneeAccountId: null });
   const [collapsedLanes, setCollapsedLanes] = useState<Set<string>>(new Set());
   const transitionCache = useRef(new Map<string, Set<string>>());
 
@@ -107,7 +114,7 @@ export default function KanbanBoard({ snapshot, issues, swimlane, today, onMove,
     const summary = draft.trim();
     if (!summary || !onQuickCreate) return;
     setDraft("");
-    await onQuickCreate(summary);
+    await onQuickCreate(summary, quickOpts);
   }
 
   if (columns.length === 0) {
@@ -144,7 +151,7 @@ export default function KanbanBoard({ snapshot, issues, swimlane, today, onMove,
                   {totalWeight(inCol, snapshot)}
                 </span>
               )}
-              {over && <span className="bd-wip-flag">Vượt WIP</span>}
+              {over && <span className="bd-wip-flag">Vượt giới hạn</span>}
             </div>
           );
         })}
@@ -193,6 +200,8 @@ export default function KanbanBoard({ snapshot, issues, swimlane, today, onMove,
                             snapshot={snapshot}
                             today={today}
                             dragging={drag?.key === issue.key}
+                            members={members}
+                            onAssign={(accountId) => onAssign(issue.key, accountId)}
                             onOpen={() => onOpen(issue.key)}
                             onDragStart={(e) => startDrag(e, issue)}
                             onDragEnd={endDrag}
@@ -206,7 +215,13 @@ export default function KanbanBoard({ snapshot, issues, swimlane, today, onMove,
                       )}
                       {ci === 0 && lane === lanes[0] && onQuickCreate && (
                         creating ? (
-                          <div className="bd-quick">
+                          <div
+                            className="bd-quick"
+                            // Focus moving to the pickers below is not leaving the form.
+                            onBlur={(e) => {
+                              if (!e.currentTarget.contains(e.relatedTarget as Node | null) && !draft.trim()) setCreating(false);
+                            }}
+                          >
                             <textarea
                               autoFocus
                               value={draft}
@@ -223,8 +238,8 @@ export default function KanbanBoard({ snapshot, issues, swimlane, today, onMove,
                                   setDraft("");
                                 }
                               }}
-                              onBlur={() => !draft.trim() && setCreating(false)}
                             />
+                            <QuickCreateOptions types={createTypes} members={members} value={quickOpts} onChange={setQuickOpts} />
                           </div>
                         ) : (
                           <button className="bd-add" onClick={() => setCreating(true)}>
@@ -249,11 +264,15 @@ function Card({
   snapshot,
   today,
   dragging,
+  members,
+  onAssign,
   onOpen,
   onDragStart,
   onDragEnd,
   onDragOver,
 }: {
+  members: Member[];
+  onAssign: (accountId: string | null) => void;
   issue: BoardIssue;
   snapshot: BoardSnapshot;
   today: string;
@@ -304,14 +323,23 @@ function Card({
           </span>
         )}
         <span className="bd-spacer" />
+        {priorityTone(issue.priority) && (
+          <span className={`bd-prio bd-prio-${priorityTone(issue.priority)}`} title={`Ưu tiên: ${issue.priority}`}>
+            {priorityTone(issue.priority) === "high" ? "▲" : priorityTone(issue.priority) === "low" ? "▼" : "■"}
+          </span>
+        )}
         {snapshot.estimation && (
           <span className={`bd-est ${issue.estimate === null ? "is-empty" : ""}`} title={snapshot.estimation.name}>
             {issue.estimate ?? "–"}
           </span>
         )}
-        <span className={`bd-avatar ${issue.assigneeName ? "" : "is-none"}`} title={issue.assigneeName ?? "Chưa gán"}>
-          {initials(issue.assigneeName)}
-        </span>
+        <AssigneePicker
+          issueType={issue.issueType}
+          accountId={issue.assigneeAccountId}
+          name={issue.assigneeName}
+          members={members}
+          onAssign={onAssign}
+        />
       </div>
     </div>
   );

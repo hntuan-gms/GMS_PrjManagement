@@ -111,7 +111,7 @@ export default function SprintHeader(props: Props) {
         <div className="sh-ai">
           <button className="sh-ai-head" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
             <span className="ai-spark sh-spark" aria-hidden="true">✦</span>
-            <b>Stand-up hôm nay</b>
+            <b>Họp nhanh hôm nay</b>
             {insight.data && (
               <span className={`sh-verdict sh-tone-${VERDICT[insight.data.forecast.verdict].tone}`}>
                 <span aria-hidden="true">{VERDICT[insight.data.forecast.verdict].icon}</span>

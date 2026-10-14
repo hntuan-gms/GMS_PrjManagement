@@ -46,6 +46,8 @@ export interface Task {
   /** Hours logged against the issue (Jira's `timespent`), across everyone. */
   spentHours: number | null;
   priority: string | null;
+  /** Jira labels — free-form tags, no spaces. */
+  labels: string[];
   jiraUrl: string;
 }
 
@@ -97,10 +99,15 @@ export interface TaskUpdateInput {
   statusTransition?: string;
   /** Jira's Original estimate, in hours. Must be > 0; it is written through `timetracking`. */
   estimateHours?: number;
+  /** A priority name from GET /priorities. */
+  priority?: string;
+  /** The full label set the issue should end up with (replaces, not merges). */
+  labels?: string[];
 }
 
 export interface TaskCreateInput {
   summary: string;
+  labels?: string[];
   issueType: IssueTypeName;
   description?: string | null;
   wbsParentId?: string | null;

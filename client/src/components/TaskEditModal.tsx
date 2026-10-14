@@ -7,6 +7,8 @@ import AttachmentPicker from "./AttachmentPicker";
 import NumberInput from "./NumberInput";
 import { HOURS_PER_DAY, localToday, roundHours } from "../taskForm";
 import DurationHint from "./DurationHint";
+import LabelsInput from "./LabelsInput";
+import TaskDiscussion from "./TaskDiscussion";
 
 interface Props {
   task: Task;
@@ -17,11 +19,15 @@ interface Props {
   onDelete: () => Promise<void>;
   /** Time was logged from here — the task's "spent" needs a refresh. */
   onWorkLogged: () => void;
+  /** The signed-in account, for marking mentions of you. */
+  myAccountId: string;
+  /** Opens the create form with this task as the parent. */
+  onAddSubtask: (parent: Task) => void;
 }
 
 const DEP_TYPES: DependencyType[] = ["FS", "SS", "FF", "SF"];
 
-export default function TaskEditModal({ task, allTasks, users, onClose, onSave, onDelete, onWorkLogged }: Props) {
+export default function TaskEditModal({ task, allTasks, users, onClose, onSave, onDelete, onWorkLogged, myAccountId, onAddSubtask }: Props) {
   const [summary, setSummary] = useState(task.summary);
   const [description, setDescription] = useState(task.description ?? "");
   const [startDate, setStartDate] = useState(task.startDate ?? "");
@@ -33,6 +39,12 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
   const [percentComplete, setPercentComplete] = useState(task.percentComplete);
   const [assigneeAccountId, setAssigneeAccountId] = useState(task.assigneeAccountId ?? "");
   const [statusTransition, setStatusTransition] = useState("");
+  const [priority, setPriority] = useState(task.priority ?? "");
+  const [labels, setLabels] = useState<string[]>(task.labels);
+  // Both lists come from Jira; they only decorate the form, so a failure leaves
+  // the current value editable rather than blocking the save.
+  const [priorityOptions, setPriorityOptions] = useState<string[]>([]);
+  const [labelSuggestions, setLabelSuggestions] = useState<string[]>([]);
   const [predecessors, setPredecessors] = useState<Predecessor[]>(task.predecessors);
   const [newPredId, setNewPredId] = useState("");
   const [newPredType, setNewPredType] = useState<DependencyType>("FS");
@@ -68,6 +80,14 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
       .getTaskAttachments(task.id)
       .then((a) => alive && setExisting(a))
       .catch(() => alive && setExisting({ files: [], links: [] }));
+    api
+      .listPriorities()
+      .then((p) => alive && setPriorityOptions(p))
+      .catch(() => {});
+    api
+      .listLabels()
+      .then((l) => alive && setLabelSuggestions(l))
+      .catch(() => {});
     return () => {
       alive = false;
     };
@@ -88,6 +108,9 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
     setSaving(true);
     setError(null);
     try {
+      const labelsChanged =
+        [...labels].sort().join("\n") !== [...task.labels].sort().join("\n");
+      const priorityChanged = priority !== "" && priority !== (task.priority ?? "");
       const estimateChanged = estimate !== null && estimate > 0 && estimate !== roundHours(task.estimateHours ?? -1);
       await onSave({
         summary,
@@ -98,6 +121,8 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
         assigneeAccountId: assigneeAccountId || null,
         predecessors,
         ...(statusTransition ? { statusTransition } : {}),
+        ...(priorityChanged ? { priority } : {}),
+        ...(labelsChanged ? { labels } : {}),
         ...(estimateChanged ? { estimateHours: estimate! } : {}),
       });
       if (hasPending(pending)) {
@@ -212,7 +237,7 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
 
         <div className="field-row">
           <label className="field">
-            <span>Ước lượng — Original estimate (giờ)</span>
+            <span>Ước lượng ban đầu (giờ)</span>
             <NumberInput
               value={estimate}
               min={0.01}
@@ -313,6 +338,27 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
           </label>
         </div>
 
+        <div className="field-row">
+          <label className="field">
+            <span>Độ ưu tiên</span>
+            <select value={priority} onChange={(e) => setPriority(e.target.value)}>
+              {priority === "" && <option value="">— Không rõ —</option>}
+              {/* The task's own priority stays selectable even if the site list
+                  failed to load or no longer defines it. */}
+              {priority !== "" && !priorityOptions.includes(priority) && <option value={priority}>{priority}</option>}
+              {priorityOptions.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="field field-wide">
+            <span>Nhãn</span>
+            <LabelsInput value={labels} onChange={setLabels} suggestions={labelSuggestions} />
+          </div>
+        </div>
+
         <div className="field">
           <span>Đính kèm &amp; liên kết</span>
           {existing && (existing.files.length > 0 || existing.links.length > 0) && (
@@ -384,12 +430,21 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
           </div>
         </div>
 
+        <TaskDiscussion taskId={task.id} members={users} myAccountId={myAccountId} />
+
         {error && <div className="modal-error">{error}</div>}
 
         <div className="modal-footer">
           <button className="danger" onClick={handleDelete} disabled={deleting || saving}>
             {deleting ? "Đang xoá..." : "Xoá task"}
           </button>
+          {/* A sub-task has no sub-tasks of its own in Jira, so the button is only
+              for tasks that can be a parent. */}
+          {task.issueType !== "Sub-task" && (
+            <button type="button" onClick={() => onAddSubtask(task)} disabled={deleting || saving}>
+              {task.issueType.toLowerCase() === "epic" ? "+ Việc trong Epic" : "+ Sub-task"}
+            </button>
+          )}
           <div className="spacer" />
           <button onClick={onClose} disabled={saving}>
             Huỷ

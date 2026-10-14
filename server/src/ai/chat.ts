@@ -198,7 +198,9 @@ export async function* streamChat(
   history: ChatTurn[],
   userMessage: string,
   today: string,
-  deps: ChatDeps
+  deps: ChatDeps,
+  /** Fires when the client stops or disconnects: no more model calls, no more tools. */
+  signal?: AbortSignal
 ): AsyncGenerator<ChatEvent> {
   const model = activeModel();
   const ai = client();
@@ -221,6 +223,8 @@ export async function* streamChat(
     tools: [{ functionDeclarations: TOOLS }],
     thinkingConfig: { includeThoughts: true },
     temperature: 0.3,
+    // Lets a stop reach Gemini itself, so it stops generating (and billing).
+    ...(signal ? { abortSignal: signal } : {}),
   };
 
   const usage: ChatUsage = {
@@ -240,101 +244,115 @@ export async function* streamChat(
   // so a turn always ends in words. The bound still stops a model that keeps
   // re-calling tools from billing forever.
   let answered = false;
-  for (let pass = 0; pass <= MAX_TOOL_PASSES; pass++) {
-    const finalPass = pass === MAX_TOOL_PASSES;
-    const stream = await ai.models.generateContentStream({
-      model,
-      contents,
-      config: finalPass
-        ? { ...config, toolConfig: { functionCallingConfig: { mode: FunctionCallingConfigMode.NONE } } }
-        : config,
-    });
+  // A stop is not a failure: whatever was streamed so far stands, the usage is
+  // still reported (the tokens were spent), and no apology is appended.
+  let aborted = false;
+  try {
+    for (let pass = 0; pass <= MAX_TOOL_PASSES; pass++) {
+      if (signal?.aborted) {
+        aborted = true;
+        break;
+      }
+      const finalPass = pass === MAX_TOOL_PASSES;
+      const stream = await ai.models.generateContentStream({
+        model,
+        contents,
+        config: finalPass
+          ? { ...config, toolConfig: { functionCallingConfig: { mode: FunctionCallingConfigMode.NONE } } }
+          : config,
+      });
 
-    let answer = "";
-    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
-    const modelParts: Array<Record<string, unknown>> = [];
+      let answer = "";
+      const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+      const modelParts: Array<Record<string, unknown>> = [];
 
-    for await (const chunk of stream) {
-      // Usage is reported cumulatively per chunk, so the last one wins rather
-      // than summing — summing would multiply the real cost by the chunk count.
-      const meta = chunk.usageMetadata;
-      if (meta) {
-        usage.promptTokens = meta.promptTokenCount ?? usage.promptTokens;
-        usage.outputTokens = meta.candidatesTokenCount ?? usage.outputTokens;
-        usage.thoughtTokens = meta.thoughtsTokenCount ?? usage.thoughtTokens;
-        usage.cachedTokens = meta.cachedContentTokenCount ?? usage.cachedTokens;
+      for await (const chunk of stream) {
+        if (signal?.aborted) break;
+        // Usage is reported cumulatively per chunk, so the last one wins rather
+        // than summing — summing would multiply the real cost by the chunk count.
+        const meta = chunk.usageMetadata;
+        if (meta) {
+          usage.promptTokens = meta.promptTokenCount ?? usage.promptTokens;
+          usage.outputTokens = meta.candidatesTokenCount ?? usage.outputTokens;
+          usage.thoughtTokens = meta.thoughtsTokenCount ?? usage.thoughtTokens;
+          usage.cachedTokens = meta.cachedContentTokenCount ?? usage.cachedTokens;
+        }
+
+        for (const part of chunk.candidates?.[0]?.content?.parts ?? []) {
+          if (part.thought && part.text) {
+            yield { type: "thinking", text: part.text };
+            continue;
+          }
+          if (part.text) {
+            answer += part.text;
+            yield { type: "text", text: part.text };
+          }
+          if (part.functionCall?.name) {
+            calls.push({ name: part.functionCall.name, args: (part.functionCall.args ?? {}) as Record<string, unknown> });
+          }
+          modelParts.push(part as Record<string, unknown>);
+        }
       }
 
-      for (const part of chunk.candidates?.[0]?.content?.parts ?? []) {
-        if (part.thought && part.text) {
-          yield { type: "thinking", text: part.text };
+      if (answer.trim()) answered = true;
+      if (calls.length === 0 || finalPass) {
+        // A pass with neither text nor a call (thoughts only) gets one forced,
+        // tool-free retry rather than ending the turn silently.
+        // Same contents, tools off: the model can only answer in words.
+        if (!answered && !finalPass) {
+          pass = MAX_TOOL_PASSES - 1;
           continue;
         }
-        if (part.text) {
-          answer += part.text;
-          yield { type: "text", text: part.text };
-        }
-        if (part.functionCall?.name) {
-          calls.push({ name: part.functionCall.name, args: (part.functionCall.args ?? {}) as Record<string, unknown> });
-        }
-        modelParts.push(part as Record<string, unknown>);
+        break;
       }
-    }
 
-    if (answer.trim()) answered = true;
-    if (calls.length === 0 || finalPass) {
-      // A pass with neither text nor a call (thoughts only) gets one forced,
-      // tool-free retry rather than ending the turn silently.
-      // Same contents, tools off: the model can only answer in words.
-      if (!answered && !finalPass) {
-        pass = MAX_TOOL_PASSES - 1;
-        continue;
-      }
-      break;
-    }
+      // Feed the tool result back in the shape Gemini expects, keeping the
+      // model's own parts so the call and its response stay paired.
+      contents.push({ role: "model", parts: modelParts as never });
+      const responseParts: Array<Record<string, unknown>> = [];
 
-    // Feed the tool result back in the shape Gemini expects, keeping the
-    // model's own parts so the call and its response stay paired.
-    contents.push({ role: "model", parts: modelParts as never });
-    const responseParts: Array<Record<string, unknown>> = [];
-
-    for (const call of calls) {
-      yield { type: "tool", name: call.name, label: labelFor(call.name) };
-      try {
-        const outcome = await runTool(call.name, call.args, toolCtx);
-        if (outcome.plan) {
-          yield {
-            type: "plan",
-            runId: outcome.plan.runId,
-            itemCount: outcome.plan.itemCount,
-            warnings: outcome.plan.warnings,
-          };
+      for (const call of calls) {
+        if (signal?.aborted) break;
+        yield { type: "tool", name: call.name, label: labelFor(call.name) };
+        try {
+          const outcome = await runTool(call.name, call.args, toolCtx);
+          if (outcome.plan) {
+            yield {
+              type: "plan",
+              runId: outcome.plan.runId,
+              itemCount: outcome.plan.itemCount,
+              warnings: outcome.plan.warnings,
+            };
+          }
+          if (outcome.report) {
+            yield {
+              type: "report",
+              reportId: outcome.report.id,
+              headline: outcome.report.headline,
+              health: outcome.report.health,
+            };
+          }
+          responseParts.push({
+            functionResponse: { name: call.name, response: outcome.response },
+          });
+        } catch (err) {
+          // The model gets the failure too, not just the user: told that
+          // assign_task failed, it can explain or try someone else, whereas a
+          // silently dropped tool result makes it narrate a success that never
+          // happened.
+          const message = (err as Error).message;
+          yield { type: "error", message };
+          responseParts.push({ functionResponse: { name: call.name, response: { error: message } } });
         }
-        if (outcome.report) {
-          yield {
-            type: "report",
-            reportId: outcome.report.id,
-            headline: outcome.report.headline,
-            health: outcome.report.health,
-          };
-        }
-        responseParts.push({
-          functionResponse: { name: call.name, response: outcome.response },
-        });
-      } catch (err) {
-        // The model gets the failure too, not just the user: told that
-        // assign_task failed, it can explain or try someone else, whereas a
-        // silently dropped tool result makes it narrate a success that never
-        // happened.
-        const message = (err as Error).message;
-        yield { type: "error", message };
-        responseParts.push({ functionResponse: { name: call.name, response: { error: message } } });
       }
+      contents.push({ role: "user", parts: responseParts as never });
     }
-    contents.push({ role: "user", parts: responseParts as never });
+  } catch (err) {
+    if (!signal?.aborted) throw err;
+    aborted = true;
   }
 
-  if (!answered) {
+  if (!answered && !aborted) {
     // Should not happen after the forced pass, but an empty bubble is the one
     // outcome the user can't interpret — say so plainly instead.
     yield { type: "text", text: "Mình chưa trả lời được yêu cầu này. Bạn thử nói lại cụ thể hơn nhé." };

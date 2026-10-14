@@ -236,6 +236,28 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
     abortRef.current = controller;
     let turn = { ...EMPTY_LIVE };
 
+    // The streamed turn becomes a normal message once it is complete, so it
+    // renders identically whether it just arrived or came back from the DB. Also
+    // used when the user presses Stop: what had streamed so far is kept, not
+    // thrown away (the server saves the same partial answer).
+    const commitTurn = () =>
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `model-${Date.now()}`,
+          role: "model",
+          content: turn.text,
+          thinking: turn.thinking || null,
+          planRunId: turn.planRunId,
+          reportId: turn.report?.id ?? null,
+          reportHeadline: turn.report?.headline ?? null,
+          reportHealth: turn.report?.health ?? null,
+          model: null,
+          usage: { promptTokens: 0, outputTokens: 0, thoughtTokens: 0, cachedTokens: 0 },
+          createdAt: new Date().toISOString(),
+        },
+      ]);
+
     try {
       for await (const event of streamChat(text, sessionId, controller.signal)) {
         if (event.type === "session") {
@@ -265,32 +287,28 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
         setLive({ ...turn });
       }
 
-      // The streamed turn becomes a normal message once it is complete, so it
-      // renders identically whether it just arrived or came back from the DB.
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `model-${Date.now()}`,
-          role: "model",
-          content: turn.text,
-          thinking: turn.thinking || null,
-          planRunId: turn.planRunId,
-          reportId: turn.report?.id ?? null,
-          reportHeadline: turn.report?.headline ?? null,
-          reportHealth: turn.report?.health ?? null,
-          model: null,
-          usage: { promptTokens: 0, outputTokens: 0, thoughtTokens: 0, cachedTokens: 0 },
-          createdAt: new Date().toISOString(),
-        },
-      ]);
+      commitTurn();
     } catch (e) {
       if (!controller.signal.aborted) {
         setError(e instanceof Error ? e.message : "Trợ lý gặp lỗi.");
+      } else if (turn.text.trim() || turn.thinking) {
+        commitTurn();
       }
     } finally {
       setLive(null);
       abortRef.current = null;
       refreshSessions();
+    }
+  }
+
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  async function copyAnswer(id: string, text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedId(id);
+      setTimeout(() => setCopiedId((cur) => (cur === id ? null : cur)), 1500);
+    } catch {
+      // Clipboard blocked (permissions, insecure context): nothing useful to show.
     }
   }
 
@@ -389,13 +407,13 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
           <div className="chat-usage-grid">
             <span>Phiên này</span>
             <span />
-            <span>Input</span>
+            <span>Đầu vào</span>
             <b>{formatTokens(usage?.promptTokens ?? 0)}</b>
-            <span>Output</span>
+            <span>Đầu ra</span>
             <b>{formatTokens(usage?.outputTokens ?? 0)}</b>
             <span title="Token model dùng để suy luận, tính phí riêng với output">Suy nghĩ</span>
             <b>{formatTokens(usage?.thoughtTokens ?? 0)}</b>
-            <span title="Phần input được cache, rẻ hơn input thường">Cache</span>
+            <span title="Phần đầu vào được lưu đệm, rẻ hơn đầu vào thường">Bộ nhớ đệm</span>
             <b>{formatTokens(usage?.cachedTokens ?? 0)}</b>
             <span>Lượt hỏi</span>
             <b>{usage?.messages ?? 0}</b>
@@ -430,6 +448,11 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
                 {/* The user's own words stay verbatim; the model's are rendered. */}
                 {m.role === "model" ? <ChatMarkdown text={m.content} knownKeys={knownKeys} onOpenIssue={onOpenIssue} /> : m.content}
               </div>
+            )}
+            {m.role === "model" && m.content && (
+              <button className="chat-copy" onClick={() => copyAnswer(m.id, m.content)} title="Chép câu trả lời vào bộ nhớ tạm">
+                {copiedId === m.id ? "Đã chép ✓" : "Sao chép"}
+              </button>
             )}
             {m.reportId && (
               <button className="chat-plan-card chat-report-card" onClick={() => onOpenReport(m.reportId!)}>
@@ -529,7 +552,7 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
           Phiên: <b>{formatTokens(usage?.totalTokens ?? 0)}</b> token
         </span>
         <span className="chat-token-breakdown">
-          in {formatTokens(usage?.promptTokens ?? 0)} · out {formatTokens(usage?.outputTokens ?? 0)} · nghĩ{" "}
+          vào {formatTokens(usage?.promptTokens ?? 0)} · ra {formatTokens(usage?.outputTokens ?? 0)} · nghĩ{" "}
           {formatTokens(usage?.thoughtTokens ?? 0)}
         </span>
       </button>

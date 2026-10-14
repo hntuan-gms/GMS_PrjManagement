@@ -10,7 +10,9 @@ import type {
   ChatMessage,
   JiraUser,
   PlanResponse,
+  ActivityEntry,
   ProgressOverview,
+  ProgressScope,
   ProgressReport,
   ReportPoint,
   ResourceAbsence,
@@ -25,6 +27,7 @@ import type {
   TaskUpdateResponse,
   TaskTransition,
   TaskAttachments,
+  TaskComment,
   Timesheet,
   WorklogEntry,
 } from "./types";
@@ -122,6 +125,9 @@ export const api = {
 
   listTasks: () => request<Task[]>("/tasks"),
   listUsers: () => request<JiraUser[]>("/users"),
+  listPriorities: () => request<string[]>("/priorities"),
+  listLabels: () => request<string[]>("/labels"),
+  listIssueTypes: () => request<Array<{ name: string; subtask: boolean }>>("/issue-types"),
   createTask: (input: TaskCreateInput) =>
     request<Task>("/tasks", { method: "POST", body: JSON.stringify(input) }),
   createTasksBulk: (input: BulkTaskCreateInput) =>
@@ -135,6 +141,17 @@ export const api = {
     request<void>(`/tasks/${encodeURIComponent(id)}`, { method: "DELETE" }),
   getTaskTransitions: (id: string) =>
     request<TaskTransition[]>(`/tasks/${encodeURIComponent(id)}/transitions`),
+  listComments: (id: string) => request<TaskComment[]>(`/tasks/${encodeURIComponent(id)}/comments`),
+  addComment: (id: string, text: string) =>
+    request<TaskComment>(`/tasks/${encodeURIComponent(id)}/comments`, { method: "POST", body: JSON.stringify({ text }) }),
+  updateComment: (id: string, commentId: string, text: string) =>
+    request<TaskComment>(`/tasks/${encodeURIComponent(id)}/comments/${encodeURIComponent(commentId)}`, {
+      method: "PUT",
+      body: JSON.stringify({ text }),
+    }),
+  deleteComment: (id: string, commentId: string) =>
+    request<void>(`/tasks/${encodeURIComponent(id)}/comments/${encodeURIComponent(commentId)}`, { method: "DELETE" }),
+  listActivity: (id: string) => request<ActivityEntry[]>(`/tasks/${encodeURIComponent(id)}/activity`),
   getTaskAttachments: (id: string) =>
     request<TaskAttachments>(`/tasks/${encodeURIComponent(id)}/attachments`),
   // The file goes up as the raw body, its name in a header — see routes/api.ts.
@@ -170,8 +187,15 @@ export const api = {
     }),
   // Progress report. The overview is free (computed, no model call); generating a
   // report waits on Gemini and can take several seconds.
-  getProgress: (asOf: string) =>
-    request<ProgressOverview>(`/progress?asOf=${encodeURIComponent(asOf)}`),
+  getProgress: (asOf: string, scope?: ProgressScope) => {
+    const q = new URLSearchParams({ asOf });
+    if (scope?.assignee) q.set("assignee", scope.assignee);
+    if (scope?.epic) q.set("epic", scope.epic);
+    if (scope?.types && scope.types.length > 0) q.set("type", scope.types.join(","));
+    return request<ProgressOverview>(`/progress?${q}`);
+  },
+  deleteProgressReport: (id: string) =>
+    request<{ history: ReportPoint[] }>(`/progress/reports/${encodeURIComponent(id)}`, { method: "DELETE" }),
   generateProgressReport: (asOf: string) =>
     request<{ report: ProgressReport; warnings: string[]; history: ReportPoint[] }>("/progress/reports", {
       method: "POST",

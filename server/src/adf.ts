@@ -80,3 +80,82 @@ export function adfToText(doc: unknown): string {
   const paragraphs = (root.content ?? []).map(walk);
   return paragraphs.join("\n\n").trim();
 }
+
+/* -------------------------------------------------------------------------- */
+/* Comments — the same plain text, plus @mentions                             */
+/* -------------------------------------------------------------------------- */
+
+/** `@[Display Name](accountId)` — how a mention travels in the text this API speaks. */
+const MENTION_PATTERN = /@\[([^\]]+)\]\(([^)\s]+)\)/g;
+
+function lineToCommentInline(line: string): AdfNode[] {
+  const nodes: AdfNode[] = [];
+  let lastIndex = 0;
+  for (const match of line.matchAll(MENTION_PATTERN)) {
+    const start = match.index ?? 0;
+    if (start > lastIndex) nodes.push(...lineToInline(line.slice(lastIndex, start)));
+    nodes.push({ type: "mention", attrs: { id: match[2], text: `@${match[1]}` } } as AdfNode);
+    lastIndex = start + match[0].length;
+  }
+  if (lastIndex < line.length) nodes.push(...lineToInline(line.slice(lastIndex)));
+  return nodes;
+}
+
+/** Like textToAdf, but `@[Name](accountId)` becomes a real mention node, which is what makes Jira notify them. */
+export function commentToAdf(text: string): { type: "doc"; version: 1; content: AdfNode[] } {
+  const paragraphs = text.split(/\n{2,}/).map((block) => {
+    const lines = block.split("\n");
+    const inline: AdfNode[] = [];
+    lines.forEach((line, i) => {
+      if (line) inline.push(...lineToCommentInline(line));
+      if (i < lines.length - 1) inline.push({ type: "hardBreak" });
+    });
+    return { type: "paragraph", content: inline } as AdfNode;
+  });
+  return { type: "doc", version: 1, content: paragraphs.length > 0 ? paragraphs : [{ type: "paragraph", content: [] }] };
+}
+
+/** Nodes whose children run together on one line; every other container stacks its children. */
+const INLINE_CONTAINERS = new Set(["paragraph", "heading", "codeBlock"]);
+
+/**
+ * A comment as plain text, mentions kept as `@[Name](accountId)`. Comments are
+ * often written in Jira's own editor, so lists, quotes and the like are flattened
+ * to lines rather than dropped — lossy, but nothing someone wrote goes missing.
+ */
+export function adfToCommentText(doc: unknown): string {
+  if (!doc || typeof doc !== "object") return "";
+  const walk = (node: AdfNode): string => {
+    const attrs = (node as { attrs?: Record<string, unknown> }).attrs ?? {};
+    switch (node.type) {
+      case "text": {
+        const text = node.text ?? "";
+        // A link's target would vanish on the next edit (the comment is rewritten
+        // from this text), so keep it beside the words when it isn't the words.
+        const href = node.marks?.find((m) => m.type === "link")?.attrs?.href;
+        return typeof href === "string" && href !== text ? `${text} (${href})` : text;
+      }
+      case "hardBreak":
+        return "\n";
+      case "mention": {
+        const id = String(attrs.id ?? "");
+        // Brackets in a display name would break the token the client parses back out.
+        const name = String(attrs.text ?? "").replace(/^@/, "").replace(/[\[\]()]/g, "");
+        return id ? `@[${name || "?"}](${id})` : name;
+      }
+      case "emoji":
+        return String(attrs.text ?? "");
+      case "inlineCard":
+        return String(attrs.url ?? "");
+      case "listItem":
+        return "• " + (node.content ?? []).map(walk).join("\n");
+      default: {
+        const kids = node.content ?? [];
+        // Top-level blocks are paragraphs: keep the blank line textToAdf split them on.
+        const glue = INLINE_CONTAINERS.has(node.type) ? "" : node.type === "doc" ? "\n\n" : "\n";
+        return kids.map(walk).join(glue);
+      }
+    }
+  };
+  return walk(doc as AdfNode).trim();
+}

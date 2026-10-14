@@ -1,6 +1,9 @@
+import { buildEpicIndex, filterTaskIds, type TaskFilter } from "../taskFilter";
+import FilterBar from "./FilterBar";
 import { Gantt, ViewMode, type Task as GanttTaskT } from "gantt-task-react";
 import "gantt-task-react/dist/index.css";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { csvName, downloadCsv, type CsvCell } from "../csv";
 import { computeCriticalPath } from "../criticalPath";
 import { orderByWbs, resolveRanges, toGanttTasks } from "../ganttMapping";
 import type { DependencyType, Task } from "../types";
@@ -38,6 +41,11 @@ const DAYS_PER_COLUMN: Record<ViewMode, number> = {
   [ViewMode.Week]: 7,
   [ViewMode.Month]: 30.4,
 } as Record<ViewMode, number>;
+const VIEW_MODE_LABEL: Partial<Record<ViewMode, string>> = {
+  [ViewMode.Day]: "Ngày",
+  [ViewMode.Week]: "Tuần",
+  [ViewMode.Month]: "Tháng",
+};
 // A column narrower than this can't fit its own label; wider than this, zooming
 // in stops helping and just wastes horizontal space. Both modes' comfort bands
 // overlap on purpose — see pickScale — so the handoff between them has room to
@@ -86,7 +94,7 @@ function pickScale(pixelsPerDay: number): { viewMode: ViewMode; columnWidth: num
 
 /* ---------------------------------------------------------------- columns */
 
-type ColumnId = "type" | "status" | "priority" | "assignee" | "start" | "due" | "duration" | "estimate" | "spent" | "pct";
+type ColumnId = "type" | "status" | "priority" | "labels" | "assignee" | "start" | "due" | "duration" | "estimate" | "spent" | "pct";
 
 interface ColumnDef {
   id: ColumnId;
@@ -114,6 +122,13 @@ const COLUMNS: ColumnDef[] = [
     cell: (t) => <span className={`wbs-status is-${t.statusCategory}`}>{t.statusName}</span>,
   },
   { id: "priority", label: "Ưu tiên", long: "Độ ưu tiên", width: 76, cell: (t) => t.priority ?? "—" },
+  {
+    id: "labels",
+    label: "Nhãn",
+    long: "Nhãn (labels)",
+    width: 110,
+    cell: (t) => (t.labels.length > 0 ? <span title={t.labels.join(", ")}>{t.labels.join(", ")}</span> : "—"),
+  },
   { id: "assignee", label: "Phụ trách", long: "Người phụ trách", width: 110, cell: (t) => t.assigneeName ?? "—" },
   { id: "start", label: "Bắt đầu", long: "Ngày bắt đầu", width: 76, cell: (t, r) => dm(r?.start ?? t.startDate) },
   { id: "due", label: "Kết thúc", long: "Ngày kết thúc", width: 76, cell: (t, r) => dm(r?.end ?? t.dueDate) },
@@ -143,6 +158,34 @@ const COLUMNS: ColumnDef[] = [
   },
   { id: "pct", label: "%", long: "% hoàn thành", width: 48, align: "right", cell: (t) => `${t.percentComplete}%` },
 ];
+
+/** The same value a column shows, as plain data for a spreadsheet. */
+function csvValue(id: ColumnId, t: Task, r: { start: string; end: string } | undefined): CsvCell {
+  switch (id) {
+    case "type":
+      return t.issueType;
+    case "status":
+      return t.statusName;
+    case "priority":
+      return t.priority;
+    case "labels":
+      return t.labels.join(", ");
+    case "assignee":
+      return t.assigneeName;
+    case "start":
+      return r?.start ?? t.startDate;
+    case "due":
+      return r?.end ?? t.dueDate;
+    case "duration":
+      return r ? spanDays(r) : t.durationDays;
+    case "estimate":
+      return t.estimateHours;
+    case "spent":
+      return t.spentHours;
+    case "pct":
+      return t.percentComplete;
+  }
+}
 
 // What the table always showed, so nobody's Gantt changes until they ask.
 const DEFAULT_COLUMNS: ColumnId[] = ["assignee", "pct"];
@@ -184,6 +227,13 @@ interface Props {
     visibleOrder: string[]
   ) => void;
   selectedIds: Set<string>;
+  /** Shared with the resource tab, so it lives in ProjectWorkspace. */
+  filter: TaskFilter;
+  onFilterChange: (f: TaskFilter) => void;
+  myAccountId: string;
+  today: string;
+  /** Replaces the whole collapsed set — empty expands everything. */
+  onSetCollapsed: (ids: string[]) => void;
   onOpenEdit: (task: Task) => void;
   onScheduleChange: (id: string, startDate: string, durationDays: number) => void;
   onProgressChange: (id: string, percentComplete: number) => void;
@@ -214,6 +264,11 @@ export default function GanttView({
   selectedId,
   onSelect,
   selectedIds,
+  filter,
+  onFilterChange,
+  myAccountId,
+  today,
+  onSetCollapsed,
   onOpenEdit,
   onScheduleChange,
   onProgressChange,
@@ -226,7 +281,19 @@ export default function GanttView({
   const { viewMode, columnWidth } = pickScale(pixelsPerDay);
   const [showCriticalPath, setShowCriticalPath] = useState(false);
   const [showDependencies, setShowDependencies] = useState(true);
-  const [query, setQuery] = useState("");
+  const query = filter.text;
+  const setQuery = (text: string) => onFilterChange({ ...filter, text });
+  // gantt-task-react scrolls to `viewDate` whenever its value changes. The
+  // nonce nudges the millisecond so pressing "Hôm nay" again — after scrolling
+  // away — is a different value and scrolls again; a day column can't tell.
+  const [viewDate, setViewDate] = useState<Date | undefined>();
+  const viewNonce = useRef(0);
+  const scrollToDate = useCallback((iso: string) => {
+    const [y, m, d] = iso.split("-").map(Number);
+    setViewDate(new Date(y, m - 1, d, 0, 0, 0, viewNonce.current++ % 900));
+  }, []);
+  const [unscheduledOpen, setUnscheduledOpen] = useState(false);
+  const unscheduledRef = useRef<HTMLDivElement>(null);
   // Per browser, not per project: which columns someone reads is a habit, not a property of the plan.
   const [columnIds, setColumnIds] = useState<ColumnId[]>(loadColumns);
   const [chooserOpen, setChooserOpen] = useState(false);
@@ -387,17 +454,11 @@ export default function GanttView({
   // rolled-up bar must span all of its children, not just the ones matching the query.
   const ranges = useMemo(() => resolveRanges(ordered), [ordered]);
 
-  const needle = query.trim().toLowerCase();
-  const matchIds = useMemo(() => {
-    if (!needle) return null;
-    const ids = new Set<string>();
-    for (const t of tasks) {
-      if (t.id.toLowerCase().includes(needle) || t.summary.toLowerCase().includes(needle)) {
-        ids.add(t.id);
-      }
-    }
-    return ids;
-  }, [tasks, needle]);
+  const epicOf = useMemo(() => buildEpicIndex(tasks), [tasks]);
+  const matchIds = useMemo(
+    () => filterTaskIds(tasks, filter, { today, epicOf }),
+    [tasks, filter, today, epicOf]
+  );
 
   /**
    * Matches plus their ancestors. Keeping matches alone would strip a matched
@@ -441,6 +502,88 @@ export default function GanttView({
   // render this exact same filtered list, in this exact order, or the two panes
   // drift out of row alignment (a task without a resolvable date can't get a bar).
   const rows = useMemo(() => visible.filter((v) => ranges.has(v.task.id)), [visible, ranges]);
+
+  // Tasks with no resolvable date have no bar, so without this list a task whose
+  // start was cleared simply vanishes from the Gantt with nowhere to find it.
+  const unscheduled = useMemo(
+    () => ordered.map((o) => o.task).filter((t) => !ranges.has(t.id) && (!matchIds || matchIds.has(t.id))),
+    [ordered, ranges, matchIds]
+  );
+  const parentIds = useMemo(
+    () => [...new Set(tasks.map((t) => t.wbsParentId).filter((id): id is string => !!id))],
+    [tasks]
+  );
+
+  // Typing a search jumps the chart to the first hit. Keyed on the text itself:
+  // matchIds is a new Set after every edit, and re-scrolling after a drag while a
+  // search is open would yank the chart away from what was just moved.
+  const lastScrolledText = useRef("");
+  useEffect(() => {
+    const text = filter.text.trim();
+    if (text === lastScrolledText.current) return;
+    lastScrolledText.current = text;
+    if (!text || !matchIds || matchIds.size === 0) return;
+    let first: string | null = null;
+    for (const id of matchIds) {
+      const r = ranges.get(id);
+      if (r && (!first || r.start < first)) first = r.start;
+    }
+    if (first) scrollToDate(first);
+  }, [filter.text, matchIds, ranges, scrollToDate]);
+
+  useEffect(() => {
+    if (!unscheduledOpen) return;
+    function onDown(e: MouseEvent) {
+      if (unscheduledRef.current && !unscheduledRef.current.contains(e.target as Node)) setUnscheduledOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setUnscheduledOpen(false);
+    }
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [unscheduledOpen]);
+
+  function exportCsv() {
+    const list = ordered.filter((o) => !searchKeep || searchKeep.has(o.task.id));
+    const header = ["Mã", "Tên công việc", ...columns.map((c) => c.long)];
+    const body = list.map((o) => [
+      o.task.id,
+      o.task.summary,
+      ...columns.map((c) => csvValue(c.id, o.task, ranges.get(o.task.id))),
+    ]);
+    downloadCsv(csvName(`wbs-${tasks[0]?.id.split("-")[0] ?? "du-an"}`, today), [header, ...body]);
+  }
+
+  // Replaces the library's English hover card ("Duration: 3 day(s)").
+  const TooltipContent = useMemo(
+    () =>
+      function GanttTooltip({ task }: { task: GanttTaskT; fontSize: string; fontFamily: string }) {
+        const full = byId.get(task.id);
+        const days = Math.max(1, Math.round((task.end.getTime() - task.start.getTime()) / DAY_MS));
+        const fmt = (d: Date) => `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
+        // `end` is exclusive (see toGanttTasks), so the last day is one before it.
+        const last = new Date(task.end.getTime() - DAY_MS);
+        return (
+          <div className="gantt-tip">
+            <b>{task.id}</b> · {task.name}
+            <div>
+              {fmt(task.start)} – {fmt(last)} ({days} ngày)
+            </div>
+            {full && (
+              <div>
+                {full.statusName} · {full.assigneeName ?? "Chưa gán"}
+              </div>
+            )}
+            <div>Hoàn thành: {Math.round(task.progress)}%</div>
+          </div>
+        );
+      },
+    [byId]
+  );
   const ganttTasks = useMemo(() => {
     const base = toGanttTasks(rows, ranges);
     if (!showCriticalPath) return base;
@@ -552,7 +695,7 @@ export default function GanttView({
             className={viewMode === vm ? "active" : ""}
             onClick={() => setPixelsPerDay(DEFAULT_PIXELS_PER_DAY[vm])}
           >
-            {vm}
+            {VIEW_MODE_LABEL[vm]}
           </button>
         ))}
         <span className="gantt-toolbar-divider" aria-hidden="true" />
@@ -569,6 +712,52 @@ export default function GanttView({
           title="Ẩn/hiện mũi tên phụ thuộc giữa các task (FS/SS/FF/SF). Kéo từ đầu hoặc đuôi một task sang task khác để tạo phụ thuộc mới."
         >
           Phụ thuộc
+        </button>
+        <button onClick={() => scrollToDate(today)} title="Cuộn biểu đồ tới ngày hôm nay">
+          Hôm nay
+        </button>
+        <button
+          onClick={() => onSetCollapsed(parentIds)}
+          disabled={parentIds.length === 0}
+          title="Thu gọn mọi nhóm công việc"
+        >
+          Thu gọn
+        </button>
+        <button onClick={() => onSetCollapsed([])} disabled={collapsed.size === 0} title="Mở rộng mọi nhóm công việc">
+          Mở rộng
+        </button>
+        {unscheduled.length > 0 && (
+          <div className="col-chooser" ref={unscheduledRef}>
+            <button
+              className={unscheduledOpen ? "active" : ""}
+              onClick={() => setUnscheduledOpen((v) => !v)}
+              aria-expanded={unscheduledOpen}
+              title="Công việc chưa có ngày bắt đầu nên không có thanh trên biểu đồ"
+            >
+              Chưa có ngày ({unscheduled.length}) ▾
+            </button>
+            {unscheduledOpen && (
+              <div className="col-chooser-menu tf-menu" role="menu">
+                <div className="col-chooser-title">Bấm để đặt ngày</div>
+                {unscheduled.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    className="unscheduled-item"
+                    onClick={() => {
+                      setUnscheduledOpen(false);
+                      onOpenEdit(t);
+                    }}
+                  >
+                    <b>{t.id}</b> {t.summary}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        <button onClick={exportCsv} title="Tải bảng WBS (các cột đang hiện, theo bộ lọc) về file CSV mở được bằng Excel">
+          Xuất CSV
         </button>
         <div className="col-chooser" ref={chooserRef}>
           <button
@@ -624,7 +813,6 @@ export default function GanttView({
             placeholder="Tìm theo mã hoặc tên công việc..."
             aria-label="Tìm công việc"
           />
-          {matchIds && <span className="gantt-search-count">{matchIds.size} kết quả</span>}
           {query && (
             <button
               className="gantt-search-clear"
@@ -640,11 +828,19 @@ export default function GanttView({
           ResizeObserver attaches to bodyRef once on mount, so unmounting this node
           when a query matches nothing would leave the observer bound to a detached
           element and freeze bodySize once the query was cleared again. */}
+      <FilterBar
+        tasks={tasks}
+        filter={filter}
+        onChange={onFilterChange}
+        myAccountId={myAccountId}
+        matched={matchIds?.size}
+        total={tasks.length}
+      />
       <div className="gantt-body" ref={bodyRef}>
         {rows.length === 0 ? (
           <div className="empty-state">
             {matchIds?.size === 0
-              ? `Không tìm thấy công việc nào khớp với "${query.trim()}".`
+              ? "Không có công việc nào khớp bộ lọc."
               : "Chưa có task nào có ngày bắt đầu để hiển thị trên Gantt. Hãy tạo task hoặc đặt ngày bắt đầu cho task hiện có."}
           </div>
         ) : (
@@ -653,6 +849,8 @@ export default function GanttView({
               <Gantt
                 tasks={ganttTasks}
                 viewMode={viewMode}
+                viewDate={viewDate}
+                TooltipContent={TooltipContent}
                 locale="vi"
                 rowHeight={ROW_HEIGHT}
                 headerHeight={HEADER_HEIGHT}

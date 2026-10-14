@@ -153,14 +153,53 @@ function plannedFraction(t: Task, asOf: string): number {
   return Math.min(1, (diffDays(start, asOf) + 1) / span);
 }
 
-export function computeProgress(tasks: Task[], asOf: string): ProgressMetrics {
+/**
+ * Narrows the report to part of the project. Every field is optional and they
+ * combine with AND; an empty scope is the whole project.
+ */
+export interface ProgressScope {
+  /** An account id, or "none" for work nobody owns. */
+  assignee?: string;
+  /** An Epic key: that Epic's phase only. */
+  epic?: string;
+  /** Issue type names. */
+  types?: string[];
+}
+
+export function isScoped(scope: ProgressScope | undefined): scope is ProgressScope {
+  return !!scope && (!!scope.assignee || !!scope.epic || (scope.types?.length ?? 0) > 0);
+}
+
+export function computeProgress(tasks: Task[], asOf: string, scope?: ProgressScope): ProgressMetrics {
   const byId = new Map(tasks.map((t) => [t.id, t]));
   const parentIds = new Set(tasks.map((t) => t.wbsParentId).filter((p): p is string => !!p));
+
+  const epicOf = (t: Task): Task | null => {
+    let cursor = t.wbsParentId ? byId.get(t.wbsParentId) : undefined;
+    for (let guard = 0; cursor && guard < 20; guard++) {
+      if (!isAssignableType(cursor.issueType)) return cursor;
+      cursor = cursor.wbsParentId ? byId.get(cursor.wbsParentId) : undefined;
+    }
+    return null;
+  };
 
   // Work items = leaves that are real work. A Story with sub-tasks is excluded
   // (its sub-tasks are counted instead — counting both double-counts the same
   // effort), and every Epic is excluded (a container, see isAssignableType).
-  const workItems = tasks.filter((t) => isAssignableType(t.issueType) && !parentIds.has(t.id));
+  //
+  // The scope narrows AFTER that: deciding who is a leaf from an already-filtered
+  // list would turn a Story whose sub-tasks belong to someone else into a leaf of
+  // its own, and count it as work for the wrong person. The critical path below
+  // is likewise computed over the whole graph — a task is critical because of
+  // what it blocks, not because of who is being looked at.
+  const workItems = tasks.filter((t) => {
+    if (!isAssignableType(t.issueType) || parentIds.has(t.id)) return false;
+    if (!isScoped(scope)) return true;
+    if (scope.assignee && (t.assigneeAccountId ?? "none") !== scope.assignee) return false;
+    if (scope.epic && epicOf(t)?.id !== scope.epic) return false;
+    if (scope.types && scope.types.length > 0 && !scope.types.includes(t.issueType)) return false;
+    return true;
+  });
   const scheduled = workItems.filter((t) => t.startDate);
   const open = workItems.filter((t) => t.statusCategory !== "done");
 
@@ -238,15 +277,6 @@ export function computeProgress(tasks: Task[], asOf: string): ProgressMetrics {
   const daysRemaining = plannedEnd ? Math.max(0, diffDays(asOf, plannedEnd)) : null;
 
   // --- phases: grouped by nearest Epic ancestor ------------------------------
-  const epicOf = (t: Task): Task | null => {
-    let cursor = t.wbsParentId ? byId.get(t.wbsParentId) : undefined;
-    for (let guard = 0; cursor && guard < 20; guard++) {
-      if (!isAssignableType(cursor.issueType)) return cursor;
-      cursor = cursor.wbsParentId ? byId.get(cursor.wbsParentId) : undefined;
-    }
-    return null;
-  };
-
   const phaseGroups = new Map<string, { epic: Task | null; items: Task[] }>();
   for (const t of workItems) {
     const epic = epicOf(t);
