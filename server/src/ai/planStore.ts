@@ -126,12 +126,19 @@ export async function saveProposal(
   });
 }
 
-/** Scoped by cloudId so a run id from another site can't be read or applied here. */
-export async function getRun(cloudId: string, runId: string): Promise<PlanRun | null> {
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Scoped by cloudId and project, so a run id from another site or another project
+ * can't be read, edited, discarded or applied here. A malformed id is "not found"
+ * rather than a Postgres cast error (a 500).
+ */
+export async function getRun(cloudId: string, projectKey: string, runId: string): Promise<PlanRun | null> {
+  if (!UUID.test(runId)) return null;
   const { rows } = await db().query<RunRow>(
     `SELECT id, project_key, status, brief, model, input_tokens, output_tokens, error, created_at, applied_at
-       FROM ai_plan_run WHERE cloud_id = $1 AND id = $2`,
-    [cloudId, runId]
+       FROM ai_plan_run WHERE cloud_id = $1 AND project_key = $2 AND id = $3`,
+    [cloudId, projectKey, runId]
   );
   return rows.length > 0 ? toRun(rows[0]) : null;
 }

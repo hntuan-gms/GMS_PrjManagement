@@ -157,11 +157,10 @@ function activityFor(req: express.Request): TaskActivity {
 
 /** Keys outside the session's project are refused up front, as the board routes do. */
 function ownKey(req: express.Request): string {
-  const id = req.params.id;
-  if (!id.startsWith(`${req.auth!.session.projectKey}-`)) {
-    throw badRequest(`${id} không thuộc dự án ${req.auth!.session.projectKey}.`);
-  }
-  return id;
+  // The exact `KEY-<digits>` shape, not just the prefix: the key is spliced into a
+  // Jira URL path, and "PRJ-1/../../x" starts with "PRJ-" too.
+  req.auth!.taskService!.assertOwnKey(req.params.id);
+  return req.params.id;
 }
 
 apiRouter.get("/tasks/:id/comments", requireProject, async (req, res, next) => {

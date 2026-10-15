@@ -596,6 +596,14 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
         </div>
       )}
 
+      {/* The strip keeps its height whether or not anything is selected. It used to
+          appear only on selection, which pushed the table down by its own height
+          between the two clicks of a double-click, so the second landed on another row. */}
+      {selectedIds.size === 0 && view === "gantt" && (
+        <div className="selection-idle">
+          Nhấp để chọn · Ctrl/Cmd để chọn thêm · Shift để chọn cả dải · nhấp đúp để mở chi tiết
+        </div>
+      )}
       {selectedIds.size > 0 && view === "gantt" && (
         <div className="selection-bar">
           <span>

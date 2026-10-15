@@ -924,6 +924,11 @@ button.danger:hover:not(:disabled) {
   margin: 0 4px;
 }
 
+.gantt-today-note {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
 .critical-toggle.active {
   background: #dc2626 !important;
   border-color: #b91c1c !important;
@@ -2358,15 +2363,29 @@ button.danger:hover:not(:disabled) {
 }
 
 /* --- Bulk selection ------------------------------------------------------ */
-.selection-bar {
+.selection-bar,
+.selection-idle {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 8px 20px;
-  background: var(--color-primary-light);
-  border-bottom: 1px solid var(--color-primary-border);
+  box-sizing: border-box;
+  /* One fixed height for both states: if the bar changed the page's height when it
+     appeared, a double-click on a row would land its second click on another row. */
+  height: 48px;
+  flex-shrink: 0;
+  padding: 0 20px;
   font-size: 13px;
   color: var(--color-text-primary);
+}
+.selection-bar {
+  background: var(--color-primary-light);
+  border-bottom: 1px solid var(--color-primary-border);
+  overflow: hidden;
+}
+.selection-idle {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  border-bottom: 1px solid var(--color-border);
 }
 .selection-hint {
   margin-left: auto;

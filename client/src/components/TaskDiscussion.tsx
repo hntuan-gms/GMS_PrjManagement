@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api } from "../api";
+import { fromTokens, labelFor, toTokens, type Mentions } from "../mentions";
 import type { ActivityEntry, JiraUser, TaskComment } from "../types";
 
 /**
@@ -23,7 +24,6 @@ const TOKEN = /@\[([^\]]+)\]\(([^)\s]+)\)|\bhttps?:\/\/[^\s<>"')\]]+/g;
 
 const clean = (name: string) => name.replace(/[[\]()]/g, "");
 const fold = (s: string) => s.normalize("NFD").replace(/\p{Diacritic}/gu, "").replace(/đ/g, "d").toLowerCase();
-const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** Comment text with mentions highlighted and links clickable — React elements, never innerHTML: the text is anyone's. */
 function renderText(text: string, myAccountId: string): ReactNode[] {
@@ -52,26 +52,6 @@ function renderText(text: string, myAccountId: string): ReactNode[] {
     last = at + m[0].length;
   }
   if (last < text.length) out.push(text.slice(last));
-  return out;
-}
-
-/** Tokens → the `@Name` a person types, remembering who each name stands for. */
-function fromTokens(text: string): { display: string; mentions: Map<string, string> } {
-  const mentions = new Map<string, string>();
-  const display = text.replace(/@\[([^\]]+)\]\(([^)\s]+)\)/g, (_all, name: string, id: string) => {
-    mentions.set(name, id);
-    return `@${name}`;
-  });
-  return { display, mentions };
-}
-
-/** `@Name` → `@[Name](accountId)` for every person picked from the list and still present. */
-function toTokens(text: string, mentions: Map<string, string>): string {
-  let out = text;
-  // Longest names first, so "@Anh Tuấn" is not eaten by "@Anh".
-  for (const [name, id] of [...mentions].sort((a, b) => b[0].length - a[0].length)) {
-    out = out.replace(new RegExp(`@${escapeRe(name)}(?=$|[\\s.,;:!?)])`, "g"), `@[${name}](${id})`);
-  }
   return out;
 }
 
@@ -125,7 +105,7 @@ function CommentBox({
 }) {
   const [seeded] = useState(() => fromTokens(initialText));
   const [text, setText] = useState(seeded.display);
-  const [mentions, setMentions] = useState<Map<string, string>>(seeded.mentions);
+  const [mentions, setMentions] = useState<Mentions>(seeded.mentions);
   const [suggest, setSuggest] = useState<{ query: string; start: number } | null>(null);
   const [active, setActive] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -147,11 +127,12 @@ function CommentBox({
     if (!suggest) return;
     const caret = areaRef.current?.selectionStart ?? text.length;
     const name = clean(user.displayName);
-    const next = `${text.slice(0, suggest.start)}@${name} ${text.slice(caret)}`;
+    const label = labelFor(mentions, name, user.accountId);
+    const next = `${text.slice(0, suggest.start)}@${label} ${text.slice(caret)}`;
     setText(next);
-    setMentions((prev) => new Map(prev).set(name, user.accountId));
+    setMentions((prev) => new Map(prev).set(label, { accountId: user.accountId, name }));
     setSuggest(null);
-    const pos = suggest.start + name.length + 2;
+    const pos = suggest.start + label.length + 2;
     requestAnimationFrame(() => {
       areaRef.current?.focus();
       areaRef.current?.setSelectionRange(pos, pos);

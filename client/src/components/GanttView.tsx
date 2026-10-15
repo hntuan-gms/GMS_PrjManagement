@@ -2,7 +2,7 @@ import { buildEpicIndex, filterTaskIds, type TaskFilter } from "../taskFilter";
 import FilterBar from "./FilterBar";
 import { Gantt, ViewMode, type Task as GanttTaskT } from "gantt-task-react";
 import "gantt-task-react/dist/index.css";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { csvName, downloadCsv, type CsvCell } from "../csv";
 import { computeCriticalPath } from "../criticalPath";
 import { orderByWbs, resolveRanges, toGanttTasks } from "../ganttMapping";
@@ -29,6 +29,28 @@ const MIN_CHART_WIDTH = 240;
 // chart rows; reserve room for it so the fixed-height layout below doesn't clip it.
 const SCROLLBAR_RESERVE = 24;
 const DAY_MS = 86_400_000;
+
+/**
+ * The WBS table and header are handed to gantt-task-react as component *types*, and
+ * React unmounts and rebuilds a subtree whenever that type changes. Defining them
+ * inline in GanttView's render gave them a new identity on every render, so the
+ * first click of a double-click (which selects, which re-renders) replaced the row
+ * under the pointer and the browser never saw a dblclick. These two have a fixed
+ * identity instead; the current closures reach them through context, which
+ * re-renders them in place on every change.
+ */
+const WbsListContext = createContext<{ renderHeader: () => ReactNode; renderTable: () => ReactNode } | null>(null);
+const useWbsList = () => {
+  const ctx = useContext(WbsListContext);
+  if (!ctx) throw new Error("WBS list rendered outside GanttView");
+  return ctx;
+};
+function WbsListHeader() {
+  return <>{useWbsList().renderHeader()}</>;
+}
+function WbsListTable() {
+  return <>{useWbsList().renderTable()}</>;
+}
 
 // How many calendar days one column spans in each mode (gantt-task-react's own
 // seedDates — Month is a real calendar month, ~30.4 days on average). This is
@@ -514,6 +536,34 @@ export default function GanttView({
     [tasks]
   );
 
+  // The chart only spans its own bars, so "today" can lie outside it, where a
+  // scroll to it would silently do nothing. Go to the nearest end and say why.
+  const [todayNote, setTodayNote] = useState<string | null>(null);
+  useEffect(() => {
+    if (!todayNote) return;
+    const timer = window.setTimeout(() => setTodayNote(null), 5000);
+    return () => window.clearTimeout(timer);
+  }, [todayNote]);
+  function goToToday() {
+    let first: string | null = null;
+    let last: string | null = null;
+    for (const row of rows) {
+      const r = ranges.get(row.task.id)!;
+      if (!first || r.start < first) first = r.start;
+      if (!last || r.end > last) last = r.end;
+    }
+    if (first && today < first) {
+      setTodayNote("Hôm nay nằm trước thanh đầu tiên của biểu đồ.");
+      scrollToDate(first);
+    } else if (last && today > last) {
+      setTodayNote("Hôm nay nằm sau thanh cuối cùng của biểu đồ.");
+      scrollToDate(last);
+    } else {
+      setTodayNote(null);
+      scrollToDate(today);
+    }
+  }
+
   // Typing a search jumps the chart to the first hit. Keyed on the text itself:
   // matchIds is a new Set after every edit, and re-scrolling after a drag while a
   // search is open would yank the chart away from what was just moved.
@@ -548,7 +598,9 @@ export default function GanttView({
   }, [unscheduledOpen]);
 
   function exportCsv() {
-    const list = ordered.filter((o) => !searchKeep || searchKeep.has(o.task.id));
+    // Matches only: the table keeps their ancestors for indentation, but a sheet of
+    // "what the filter found" should not list parents the filter excluded.
+    const list = ordered.filter((o) => !matchIds || matchIds.has(o.task.id));
     const header = ["Mã", "Tên công việc", ...columns.map((c) => c.long)];
     const body = list.map((o) => [
       o.task.id,
@@ -611,7 +663,7 @@ export default function GanttView({
   // roots stay at their shrink-to-fit content width, so dragging the divider moves
   // only the handle (which follows `listWidth` directly) while the WBS pane itself
   // never actually resizes.
-  const TaskListHeader = () => (
+  const renderHeader = () => (
     <div className="wbs-header" style={{ height: HEADER_HEIGHT, width: listWidth }}>
       <div className="wbs-col wbs-col-key">Mã</div>
       <div className="wbs-col wbs-col-name">Tên công việc</div>
@@ -628,7 +680,7 @@ export default function GanttView({
     </div>
   );
 
-  const TaskListTable = () => (
+  const renderTable = () => (
     <div style={{ width: listWidth }}>
       {rows.map(({ task, depth, hasChildren }) => (
         <div
@@ -713,9 +765,14 @@ export default function GanttView({
         >
           Phụ thuộc
         </button>
-        <button onClick={() => scrollToDate(today)} title="Cuộn biểu đồ tới ngày hôm nay">
+        <button onClick={goToToday} title="Cuộn biểu đồ tới ngày hôm nay">
           Hôm nay
         </button>
+        {todayNote && (
+          <span className="gantt-today-note" role="status">
+            {todayNote}
+          </span>
+        )}
         <button
           onClick={() => onSetCollapsed(parentIds)}
           disabled={parentIds.length === 0}
@@ -846,6 +903,7 @@ export default function GanttView({
         ) : (
           bodySize.width > 0 && (
             <>
+              <WbsListContext.Provider value={{ renderHeader, renderTable }}>
               <Gantt
                 tasks={ganttTasks}
                 viewMode={viewMode}
@@ -862,8 +920,8 @@ export default function GanttView({
                 // drag jump cleanly from one day-cell to the next, matching how the rest
                 // of the app (and a real Gantt chart) treats a day as the smallest unit.
                 timeStep={DAY_MS}
-                TaskListHeader={TaskListHeader}
-                TaskListTable={TaskListTable}
+                TaskListHeader={WbsListHeader}
+                TaskListTable={WbsListTable}
                 onSelect={(t: GanttTaskT) =>
                   onSelect(t.id, { toggle: false, range: false }, rows.map((r) => r.task.id))
                 }
@@ -886,6 +944,7 @@ export default function GanttView({
                 }}
                 onProgressChange={(t: GanttTaskT) => onProgressChange(t.id, Math.round(t.progress))}
               />
+              </WbsListContext.Provider>
               <div
                 className={`gantt-divider ${dragging ? "dragging" : ""}`}
                 style={{ left: listWidth }}

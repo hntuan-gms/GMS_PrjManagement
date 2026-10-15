@@ -30,8 +30,8 @@ function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-async function loadPlan(cloudId: string, runId: string, startDate: string) {
-  const run = await plans.getRun(cloudId, runId);
+async function loadPlan(cloudId: string, projectKey: string, runId: string, startDate: string) {
+  const run = await plans.getRun(cloudId, projectKey, runId);
   if (!run) return null;
   const stored = await plans.listItems(runId);
   // Dates are derived on every read rather than stored: an edit to one task's
@@ -85,7 +85,7 @@ aiRouter.post("/plans", requireProject, async (req, res, next) => {
     });
 
     await plans.saveProposal(runId, result.items, result);
-    const loaded = await loadPlan(session.cloudId, runId, startDate);
+    const loaded = await loadPlan(session.cloudId, session.projectKey!, runId, startDate);
     res.status(201).json({ ...loaded, warnings: result.warnings });
   } catch (err) {
     // The run row is kept, not deleted: a failed run with its error is the only
@@ -333,7 +333,8 @@ aiRouter.get("/usage", requireProject, async (req, res, next) => {
 aiRouter.get("/plans/:runId", requireProject, async (req, res, next) => {
   try {
     const startDate = String(req.query.startDate ?? "") || todayIso();
-    const loaded = await loadPlan(req.auth!.session.cloudId, req.params.runId, startDate);
+    const { cloudId, projectKey } = req.auth!.session;
+    const loaded = await loadPlan(cloudId, projectKey!, req.params.runId, startDate);
     if (!loaded) {
       next(notFound("Không tìm thấy kế hoạch này."));
       return;
@@ -347,7 +348,8 @@ aiRouter.get("/plans/:runId", requireProject, async (req, res, next) => {
 aiRouter.patch("/plans/:runId/items/:itemId", requireProject, async (req, res, next) => {
   try {
     const { runId, itemId } = req.params;
-    const run = await plans.getRun(req.auth!.session.cloudId, runId);
+    const { cloudId, projectKey } = req.auth!.session;
+    const run = await plans.getRun(cloudId, projectKey!, runId);
     if (!run) {
       next(notFound("Không tìm thấy kế hoạch này."));
       return;
@@ -367,16 +369,29 @@ aiRouter.patch("/plans/:runId/items/:itemId", requireProject, async (req, res, n
           ? (body.assigneeAccountId as string | null)
           : undefined,
     });
-    res.json(await loadPlan(req.auth!.session.cloudId, runId, todayIso()));
+    res.json(await loadPlan(cloudId, projectKey!, runId, todayIso()));
   } catch (err) {
     next(err);
   }
 });
 
+// Editing, deleting and discarding all begin with the same scoped lookup as the
+// PATCH above: the item and run ids in the URL are only trusted once the run is
+// known to belong to this site and project.
 aiRouter.delete("/plans/:runId/items/:itemId", requireProject, async (req, res, next) => {
   try {
-    await plans.deleteItem(req.params.runId, req.params.itemId);
-    res.json(await loadPlan(req.auth!.session.cloudId, req.params.runId, todayIso()));
+    const { cloudId, projectKey } = req.auth!.session;
+    const run = await plans.getRun(cloudId, projectKey!, req.params.runId);
+    if (!run) {
+      next(notFound("Không tìm thấy kế hoạch này."));
+      return;
+    }
+    if (run.status !== "proposed") {
+      next(badRequest("Chỉ sửa được kế hoạch đang chờ duyệt."));
+      return;
+    }
+    await plans.deleteItem(run.id, req.params.itemId);
+    res.json(await loadPlan(cloudId, projectKey!, run.id, todayIso()));
   } catch (err) {
     next(err);
   }
@@ -384,7 +399,13 @@ aiRouter.delete("/plans/:runId/items/:itemId", requireProject, async (req, res, 
 
 aiRouter.post("/plans/:runId/discard", requireProject, async (req, res, next) => {
   try {
-    await plans.setRunStatus(req.params.runId, "discarded");
+    const { cloudId, projectKey } = req.auth!.session;
+    const run = await plans.getRun(cloudId, projectKey!, req.params.runId);
+    if (!run) {
+      next(notFound("Không tìm thấy kế hoạch này."));
+      return;
+    }
+    await plans.setRunStatus(run.id, "discarded");
     res.status(204).end();
   } catch (err) {
     next(err);
@@ -404,7 +425,7 @@ aiRouter.post("/plans/:runId/apply", requireProject, async (req, res, next) => {
   const { session, taskService } = req.auth!;
   try {
     const startDate = String((req.body as { startDate?: unknown })?.startDate ?? "").trim() || todayIso();
-    const loaded = await loadPlan(session.cloudId, req.params.runId, startDate);
+    const loaded = await loadPlan(session.cloudId, session.projectKey!, req.params.runId, startDate);
     if (!loaded) {
       next(notFound("Không tìm thấy kế hoạch này."));
       return;

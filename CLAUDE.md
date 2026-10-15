@@ -44,7 +44,15 @@ Dev goes through the Vite proxy so it is same-origin with the API and the sessio
 
 The server **exits at boot** if `ATLASSIAN_CLIENT_ID`, `ATLASSIAN_CLIENT_SECRET`, `SESSION_ENCRYPTION_KEYS`, `APP_BASE_URL` or `DATABASE_URL` is missing, or if the database is unreachable. That is deliberate: with mock mode gone there is no degraded path worth starting.
 
-There is **no test framework and no test script** in either package. The one test pass on record (`docs/test-reports/2026-09-11-jira-two-way-sync.md`) predates OAuth. API calls now require a session cookie, so `curl` needs a cookie jar (`-b`/`-c`) or you verify in the browser.
+**Tests** come in two layers, and neither touches Jira or the database:
+
+```bash
+cd server && npm test && npm run typecheck:test   # node:test via tsx: computeProgress (scope, baseline), ADF/mentions
+cd client && npm test && npm run typecheck:test   # csv, taskFilter, mentions (the comment box's @Name round trip)
+cd e2e && npm install && npm test                 # real client in Chrome vs a stand-in API; needs Chrome, ports 4000+5173 free
+```
+
+Unit tests live in `test/` beside `src/` (outside both `tsc` build roots, hence the separate `tsconfig.test.json` typecheck) and cover only pure logic — put new pure logic in a React-free module so it can be tested (that is why `client/src/mentions.ts` is not inside `TaskDiscussion.tsx`). `e2e/mock-api.mts` answers `/api/*` from memory and runs the **real** `computeProgress`; it proves the client's behaviour, never Jira's. Each `*.e2e.mjs` is a standalone script that `run.mjs` runs in turn. Use a real `dblclick()` rather than `dispatchEvent("dblclick")` — the latter skipped the first click's re-render and hid a bug for a whole phase. Anything that writes to Jira (comments, mentions, priority/labels, worklogs, the AI plan's Apply) is still only verified by hand: `docs/test-reports/2026-10-15-jira-that-checklist.md`. The one earlier test pass (`docs/test-reports/2026-09-11-jira-two-way-sync.md`) predates OAuth. API calls require a session cookie, so `curl` needs a cookie jar (`-b`/`-c`) or you verify in the browser.
 
 `client/.npmrc` sets `legacy-peer-deps=true` — `gantt-task-react` declares an old React peer range. The Dockerfile must copy it before `npm ci` or the image build fails; that's why [Dockerfile:8](Dockerfile#L8) lists it explicitly.
 
@@ -191,7 +199,7 @@ The chat's `sprint_status` tool returns the same computed facts.
 
 ### Task detail: comments and history
 
-`server/src/taskActivity.ts` is the comments and changelog of one issue, Jira's own and with no table of ours (the usual reason: a copy would disagree with the one people read in Jira). Routes sit under `/api/tasks/:id/comments` and `/activity`, and refuse a key outside the session's project (`ownKey`). A mention travels as `@[Name](accountId)` in the text this API speaks: `adf.commentToAdf` turns it into a real ADF `mention` node, which is what makes **Jira** notify the person — no notification code exists here and none should be added. `adfToCommentText` flattens whatever was written in Jira's own editor (lists, quotes) to lines rather than dropping it. Only the author can edit or delete a comment (`mine`; Jira enforces it again). The changelog is paged (capped at five pages) and drops Rank/worklog noise; the client (`TaskDiscussion.tsx`) translates the common field names.
+`server/src/taskActivity.ts` is the comments and changelog of one issue, Jira's own and with no table of ours (the usual reason: a copy would disagree with the one people read in Jira). Routes sit under `/api/tasks/:id/comments` and `/activity`, and refuse a key that is not exactly `<PROJECT>-<digits>` (`ownKey` → `TaskService.assertOwnKey`; a bare prefix test would let `PRJ-1/../x` through into a Jira URL). A mention travels as `@[Name](accountId)` in the text this API speaks: `adf.commentToAdf` turns it into a real ADF `mention` node, which is what makes **Jira** notify the person — no notification code exists here and none should be added. `adfToCommentText` flattens whatever was written in Jira's own editor (lists, quotes) to lines rather than dropping it. Only the author can edit or delete a comment (`mine`; Jira enforces it again). The changelog is paged (capped at five pages) and drops Rank/worklog noise; the client (`TaskDiscussion.tsx`) translates the common field names.
 
 ### Filters, bulk actions and CSV
 
@@ -237,7 +245,7 @@ The split is the design: **the model decides semantics, this code decides every 
 
 `responseSchema` (constrained decoding) guarantees the *shape*, never the meaning, so `normalize()` re-checks everything that only fails later: an issue type this project doesn't have (validated against `listIssueTypes()`, not the hard-coded `IssueTypeName` union), an assignee who isn't on the team, an edge pointing at a `tempId` the model never emitted, and cycles — each corrected and surfaced to the reviewer as a warning rather than silently accepted or thrown away.
 
-**Nothing reaches Jira without a human.** Generation writes to `ai_plan_run`/`ai_plan_item` only; `POST /api/ai/plans/:id/apply` is the sole route that creates issues, in two passes — parents before children (Jira rejects an unborn parent key), then dependencies once every `tempId` resolves to a real issue key. Partial failure is reported per row, not rolled back: issues already created in Jira cannot be unmade, so the run stays `proposed` and the applied rows carry `applied_issue_key`.
+**Nothing reaches Jira without a human.** Generation writes to `ai_plan_run`/`ai_plan_item` only; `POST /api/ai/plans/:id/apply` is the sole route that creates issues, in two passes — parents before children (Jira rejects an unborn parent key), then dependencies once every `tempId` resolves to a real issue key. Partial failure is reported per row, not rolled back: issues already created in Jira cannot be unmade, so the run stays `proposed` and the applied rows carry `applied_issue_key`. **Every plan route starts from `planStore.getRun(cloudId, projectKey, runId)`**, which scopes by site *and* project and treats a malformed id as not-found: edit, delete-item and discard once trusted the URL's ids after (or without) a cloud-only lookup, so another project's run could be discarded or have its items changed.
 
 The model is `GEMINI_MODEL` (default in `planner.ts`), and it must be set as a **repo variable** in the deploy workflow — `env_vars_update_strategy: overwrite` means a value set on the Cloud Run service by hand is wiped on the next deploy. `GET /api/ai/models` lists what the key can actually call, filtered to `generateContent`: model names are added and retired continuously, so a list written into source or docs is wrong within weeks, and a stale `GEMINI_MODEL` surfaces as a 404 on the next plan rather than at deploy time.
 
@@ -267,6 +275,8 @@ A native (non-passive) `wheel` listener on `.gantt-body` — not React's `onWhee
 `api.ts` sends `credentials: "include"` on every call and routes 401s through a module-level handler so any failed call pulls the app back to the login screen. A 403 must **not** log out: Jira returns 401 for a dead token and 403 for a permission problem, and `server/src/errors.ts` preserves that distinction across the whole API.
 
 Selection is file-manager style: click selects one, Ctrl/Cmd toggles, Shift extends a range measured in the **visible row order** (post-filter, post-collapse) — see `GanttView`'s `onSelect`. A global `keydown` in `ProjectWorkspace` handles Escape: closes the edit modal if one is open, otherwise clears the selection, never both at once.
+
+**Two things keep a double-click on a WBS row working, and each alone is not enough.** (1) `GanttView` hands `gantt-task-react` `WbsListHeader`/`WbsListTable`, module-level components with a fixed identity that pull the current render closures from `WbsListContext`. Defined inline in render they were a new component *type* every time, so the first click (select → re-render) rebuilt the row under the pointer and no `dblclick` fired. (2) The strip above the table (`.selection-bar` when something is selected, `.selection-idle` with a hint when not) has one fixed height: when it used to appear only on selection it pushed the table down ~45px between the two clicks and the second landed on another row. Don't make either conditional or inline again; `e2e/wbs-dblclick.e2e.mjs` checks both.
 
 `server/src/adf.ts`'s `textToAdf()` wraps a bare `http(s)` URL in ADF's `link` mark rather than leaving it as plain text — a link pasted in from an import file (an image URL, a shared doc) needs to land in Jira as something clickable. The link lives on the issue's `description` field only, never in the overlay/database.
 

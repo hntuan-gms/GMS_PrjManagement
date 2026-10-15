@@ -3,3 +3,4 @@ dist/
 .env
 server/data/
 *.log
+e2e/shots/

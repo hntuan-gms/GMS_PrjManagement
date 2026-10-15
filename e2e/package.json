@@ -1,0 +1,16 @@
+{
+  "name": "gms-e2e",
+  "private": true,
+  "type": "module",
+  "description": "Browser tests: the real client in Chrome against a stand-in API (no Jira, no database, no login).",
+  "scripts": {
+    "test": "node run.mjs"
+  },
+  "dependencies": {
+    "express": "^4.22.3",
+    "playwright-core": "^1.64.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.16.2"
+  }
+}
