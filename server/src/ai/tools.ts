@@ -1,4 +1,5 @@
 import { Type, type FunctionDeclaration } from "@google/genai";
+import type { TaskActivity } from "../taskActivity.js";
 import type { TimesheetService } from "../timesheet.js";
 import type { BoardService } from "../agile/boardService.js";
 import { sprintFacts, velocityStats } from "../agile/sprintMetrics.js";
@@ -8,7 +9,9 @@ import * as resources from "../resourceStore.js";
 import { computeProgress, HEALTH_LABEL } from "../progress.js";
 import { EDIT_TOOLS, editLabelFor, runEditTool } from "./editTools.js";
 import { createProgressReport } from "./progressReport.js";
+import { DUPLICATE_THRESHOLD, findSimilarTasks } from "./similarity.js";
 import { addDays, ISO_DATE, resolvePerson, str } from "./toolUtils.js";
+import type { ViewFilterEvent } from "./viewFilter.js";
 import { latestReport } from "./reportStore.js";
 import {
   buildWorkload,
@@ -70,6 +73,8 @@ export interface ToolContext {
   team: JiraUser[];
   /** Jira worklogs: the Timesheet tab's reads and writes. */
   timesheet: TimesheetService;
+  /** Comments and change history of an issue — the task detail's reads and writes. */
+  activity: TaskActivity;
 }
 
 export interface ToolOutcome {
@@ -77,6 +82,8 @@ export interface ToolOutcome {
   plan?: { runId: string; itemCount: number; warnings: string[] };
   /** A progress report was generated and stored; the chat shows a link to it. */
   report?: { id: string; headline: string; health: string };
+  /** A screen filter for the browser to apply (set_view_filter). Touches no data. */
+  filter?: ViewFilterEvent;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -152,6 +159,11 @@ const CREATE_TASK: FunctionDeclaration = {
         description:
           "Pick the person with the fewest schedule conflicts in this task's date range and assign them. " +
           "Ignored for an Epic.",
+      },
+      allowDuplicate: {
+        type: Type.BOOLEAN,
+        description:
+          "Set true ONLY after the user has seen the possibleDuplicates this tool returned and still wants the new task.",
       },
     },
     required: ["summary", "issueType"],
@@ -384,6 +396,30 @@ async function runCreateTask(args: Record<string, unknown>, ctx: ToolContext): P
   const issueType = str(args, "issueType");
   if (!summary || !issueType) {
     return { response: { error: "Thiếu tên công việc hoặc loại issue." } };
+  }
+
+  // Looks for the same work already in the project before adding it again. Enforced
+  // here, not only asked of the model: an unconfirmed call creates nothing. Under a
+  // parent only its own children are compared — "Kiểm thử" under every Story is normal.
+  if (args.allowDuplicate !== true) {
+    const parentKey = str(args, "parentKey").toUpperCase();
+    const pool = parentKey ? ctx.tasks.filter((t) => (t.wbsParentId ?? "").toUpperCase() === parentKey) : ctx.tasks;
+    const dupes = findSimilarTasks({ summary, description: str(args, "description") || null }, pool, {
+      min: DUPLICATE_THRESHOLD,
+      limit: 3,
+    });
+    if (dupes.length > 0) {
+      return {
+        response: {
+          needsConfirmation: true,
+          created: false,
+          possibleDuplicates: dupes,
+          instruction:
+            "Chưa tạo gì. Cho người dùng thấy các việc có vẻ trùng (mã, tên, trạng thái, người làm) và hỏi họ có vẫn muốn tạo mới không; " +
+            "chỉ gọi lại với allowDuplicate=true khi họ đồng ý. Nếu việc cũ đã đúng ý họ thì không tạo.",
+        },
+      };
+    }
   }
 
   const startDate = ISO_DATE.test(str(args, "startDate")) ? str(args, "startDate") : ctx.today;

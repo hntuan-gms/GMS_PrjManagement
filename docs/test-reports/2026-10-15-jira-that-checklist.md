@@ -72,3 +72,32 @@ Mỗi dòng: thao tác trong app → điều phải thấy **trong Jira** (khôn
 
 ## Lỗi tìm được
 _(chưa có)_
+
+---
+
+## B. Trợ lý AI giai đoạn 1 — thử trên bản deploy (cần Gemini + Jira thật)
+
+Test tự động đã chứng minh phần code của ta; mục này chứng minh **model chọn đúng tool** và các ghi lên Jira. Chỉ nhân viên dùng được (route AI chỉ cho nhân viên). Dùng dự án thử.
+
+| # | Nói với trợ lý | Phải thấy | Kết quả |
+|---|---|---|---|
+| B1 | "đặt GPM-5 ưu tiên cao" / "khẩn cấp" | Priority trong Jira đổi đúng tên của site | |
+| B2 | "thêm nhãn urgent cho GPM-5", rồi "bỏ nhãn urgent" | Labels trong Jira đúng; các nhãn cũ còn nguyên | |
+| B3 | "liệt kê việc có nhãn backend ưu tiên cao trong sprint hiện tại" | Danh sách khớp Jira (cần JIRA_AGILE) | |
+| B4 | "nhắn @<tên một đồng nghiệp> trong GPM-5: cần chốt trước thứ Sáu" | Bình luận có mention thật; **người đó nhận email từ Jira** | |
+| B5 | Như B4 nhưng nêu tên mơ hồ (hai người cùng tên) | Trợ lý **hỏi lại**, không đăng gì | |
+| B6 | "GPM-5 có ai bình luận gì không?" / "ai đổi trạng thái GPM-5 lúc nào?" | Khớp tab Comments / History trong Jira | |
+| B7 | "GPM-5 đang vướng gì?" | Trả lời dẫn các *signals* (quá hạn, đang chờ…) và mã issue; **không có con số nào không có trong dữ liệu** | |
+| B8 | "lọc việc quá hạn của <tên>" | Gantt lọc đúng; thanh lọc hiện số; có ghi chú dưới câu trả lời; "bỏ lọc" gỡ được | |
+| B9 | "lọc việc của mình" / "chỉ hiện bug đang mở" trên tab Bảng | Bảng lọc đúng | |
+| B10 | "tạo task Thiết kế màn hình đăng nhập" khi đã có việc gần giống | Trợ lý **không tạo**, nêu việc giống và hỏi; đồng ý mới tạo | |
+| B11 | "đã có việc nào giống … chưa?" | Danh sách có điểm và từ chung | |
+| B12 | "viết mô tả và tiêu chí nghiệm thu cho GPM-7" (việc chưa có mô tả, rồi việc đã có) | Chưa có: ghi thẳng; đã có: đưa bản nháp, chưa ghi đè | |
+| B13 | Hỏi một câu rồi bấm **Tạo lại**; rồi **Sửa** câu hỏi | Chỉ còn một câu trả lời; chi phí/token tăng (vẫn tính lượt cũ) | |
+| B14 | Sau khi trợ lý tạo một việc, thử Tạo lại / Sửa | Không có nút; hover giải thích lý do | |
+| B15 | Đặt `GEMINI_PRICING` (repo variable) rồi deploy; mở panel thống kê | Có chi phí bằng tiền cho phiên và cả dự án; đối chiếu một lượt với bảng giá Google | |
+| B16 | Không đặt giá cho mô hình đang dùng | Chỉ token, có dòng giải thích — không có "0" | |
+| B17 | Dán ảnh chụp lỗi + "tạo bug từ ảnh này" | Trợ lý đọc được ảnh, tạo bug; bong bóng hiện tên tệp | |
+| B18 | Đính kèm PDF và một file .md | Trợ lý đọc nội dung | |
+| B19 | Gửi tệp .exe hoặc >5 MB | Bị từ chối ngay, nói rõ lý do | |
+| B20 | Sau lượt có tệp, hỏi "như ảnh lúc nãy thì sao" | Trợ lý nói không còn thấy ảnh (không bịa nội dung) | |

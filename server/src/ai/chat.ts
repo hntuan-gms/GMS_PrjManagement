@@ -1,8 +1,9 @@
-import { FunctionCallingConfigMode, GoogleGenAI, type Content } from "@google/genai";
+import { FunctionCallingConfigMode, GoogleGenAI, type Content, type Part } from "@google/genai";
 import { computeProgress, progressHeadline } from "../progress.js";
 import type { JiraUser, Task } from "../types.js";
 import { activeModel } from "./planner.js";
 import { TOOLS, labelFor, runTool, type ToolContext } from "./tools.js";
+import type { ViewFilterSpec } from "./viewFilter.js";
 
 /**
  * The project assistant: a streaming chat that can answer questions about the
@@ -42,6 +43,8 @@ export type ChatEvent =
   | { type: "mutated" }
   /** A progress report was generated; the bubble renders a card linking to it. */
   | { type: "report"; reportId: string; headline: string; health: string }
+  /** set_view_filter: the browser applies this to the Gantt / heatmap / board. spec null = clear. */
+  | { type: "filter"; spec: ViewFilterSpec | null; view: "gantt" | "board" | null; summary: string }
   | { type: "usage"; usage: ChatUsage }
   | { type: "error"; message: string };
 
@@ -145,6 +148,21 @@ function systemPrompt(projectKey: string, tasks: Task[], today: string, team: Ji
     "- Nối phụ thuộc / liên kết / 'A xong mới làm B' → add_dependency (predecessor = việc làm trước). Gỡ → remove_dependency.",
     "  Lịch các việc phía sau tự dời theo; hãy báo lại việc nào đã bị dời (alsoMoved).",
     "- Cần chi tiết một việc (mô tả, việc con, phụ thuộc, trạng thái được phép) → get_task. Tìm việc theo chữ/người/trạng thái → search_tasks.",
+    "- Đổi độ ưu tiên / nhãn → update_task (priority; addLabels, removeLabels — không cần đọc nhãn cũ). Tìm việc theo nhãn, ưu tiên, sprint → search_tasks.",
+    "- Đọc bình luận → get_task_comments. Viết bình luận / nhắn ai đó trong một việc → add_comment; tên người cần báo đưa vào mentions (Jira sẽ gửi thông báo cho họ).",
+    "  Chỉ đăng bình luận khi người dùng bảo; tên mơ hồ thì hỏi lại, không đoán.",
+    "- Lịch sử thay đổi (ai đổi gì, khi nào) → get_task_history.",
+    '- "Việc này đang vướng gì?", "tóm tắt GPM-5", "vì sao chưa xong" → task_digest. Nó đã đo sẵn các signals (quá hạn, đang chờ việc nào, bao ngày không có thay đổi);',
+    "  hãy diễn giải chúng và dẫn mã issue, KHÔNG tự thêm con số. Có thể gợi ý việc nên làm tiếp, nói rõ đó là gợi ý.",
+    '- Người dùng muốn XEM / LỌC trên màn hình ("lọc việc quá hạn của Minh", "chỉ hiện bug đang mở") → set_view_filter: chỉ đổi cách hiển thị, không ghi Jira.',
+    "  Hỏi đáp thông thường thì dùng search_tasks, đừng đổi màn hình của họ.",
+    "- Viết / soạn mô tả và tiêu chí nghiệm thu cho một việc: gọi get_task lấy tên, việc cha, các việc cùng cha, mô tả hiện có, rồi viết theo mẫu (văn bản thường):",
+    "  Mục tiêu: … / Phạm vi: … / Tiêu chí nghiệm thu: rồi các dòng '- '. Chỉ dựa trên thông tin có sẵn; chỗ chưa rõ ghi 'Cần làm rõ: …', không bịa.",
+    "  Việc CHƯA có mô tả → ghi thẳng bằng update_task.description. Đã có mô tả → đưa bản nháp cho người dùng xem, chỉ ghi đè khi họ đồng ý.",
+    "- Trùng lặp: create_task tự kiểm tra; nếu trả needsConfirmation + possibleDuplicates thì cho người dùng xem các việc giống và hỏi, KHÔNG tự tạo.",
+    "  Hỏi 'đã có việc nào giống … chưa' → find_similar_tasks (score là độ trùng từ khoá, chỉ là gợi ý).",
+    "- Người dùng có thể đính kèm ảnh, PDF hoặc văn bản vào tin nhắn: đọc nội dung tệp và làm theo yêu cầu đi kèm (ví dụ tạo việc / bug từ ảnh lỗi, tóm tắt tài liệu).",
+    "  Tệp chỉ có trong lượt đó; các lượt sau bạn không còn thấy. Chỗ nào trong tệp không đọc rõ thì nói rõ, đừng đoán.",
     "- Chốt / lưu / đặt lại baseline → set_baseline.",
     "- Xoá việc → delete_task: gọi lần đầu KHÔNG có confirmed để xem sẽ xoá gì, hỏi người dùng; chỉ khi họ đồng ý rõ ràng mới gọi lại với confirmed=true.",
     "- Đưa việc vào sprint / về backlog → move_to_sprint. Đặt story point → set_estimate.",
@@ -199,9 +217,14 @@ export async function* streamChat(
   userMessage: string,
   today: string,
   deps: ChatDeps,
-  /** Fires when the client stops or disconnects: no more model calls, no more tools. */
-  signal?: AbortSignal
+  options: {
+    /** Fires when the client stops or disconnects: no more model calls, no more tools. */
+    signal?: AbortSignal;
+    /** Files attached to THIS message (ai/attachments.ts) — sent with it and not kept. */
+    files?: Part[];
+  } = {}
 ): AsyncGenerator<ChatEvent> {
+  const { signal } = options;
   const model = activeModel();
   const ai = client();
 
@@ -215,7 +238,7 @@ export async function* streamChat(
 
   const contents: Content[] = [
     ...history.map((turn) => ({ role: turn.role, parts: [{ text: turn.content }] })),
-    { role: "user", parts: [{ text: userMessage }] },
+    { role: "user", parts: [{ text: userMessage }, ...(options.files ?? [])] },
   ];
 
   const config = {
@@ -324,6 +347,7 @@ export async function* streamChat(
               warnings: outcome.plan.warnings,
             };
           }
+          if (outcome.filter) yield { type: "filter", ...outcome.filter };
           if (outcome.report) {
             yield {
               type: "report",

@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import { streamChat } from "../chatStream";
+import { ACCEPT, addFiles, encodeFile, formatSize, mimeOf } from "../chatAttachments";
+import { streamChat, type RetryMode } from "../chatStream";
+import type { ViewFilterSpec } from "../viewFilter";
 import ChatMarkdown from "./ChatMarkdown";
-import type { ChatMessage, ChatSessionSummary, UsageStats } from "../types";
+import type { ChatMessage, ChatSessionSummary, Money, UsageStats } from "../types";
 
 interface Props {
   /**
@@ -21,6 +23,8 @@ interface Props {
    * a task appeared or changed owner.
    */
   onProjectChanged: () => void;
+  /** set_view_filter: filter the Gantt / heatmap / board the way the user could by hand. spec null clears. */
+  onApplyFilter: (ev: { spec: ViewFilterSpec | null; view: "gantt" | "board" | null }) => void;
   /** This project's issue keys — those in a reply become buttons that open the task. */
   knownKeys?: Set<string>;
   onOpenIssue?: (key: string) => void;
@@ -34,6 +38,10 @@ interface LiveTurn {
   planRunId: string | null;
   planItemCount: number;
   report: { id: string; headline: string; health: string } | null;
+  /** What set_view_filter applied this turn, in words. */
+  filterNote: string | null;
+  /** A tool wrote to Jira — this turn can no longer be regenerated. */
+  mutated: boolean;
 }
 
 const EMPTY_LIVE: LiveTurn = {
@@ -43,6 +51,8 @@ const EMPTY_LIVE: LiveTurn = {
   planRunId: null,
   planItemCount: 0,
   report: null,
+  filterNote: null,
+  mutated: false,
 };
 
 const HEALTH_TEXT: Record<string, string> = {
@@ -50,6 +60,8 @@ const HEALTH_TEXT: Record<string, string> = {
   at_risk: "Có rủi ro",
   off_track: "Chậm tiến độ",
 };
+const RETRY_BLOCKED = "Lượt này đã thay đổi dữ liệu trên Jira; làm lại sẽ ghi lần nữa. Hãy nhắn yêu cầu mới.";
+const RETRY_BLOCKED_FILES = "Câu hỏi này kèm tệp đính kèm mà hệ thống không lưu nội dung tệp, nên không làm lại được. Hãy gửi lại kèm tệp.";
 /** The old single key, shared by everyone on the machine — cleared, never read. */
 const LEGACY_SESSION_KEY = "gms.chat.sessionId";
 
@@ -82,6 +94,19 @@ function relativeTime(iso: string): string {
   return new Date(iso).toLocaleDateString("vi-VN");
 }
 
+/** "≈ $0.0123", or "≥ …" when some tokens had no price. Small amounts keep their significant digits. */
+function formatMoney(m: Money): string {
+  const digits = m.amount === 0 ? 0 : m.amount < 0.01 ? 5 : m.amount < 1 ? 4 : m.amount < 100 ? 2 : 0;
+  let text: string;
+  try {
+    text = new Intl.NumberFormat("vi-VN", { style: "currency", currency: m.currency, minimumFractionDigits: 0, maximumFractionDigits: digits }).format(m.amount);
+  } catch {
+    // An unknown currency code from the server's config: show the plain number.
+    text = `${m.amount.toFixed(digits)} ${m.currency}`;
+  }
+  return `${m.partial ? "≥" : "≈"} ${text}`;
+}
+
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
@@ -99,7 +124,7 @@ function formatTokens(n: number): string {
  * real answer can be ten seconds away when the model is thinking or building a
  * plan, and an empty panel for that long reads as a hang.
  */
-export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProjectChanged, knownKeys, onOpenIssue }: Props) {
+export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProjectChanged, onApplyFilter, knownKeys, onOpenIssue }: Props) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(() => readStored(storageKey));
@@ -111,6 +136,13 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
   const [usage, setUsage] = useState<UsageStats | null>(null);
   const [projectUsage, setProjectUsage] = useState<UsageStats | null>(null);
   const [model, setModel] = useState<string | null>(null);
+  const [pricing, setPricing] = useState<{ configured: boolean; currency: string } | null>(null);
+  // Files chosen for the NEXT message. Read and sent with it; nothing is uploaded before that.
+  const [pending, setPending] = useState<File[]>([]);
+  const [attachError, setAttachError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  // The last question being rewritten, in place.
+  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showUsage, setShowUsage] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -142,6 +174,7 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
       .then((res) => {
         setProjectUsage(res.project);
         setModel(res.model);
+        setPricing(res.pricing);
         if (res.session) setUsage(res.session);
       })
       .catch(() => {});
@@ -214,22 +247,56 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
 
   async function send() {
     const text = input.trim();
-    if (!text || live) return;
+    if ((!text && pending.length === 0) || live) return;
+    const files = pending;
     setInput("");
+    setPending([]);
+    setAttachError(null);
+    await ask(text, undefined, files);
+  }
+
+  function attach(incoming: File[]) {
+    const { files, error } = addFiles(pending, incoming);
+    setPending(files);
+    setAttachError(error);
+  }
+
+  /**
+   * One turn. `retry` re-asks: "regenerate" answers the last question again,
+   * "replace" swaps it for `text` — the old answer (and question) leave the screen
+   * at once and come back if the server refuses (409: that answer wrote to Jira).
+   */
+  async function ask(text: string, retry?: RetryMode, files: File[] = []) {
     setError(null);
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: `local-${Date.now()}`,
-        role: "user",
-        content: text,
-        thinking: null,
-        planRunId: null,
-        model: null,
-        usage: { promptTokens: 0, outputTokens: 0, thoughtTokens: 0, cachedTokens: 0 },
-        createdAt: new Date().toISOString(),
-      },
-    ]);
+    let encoded;
+    try {
+      encoded = await Promise.all(files.map(encodeFile));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Không đọc được tệp đính kèm.");
+      setPending(files);
+      return;
+    }
+    const before = messages;
+    const lastModel = messages.at(-1)?.role === "model";
+    const kept = retry === "regenerate" ? (lastModel ? messages.slice(0, -1) : messages) : retry === "replace" ? (lastModel ? messages.slice(0, -2) : messages.slice(0, -1)) : messages;
+    setMessages(
+      retry === "regenerate"
+        ? kept
+        : [
+            ...kept,
+            {
+              id: `local-${Date.now()}`,
+              role: "user",
+              content: text || (encoded.length > 0 ? "Hãy đọc tệp đính kèm và cho tôi biết nội dung chính." : ""),
+              attachments: encoded.map(({ name, mimeType, size }) => ({ name, mimeType, size })),
+              thinking: null,
+              planRunId: null,
+              model: null,
+              usage: { promptTokens: 0, outputTokens: 0, thoughtTokens: 0, cachedTokens: 0 },
+              createdAt: new Date().toISOString(),
+            },
+          ]
+    );
     setLive({ ...EMPTY_LIVE });
 
     const controller = new AbortController();
@@ -249,6 +316,8 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
           content: turn.text,
           thinking: turn.thinking || null,
           planRunId: turn.planRunId,
+          mutated: turn.mutated,
+          filterNote: turn.filterNote,
           reportId: turn.report?.id ?? null,
           reportHeadline: turn.report?.headline ?? null,
           reportHealth: turn.report?.health ?? null,
@@ -258,8 +327,10 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
         },
       ]);
 
+    let gotEvent = false;
     try {
-      for await (const event of streamChat(text, sessionId, controller.signal)) {
+      for await (const event of streamChat(text, sessionId, controller.signal, retry, encoded)) {
+        gotEvent = true;
         if (event.type === "session") {
           setSessionId(event.sessionId);
           writeStored(storageKey, event.sessionId);
@@ -272,7 +343,11 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
         } else if (event.type === "plan") {
           turn = { ...turn, planRunId: event.runId, planItemCount: event.itemCount, toolLabel: null };
         } else if (event.type === "mutated") {
+          turn = { ...turn, mutated: true };
           onProjectChanged();
+        } else if (event.type === "filter") {
+          turn = { ...turn, filterNote: event.summary, toolLabel: null };
+          onApplyFilter({ spec: event.spec, view: event.view });
         } else if (event.type === "report") {
           turn = {
             ...turn,
@@ -291,6 +366,8 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
     } catch (e) {
       if (!controller.signal.aborted) {
         setError(e instanceof Error ? e.message : "Trợ lý gặp lỗi.");
+        // Refused before anything streamed (e.g. 409): the old answer is still the truth.
+        if (retry && !gotEvent) setMessages(before);
       } else if (turn.text.trim() || turn.thinking) {
         commitTurn();
       }
@@ -299,6 +376,22 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
       abortRef.current = null;
       refreshSessions();
     }
+  }
+
+  const lastMessage = messages.at(-1);
+  const lastUserId = [...messages].reverse().find((m) => m.role === "user")?.id ?? null;
+  // The last answer wrote to Jira: asking again would write again, so neither "Tạo lại" nor "Sửa" is offered
+  // (the server refuses too — this only keeps the buttons honest).
+  const lastUser = [...messages].reverse().find((m) => m.role === "user");
+  // A question with files cannot be asked again either: the server did not keep them.
+  const hadFiles = (lastUser?.attachments?.length ?? 0) > 0;
+  const canRetry = !!sessionId && !hadFiles && !(lastMessage?.role === "model" && lastMessage.mutated);
+
+  function submitEdit() {
+    if (!editing || !editing.text.trim() || live) return;
+    const text = editing.text.trim();
+    setEditing(null);
+    void ask(text, "replace");
   }
 
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -417,14 +510,32 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
             <b>{formatTokens(usage?.cachedTokens ?? 0)}</b>
             <span>Lượt hỏi</span>
             <b>{usage?.messages ?? 0}</b>
+            {usage?.cost && (
+              <>
+                <span title="Theo bảng giá GEMINI_PRICING; token suy nghĩ tính như đầu ra">Chi phí</span>
+                <b>{formatMoney(usage.cost)}</b>
+              </>
+            )}
           </div>
           <div className="chat-usage-grid chat-usage-total">
             <span>Cả dự án</span>
             <b>{formatTokens(projectUsage?.totalTokens ?? 0)}</b>
             <span>Lượt hỏi</span>
             <b>{projectUsage?.messages ?? 0}</b>
+            {projectUsage?.cost && (
+              <>
+                <span>Chi phí</span>
+                <b>{formatMoney(projectUsage.cost)}</b>
+              </>
+            )}
           </div>
           {model && <p className="chat-usage-model">Mô hình: {model}</p>}
+          {pricing && !pricing.configured && (
+            <p className="chat-usage-model">Chưa có giá cho mô hình này (biến GEMINI_PRICING) nên chỉ hiện số token.</p>
+          )}
+          {usage?.cost?.partial && (
+            <p className="chat-usage-model">Một phần token thuộc mô hình chưa có giá, nên chi phí là mức tối thiểu.</p>
+          )}
         </div>
       )}
 
@@ -443,16 +554,83 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
         {messages.map((m) => (
           <div key={m.id} className={`chat-msg chat-msg-${m.role}`}>
             {m.thinking && <ThinkingBlock text={m.thinking} />}
-            {m.content && (
-              <div className="chat-bubble">
-                {/* The user's own words stay verbatim; the model's are rendered. */}
-                {m.role === "model" ? <ChatMarkdown text={m.content} knownKeys={knownKeys} onOpenIssue={onOpenIssue} /> : m.content}
+            {editing?.id === m.id ? (
+              <div className="chat-edit">
+                <textarea
+                  autoFocus
+                  rows={3}
+                  value={editing.text}
+                  onChange={(e) => setEditing({ id: m.id, text: e.target.value })}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") {
+                      // Leaves the edit only — not whatever Escape would close behind the dock.
+                      e.stopPropagation();
+                      setEditing(null);
+                    }
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      submitEdit();
+                    }
+                  }}
+                />
+                <div className="chat-edit-actions">
+                  <button onClick={() => setEditing(null)}>Huỷ</button>
+                  <button className="primary" onClick={submitEdit} disabled={!editing.text.trim()}>
+                    Gửi lại
+                  </button>
+                </div>
+              </div>
+            ) : (
+              m.content && (
+                <div className="chat-bubble">
+                  {/* The user's own words stay verbatim; the model's are rendered. */}
+                  {m.role === "model" ? <ChatMarkdown text={m.content} knownKeys={knownKeys} onOpenIssue={onOpenIssue} /> : m.content}
+                </div>
+              )
+            )}
+            {m.role === "user" && (m.attachments?.length ?? 0) > 0 && (
+              <ul className="chat-files">
+                {m.attachments!.map((a, i) => (
+                  <li key={i} title={`${a.mimeType} · ${formatSize(a.size)}`}>
+                    <span aria-hidden="true">📎</span> {a.name}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {m.role === "user" && m.id === lastUserId && !live && editing?.id !== m.id && (
+              <div className="chat-msg-actions">
+                {canRetry ? (
+                  <button className="chat-copy" onClick={() => setEditing({ id: m.id, text: m.content })} title="Sửa câu hỏi này rồi hỏi lại">
+                    Sửa
+                  </button>
+                ) : (
+                  <span className="chat-copy chat-copy-off" title={hadFiles ? RETRY_BLOCKED_FILES : RETRY_BLOCKED}>
+                    Không sửa được
+                  </span>
+                )}
               </div>
             )}
             {m.role === "model" && m.content && (
-              <button className="chat-copy" onClick={() => copyAnswer(m.id, m.content)} title="Chép câu trả lời vào bộ nhớ tạm">
-                {copiedId === m.id ? "Đã chép ✓" : "Sao chép"}
-              </button>
+              <div className="chat-msg-actions">
+                <button className="chat-copy" onClick={() => copyAnswer(m.id, m.content)} title="Chép câu trả lời vào bộ nhớ tạm">
+                  {copiedId === m.id ? "Đã chép ✓" : "Sao chép"}
+                </button>
+                {m.id === lastMessage?.id && !live && canRetry && (
+                  <button className="chat-copy" onClick={() => ask("", "regenerate")} title="Trả lời lại câu hỏi này">
+                    Tạo lại
+                  </button>
+                )}
+                {m.id === lastMessage?.id && !live && m.mutated && (
+                  <span className="chat-copy chat-copy-off" title={RETRY_BLOCKED}>
+                    Đã ghi lên Jira
+                  </span>
+                )}
+              </div>
+            )}
+            {m.filterNote && (
+              <div className="chat-filter-note">
+                <span aria-hidden="true">⏷</span> {m.filterNote}
+              </div>
             )}
             {m.reportId && (
               <button className="chat-plan-card chat-report-card" onClick={() => onOpenReport(m.reportId!)}>
@@ -490,6 +668,11 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
                 <ChatMarkdown text={live.text} knownKeys={knownKeys} onOpenIssue={onOpenIssue} />
               </div>
             )}
+            {live.filterNote && (
+              <div className="chat-filter-note">
+                <span aria-hidden="true">⏷</span> {live.filterNote}
+              </div>
+            )}
             {live.report && (
               <button className="chat-plan-card chat-report-card" onClick={() => onOpenReport(live.report!.id)}>
                 <span className="chat-plan-icon">▤</span>
@@ -521,12 +704,65 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
         {error && <div className="chat-error">{error}</div>}
       </div>
 
+      {(pending.length > 0 || attachError) && (
+        <div className="chat-pending">
+          {pending.length > 0 && (
+            <ul className="chat-files">
+              {pending.map((f, i) => (
+                <li key={`${f.name}-${i}`} title={`${mimeOf(f)} · ${formatSize(f.size)}`}>
+                  <span aria-hidden="true">📎</span> {f.name} <small>{formatSize(f.size)}</small>
+                  <button
+                    className="chat-file-remove"
+                    onClick={() => {
+                      setPending((prev) => prev.filter((_, j) => j !== i));
+                      setAttachError(null);
+                    }}
+                    aria-label={`Bỏ ${f.name}`}
+                  >
+                    ✕
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {attachError && <div className="chat-error">{attachError}</div>}
+        </div>
+      )}
       <div className="chat-input-row">
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          hidden
+          accept={ACCEPT}
+          onChange={(e) => {
+            attach([...(e.target.files ?? [])]);
+            // Without this, picking the same file again after removing it does nothing.
+            e.target.value = "";
+          }}
+        />
+        <button
+          className="chat-attach"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={!!live}
+          title="Đính kèm ảnh, PDF hoặc văn bản (tối đa 4 tệp, 5 MB mỗi tệp). Tệp chỉ dùng cho tin nhắn này và không được lưu."
+          aria-label="Đính kèm tệp"
+        >
+          📎
+        </button>
         <textarea
           rows={1}
           value={input}
           placeholder="Hỏi về dự án, hoặc yêu cầu lập kế hoạch..."
           onChange={(e) => setInput(e.target.value)}
+          onPaste={(e) => {
+            // A pasted screenshot arrives as a file on the clipboard; pasted text is left alone.
+            const pasted = [...e.clipboardData.files];
+            if (pasted.length > 0) {
+              e.preventDefault();
+              attach(pasted);
+            }
+          }}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
@@ -539,7 +775,7 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
             ■
           </button>
         ) : (
-          <button className="chat-send primary" onClick={send} disabled={!input.trim()}>
+          <button className="chat-send primary" onClick={send} disabled={!input.trim() && pending.length === 0}>
             ➤
           </button>
         )}
@@ -550,6 +786,7 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
       <button className="chat-token-strip" onClick={() => setShowUsage((v) => !v)}>
         <span>
           Phiên: <b>{formatTokens(usage?.totalTokens ?? 0)}</b> token
+          {usage?.cost && <b className="chat-token-cost"> · {formatMoney(usage.cost)}</b>}
         </span>
         <span className="chat-token-breakdown">
           vào {formatTokens(usage?.promptTokens ?? 0)} · ra {formatTokens(usage?.outputTokens ?? 0)} · nghĩ{" "}

@@ -1,5 +1,9 @@
 import { Router } from "express";
+import { TaskActivity } from "../taskActivity.js";
 import { TimesheetService } from "../timesheet.js";
+import { AttachmentError, CHAT_BODY_LIMIT, parseAttachments, type ParsedAttachments } from "../ai/attachments.js";
+import { priceFor, priceTable } from "../ai/pricing.js";
+import express from "express";
 import { requireProject } from "../auth/middleware.js";
 import { badRequest, notFound } from "../errors.js";
 import { activeModel, generatePlan, layoutSchedule, listAvailableModels, toPlannerResources } from "../ai/planner.js";
@@ -96,6 +100,38 @@ aiRouter.post("/plans", requireProject, async (req, res, next) => {
 });
 
 /**
+ * Whether the last exchange of a conversation may be answered again, and which
+ * stored messages that would replace. A turn that wrote to Jira may not: the
+ * write would happen twice (a duplicate task, a second comment, double the hours).
+ */
+export async function prepareRetry(
+  session: { cloudId: string; projectKey: string | null; accountId: string },
+  sessionId: string,
+  mode: "regenerate" | "replace"
+): Promise<{ question: string; supersede: string[] } | { status: number; error: string }> {
+  if (!(await chatStore.ownsSession(session.cloudId, session.projectKey!, session.accountId, sessionId))) {
+    return { status: 404, error: "Không tìm thấy cuộc trò chuyện này." };
+  }
+  const turn = await chatStore.latestTurn(sessionId);
+  if (!turn.user) return { status: 400, error: "Chưa có câu hỏi nào để làm lại." };
+  if (turn.user.hasAttachments) {
+    return {
+      status: 409,
+      error: "Câu hỏi này kèm tệp đính kèm, mà hệ thống không lưu nội dung tệp nên không tạo lại hay sửa được. Hãy gửi lại kèm tệp.",
+    };
+  }
+  if (turn.model?.mutated) {
+    return {
+      status: 409,
+      error:
+        "Lượt này đã thay đổi dữ liệu trên Jira (tạo/sửa việc, bình luận, ghi giờ…) nên không tạo lại hay sửa được — làm lại sẽ ghi lần nữa. Hãy nhắn yêu cầu mới.",
+    };
+  }
+  const answer = turn.model ? [turn.model.id] : [];
+  return { question: turn.user.content, supersede: mode === "replace" ? [turn.user.id, ...answer] : answer };
+}
+
+/**
  * One assistant turn, streamed as Server-Sent Events.
  *
  * SSE rather than a JSON response because the useful part of a turn — the
@@ -108,10 +144,51 @@ aiRouter.post("/plans", requireProject, async (req, res, next) => {
  * sent — so they go down the stream as an `error` event and the client renders
  * them in the transcript.
  */
-aiRouter.post("/chat", requireProject, async (req, res) => {
+// The parser comes after requireProject on purpose: see index.ts — a large body is
+// only read from someone who is signed in.
+aiRouter.post("/chat", requireProject, express.json({ limit: CHAT_BODY_LIMIT }), async (req, res) => {
   const { session, taskService } = req.auth!;
-  const body = req.body as { message?: unknown; sessionId?: unknown; today?: unknown; tzOffsetMinutes?: unknown };
-  const message = String(body?.message ?? "").trim();
+  const body = req.body as {
+    message?: unknown;
+    sessionId?: unknown;
+    today?: unknown;
+    tzOffsetMinutes?: unknown;
+    regenerate?: unknown;
+    replaceLast?: unknown;
+    attachments?: unknown;
+  };
+  let message = String(body?.message ?? "").trim();
+  // "Tạo lại" answers the last question again; "sửa" replaces the last question and
+  // answers that. Neither deletes anything (the old messages are marked superseded,
+  // their tokens still count), and both are refused when that turn wrote to Jira:
+  // answering it again would write it again.
+  const retry: "regenerate" | "replace" | null = body?.regenerate === true ? "regenerate" : body?.replaceLast === true ? "replace" : null;
+  let supersedeIds: string[] = [];
+  if (retry) {
+    // Before the stream starts, so a refusal is an ordinary HTTP error.
+    try {
+      const plan = await prepareRetry(session, typeof body?.sessionId === "string" ? body.sessionId : "", retry);
+      if ("error" in plan) {
+        res.status(plan.status).json({ error: plan.error });
+        return;
+      }
+      if (retry === "regenerate") message = plan.question;
+      supersedeIds = plan.supersede;
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+      return;
+    }
+  }
+  let files: ParsedAttachments;
+  try {
+    files = parseAttachments(body?.attachments);
+  } catch (err) {
+    if (!(err instanceof AttachmentError)) throw err;
+    res.status(400).json({ error: err.message });
+    return;
+  }
+  // Files with no words of their own: ask the obvious question rather than refuse.
+  if (!message && files.meta.length > 0) message = "Hãy đọc tệp đính kèm và cho tôi biết nội dung chính.";
   // The browser's local date, when it sends one: server UTC is a day behind in
   // Vietnam until 07:00, and "overdue" in the chat must match "overdue" on the
   // report page, which uses the browser's date for the same reason.
@@ -152,7 +229,9 @@ aiRouter.post("/chat", requireProject, async (req, res) => {
       typeof body?.sessionId === "string" ? body.sessionId : null
     );
     send("session", { sessionId });
-    await chatStore.addUserMessage(sessionId, message);
+    await chatStore.supersede(supersedeIds);
+    // A regeneration answers the user message that is already stored.
+    if (retry !== "regenerate") await chatStore.addUserMessage(sessionId, message, files.meta);
 
     const [tasks, history] = await Promise.all([
       taskService!.listTasks(),
@@ -166,6 +245,8 @@ aiRouter.post("/chat", requireProject, async (req, res) => {
     let thinking = "";
     let planRunId: string | null = null;
     let usage: ChatUsage | null = null;
+    // Stored with the answer: it is what lets a later "tạo lại" be refused.
+    let wroteToJira = false;
 
     const stream = streamChat(session.projectKey!, tasks, priorTurns, message, today, {
       taskService: taskService!,
@@ -173,6 +254,7 @@ aiRouter.post("/chat", requireProject, async (req, res) => {
       projectKey: session.projectKey!,
       accountId: session.accountId,
       boardService: boardServiceFor(req),
+      activity: new TaskActivity(req.auth!.jira, session.accountId),
       timesheet: new TimesheetService(req.auth!.jira, {
         cloudId: session.cloudId,
         projectKey: session.projectKey!,
@@ -213,13 +295,14 @@ aiRouter.post("/chat", requireProject, async (req, res) => {
           throw err;
         }
       },
-    }, abort.signal);
+    }, { signal: abort.signal, files: files.parts });
 
     try {
       for await (const event of stream) {
         if (event.type === "text") answer += event.text;
         if (event.type === "thinking") thinking += event.text;
         if (event.type === "usage") usage = event.usage;
+        if (event.type === "mutated") wroteToJira = true;
         send(event.type, event);
       }
     } catch (err) {
@@ -233,7 +316,8 @@ aiRouter.post("/chat", requireProject, async (req, res) => {
       answer,
       thinking || null,
       planRunId,
-      usage ?? { promptTokens: 0, outputTokens: 0, thoughtTokens: 0, cachedTokens: 0, model: activeModel() }
+      usage ?? { promptTokens: 0, outputTokens: 0, thoughtTokens: 0, cachedTokens: 0, model: activeModel() },
+      wroteToJira
     );
     send("done", { messageId, usage: await chatStore.sessionUsage(sessionId) });
   } catch (err) {
@@ -322,6 +406,9 @@ aiRouter.get("/usage", requireProject, async (req, res, next) => {
       raw && (await chatStore.ownsSession(session.cloudId, session.projectKey!, session.accountId, raw)) ? raw : null;
     res.json({
       model: activeModel(),
+      // Whether a price is configured for the active model — without one the panel
+      // shows tokens only and says why, rather than a cost of 0.
+      pricing: { configured: priceFor(priceTable(), activeModel()) !== null, currency: priceTable().currency },
       session: sessionId ? await chatStore.sessionUsage(sessionId) : null,
       project: await chatStore.projectUsage(session.cloudId, session.projectKey!),
     });

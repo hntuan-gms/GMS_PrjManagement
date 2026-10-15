@@ -169,20 +169,61 @@ app.post("/api/board/sprints/:id/issues", (_q, r) => r.status(204).end());
 
 // --- ai chat: an SSE stream that notices when the client goes away ----------
 app.get("/api/ai/chat/sessions", (_q, r) => r.json([]));
-app.get("/api/ai/usage", (_q, r) => r.json({ model: "mock", session: null, project: { messages: 0, promptTokens: 0, outputTokens: 0, thoughtTokens: 0, cachedTokens: 0, totalTokens: 0 } }));
+// Pricing is "configured" here so the cost shows; phase1.e2e.mjs does not look at it.
+app.get("/api/ai/usage", (_q, r) => r.json({
+  model: "mock", pricing: { configured: true, currency: "USD" },
+  session: null,
+  project: { messages: 0, promptTokens: 0, outputTokens: 0, thoughtTokens: 0, cachedTokens: 0, totalTokens: 0, cost: { amount: 0.5, currency: "USD", partial: false } },
+}));
+
+// The last exchange, as the real server tracks it, so regenerate / edit can be
+// refused (409) exactly when the answer wrote to Jira.
+let lastAnswerMutated = false;
+let answerCount = 0;
+const slowWords = ["Đây", " là", " câu", " trả", " lời", " rất", " dài", " được", " stream", " từng", " chữ", "."];
+
 app.post("/api/ai/chat", (req, res) => {
+  const body = req.body ?? {};
+  const retry = body.regenerate === true || body.replaceLast === true;
+  if (retry && lastAnswerMutated) {
+    return res.status(409).json({ error: "Lượt này đã thay đổi dữ liệu trên Jira nên không tạo lại hay sửa được." });
+  }
   res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
   res.setHeader("Cache-Control", "no-cache, no-transform");
   res.flushHeaders();
   const send = (e: string, d: unknown) => res.write(`event: ${e}\ndata: ${JSON.stringify(d)}\n\n`);
+  const message: string = String(body.message ?? "");
   send("session", { sessionId: "s1" });
+  const done = () => {
+    send("done", { messageId: `m${answerCount}`, usage: { messages: answerCount, promptTokens: 1000, outputTokens: 500, thoughtTokens: 0, cachedTokens: 0, totalTokens: 1500, cost: { amount: 0.0123 * answerCount, currency: "USD", partial: false } } });
+    res.end();
+  };
+
+  // Fast, scripted turns for the tests that are not about streaming.
+  if (message.includes("nhanh") || body.regenerate === true) {
+    answerCount++;
+    lastAnswerMutated = false;
+    if (message.includes("tạo")) {
+      lastAnswerMutated = true;
+      send("tool", { name: "create_task", label: "Đang tạo công việc trên Jira..." });
+      send("mutated", {});
+    }
+    if (message.includes("lọc")) {
+      send("tool", { name: "set_view_filter", label: "Đang áp bộ lọc lên màn hình..." });
+      send("filter", { spec: { text: "", people: ["anh"], statuses: [], types: [], epics: [], labels: [], priorities: [], onlyOverdue: false, onlyBlocked: false }, view: null, summary: "người: Nguyễn Anh" });
+    }
+    const files: Array<{ name: string }> = Array.isArray(body.attachments) ? body.attachments : [];
+    send("text", { text: `Trả lời số ${answerCount}.${files.length ? ` Đã đọc ${files.length} tệp: ${files.map((f) => f.name).join(", ")}.` : ""}` });
+    return done();
+  }
+
   let i = 0;
-  const words = ["Đây", " là", " câu", " trả", " lời", " rất", " dài", " được", " stream", " từng", " chữ", "."];
   const iv = setInterval(() => {
-    if (i >= words.length) { clearInterval(iv); send("done", { messageId: "m1", usage: { messages: 1, promptTokens: 1, outputTokens: 1, thoughtTokens: 0, cachedTokens: 0, totalTokens: 2 } }); return res.end(); }
-    send("text", { text: words[i++] });
+    if (i >= slowWords.length) { clearInterval(iv); answerCount++; lastAnswerMutated = false; return done(); }
+    send("text", { text: slowWords[i++] });
   }, 400);
   res.on("close", () => { if (!res.writableFinished) { chatAborts++; clearInterval(iv); } });
 });
 
-app.listen(4000, () => console.log("MOCK API on :4000"));
+const port = Number(process.env.MOCK_PORT ?? 4000);
+app.listen(port, () => console.log(`MOCK API on :${port}`));

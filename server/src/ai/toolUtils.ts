@@ -69,3 +69,33 @@ export function resolvePerson(
     candidates: team.slice(0, 40).map((u) => u.displayName),
   };
 }
+
+/** What people say in Vietnamese for Jira's stock priority names. */
+const PRIORITY_WORDS: Record<string, string> = {
+  "khan cap": "highest",
+  "cuc cao": "highest",
+  "cao nhat": "highest",
+  blocker: "highest",
+  critical: "highest",
+  cao: "high",
+  "trung binh": "medium",
+  vua: "medium",
+  thuong: "medium",
+  binh: "medium",
+  thap: "low",
+  "thap nhat": "lowest",
+  "cuc thap": "lowest",
+};
+
+/**
+ * A priority as spoken ("cao", "khẩn cấp", "High") → one of this site's own
+ * priority names. Sites rename priorities, so the stock word only picks the
+ * candidate; the answer is always a name from `available`.
+ */
+export function resolvePriority(available: string[], raw: string): { name: string } | { error: string; available: string[] } {
+  const q = fold(raw);
+  const target = PRIORITY_WORDS[q] ?? q;
+  const hit = available.find((p) => fold(p) === target) ?? available.find((p) => fold(p) === q);
+  if (hit) return { name: hit };
+  return { error: `Không có mức ưu tiên "${raw}" trong dự án này.`, available };
+}

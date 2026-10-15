@@ -317,7 +317,13 @@ export const api = {
       `/ai/chat/${encodeURIComponent(sessionId)}`
     ),
   getUsage: (sessionId: string | null) =>
-    request<{ model: string; session: UsageStats | null; project: UsageStats }>(
+    request<{
+      model: string;
+      /** Whether GEMINI_PRICING has a price for the active model. */
+      pricing: { configured: boolean; currency: string };
+      session: UsageStats | null;
+      project: UsageStats;
+    }>(
       `/ai/usage${sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ""}`
     ),
 };

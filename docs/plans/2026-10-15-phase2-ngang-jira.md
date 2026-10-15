@@ -50,6 +50,8 @@ Chatbot hiện thua giao diện ở mọi tính năng mới của phase 1. CLAUD
 
 Sau khi xong, cập nhật lại đoạn tương ứng trong CLAUDE.md.
 
+**Tiến độ giai đoạn 1 (2026-10-15):** 1.1–1.9 đã viết và kiểm tra bằng test đơn vị + e2e với máy chủ giả; **chưa chạy với Gemini và Jira thật** (xem [checklist, phần B](../test-reports/2026-10-15-jira-that-checklist.md)). Mục 1.2 lọc theo sprint dùng dữ liệu board nên cần `JIRA_AGILE`. Chi tiết và các quyết định ở [`docs/changes/2026-10-15/`](../changes/2026-10-15/README.md), mục "Giai đoạn 1".
+
 ---
 
 ## 4. Giai đoạn 2 — Chi tiết task và Gantt

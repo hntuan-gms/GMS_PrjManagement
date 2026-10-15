@@ -42,6 +42,13 @@ interface Props {
   onOpenEdit: (task: Task) => void;
   /** Refetch the workspace's tasks — the Gantt and report show status and assignee too. */
   onTasksChanged: () => Promise<void> | void;
+  /**
+   * A filter the assistant set (set_view_filter). The board's filter is local state
+   * that starts empty on every visit to the tab, so one sent while the board was
+   * not showing is handed over here and taken once.
+   */
+  incomingFilter: BoardFilter | null;
+  onIncomingFilterTaken: () => void;
 }
 
 /**
@@ -73,14 +80,19 @@ function readStoredBoard(project: string): number | null {
   }
 }
 
-export default function BoardView({ session, tasks, users, onOpenEdit, onTasksChanged }: Props) {
+export default function BoardView({ session, tasks, users, onOpenEdit, onTasksChanged, incomingFilter, onIncomingFilterTaken }: Props) {
   const projectKey = session.project?.key ?? "";
   const [boardId, setBoardId] = useState<number | null>(() => readStoredBoard(projectKey));
   const [snapshot, setSnapshot] = useState<BoardSnapshot | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [view, setView] = useState<"board" | "backlog">("board");
-  const [filter, setFilter] = useState<BoardFilter>(EMPTY_FILTER);
+  const [filter, setFilter] = useState<BoardFilter>(incomingFilter ?? EMPTY_FILTER);
+  useEffect(() => {
+    if (!incomingFilter) return;
+    setFilter(incomingFilter);
+    onIncomingFilterTaken();
+  }, [incomingFilter, onIncomingFilterTaken]);
   const [swimlane, setSwimlane] = useState<Swimlane>("none");
   const [activeSprintId, setActiveSprintId] = useState<number | null>(null);
   const [modal, setModal] = useState<Modal | null>(null);

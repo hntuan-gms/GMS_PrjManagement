@@ -10,7 +10,8 @@ export default defineConfig({
     // credentials alternative would need SameSite=None in dev only, so dev would
     // stop exercising the cookie path that production actually runs.
     proxy: {
-      '/api': { target: 'http://localhost:4000' },
+      // VITE_PROXY_TARGET only exists so e2e/ can run its stand-in API on a free port.
+      '/api': { target: process.env.VITE_PROXY_TARGET ?? 'http://localhost:4000' },
     },
   },
 })

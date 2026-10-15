@@ -20,7 +20,7 @@ async function step(name, fn) {
   }
 }
 
-await page.goto("http://localhost:5173/");
+await page.goto(process.env.E2E_APP ?? "http://localhost:5173/");
 await page.waitForSelector(".wbs-row");
 
 console.log("\n== Gantt: nhấp đúp ==");

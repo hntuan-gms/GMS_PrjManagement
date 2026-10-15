@@ -26,6 +26,12 @@ name: Deploy to Cloud Run
 #                              than be set on the service by hand: env_vars_update_strategy
 #                              is `overwrite`, so a hand-set value is wiped on the next
 #                              deploy. GET /api/ai/models lists what the key can call.
+#     GEMINI_PRICING           optional; the chat's cost in money, as a price table per model in
+#                              currency per 1M tokens: `model=input/output[/cached]`, entries
+#                              separated by `;` (no commas — env_vars would split on them), e.g.
+#                              gemini-2.5-flash=0.30/2.50/0.075;gemini-2.5-pro=1.25/10.00
+#                              Unset or no entry for the active model = tokens only, no cost shown.
+#     GEMINI_PRICING_CURRENCY  optional, default USD.
 #     JIRA_AGILE               optional; "on" makes login also request the Jira Software
 #                              granular scopes (boards, sprints, rank, estimation — see
 #                              AGILE_SCOPES in server/src/auth/config.ts). Enable those
@@ -127,6 +133,8 @@ jobs:
             ALLOWED_SITE_HOSTS=${{ vars.ALLOWED_SITE_HOSTS }}
             STAFF_EMAIL_DOMAIN=${{ vars.STAFF_EMAIL_DOMAIN }}
             GEMINI_MODEL=${{ vars.GEMINI_MODEL }}
+            GEMINI_PRICING=${{ vars.GEMINI_PRICING }}
+            GEMINI_PRICING_CURRENCY=${{ vars.GEMINI_PRICING_CURRENCY }}
             JIRA_AGILE=${{ vars.JIRA_AGILE }}
           # The runtime service account needs roles/secretmanager.secretAccessor on
           # both. Rotate session-encryption-keys by PREPENDING a new key — replacing

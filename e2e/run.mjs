@@ -4,8 +4,8 @@
 //   cd e2e && npm install && npm test
 //
 // Needs Google Chrome installed (playwright-core drives it; no browser download)
-// and `npm install` done in ../client. Ports 4000 and 5173 must be free: the
-// client's dev proxy is fixed to :4000, so a running `npm run dev` has to stop first.
+// and `npm install` done in ../client. It takes the first free ports from 4000 and
+// 5173 up, so a `npm run dev` that is already running is left alone.
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
@@ -16,11 +16,28 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const client = path.join(here, "..", "client");
 const children = [];
 
-function inUse(port) {
-  return new Promise((resolve) => {
-    const s = net.createServer().once("error", () => resolve(true)).once("listening", () => s.close(() => resolve(false)));
-    s.listen(port);
-  });
+/**
+ * Whether anything listens on `port`. Tried on each address family separately: Vite
+ * binds `localhost` (often ::1 only), and a probe on the wildcard address can succeed
+ * right next to it, which would hand out a port that is in fact taken.
+ */
+async function inUse(port) {
+  for (const host of ["127.0.0.1", "::1", "::"]) {
+    const busy = await new Promise((resolve) => {
+      const s = net.createServer();
+      s.once("error", (e) => resolve(e.code === "EADDRINUSE" || e.code === "EACCES"));
+      s.once("listening", () => s.close(() => resolve(false)));
+      s.listen(port, host);
+    });
+    if (busy) return true;
+  }
+  return false;
+}
+
+/** The first free port at or after `from`. */
+async function freePort(from) {
+  for (let p = from; p < from + 100; p++) if (!(await inUse(p))) return p;
+  throw new Error(`no free port near ${from}`);
 }
 
 async function waitFor(url, label, ms = 60_000) {
@@ -36,8 +53,8 @@ async function waitFor(url, label, ms = 60_000) {
   throw new Error(`${label} did not come up at ${url} within ${ms / 1000}s`);
 }
 
-function start(label, args, cwd) {
-  const child = spawn(process.execPath, args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
+function start(label, args, cwd, env = {}) {
+  const child = spawn(process.execPath, args, { cwd, env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"] });
   child.stdout.on("data", (d) => process.env.E2E_VERBOSE && process.stdout.write(`[${label}] ${d}`));
   child.stderr.on("data", (d) => process.stderr.write(`[${label}] ${d}`));
   children.push(child);
@@ -50,19 +67,25 @@ function stopAll() {
 
 let failed = 0;
 try {
-  for (const port of [4000, 5173]) {
-    if (await inUse(port)) throw new Error(`port ${port} is already in use — stop whatever is running there first`);
-  }
-  start("mock", ["--import", "tsx", "mock-api.mts"], here);
-  start("vite", [path.join(client, "node_modules", "vite", "bin", "vite.js"), "--port", "5173", "--strictPort"], client);
-  await waitFor("http://localhost:4000/api/auth/me", "mock API");
-  await waitFor("http://localhost:5173/", "client");
+  const apiPort = await freePort(4000);
+  const appPort = await freePort(5173);
+  const urls = { E2E_API: `http://localhost:${apiPort}`, E2E_APP: `http://localhost:${appPort}/` };
+  console.log(`stand-in API :${apiPort}, client :${appPort}`);
+  start("mock", ["--import", "tsx", "mock-api.mts"], here, { MOCK_PORT: String(apiPort) });
+  start(
+    "vite",
+    [path.join(client, "node_modules", "vite", "bin", "vite.js"), "--port", String(appPort), "--strictPort"],
+    client,
+    { VITE_PROXY_TARGET: urls.E2E_API }
+  );
+  await waitFor(`${urls.E2E_API}/api/auth/me`, "mock API");
+  await waitFor(urls.E2E_APP, "client");
 
   const files = fs.readdirSync(here).filter((f) => f.endsWith(".e2e.mjs")).sort();
   for (const file of files) {
     console.log(`\n##### ${file}`);
     const code = await new Promise((resolve) => {
-      const p = spawn(process.execPath, [path.join(here, file)], { cwd: here, stdio: "inherit" });
+      const p = spawn(process.execPath, [path.join(here, file)], { cwd: here, env: { ...process.env, ...urls }, stdio: "inherit" });
       p.on("exit", (c) => resolve(c ?? 1));
     });
     if (code !== 0) failed++;

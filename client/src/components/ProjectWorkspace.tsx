@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { ApiError, NetworkError, api } from "../api";
 import { computeOptimisticCascade } from "../dependencyCascade";
-import { useTaskFilter } from "../taskFilter";
+import { EMPTY_FILTER, type BoardFilter } from "../boardModel";
+import { EMPTY_TASK_FILTER, useTaskFilter } from "../taskFilter";
+import { toBoardFilter, toTaskFilter, type ViewFilterSpec } from "../viewFilter";
 import { addDays, buildResourceLoad, defaultWindow, todayIso } from "../resourceAllocation";
 import type {
   BulkTaskCreateResult,
@@ -63,6 +65,18 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
   );
 
   const [view, setView] = useState<WorkspaceView>("gantt");
+  // A filter the assistant set while the board was not showing. The board's own
+  // filter is local to it and starts empty on every visit, so it is handed over
+  // through here and taken once (BoardView's onIncomingFilterTaken).
+  const [chatBoardFilter, setChatBoardFilter] = useState<BoardFilter | null>(null);
+
+  /** set_view_filter: one sentence → the same filters a person sets by hand. */
+  function applyChatFilter(ev: { spec: ViewFilterSpec | null; view: "gantt" | "board" | null }) {
+    setTaskFilter(ev.spec ? toTaskFilter(ev.spec) : EMPTY_TASK_FILTER);
+    setChatBoardFilter(ev.spec ? toBoardFilter(ev.spec) : EMPTY_FILTER);
+    // Stay where the user is when that tab shows filters; otherwise bring them to one.
+    setView(ev.view ?? (view === "gantt" || view === "board" || view === "resource" ? view : "gantt"));
+  }
   // The report the Báo cáo tab should open on — set by a report card in the chat.
   const [focusReportId, setFocusReportId] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -710,6 +724,8 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
             users={users}
             onOpenEdit={setEditingTask}
             onTasksChanged={refreshTasks}
+            incomingFilter={chatBoardFilter}
+            onIncomingFilterTaken={() => setChatBoardFilter(null)}
           />
         ) : view === "resource" ? (
           <ResourceView
@@ -772,6 +788,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
             setView("report");
           }}
           onProjectChanged={refreshTasks}
+          onApplyFilter={applyChatFilter}
           knownKeys={taskKeys}
           onOpenIssue={(key) => {
             const task = tasks.find((t) => t.id === key);

@@ -31,7 +31,11 @@ const app = express();
 // Cloud Run terminates TLS upstream; without this req.secure is false and any
 // protocol-derived logic is wrong.
 app.set("trust proxy", 1);
-app.use(express.json());
+const jsonBody = express.json();
+// POST /api/ai/chat can carry attached files (base64), so it has its own, larger body
+// limit — applied in routes/ai.ts AFTER authentication. Parsing it here would let
+// anyone, logged in or not, make this public service read megabytes.
+app.use((req, res, next) => (req.method === "POST" && req.path.replace(/\/+$/, "") === "/api/ai/chat" ? next() : jsonBody(req, res, next)));
 
 // No CORS: production serves the client from this same process, and dev goes
 // through the Vite proxy (client/vite.config.ts), so every request is same-origin.

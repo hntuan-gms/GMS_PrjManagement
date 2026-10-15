@@ -3,7 +3,11 @@ import { nextSprintName } from "../agile/boardService.js";
 import type { Sprint } from "../agile/boardTypes.js";
 import type { DependencyType, Predecessor, Task, TaskUpdateInput } from "../types.js";
 import type { ToolContext, ToolOutcome } from "./tools.js";
-import { addDays, findTaskIn, fold, ISO_DATE, str } from "./toolUtils.js";
+import { applyMentions, mentionsToPlain, type ResolvedMention } from "./mentionText.js";
+import { DUPLICATE_THRESHOLD, findSimilarTasks } from "./similarity.js";
+import { buildTaskDigest } from "./taskDigest.js";
+import { addDays, findTaskIn, fold, ISO_DATE, resolvePerson, resolvePriority, str } from "./toolUtils.js";
+import { resolveViewFilter } from "./viewFilter.js";
 
 /**
  * The assistant's editing tools — everything a person can do to a task in the
@@ -57,6 +61,14 @@ const SEARCH_TASKS: FunctionDeclaration = {
       issueType: { type: Type.STRING },
       parentKey: { type: Type.STRING, description: "Only children (at any depth) of this issue." },
       overdue: { type: Type.BOOLEAN },
+      label: { type: Type.STRING, description: "Only tasks carrying this Jira label." },
+      priority: { type: Type.STRING, description: "Priority as the user said it ('cao', 'High', 'khẩn cấp')." },
+      sprint: {
+        type: Type.STRING,
+        description:
+          "Only tasks in this sprint: its name or number ('Sprint 8', '8'), 'active' for the running one, 'next', " +
+          "or 'backlog' for work in no sprint. Needs a Jira Software board.",
+      },
       limit: { type: Type.NUMBER, description: "Default 20, max 60." },
     },
   },
@@ -65,7 +77,7 @@ const SEARCH_TASKS: FunctionDeclaration = {
 const UPDATE_TASK: FunctionDeclaration = {
   name: "update_task",
   description:
-    "Change one task in Jira: title, description, status, schedule or % complete. Schedule changes run " +
+    "Change one task in Jira: title, description, status, priority, labels, schedule or % complete. Schedule changes run " +
     "the dependency cascade, so successors move too — report which ones. Give only the fields to change. " +
     "For several tasks, call it once per task (calls can run in parallel).",
   parameters: {
@@ -88,6 +100,14 @@ const UPDATE_TASK: FunctionDeclaration = {
         description: "Move the whole task by N calendar days (negative = earlier), keeping its duration.",
       },
       percentComplete: { type: Type.NUMBER, description: "0–100." },
+      priority: { type: Type.STRING, description: "Priority as the user said it ('cao', 'thấp', 'High'); matched to this site's own names." },
+      addLabels: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Labels to add to the ones the task already has." },
+      removeLabels: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Labels to take off." },
+      labels: {
+        type: Type.ARRAY,
+        items: { type: Type.STRING },
+        description: "The COMPLETE label set the task should end up with (replaces all). Prefer addLabels/removeLabels.",
+      },
       estimateHours: {
         type: Type.NUMBER,
         description: "Jira Original estimate in hours ('ước lượng 12 tiếng', '1.5 ngày công' = 12). > 0.",
@@ -245,7 +265,123 @@ const SPRINT_ACTION: FunctionDeclaration = {
   },
 };
 
+const GET_TASK_COMMENTS: FunctionDeclaration = {
+  name: "get_task_comments",
+  description:
+    "Read the comments on a task, newest first (author, time, text; @mentions shown as @Name). Read-only. " +
+    "'GPM-5 có ai bình luận gì không?', 'Lan nói gì ở task này?'.",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      taskId: { type: Type.STRING },
+      limit: { type: Type.NUMBER, description: "Default 10, max 30." },
+    },
+    required: ["taskId"],
+  },
+};
+
+const ADD_COMMENT: FunctionDeclaration = {
+  name: "add_comment",
+  description:
+    "Post a comment on a task in Jira, as the signed-in user. To notify someone, put their name in " +
+    "mentions (spoken name, diacritics optional) — Jira then emails them; an ambiguous name comes back as a " +
+    "question. Only call it when the user asked for a comment to be written or someone to be told/pinged.",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      taskId: { type: Type.STRING },
+      text: { type: Type.STRING, description: "The comment, plain text. May contain @Name where a person is addressed." },
+      mentions: {
+        type: Type.ARRAY,
+        items: { type: Type.STRING },
+        description:
+          "Names of the people to notify. Each is resolved against the team; one not already written as @Name in the text is put at the front.",
+      },
+    },
+    required: ["taskId", "text"],
+  },
+};
+
+const GET_TASK_HISTORY: FunctionDeclaration = {
+  name: "get_task_history",
+  description:
+    "The change history of a task from Jira, newest first: who changed what (status, assignee, dates, estimate…) " +
+    "and when. Read-only. 'GPM-5 đổi trạng thái lúc nào?', 'ai đã dời hạn việc này?'.",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      taskId: { type: Type.STRING },
+      limit: { type: Type.NUMBER, description: "How many history entries, default 15, max 40." },
+    },
+    required: ["taskId"],
+  },
+};
+
+const TASK_DIGEST: FunctionDeclaration = {
+  name: "task_digest",
+  description:
+    "Everything needed to explain where ONE task stands, in one call: description, schedule, unfinished " +
+    "predecessors (what it is waiting for) and what waits for it, children, effort vs estimate, recent history " +
+    "and comments — plus 'signals', facts the system already measured (overdue days, blocked by, days " +
+    "without any change). Read-only. Use it for 'task này đang vướng gì?', 'tóm tắt GPM-5', 'vì sao GPM-5 " +
+    "chưa xong'. Interpret the signals; do not add figures of your own.",
+  parameters: {
+    type: Type.OBJECT,
+    properties: { taskId: { type: Type.STRING } },
+    required: ["taskId"],
+  },
+};
+
+const FIND_SIMILAR_TASKS: FunctionDeclaration = {
+  name: "find_similar_tasks",
+  description:
+    "Find tasks in this project that look like a given title (and optional description): possible duplicates. " +
+    "Read-only; the overlap score and shared words are computed. Use it for 'đã có task nào giống … chưa?', " +
+    "'task này có bị trùng không?'. Give taskId to check an existing task against the rest, or summary for new work.",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      taskId: { type: Type.STRING, description: "Check this existing task against the others." },
+      summary: { type: Type.STRING, description: "A title to check, when no taskId." },
+      description: { type: Type.STRING },
+      limit: { type: Type.NUMBER, description: "Default 5, max 10." },
+    },
+  },
+};
+
+const SET_VIEW_FILTER: FunctionDeclaration = {
+  name: "set_view_filter",
+  description:
+    "Filter what the user sees on screen — the Gantt, the resource view and the board — with the same filter " +
+    "they have in the toolbar. Changes only the display, nothing in Jira. Use it when the user asks to show / " +
+    "filter / narrow ('lọc việc quá hạn của Minh', 'chỉ cho tôi các bug đang mở', 'xem việc của Epic GPM-2'); to " +
+    "answer a question without changing their screen, use search_tasks instead. clear=true removes the filters. " +
+    "Facets combine (AND); values inside one facet are alternatives (OR).",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      assignees: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Names, 'me' for the signed-in user, or 'none' for unassigned." },
+      statuses: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Status names, or todo / in_progress / done / open." },
+      types: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Issue types (Bug, Task…)." },
+      epics: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Epic keys or words from the Epic's title." },
+      labels: { type: Type.ARRAY, items: { type: Type.STRING } },
+      priorities: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Shown on the board only." },
+      text: { type: Type.STRING, description: "Words that must appear in the key, title, assignee or labels." },
+      overdue: { type: Type.BOOLEAN },
+      blocked: { type: Type.BOOLEAN, description: "Board only: cards blocked by unfinished work or flagged." },
+      view: { type: Type.STRING, enum: ["gantt", "board"], format: "enum", description: "Switch to this tab too. Omit to stay where the user is." },
+      clear: { type: Type.BOOLEAN },
+    },
+  },
+};
+
 export const EDIT_TOOLS: FunctionDeclaration[] = [
+  GET_TASK_COMMENTS,
+  ADD_COMMENT,
+  GET_TASK_HISTORY,
+  TASK_DIGEST,
+  FIND_SIMILAR_TASKS,
+  SET_VIEW_FILTER,
   GET_TASK,
   SEARCH_TASKS,
   UPDATE_TASK,
@@ -273,6 +409,12 @@ const LABELS: Record<string, string> = {
   sprint_action: "Đang thao tác sprint...",
   log_work: "Đang ghi giờ lên Jira...",
   timesheet: "Đang xem bảng chấm công...",
+  get_task_comments: "Đang đọc bình luận...",
+  add_comment: "Đang đăng bình luận lên Jira...",
+  get_task_history: "Đang đọc lịch sử thay đổi...",
+  task_digest: "Đang tổng hợp tình trạng công việc...",
+  find_similar_tasks: "Đang tìm việc giống nhau...",
+  set_view_filter: "Đang áp bộ lọc lên màn hình...",
 };
 
 export function editLabelFor(name: string): string | null {
@@ -309,6 +451,18 @@ export async function runEditTool(
       return runLogWork(args, ctx);
     case "timesheet":
       return runTimesheet(args, ctx);
+    case "get_task_comments":
+      return runGetComments(args, ctx);
+    case "add_comment":
+      return runAddComment(args, ctx);
+    case "get_task_history":
+      return runGetHistory(args, ctx);
+    case "task_digest":
+      return runTaskDigest(args, ctx);
+    case "find_similar_tasks":
+      return runFindSimilar(args, ctx);
+    case "set_view_filter":
+      return runSetViewFilter(args, ctx);
     default:
       return null;
   }
@@ -330,6 +484,8 @@ function brief(t: Task) {
     start: t.startDate,
     due: t.dueDate,
     percent: t.percentComplete,
+    priority: t.priority,
+    ...(t.labels.length > 0 ? { labels: t.labels } : {}),
   };
 }
 
@@ -396,10 +552,17 @@ async function runGetTask(args: Record<string, unknown>, ctx: ToolContext): Prom
     });
   // Allowed statuses need a Jira call; a failure here shouldn't hide the rest.
   const transitions = await ctx.boardService.transitionsFor(t.id).catch(() => []);
+  const parent = t.wbsParentId ? ctx.tasks.find((x) => x.id === t.wbsParentId) : undefined;
   return {
     response: {
       ...brief(t),
-      description: t.description ? t.description.slice(0, 800) : null,
+      // What drafting a description needs: where the task sits and what its neighbours are called.
+      ...(parent ? { parentSummary: parent.summary } : {}),
+      siblings: ctx.tasks
+        .filter((x) => x.wbsParentId === t.wbsParentId && x.id !== t.id)
+        .slice(0, 8)
+        .map((x) => `${x.id} ${x.summary}`),
+      description: t.description ? t.description.slice(0, 1500) : null,
       durationDays: t.durationDays,
       baselineStart: t.baselineStart,
       baselineDue: t.baselineDue,
@@ -444,8 +607,33 @@ async function runSearchTasks(args: Record<string, unknown>, ctx: ToolContext): 
     return fold(t.statusName) === status;
   };
 
+  const label = fold(str(args, "label"));
+  let priority: string | null = null;
+  if (str(args, "priority")) {
+    const p = await priorityName(ctx, str(args, "priority"));
+    if ("error" in p) return { response: p };
+    priority = p.name;
+  }
+  // Sprint membership is the board's, not the task's: one board call, then a key set.
+  let sprintKeys: Set<string> | null = null;
+  if (str(args, "sprint")) {
+    const board = await agile(ctx);
+    if ("error" in board) return { response: { error: board.error } };
+    const { issues, sprints } = board.snapshot;
+    if (fold(str(args, "sprint")) === "backlog") {
+      sprintKeys = new Set(issues.filter((i) => i.sprintId === null).map((i) => i.key));
+    } else {
+      const sprint = findSprint(sprints, str(args, "sprint"));
+      if (!sprint) return { response: { error: `Không xác định được sprint "${str(args, "sprint")}".`, sprints: sprintList(sprints) } };
+      sprintKeys = new Set(issues.filter((i) => i.sprintId === sprint.id).map((i) => i.key));
+    }
+  }
+
   const hits = ctx.tasks.filter((t) => {
     if (q && !q.split(" ").every((w) => fold(`${t.id} ${t.summary}`).includes(w))) return false;
+    if (label && !t.labels.some((l) => fold(l) === label)) return false;
+    if (priority && t.priority !== priority) return false;
+    if (sprintKeys && !sprintKeys.has(t.id)) return false;
     if (who === "none" ? t.assigneeAccountId : who && !who.split(" ").every((w) => fold(t.assigneeName ?? "").includes(w))) return false;
     if (!statusMatch(t)) return false;
     if (type && fold(t.issueType) !== type) return false;
@@ -482,6 +670,24 @@ async function runUpdateTask(args: Record<string, unknown>, ctx: ToolContext): P
     const h = Number(args.estimateHours);
     if (!Number.isFinite(h) || h <= 0) return { response: { error: "estimateHours phải lớn hơn 0." } };
     input.estimateHours = h;
+  }
+  if (str(args, "priority")) {
+    const p = await priorityName(ctx, str(args, "priority"));
+    if ("error" in p) return { response: p };
+    if (p.name !== t.priority) input.priority = p.name;
+  }
+  // Jira replaces the whole label set, so add/remove are folded into it here from
+  // the task's current labels — the model should not have to read and resend them.
+  if (Array.isArray(args.labels)) {
+    input.labels = names(args.labels);
+  } else if (names(args.addLabels).length > 0 || names(args.removeLabels).length > 0) {
+    const key = (l: string) => fold(l.replace(/\s+/g, "-"));
+    const drop = new Set(names(args.removeLabels).map(key));
+    const next = t.labels.filter((l) => !drop.has(key(l)));
+    for (const add of names(args.addLabels)) {
+      if (!next.some((l) => key(l) === key(add))) next.push(add.replace(/\s+/g, "-"));
+    }
+    if (next.length !== t.labels.length || next.some((l, i) => l !== t.labels[i])) input.labels = next;
   }
 
   // Schedule: resolved to (start, duration) — the pair updateTask and the
@@ -869,5 +1075,151 @@ async function runTimesheet(args: Record<string, unknown>, ctx: ToolContext): Pr
         };
       }),
     },
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Comments, history, digest, duplicates, screen filter                       */
+/* -------------------------------------------------------------------------- */
+
+/** A spoken priority → this site's own name. Sites rename priorities, so ask Jira; fall back to what the tasks carry. */
+async function priorityName(ctx: ToolContext, raw: string): Promise<{ name: string } | { error: string; available: string[] }> {
+  let available = await ctx.taskService.listPriorities().catch(() => [] as string[]);
+  if (available.length === 0) available = [...new Set(ctx.tasks.map((t) => t.priority).filter((p): p is string => !!p))];
+  return resolvePriority(available, raw);
+}
+
+const names = (v: unknown): string[] => (Array.isArray(v) ? v.map((x) => String(x).trim()).filter(Boolean) : []);
+
+async function runGetComments(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolOutcome> {
+  const t = findTaskIn(ctx.tasks, str(args, "taskId"));
+  if (!t) return notFound(str(args, "taskId"));
+  const limit = Math.min(30, Math.max(1, Math.round(Number(args.limit)) || 10));
+  const all = await ctx.activity.listComments(t.id);
+  return {
+    response: {
+      task: t.id,
+      total: all.length,
+      comments: all.slice(0, limit).map((c) => ({
+        author: c.authorName,
+        at: c.created,
+        ...(c.updated !== c.created ? { edited: c.updated } : {}),
+        text: mentionsToPlain(c.text).slice(0, 1200),
+      })),
+      ...(all.length > limit ? { note: `Còn ${all.length - limit} bình luận cũ hơn.` } : {}),
+    },
+  };
+}
+
+async function runAddComment(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolOutcome> {
+  const t = findTaskIn(ctx.tasks, str(args, "taskId"));
+  if (!t) return notFound(str(args, "taskId"));
+  const text = str(args, "text");
+  if (!text) return { response: { error: "Bình luận không được để trống." } };
+
+  // Every name is resolved before anything is posted: an ambiguous one is a
+  // question for the user, and a comment cannot be unsent (nor can the email).
+  const resolved: ResolvedMention[] = [];
+  for (const typed of names(args.mentions)) {
+    const found = resolvePerson(ctx.team, typed.replace(/^@/, ""));
+    if ("error" in found) return { response: found };
+    if (!resolved.some((m) => m.accountId === found.person.accountId)) {
+      resolved.push({ typed: typed.replace(/^@/, ""), accountId: found.person.accountId, name: found.person.displayName });
+    }
+  }
+  const comment = await ctx.activity.addComment(t.id, applyMentions(text, resolved));
+  ctx.mutated = true;
+  return {
+    response: {
+      commented: t.id,
+      by: comment.authorName,
+      ...(resolved.length > 0 ? { notified: resolved.map((m) => m.name), note: "Jira gửi thông báo cho những người được nhắc." } : {}),
+    },
+  };
+}
+
+async function runGetHistory(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolOutcome> {
+  const t = findTaskIn(ctx.tasks, str(args, "taskId"));
+  if (!t) return notFound(str(args, "taskId"));
+  const limit = Math.min(40, Math.max(1, Math.round(Number(args.limit)) || 15));
+  const all = await ctx.activity.listActivity(t.id);
+  return {
+    response: {
+      task: t.id,
+      total: all.length,
+      history: all.slice(0, limit).map((e) => ({
+        at: e.created,
+        by: e.authorName,
+        changes: e.changes.map((c) => `${c.field}: ${c.from ?? "—"} → ${c.to ?? "—"}`),
+      })),
+      ...(all.length > limit ? { note: `Còn ${all.length - limit} thay đổi cũ hơn.` } : {}),
+    },
+  };
+}
+
+async function runTaskDigest(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolOutcome> {
+  const t = findTaskIn(ctx.tasks, str(args, "taskId"));
+  if (!t) return notFound(str(args, "taskId"));
+  // Either read failing costs that part of the picture, not the digest: a task
+  // can be summarised from its schedule alone, and the model is told what is missing.
+  const missing: string[] = [];
+  const [comments, activity] = await Promise.all([
+    ctx.activity.listComments(t.id).catch(() => {
+      missing.push("bình luận");
+      return [];
+    }),
+    ctx.activity.listActivity(t.id).catch(() => {
+      missing.push("lịch sử thay đổi");
+      return [];
+    }),
+  ]);
+  const digest = buildTaskDigest({ task: t, tasks: ctx.tasks, comments, activity, today: ctx.today });
+  return {
+    response: {
+      ...digest,
+      ...(missing.length > 0 ? { notAvailable: `Không đọc được ${missing.join(" và ")} từ Jira lúc này.` } : {}),
+      note: "'signals' là các sự thật đã đo sẵn; giải thích chúng và dẫn mã issue, không thêm con số của riêng bạn.",
+    },
+  };
+}
+
+async function runFindSimilar(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolOutcome> {
+  const limit = Math.min(10, Math.max(1, Math.round(Number(args.limit)) || 5));
+  let query: { summary: string; description?: string | null };
+  let excludeId: string | undefined;
+  if (str(args, "taskId")) {
+    const t = findTaskIn(ctx.tasks, str(args, "taskId"));
+    if (!t) return notFound(str(args, "taskId"));
+    query = { summary: t.summary, description: t.description };
+    excludeId = t.id;
+  } else if (str(args, "summary")) {
+    query = { summary: str(args, "summary"), description: str(args, "description") || null };
+  } else {
+    return { response: { error: "Cần taskId hoặc summary để so sánh." } };
+  }
+  // A lower bar than create_task's guard: asked outright, "gần giống" is worth showing.
+  const hits = findSimilarTasks(query, ctx.tasks, { min: 0.4, limit, excludeId });
+  return {
+    response: {
+      checked: query.summary,
+      matches: hits.map((h) => ({ ...h, likelyDuplicate: h.score >= DUPLICATE_THRESHOLD })),
+      note:
+        hits.length === 0
+          ? "Không có việc nào giống trong dự án này (so tiêu đề và mô tả)."
+          : "score 0–1 là độ trùng từ khoá tiêu đề; likelyDuplicate chỉ là gợi ý, hãy để người dùng quyết định.",
+    },
+  };
+}
+
+async function runSetViewFilter(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolOutcome> {
+  const resolved = resolveViewFilter(args, { tasks: ctx.tasks, team: ctx.team, accountId: ctx.accountId, today: ctx.today });
+  if ("error" in resolved) return { response: { ...resolved } };
+  return {
+    response: {
+      applied: resolved.event.summary,
+      ...(resolved.event.spec ? { matchingTasks: resolved.matching, ofTotal: ctx.tasks.length } : {}),
+      note: "Đã áp lên màn hình của người dùng; nói ngắn gọn đã lọc gì và có bao nhiêu việc khớp.",
+    },
+    filter: resolved.event,
   };
 }

@@ -6,8 +6,8 @@ import { fileURLToPath } from "node:url";
 
 const OUT = path.join(path.dirname(fileURLToPath(import.meta.url)), "shots");
 fs.mkdirSync(OUT, { recursive: true });
-const API = "http://localhost:4000";
-const APP = "http://localhost:5173/";
+const API = process.env.E2E_API ?? "http://localhost:4000";
+const APP = process.env.E2E_APP ?? "http://localhost:5173/";
 
 const browser = await chromium.launch({ channel: "chrome", headless: true });
 const ctx = await browser.newContext({ viewport: { width: 1500, height: 900 }, acceptDownloads: true });

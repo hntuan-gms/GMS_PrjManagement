@@ -267,6 +267,15 @@ export interface UsageStats {
   thoughtTokens: number;
   cachedTokens: number;
   totalTokens: number;
+  /** What these tokens cost per the server's GEMINI_PRICING; null/absent when no price is configured. */
+  cost?: Money | null;
+}
+
+export interface Money {
+  amount: number;
+  currency: string;
+  /** Some tokens belong to a model with no price, so the amount is a lower bound. */
+  partial: boolean;
 }
 
 export interface ChatMessage {
@@ -285,7 +294,16 @@ export interface ChatMessage {
   reportHeadline?: string | null;
   reportHealth?: string | null;
   model: string | null;
-  usage: Omit<UsageStats, "messages" | "totalTokens">;
+  usage: Omit<UsageStats, "messages" | "totalTokens" | "cost">;
+  /**
+   * The turn wrote to Jira (a created task, a comment, logged time…), so it cannot
+   * be regenerated or edited — doing it again would write again.
+   */
+  mutated?: boolean;
+  /** Client-side only: what set_view_filter applied this turn, in words. */
+  filterNote?: string | null;
+  /** Files attached to a user message — name, type, size; the server never stored the content. */
+  attachments?: Array<{ name: string; mimeType: string; size: number }>;
   createdAt: string;
 }
 
