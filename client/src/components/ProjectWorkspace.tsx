@@ -813,23 +813,15 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
           initialParentId={creating.parentId}
           onClose={() => setCreating(false)}
           onCreate={async (input): Promise<BulkTaskCreateResult> => {
-            if (input.summaries.length === 1) {
-              const single = await api.createTask({
-                summary: input.summaries[0],
-                description: input.description,
-                issueType: input.issueType,
-                wbsParentId: input.wbsParentId,
-                startDate: input.startDate,
-                durationDays: input.durationDays,
-                assigneeAccountId: input.assigneeAccountId,
-              });
-              await refreshTasks();
-              return { created: [single], errors: [] };
-            } else {
-              const res = await api.createTasksBulk(input);
-              if (res.created.length > 0) await refreshTasks();
-              return res;
-            }
+            // One path for one task or many: a field-by-field copy into createTask
+            // once silently dropped the estimate, and the bulk route also reports
+            // half-stuck fields as warnings.
+            const res = await api.createTasksBulk(input);
+            if (res.created.length > 0) await refreshTasks();
+            // A single task that failed outright reads as a form error, so what was
+            // typed stays in the form to be fixed and sent again.
+            if (input.summaries.length === 1 && res.errors.length === 1) throw new Error(res.errors[0].message);
+            return res;
           }}
         />
       )}

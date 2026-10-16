@@ -225,6 +225,7 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
         ...[...epics].sort((a, b) => a[1].localeCompare(b[1], "vi")).map(([value, label]) => ({ value, label: `${value} · ${label}` })),
         { value: "none", label: "Không thuộc Epic" },
       ],
+      labels: plain(issues.flatMap((i) => i.labels)),
       priorities: priorities.map((p) => ({ value: p, label: p === "none" ? "Không đặt" : p })),
     };
   }, [snapshot]);
@@ -595,6 +596,7 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
         <MultiSelect label="Loại" options={filterOptions.types} selected={filter.types} onChange={(types) => setFilter({ ...filter, types })} />
         <MultiSelect label="Trạng thái" options={filterOptions.statuses} selected={filter.statuses} onChange={(statuses) => setFilter({ ...filter, statuses })} />
         <MultiSelect label="Epic" options={filterOptions.epics} selected={filter.epics} onChange={(epics) => setFilter({ ...filter, epics })} />
+        <MultiSelect label="Nhãn" options={filterOptions.labels} selected={filter.labels} onChange={(labels) => setFilter({ ...filter, labels })} />
         <MultiSelect label="Ưu tiên" options={filterOptions.priorities} selected={filter.priorities} onChange={(priorities) => setFilter({ ...filter, priorities })} />
         {isFiltering(filter) && (
           <button className="link-btn" onClick={() => setFilter(EMPTY_FILTER)}>

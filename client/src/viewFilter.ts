@@ -18,14 +18,14 @@ export interface ViewFilterSpec {
   /** Epic keys. */
   epics: string[];
   labels: string[];
-  /** Board only. */
+  /** Priority names; "none" stands for no priority. */
   priorities: string[];
   onlyOverdue: boolean;
   /** Board only. */
   onlyBlocked: boolean;
 }
 
-/** Gantt and resource heatmap. Priorities and "blocked" are not facets there. */
+/** Gantt and resource heatmap. "Blocked" is not a facet there. */
 export function toTaskFilter(spec: ViewFilterSpec): TaskFilter {
   return {
     ...EMPTY_TASK_FILTER,
@@ -35,23 +35,21 @@ export function toTaskFilter(spec: ViewFilterSpec): TaskFilter {
     types: new Set(spec.types),
     epics: new Set(spec.epics),
     labels: new Set(spec.labels),
+    priorities: new Set(spec.priorities),
     onlyOverdue: spec.onlyOverdue,
   };
 }
 
-/**
- * The board. It has no label facet, but its text box also matches labels, so a
- * single label goes there when the filter has no words of its own — several
- * labels cannot be expressed and are left to the Gantt.
- */
+/** The board. */
 export function toBoardFilter(spec: ViewFilterSpec): BoardFilter {
   return {
     ...EMPTY_FILTER,
-    text: spec.text || (spec.labels.length === 1 ? spec.labels[0] : ""),
+    text: spec.text,
     people: new Set(spec.people),
     statuses: new Set(spec.statuses),
     types: new Set(spec.types),
     epics: new Set(spec.epics),
+    labels: new Set(spec.labels),
     priorities: new Set(spec.priorities),
     onlyOverdue: spec.onlyOverdue,
     onlyBlocked: spec.onlyBlocked,

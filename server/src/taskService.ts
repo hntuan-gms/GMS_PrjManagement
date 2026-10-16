@@ -665,6 +665,7 @@ export class TaskService {
       startDateFieldId: this.ctx.startDateFieldId,
       assigneeAccountId,
       labels: input.labels ? cleanLabels(input.labels) : undefined,
+      priority: input.priority || undefined,
     });
     const key = created.key;
     if (input.estimateHours && input.estimateHours > 0) {
@@ -787,6 +788,8 @@ export class TaskService {
               durationDays: input.durationDays,
               assigneeAccountId: input.assigneeAccountId ?? null,
               estimateHours: input.estimateHours ?? null,
+              priority: input.priority,
+              labels: input.labels,
             },
             warnings
           )

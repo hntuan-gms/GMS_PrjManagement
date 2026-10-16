@@ -61,6 +61,16 @@ await step("lọc theo nhãn và NHỚ sau khi tải lại trang", async () => {
   assert.ok(has(r, "DEMO-3") && !has(r, "DEMO-6"));
   await clearFilter();
 });
+await step("lọc theo ưu tiên (giống bộ lọc của Bảng)", async () => {
+  await page.locator(".tf-bar .tf-btn", { hasText: "Ưu tiên" }).first().click();
+  // Exact match: "High" must not tick "Highest", which sorts before it.
+  await page.locator(".tf-menu .col-chooser-item", { hasText: /^High$/ }).click();
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(() => document.querySelector(".tf-count")?.textContent.includes("1/9"));
+  const r = await rows();
+  assert.ok(has(r, "DEMO-3") && !has(r, "DEMO-7"), "lọc ưu tiên sai: " + r.join("|"));
+  await clearFilter();
+});
 await step("'Của tôi' → 1/9 và nhắc task chưa có ngày", async () => {
   await page.locator(".tf-bar .tf-btn", { hasText: "Của tôi" }).click();
   await page.waitForFunction(() => document.querySelector(".tf-count")?.textContent.includes("1/9"));
@@ -265,7 +275,7 @@ await step("đổi người ngay trên thẻ → PATCH", async () => {
 });
 await step("có thêm bộ lọc Loại / Trạng thái / Epic / Ưu tiên", async () => {
   const t = await page.$$eval(".bd-filters .tf-btn", (b) => b.map((x) => x.textContent.replace(/[▾\s]+$/, "").trim()));
-  for (const k of ["Loại", "Trạng thái", "Epic", "Ưu tiên"]) assert.ok(t.some((x) => x.startsWith(k)), k + " thiếu: " + t);
+  for (const k of ["Loại", "Trạng thái", "Epic", "Nhãn", "Ưu tiên"]) assert.ok(t.some((x) => x.startsWith(k)), k + " thiếu: " + t);
 });
 await step("lọc ra rỗng → thông báo + nút Xoá lọc", async () => {
   await page.fill(".bd-search", "zzzz-khong-co");
@@ -300,6 +310,9 @@ await step("lọc theo người → số công việc khớp đúng máy chủ",
 await step("đặt lại bộ lọc", async () => {
   await page.locator(".pr-filters .text-btn", { hasText: "Đặt lại" }).click();
   await page.waitForFunction(() => !document.querySelector(".pr-filters .text-btn"));
+});
+await step("có ô 'Sắp đến hạn (7 ngày)'", async () => {
+  assert.equal(await page.locator(".pr-tile", { hasText: "Sắp đến hạn" }).count(), 1);
 });
 await step("bấm tile mở danh sách chi tiết: có tìm kiếm, sắp xếp, CSV", async () => {
   await page.locator(".pr-tile:not([disabled])").first().click();
@@ -348,6 +361,28 @@ await step("Dừng: giữ phần trả lời dở và báo cho máy chủ ngắt
 });
 await step("có nút Sao chép trên câu trả lời", async () => {
   assert.ok(await page.locator(".chat-copy", { hasText: "Sao chép" }).count() >= 1);
+});
+
+console.log("\n== Tạo việc ==");
+await step("form tạo việc gửi kèm Ưu tiên, Nhãn và Ước lượng (kể cả khi chỉ tạo 1 task)", async () => {
+  await page.keyboard.press("Escape");
+  await tab("Gantt");
+  await reset();
+  await page.locator("button", { hasText: "+ Task mới" }).click();
+  await page.waitForSelector(".modal .task-input-field");
+  await page.fill(".modal .task-input-field", "Việc có ưu tiên và nhãn");
+  await page.locator(".modal .field", { hasText: "Độ ưu tiên" }).locator("select").selectOption("High");
+  const labelBox = page.locator(".modal .labels-input input");
+  await labelBox.fill("backend");
+  await labelBox.press("Enter");
+  await page.locator(".modal .field", { hasText: "Ước lượng" }).locator("input").fill("6");
+  await page.locator(".modal .primary", { hasText: "Tạo task" }).click();
+  await page.waitForFunction(async () => (await (await fetch("/api/__log")).json()).log.some((l) => l.m === "POST" && l.p === "/api/tasks/bulk"));
+  const post = (await mock("/api/__log")).log.find((l) => l.p === "/api/tasks/bulk" && l.m === "POST");
+  assert.equal(post.b.priority, "High");
+  assert.deepEqual(post.b.labels, ["backend"]);
+  assert.equal(post.b.estimateHours, 6);
+  await page.waitForFunction(() => !document.querySelector(".modal"));
 });
 
 console.log(`\n${pass} đạt, ${fail} lỗi`);

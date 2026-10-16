@@ -99,7 +99,7 @@ app.post("/api/tasks", (req, res) => {
 app.post("/api/tasks/bulk", (req, res) => {
   const b = req.body; const created: any[] = [];
   for (const s of b.summaries) {
-    const t = { ...base, baselineStart: b.startDate ?? null, baselineDue: null, id: `DEMO-${10 + tasks.length}`, summary: s, issueType: b.issueType, wbsParentId: b.wbsParentId ?? null, assigneeAccountId: b.assigneeAccountId ?? null, assigneeName: nameOf(b.assigneeAccountId ?? null), startDate: b.startDate ?? null, dueDate: null };
+    const t = { ...base, baselineStart: b.startDate ?? null, baselineDue: null, id: `DEMO-${10 + tasks.length}`, summary: s, issueType: b.issueType, wbsParentId: b.wbsParentId ?? null, assigneeAccountId: b.assigneeAccountId ?? null, assigneeName: nameOf(b.assigneeAccountId ?? null), startDate: b.startDate ?? null, dueDate: null, priority: b.priority ?? base.priority, labels: b.labels ?? [], estimateHours: b.estimateHours ?? null };
     tasks.push(t); created.push(t);
   }
   res.status(201).json({ created, errors: [] });

@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { priorityRank } from "../boardModel";
 import { EMPTY_TASK_FILTER, facetCount, isTaskFiltering, type TaskFilter } from "../taskFilter";
 import type { Task } from "../types";
 
-export type FilterFacet = "people" | "statuses" | "types" | "epics" | "labels" | "overdue";
+export type FilterFacet = "people" | "statuses" | "types" | "epics" | "labels" | "priorities" | "overdue";
 
 export interface Option {
   value: string;
@@ -22,7 +23,7 @@ interface Props {
   total?: number;
 }
 
-const ALL_FACETS: FilterFacet[] = ["people", "statuses", "types", "epics", "labels", "overdue"];
+const ALL_FACETS: FilterFacet[] = ["people", "statuses", "types", "epics", "labels", "priorities", "overdue"];
 
 function toggled(set: Set<string>, value: string): Set<string> {
   const next = new Set(set);
@@ -114,6 +115,7 @@ export default function FilterBar({ tasks, filter, onChange, myAccountId, facets
     const statuses = new Set<string>();
     const types = new Set<string>();
     const labels = new Set<string>();
+    const priorities = new Set<string>();
     const epics: Option[] = [];
     let anyUnassigned = false;
     for (const t of tasks) {
@@ -122,6 +124,7 @@ export default function FilterBar({ tasks, filter, onChange, myAccountId, facets
       statuses.add(t.statusName);
       types.add(t.issueType);
       for (const l of t.labels) labels.add(l);
+      priorities.add(t.priority ?? "none");
       if (t.issueType.toLowerCase() === "epic") epics.push({ value: t.id, label: `${t.id} · ${t.summary}` });
     }
     const byLabel = (a: Option, b: Option) => a.label.localeCompare(b.label, "vi");
@@ -134,6 +137,10 @@ export default function FilterBar({ tasks, filter, onChange, myAccountId, facets
       statuses: plain(statuses),
       types: plain(types),
       labels: plain(labels),
+      // Highest first, the way the board orders the same facet.
+      priorities: [...priorities]
+        .sort((a, b) => priorityRank(a === "none" ? null : a) - priorityRank(b === "none" ? null : b) || a.localeCompare(b, "vi"))
+        .map((value) => ({ value, label: value === "none" ? "Không đặt" : value })),
       epics: [...epics.sort(byLabel), { value: "none", label: "Không thuộc Epic" }],
     };
   }, [tasks]);
@@ -191,6 +198,14 @@ export default function FilterBar({ tasks, filter, onChange, myAccountId, facets
           options={options.labels}
           selected={filter.labels}
           onChange={(labels) => onChange({ ...filter, labels })}
+        />
+      )}
+      {has("priorities") && (
+        <MultiSelect
+          label="Ưu tiên"
+          options={options.priorities}
+          selected={filter.priorities}
+          onChange={(priorities) => onChange({ ...filter, priorities })}
         />
       )}
       {has("overdue") && (

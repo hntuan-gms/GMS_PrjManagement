@@ -514,6 +514,7 @@ export class JiraClient {
     startDateFieldId?: string | null;
     assigneeAccountId?: string | null;
     labels?: string[];
+    priority?: string;
   }): Promise<{ id: string; key: string }> {
     const fields: Record<string, unknown> = {
       project: { key: input.projectKey },
@@ -526,6 +527,7 @@ export class JiraClient {
     if (input.startDate && input.startDateFieldId) fields[input.startDateFieldId] = input.startDate;
     if (input.assigneeAccountId) fields.assignee = { accountId: input.assigneeAccountId };
     if (input.labels && input.labels.length > 0) fields.labels = input.labels;
+    if (input.priority) fields.priority = { name: input.priority };
     return this.request(`/rest/api/3/issue`, { method: "POST", body: JSON.stringify({ fields }) });
   }
 

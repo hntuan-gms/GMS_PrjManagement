@@ -3205,7 +3205,8 @@ button.pr-legend-btn:hover:not(:disabled),
 .pr-tiles {
   margin-top: 14px;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  /* Five tiles: one row when there is room, otherwise they wrap evenly. */
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
   gap: 8px;
 }
 @media (max-width: 560px) {
@@ -6147,6 +6148,12 @@ button.att-remove:hover:not(:disabled) {
 .wbs-over {
   color: #b4471c;
   font-weight: 600;
+}
+
+/* Same red as an overdue card's due chip on the board. */
+.wbs-overdue {
+  color: #a12a2a;
+  font-weight: 700;
 }
 
 /* Board: a status no Jira column maps */

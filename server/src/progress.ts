@@ -70,6 +70,8 @@ export interface ProgressMetrics {
     todo: number;
     overdue: number;
     slipped: number;
+    /** Open work due within the next 7 days (the `dueSoon` list is capped; this is not). */
+    dueSoon: number;
     notStarted: number;
     unassigned: number;
     /** Tasks with no start date: invisible on the Gantt and left out of every %. */
@@ -367,6 +369,7 @@ export function computeProgress(tasks: Task[], asOf: string, scope?: ProgressSco
       todo: workItems.filter((t) => t.statusCategory === "new").length,
       overdue: overdueAll.length,
       slipped: slippedAll.length,
+      dueSoon: dueSoonAll.length,
       notStarted: notStartedAll.length,
       unassigned: unassignedAll.length,
       undated: workItems.length - scheduled.length,

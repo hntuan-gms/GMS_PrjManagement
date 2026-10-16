@@ -216,7 +216,7 @@ export default function ResourceView({
         filter={taskFacets}
         onChange={(f) => onFilterChange({ ...filter, ...f, text: filter.text, people: filter.people })}
         myAccountId={myAccountId}
-        facets={["statuses", "types", "epics", "labels", "overdue"]}
+        facets={["statuses", "types", "epics", "labels", "priorities", "overdue"]}
         matched={filteredTasks.length}
         total={tasks.length}
       />

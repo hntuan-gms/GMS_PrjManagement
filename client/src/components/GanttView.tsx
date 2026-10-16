@@ -1,4 +1,4 @@
-import { buildEpicIndex, filterTaskIds, type TaskFilter } from "../taskFilter";
+import { buildEpicIndex, filterTaskIds, isOverdueTask, type TaskFilter } from "../taskFilter";
 import FilterBar from "./FilterBar";
 import { Gantt, ViewMode, type Task as GanttTaskT } from "gantt-task-react";
 import "gantt-task-react/dist/index.css";
@@ -126,7 +126,7 @@ interface ColumnDef {
   width: number;
   align?: "right";
   /** `range` is the bar's own span — an Epic's rolls up its children, so its columns must too. */
-  cell: (task: Task, range: { start: string; end: string } | undefined) => ReactNode;
+  cell: (task: Task, range: { start: string; end: string } | undefined, today: string) => ReactNode;
 }
 
 const dm = (iso: string | null | undefined) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(2, 4)}` : "—");
@@ -153,7 +153,22 @@ const COLUMNS: ColumnDef[] = [
   },
   { id: "assignee", label: "Phụ trách", long: "Người phụ trách", width: 110, cell: (t) => t.assigneeName ?? "—" },
   { id: "start", label: "Bắt đầu", long: "Ngày bắt đầu", width: 76, cell: (t, r) => dm(r?.start ?? t.startDate) },
-  { id: "due", label: "Kết thúc", long: "Ngày kết thúc", width: 76, cell: (t, r) => dm(r?.end ?? t.dueDate) },
+  {
+    id: "due",
+    label: "Kết thúc",
+    long: "Ngày kết thúc",
+    width: 76,
+    // Marked by the task's own due date — the same rule as the "Quá hạn" filter,
+    // so a red date and a filter hit always agree.
+    cell: (t, r, today) =>
+      isOverdueTask(t, today) ? (
+        <span className="wbs-overdue" title={`Quá hạn — hạn ${dm(t.dueDate)}, chưa xong`}>
+          {dm(r?.end ?? t.dueDate)}
+        </span>
+      ) : (
+        dm(r?.end ?? t.dueDate)
+      ),
+  },
   {
     id: "duration",
     label: "T.lượng",
@@ -730,7 +745,7 @@ export default function GanttView({
               className={`wbs-col wbs-col-extra wbs-cell-${c.id} ${c.align === "right" ? "is-right" : ""}`}
               style={{ width: c.width }}
             >
-              {c.cell(task, ranges.get(task.id))}
+              {c.cell(task, ranges.get(task.id), today)}
             </div>
           ))}
         </div>

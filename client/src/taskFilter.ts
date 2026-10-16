@@ -19,6 +19,8 @@ export interface TaskFilter {
   /** Epic keys — a task matches through its nearest Epic ancestor (or itself). */
   epics: Set<string>;
   labels: Set<string>;
+  /** Priority names; "none" stands for an issue with no priority. Same rule as the board's facet. */
+  priorities: Set<string>;
   onlyOverdue: boolean;
 }
 
@@ -29,6 +31,7 @@ export const EMPTY_TASK_FILTER: TaskFilter = {
   types: new Set(),
   epics: new Set(),
   labels: new Set(),
+  priorities: new Set(),
   onlyOverdue: false,
 };
 
@@ -40,6 +43,7 @@ export function isTaskFiltering(f: TaskFilter): boolean {
     f.types.size > 0 ||
     f.epics.size > 0 ||
     f.labels.size > 0 ||
+    f.priorities.size > 0 ||
     f.onlyOverdue
   );
 }
@@ -52,6 +56,7 @@ export function facetCount(f: TaskFilter): number {
     (f.types.size > 0 ? 1 : 0) +
     (f.epics.size > 0 ? 1 : 0) +
     (f.labels.size > 0 ? 1 : 0) +
+    (f.priorities.size > 0 ? 1 : 0) +
     (f.onlyOverdue ? 1 : 0)
   );
 }
@@ -99,6 +104,7 @@ export function matchesTaskFilter(t: Task, f: TaskFilter, ctx: FilterContext): b
     if (!f.epics.has(epic)) return false;
   }
   if (f.labels.size > 0 && !t.labels.some((l) => f.labels.has(l))) return false;
+  if (f.priorities.size > 0 && !f.priorities.has(t.priority ?? "none")) return false;
   if (f.onlyOverdue && !isOverdueTask(t, ctx.today)) return false;
   return true;
 }
@@ -119,6 +125,7 @@ interface Stored {
   types?: string[];
   epics?: string[];
   labels?: string[];
+  priorities?: string[];
   onlyOverdue?: boolean;
 }
 
@@ -135,6 +142,7 @@ function load(key: string): TaskFilter {
       types: arr(s.types),
       epics: arr(s.epics),
       labels: arr(s.labels),
+      priorities: arr(s.priorities),
       onlyOverdue: s.onlyOverdue === true,
     };
   } catch {
@@ -150,6 +158,7 @@ function save(key: string, f: TaskFilter): void {
       types: [...f.types],
       epics: [...f.epics],
       labels: [...f.labels],
+      priorities: [...f.priorities],
       onlyOverdue: f.onlyOverdue,
     };
     localStorage.setItem(key, JSON.stringify(s));

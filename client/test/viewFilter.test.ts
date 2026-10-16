@@ -24,33 +24,34 @@ const spec = (o: Partial<ViewFilterSpec>): ViewFilterSpec => ({ ...none, ...o })
 
 describe("toTaskFilter", () => {
   it("pours every shared facet into the Gantt filter's sets", () => {
-    const f = toTaskFilter(spec({ text: "api", people: ["anh", "none"], statuses: ["Done"], types: ["Bug"], epics: ["P-2"], labels: ["urgent"], onlyOverdue: true }));
+    const f = toTaskFilter(spec({ text: "api", people: ["anh", "none"], statuses: ["Done"], types: ["Bug"], epics: ["P-2"], labels: ["urgent"], priorities: ["High"], onlyOverdue: true }));
     assert.equal(f.text, "api");
     assert.deepEqual([...f.people], ["anh", "none"]);
     assert.deepEqual([...f.statuses], ["Done"]);
     assert.deepEqual([...f.types], ["Bug"]);
     assert.deepEqual([...f.epics], ["P-2"]);
     assert.deepEqual([...f.labels], ["urgent"]);
+    assert.deepEqual([...f.priorities], ["High"]);
     assert.equal(f.onlyOverdue, true);
   });
 
   it("an empty spec is an empty filter (clears)", () => {
     const f = toTaskFilter(none);
-    assert.equal(f.people.size + f.statuses.size + f.types.size + f.epics.size + f.labels.size, 0);
+    assert.equal(f.people.size + f.statuses.size + f.types.size + f.epics.size + f.labels.size + f.priorities.size, 0);
     assert.equal(f.onlyOverdue, false);
   });
 });
 
 describe("toBoardFilter", () => {
-  it("carries priorities and blocked, which only the board has", () => {
-    const f = toBoardFilter(spec({ priorities: ["High"], onlyBlocked: true }));
+  it("carries priorities, labels and blocked", () => {
+    const f = toBoardFilter(spec({ priorities: ["High"], labels: ["urgent", "ui"], onlyBlocked: true }));
     assert.deepEqual([...f.priorities], ["High"]);
+    assert.deepEqual([...f.labels], ["urgent", "ui"]);
     assert.equal(f.onlyBlocked, true);
   });
 
-  it("a single label rides in the text box (the board has no label facet); several are left to the Gantt", () => {
-    assert.equal(toBoardFilter(spec({ labels: ["urgent"] })).text, "urgent");
-    assert.equal(toBoardFilter(spec({ labels: ["urgent", "ui"] })).text, "");
+  it("labels go to the label facet, not the text box", () => {
+    assert.equal(toBoardFilter(spec({ labels: ["urgent"] })).text, "");
     assert.equal(toBoardFilter(spec({ text: "api", labels: ["urgent"] })).text, "api");
   });
 
@@ -61,6 +62,8 @@ describe("toBoardFilter", () => {
     } as unknown as BoardIssue;
     assert.equal(matchesFilter(card, toBoardFilter(spec({ people: ["anh"], statuses: ["Done"], priorities: ["High"] })), "2026-10-14"), true);
     assert.equal(matchesFilter(card, toBoardFilter(spec({ people: ["binh"] })), "2026-10-14"), false);
+    assert.equal(matchesFilter(card, toBoardFilter(spec({ labels: ["ui", "urgent"] })), "2026-10-14"), true);
+    assert.equal(matchesFilter(card, toBoardFilter(spec({ labels: ["ui"] })), "2026-10-14"), false);
   });
 });
 
@@ -78,6 +81,8 @@ describe("server countMatching mirrors the client's Gantt filter", () => {
     ["type", { types: ["Bug", "Task"] }],
     ["epic (through a Story)", { epics: ["P-1"] }],
     ["label", { labels: ["urgent"] }],
+    ["priority", { priorities: ["High"] }],
+    ["no priority", { priorities: ["none"] }],
     ["overdue", { onlyOverdue: true }],
     ["text that hits an assignee's name", { text: "binh" }],
     ["everything at once", { people: ["anh"], epics: ["P-2"], onlyOverdue: true, types: ["Task"] }],

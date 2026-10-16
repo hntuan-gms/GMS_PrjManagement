@@ -39,6 +39,13 @@ describe("filterTaskIds", () => {
     assert.deepEqual(ids({ labels: new Set(["urgent"]) }), ["P-7"]);
   });
 
+  it("priorities: a name, and 'none' for no priority", () => {
+    assert.deepEqual(ids({ priorities: new Set(["High"]) }), ["P-7"]);
+    assert.deepEqual(ids({ priorities: new Set(["none"]) }), ["P-1"]);
+    assert.deepEqual(ids({ priorities: new Set(["High", "none"]) }), ["P-1", "P-7"]);
+    assert.equal(isTaskFiltering(f({ priorities: new Set(["High"]) })), true);
+  });
+
   it("free text also matches the assignee's name", () => {
     assert.deepEqual(ids({ text: "binh" }), ["P-5"]);
   });

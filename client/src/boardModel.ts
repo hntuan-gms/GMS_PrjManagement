@@ -94,6 +94,7 @@ export interface BoardFilter {
   statuses: Set<string>;
   /** Epic keys; "none" stands for cards outside any Epic. */
   epics: Set<string>;
+  labels: Set<string>;
   priorities: Set<string>;
 }
 
@@ -105,6 +106,7 @@ export const EMPTY_FILTER: BoardFilter = {
   types: new Set(),
   statuses: new Set(),
   epics: new Set(),
+  labels: new Set(),
   priorities: new Set(),
 };
 
@@ -117,6 +119,7 @@ export function isFiltering(f: BoardFilter): boolean {
     f.types.size > 0 ||
     f.statuses.size > 0 ||
     f.epics.size > 0 ||
+    f.labels.size > 0 ||
     f.priorities.size > 0
   );
 }
@@ -150,6 +153,7 @@ export function matchesFilter(issue: BoardIssue, f: BoardFilter, today: string):
   if (f.types.size > 0 && !f.types.has(issue.issueType)) return false;
   if (f.statuses.size > 0 && !f.statuses.has(issue.statusName)) return false;
   if (f.epics.size > 0 && !f.epics.has(issue.epicKey ?? "none")) return false;
+  if (f.labels.size > 0 && !issue.labels.some((l) => f.labels.has(l))) return false;
   if (f.priorities.size > 0 && !f.priorities.has(issue.priority ?? "none")) return false;
   if (f.onlyBlocked && issue.blockedBy.length === 0 && !issue.flagged) return false;
   if (f.onlyOverdue && !isOverdue(issue, today)) return false;

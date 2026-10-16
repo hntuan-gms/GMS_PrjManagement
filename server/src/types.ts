@@ -116,6 +116,8 @@ export interface TaskCreateInput {
   durationDays?: number;
   assigneeAccountId?: string | null;
   estimateHours?: number | null;
+  /** A priority name from GET /priorities; omitted = the project's default. */
+  priority?: string;
 }
 
 /** One shared set of fields, applied to N summaries — mirrors Jira's own "create several issues" bulk dialog. */
@@ -128,6 +130,8 @@ export interface BulkTaskCreateInput {
   durationDays?: number;
   assigneeAccountId?: string | null;
   estimateHours?: number | null;
+  priority?: string;
+  labels?: string[];
 }
 
 export interface BulkTaskCreateResult {
