@@ -23,6 +23,7 @@ import ChatDock from "./ChatDock";
 import CreateTaskModal from "./CreateTaskModal";
 import GanttView from "./GanttView";
 import PlanReviewModal from "./PlanReviewModal";
+import KbktImportModal from "./KbktImportModal";
 import ProgressReportView from "./ProgressReportView";
 import ResourceView from "./ResourceView";
 import TaskEditModal from "./TaskEditModal";
@@ -94,6 +95,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
   const [creating, setCreating] = useState<false | { parentId?: string }>(false);
   // The plan being reviewed, opened from the assistant's table card.
   const [reviewRunId, setReviewRunId] = useState<string | null>(null);
+  const [importingKbkt, setImportingKbkt] = useState(false);
   // A single global counter, bumped once per mutating request (schedule change,
   // progress change, add-dependency, modal save). `taskVersion` records, per task
   // id, the seq of the most recent thing that touched it — whether that task was
@@ -714,6 +716,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
             onAddDependency={handleAddDependency}
             onEditDependency={handleEditDependency}
             onDeleteDependency={handleDeleteDependency}
+            onImportKbkt={() => setImportingKbkt(true)}
           />
         ) : view === "timesheet" ? (
           <TimesheetView session={session} tasks={tasks} onOpenEdit={setEditingTask} onTasksChanged={refreshTasks} />
@@ -802,6 +805,14 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
           runId={reviewRunId}
           users={users}
           onClose={() => setReviewRunId(null)}
+          onApplied={refreshTasks}
+        />
+      )}
+
+      {importingKbkt && session.project && (
+        <KbktImportModal
+          projectKey={session.project.key}
+          onClose={() => setImportingKbkt(false)}
           onApplied={refreshTasks}
         />
       )}

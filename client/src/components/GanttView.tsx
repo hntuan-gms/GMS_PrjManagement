@@ -282,6 +282,8 @@ interface Props {
     next: { type: DependencyType; lagDays: number }
   ) => void;
   onDeleteDependency: (successorId: string, predecessorId: string, type: DependencyType) => void;
+  /** Opens the KBKT test-case workbook import — beside "Xuất CSV": import next to export. */
+  onImportKbkt: () => void;
 }
 
 function toIso(d: Date): string {
@@ -312,6 +314,7 @@ export default function GanttView({
   onAddDependency,
   onEditDependency,
   onDeleteDependency,
+  onImportKbkt,
 }: Props) {
   // The one zoom variable everything else derives from — see pickScale.
   const [pixelsPerDay, setPixelsPerDay] = useState(DEFAULT_PIXELS_PER_DAY[ViewMode.Week]);
@@ -830,6 +833,9 @@ export default function GanttView({
         )}
         <button onClick={exportCsv} title="Tải bảng WBS (các cột đang hiện, theo bộ lọc) về file CSV mở được bằng Excel">
           Xuất CSV
+        </button>
+        <button onClick={onImportKbkt} title="Tạo/cập nhật test case và lỗi trong Jira từ file kịch bản kiểm thử (KBKT) .xlsx">
+          Nhập KBKT
         </button>
         <div className="col-chooser" ref={chooserRef}>
           <button

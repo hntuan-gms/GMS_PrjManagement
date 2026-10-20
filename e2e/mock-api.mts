@@ -3,6 +3,12 @@
 // the REAL computeProgress, so the report page is exercised end to end.
 import express from "express";
 import { computeProgress } from "../server/src/progress.ts";
+import { parseWorkbook } from "../server/src/kbkt/parse.ts";
+import { DEFAULT_SETTINGS, validateSettings } from "../server/src/kbkt/settings.ts";
+import { KbktSync, type LogLine } from "../server/src/kbkt/sync.ts";
+import { XlsxFormatError } from "../server/src/kbkt/xlsx.ts";
+import { FakeJira } from "../server/test/kbktFakeJira.ts";
+import { sampleWorkbook } from "../server/test/kbktFixture.ts";
 
 const TODAY = new Date().toISOString().slice(0, 10);
 const day = (n: number) => new Date(Date.parse(TODAY) + n * 86400000).toISOString().slice(0, 10);
@@ -223,6 +229,60 @@ app.post("/api/ai/chat", (req, res) => {
     send("text", { text: slowWords[i++] });
   }, 400);
   res.on("close", () => { if (!res.writableFinished) { chatAborts++; clearInterval(iv); } });
+});
+
+// KBKT import: the REAL parser and sync engine against an in-memory Jira, so the
+// dialog is driven end to end — upload, preview, streamed apply, re-sync.
+let kbktJira = new FakeJira("DEMO");
+let kbktSettings = structuredClone(DEFAULT_SETTINGS);
+app.post("/api/__kbkt/reset", (_q, r) => { kbktJira = new FakeJira("DEMO"); kbktSettings = structuredClone(DEFAULT_SETTINGS); r.json({}); });
+app.get("/api/__kbkt/sample", (_q, r) => r.type("application/octet-stream").send(Buffer.from(sampleWorkbook())));
+app.get("/api/kbkt/options", (_q, r) => r.json({
+  issueTypes: [{ name: "Epic", subtask: false }, { name: "Story", subtask: false }, { name: "Sub Testcase", subtask: true }, { name: "Sub-Bug", subtask: true }],
+  statuses: { "Sub Testcase": ["Not run", "Passed", "Failed", "Pending"], "Sub-Bug": ["To Do", "In Progress", "Done"] },
+  priorities: ["Highest", "High", "Medium", "Low", "Lowest"],
+  linkTypes: ["Blocks", "Relates"],
+  epics: [{ key: "DEMO-1", summary: "Đợt 1" }],
+}));
+app.get("/api/kbkt/settings", (_q, r) => r.json(kbktSettings));
+app.put("/api/kbkt/settings", (req, res) => { kbktSettings = validateSettings(req.body); res.json(kbktSettings); });
+const kbktRun = (req: express.Request) => {
+  const q = req.query as Record<string, string | undefined>;
+  return {
+    fileName: decodeURIComponent(String(req.get("x-file-name") ?? "x.xlsx")),
+    wb: parseWorkbook(req.body),
+    options: {
+      epicRef: q.epic ?? null,
+      storyKey: q.story === undefined ? undefined : q.story === "new" ? null : q.story,
+      dueDate: q.dueDate ?? null,
+      force: q.force === "1",
+    },
+  };
+};
+const kbktRaw = express.raw({ type: () => true, limit: "20mb" });
+app.post("/api/kbkt/preview", kbktRaw, async (req, res) => {
+  try {
+    const { fileName, wb, options } = kbktRun(req);
+    const lines: LogLine[] = [];
+    const result = await new KbktSync(kbktJira as any, "DEMO", kbktSettings, (l) => lines.push(l)).run(wb, fileName, { ...options, apply: false });
+    res.json({ fileName, version: Number(/_v(\d+)\.xlsx$/i.exec(fileName)?.[1] ?? 0), cases: wb.cases.length, bugs: wb.bugs.size, ...result, log: lines });
+  } catch (e) {
+    res.status(e instanceof XlsxFormatError ? 400 : 500).json({ error: (e as Error).message });
+  }
+});
+app.post("/api/kbkt/apply", kbktRaw, async (req, res) => {
+  let run: ReturnType<typeof kbktRun>;
+  try {
+    run = kbktRun(req);
+  } catch (e) {
+    return res.status(400).json({ error: (e as Error).message });
+  }
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.flushHeaders();
+  const send = (e: string, d: unknown) => res.write(`event: ${e}\ndata: ${JSON.stringify(d)}\n\n`);
+  const result = await new KbktSync(kbktJira as any, "DEMO", kbktSettings, (l) => send("log", l)).run(run.wb, run.fileName, { ...run.options, apply: true });
+  send("done", { fileName: run.fileName, ...result });
+  res.end();
 });
 
 const port = Number(process.env.MOCK_PORT ?? 4000);

@@ -1,15 +1,12 @@
 import { todayIso } from "./resourceAllocation";
+import { readSse } from "./sse";
 import type { UsageStats } from "./types";
 import type { EncodedAttachment } from "./chatAttachments";
 import type { ViewFilterSpec } from "./viewFilter";
 
 /**
- * Reads one streamed assistant turn.
- *
- * `fetch` + manual SSE parsing rather than `EventSource`, because EventSource can
- * only issue GETs and the message belongs in a request body. The framing is the
- * same, so the parsing below is the standard "split on a blank line, read the
- * event: and data: fields" loop.
+ * Reads one streamed assistant turn (SSE over fetch — see sse.ts for why not
+ * EventSource).
  */
 export type ChatStreamEvent =
   | { type: "session"; sessionId: string }
@@ -68,35 +65,5 @@ export async function* streamChat(
     throw new Error(body.error ?? `Trợ lý không phản hồi (mã ${res.status})`);
   }
 
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-
-    // Events are separated by a blank line; a partial event stays in the buffer
-    // until the rest of it arrives, which is the whole point of streaming.
-    let split: number;
-    while ((split = buffer.indexOf("\n\n")) !== -1) {
-      const raw = buffer.slice(0, split);
-      buffer = buffer.slice(split + 2);
-
-      let event = "message";
-      const dataLines: string[] = [];
-      for (const line of raw.split("\n")) {
-        if (line.startsWith("event:")) event = line.slice(6).trim();
-        else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
-      }
-      if (dataLines.length === 0) continue;
-      try {
-        yield { ...JSON.parse(dataLines.join("\n")), type: event } as ChatStreamEvent;
-      } catch {
-        // A malformed frame is not worth killing the stream over — the rest of
-        // the turn is still useful.
-      }
-    }
-  }
+  yield* readSse<ChatStreamEvent>(res);
 }

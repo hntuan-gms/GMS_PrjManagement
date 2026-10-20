@@ -165,6 +165,17 @@ function mapError(err: unknown): Mapped {
   };
 }
 
+/**
+ * The same mapping for a response that is already streaming: the 200 is sent,
+ * so the error travels as an event, but it should still say what errorHandler
+ * would have said (and a dead session must still be recognisable as one).
+ */
+export function describeError(err: unknown): { status: number; code: ErrorCode; error: string } {
+  const { status, code, error } = mapError(err);
+  if (status >= 500) console.error("[api]", err);
+  return { status, code, error };
+}
+
 // Four args is what marks this as Express error middleware; `_next` must stay.
 export function errorHandler(err: unknown, _req: Request, res: Response, _next: NextFunction): void {
   const mapped = mapError(err);

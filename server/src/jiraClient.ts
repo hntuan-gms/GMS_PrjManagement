@@ -171,8 +171,10 @@ export class JiraClient {
     return issues;
   }
 
-  async getIssue(key: string): Promise<any> {
-    return this.request(`/rest/api/3/issue/${encodeURIComponent(key)}`);
+  /** `fields` narrows the response; omitted, Jira returns every navigable field. */
+  async getIssue(key: string, fields?: string[]): Promise<any> {
+    const query = fields && fields.length > 0 ? `?fields=${fields.map(encodeURIComponent).join(",")}` : "";
+    return this.request(`/rest/api/3/issue/${encodeURIComponent(key)}${query}`);
   }
 
   async updateIssueFields(key: string, fields: Record<string, unknown>): Promise<void> {
@@ -180,6 +182,69 @@ export class JiraClient {
       method: "PUT",
       body: JSON.stringify({ fields }),
     });
+  }
+
+  /**
+   * `fields` sets values outright; `update` carries per-field operations — e.g.
+   * `{ labels: [{ add: "x" }, { remove: "y" }] }`, which changes the labels named
+   * and leaves every other label someone put on the issue alone.
+   */
+  async updateIssue(
+    key: string,
+    body: { fields?: Record<string, unknown>; update?: Record<string, Array<Record<string, unknown>>> }
+  ): Promise<void> {
+    await this.request(`/rest/api/3/issue/${encodeURIComponent(key)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  }
+
+  /**
+   * Up to 50 issues in one call. Jira creates every valid element and reports
+   * the rest by index; when *none* is valid it answers 400 with the same error
+   * list. Both come back here as the same shape, so a caller never has to tell
+   * "some failed" from "all failed".
+   */
+  async bulkCreateIssues(
+    issueUpdates: Array<{ fields: Record<string, unknown> }>
+  ): Promise<Array<{ key: string } | { error: string }>> {
+    type ElementError = { failedElementNumber: number; elementErrors?: { errorMessages?: string[]; errors?: Record<string, string> } };
+    let res: { issues?: Array<{ key: string }>; errors?: ElementError[] };
+    try {
+      res = await this.request(`/rest/api/3/issue/bulk`, { method: "POST", body: JSON.stringify({ issueUpdates }) });
+    } catch (err) {
+      if (!(err instanceof JiraApiError) || err.status !== 400) throw err;
+      try {
+        res = { issues: [], errors: JSON.parse(err.body).errors ?? [] };
+      } catch {
+        throw err;
+      }
+      if (!res.errors?.length) throw err;
+    }
+    const failed = new Map(
+      (res.errors ?? []).map((e) => [
+        e.failedElementNumber,
+        [...(e.elementErrors?.errorMessages ?? []), ...Object.values(e.elementErrors?.errors ?? {})].join(" ") || "Jira từ chối tạo issue.",
+      ])
+    );
+    // `issues` lists only the created ones, in request order.
+    const created = [...(res.issues ?? [])];
+    return issueUpdates.map((_, i) => (failed.has(i) ? { error: failed.get(i)! } : created.shift() ?? { error: "Jira không trả về issue đã tạo." }));
+  }
+
+  /** An issue link ("Relates", "Blocks"…). Inward/outward follow the link type's own wording. */
+  async createIssueLink(typeName: string, inwardKey: string, outwardKey: string): Promise<void> {
+    await this.request(`/rest/api/3/issueLink`, {
+      method: "POST",
+      body: JSON.stringify({ type: { name: typeName }, inwardIssue: { key: inwardKey }, outwardIssue: { key: outwardKey } }),
+    });
+  }
+
+  async getIssueLinkTypes(): Promise<Array<{ id: string; name: string; inward: string; outward: string }>> {
+    const res = await this.request<{ issueLinkTypes?: Array<{ id: string; name: string; inward: string; outward: string }> }>(
+      `/rest/api/3/issueLinkType`
+    );
+    return res.issueLinkTypes ?? [];
   }
 
   async getComments(key: string): Promise<any[]> {
@@ -444,6 +509,10 @@ export class JiraClient {
     });
   }
 
+  async deleteAttachment(id: string): Promise<void> {
+    await this.request(`/rest/api/3/attachment/${encodeURIComponent(id)}`, { method: "DELETE" });
+  }
+
   async getAttachments(key: string): Promise<Array<{ id: string; filename: string; size: number; mimeType: string; created: string; author?: { displayName?: string } }>> {
     const issue = await this.request<any>(`/rest/api/3/issue/${encodeURIComponent(key)}?fields=attachment`);
     return issue.fields?.attachment ?? [];
@@ -627,8 +696,8 @@ export class JiraClient {
    */
   async getProjectIssueTypes(
     projectKey: string
-  ): Promise<Array<{ id: string; name: string; subtask: boolean }>> {
-    const res = await this.request<{ issueTypes: Array<{ id: string; name: string; subtask: boolean }> }>(
+  ): Promise<Array<{ id: string; name: string; subtask: boolean; hierarchyLevel?: number }>> {
+    const res = await this.request<{ issueTypes: Array<{ id: string; name: string; subtask: boolean; hierarchyLevel?: number }> }>(
       `/rest/api/3/project/${encodeURIComponent(projectKey)}`
     );
     return res.issueTypes ?? [];

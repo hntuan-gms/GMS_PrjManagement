@@ -30,7 +30,13 @@ import type {
   TaskComment,
   Timesheet,
   WorklogEntry,
+  KbktOptions,
+  KbktPreview,
+  KbktRunParams,
+  KbktSettings,
+  KbktStreamEvent,
 } from "./types";
+import { readSse } from "./sse";
 
 // Always same-origin: in production this process also serves the UI, and in dev
 // Vite proxies /api to :4000 (see vite.config.ts). Keeping it same-origin is what
@@ -112,6 +118,47 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
  * "fix" it into an api call.
  */
 export const loginUrl = `${API_BASE}/auth/login`;
+
+function kbktQuery(params: KbktRunParams): string {
+  const q = new URLSearchParams();
+  if (params.epic) q.set("epic", params.epic);
+  if (params.story) q.set("story", params.story);
+  if (params.dueDate) q.set("dueDate", params.dueDate);
+  if (params.force) q.set("force", "1");
+  const s = q.toString();
+  return s ? `?${s}` : "";
+}
+
+// The workbook goes up as the raw body, its name in a header — like an attachment.
+function kbktUpload(file: File): RequestInit {
+  return {
+    method: "POST",
+    body: file,
+    headers: { "Content-Type": "application/octet-stream", "X-File-Name": encodeURIComponent(file.name) },
+  };
+}
+
+/**
+ * The real import, streamed. A problem with the upload itself (not a KBKT file,
+ * no project) is a normal error response and throws; once the stream starts,
+ * failures arrive as an `error` event. Aborting `signal` stops the run on the
+ * server between two Jira calls.
+ */
+export async function* kbktApply(file: File, params: KbktRunParams, signal: AbortSignal): AsyncGenerator<KbktStreamEvent> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/kbkt/apply${kbktQuery(params)}`, { ...kbktUpload(file), credentials: "include", signal });
+  } catch (err) {
+    if ((err as Error).name === "AbortError") throw err;
+    throw new NetworkError("Không kết nối được tới máy chủ.");
+  }
+  if (!res.ok || !res.body) {
+    const body = await res.json().catch(() => ({ error: res.statusText }));
+    if (res.status === 401 && unauthorizedHandler) unauthorizedHandler();
+    throw new ApiError(res.status, body.error ?? `Request failed: ${res.status}`, body.code);
+  }
+  yield* readSse<KbktStreamEvent>(res);
+}
 
 export const api = {
   getSession: () => request<Session>("/auth/me"),
@@ -227,6 +274,14 @@ export const api = {
     request<void>(`/resources/absences/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
   sync: () => request<{ syncedAt: string; count: number; tasks: Task[] }>("/sync", { method: "POST" }),
+
+  // KBKT import. The preview reads Jira and writes nothing; kbktApply (above) is the real run.
+  getKbktOptions: () => request<KbktOptions>("/kbkt/options"),
+  getKbktSettings: () => request<KbktSettings>("/kbkt/settings"),
+  saveKbktSettings: (settings: KbktSettings) =>
+    request<KbktSettings>("/kbkt/settings", { method: "PUT", body: JSON.stringify(settings) }),
+  previewKbkt: (file: File, params: KbktRunParams) =>
+    request<KbktPreview>(`/kbkt/preview${kbktQuery(params)}`, kbktUpload(file)),
 
   // AI planner. generatePlan is the slow one — it waits on the model — so callers
   // should show progress rather than assume it returns like the others.

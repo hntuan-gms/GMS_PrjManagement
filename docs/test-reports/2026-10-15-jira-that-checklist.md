@@ -101,3 +101,23 @@ Test tự động đã chứng minh phần code của ta; mục này chứng min
 | B18 | Đính kèm PDF và một file .md | Trợ lý đọc nội dung | |
 | B19 | Gửi tệp .exe hoặc >5 MB | Bị từ chối ngay, nói rõ lý do | |
 | B20 | Sau lượt có tệp, hỏi "như ảnh lúc nãy thì sao" | Trợ lý nói không còn thấy ảnh (không bịa nội dung) | |
+
+---
+
+## C. Nhập kịch bản kiểm thử (KBKT .xlsx) — cần Jira thật
+
+Test tự động đã chứng minh: đọc file giống hệt `jira_sync.py` (cùng số test case, nhãn, tiêu đề, mô tả, ảnh — đối chiếu trên 5 file mẫu), logic đồng bộ trên Jira giả, và luồng hộp thoại trong trình duyệt (`e2e/kbkt-import.e2e.mjs`). Mục này chứng minh **Jira thật** nhận đúng. Nút **Nhập KBKT** ở thanh công cụ Gantt, cạnh "Xuất CSV". Dùng dự án thử có loại issue Story / Sub Testcase / Sub Bug (hoặc sửa trong "Cấu hình dự án").
+
+| # | Thao tác | Phải thấy trong Jira | Kết quả |
+|---|---|---|---|
+| C1 | Mở "Cấu hình dự án" | Danh sách loại issue / trạng thái / ưu tiên / kiểu liên kết là của dự án này; giá trị không có trong dự án được đánh dấu | |
+| C2 | Nhập một file `AI-xx_…xlsx`, chọn Epic, Xem trước | Không có gì đổi trong Jira (xem trước không ghi) | |
+| C3 | Áp dụng | Story mới dưới Epic; mỗi dòng test là một Sub Testcase dưới Story, đúng trạng thái (P→Passed, F→Failed, PE→Pending, trống→Not run); Sub Bug có ưu tiên theo Mức độ; ảnh trong sheet "Hình ảnh lỗi" được đính kèm đúng lỗi; test ↔ lỗi có liên kết Relates; hạn hoàn thành = ngày đã chọn; nhãn `kbkt-…`, `tc-…`, `bug-…`, `result-…` | |
+| C4 | Áp dụng lại đúng file đó | Xem trước báo "Không có gì cần ghi lên Jira"; không có issue trùng | |
+| C5 | Sửa một kết quả trong file (P → F), nhập lại | Chỉ test đó đổi trạng thái + nhãn result; lỗi tương ứng mở lại | |
+| C6 | File `AI-33_…` mà AI-33 là Story có sẵn trong dự án | Test case vào dưới AI-33; AI-33 không bị đổi tên | |
+| C7 | File của một workbook **đã đồng bộ bằng `jira_sync.py`** (dự án AI) | Xem trước: không có dòng "Tạo mới" nào — issue cũ được nhận ra theo nhãn | |
+| C8 | Đặt một trạng thái không có bước chuyển (ví dụ đổi "Đạt" sang trạng thái không với tới được) | Kết quả báo "không chuyển được …" thay vì im lặng; phần còn lại vẫn ghi | |
+| C9 | File lớn nhất có ảnh (~100 test case) | Áp dụng xong trong vòng 300 giây (giới hạn Cloud Run); nhật ký chạy dần | |
+| C10 | Bấm **Dừng** giữa chừng, rồi áp dụng lại | Phần đã ghi giữ nguyên; lần sau chỉ làm phần còn lại, không trùng | |
+| C11 | Tài khoản khách (không phải nhân viên) | Dùng được (không cần quyền AI); Jira từ chối nếu tài khoản không có quyền tạo issue, kèm thông báo rõ | |

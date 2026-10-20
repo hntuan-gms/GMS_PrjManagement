@@ -159,3 +159,49 @@ export function adfToCommentText(doc: unknown): string {
   };
   return walk(doc as AdfNode).trim();
 }
+
+/* -------------------------------------------------------------------------- */
+/* Sectioned descriptions — the KBKT import's layout                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * "### Heading" + body pairs, empty bodies skipped — byte-for-byte the layout
+ * jira_sync.py writes, so a re-sync from the site compares equal to what the
+ * script created and does not rewrite every description it finds.
+ */
+export function sectionsToAdf(sections: Array<[string, string]>): { type: "doc"; version: 1; content: AdfNode[] } {
+  const content: AdfNode[] = [];
+  for (const [head, body] of sections) {
+    if (!body) continue;
+    content.push({ type: "heading", attrs: { level: 3 }, content: [{ type: "text", text: head }] } as AdfNode);
+    const para: AdfNode[] = [];
+    body.split("\n").forEach((line, i) => {
+      if (i) para.push({ type: "hardBreak" });
+      if (line) para.push({ type: "text", text: line });
+    });
+    content.push({ type: "paragraph", content: para });
+  }
+  return { type: "doc", version: 1, content };
+}
+
+/**
+ * A description reduced to its non-blank lines, for "did it change?" — the
+ * script's `norm(adf_text(...))`. Formatting Jira adds or drops on a round
+ * trip (marks, blank paragraphs, trailing spaces) does not count as a change.
+ */
+export function adfComparable(doc: unknown): string {
+  const walk = (node: AdfNode | null | undefined): string => {
+    if (!node) return "";
+    if (node.type === "text") return node.text ?? "";
+    if (node.type === "hardBreak") return "\n";
+    const sep = node.type === "paragraph" || node.type === "heading" ? "" : "\n";
+    return (node.content ?? []).map(walk).join(sep);
+  };
+  const flat = doc && typeof doc === "object" ? walk(doc as AdfNode) : "";
+  return flat
+    .trim()
+    .split(/\r?\n/)
+    .map((l) => l.trimEnd())
+    .filter((l) => l.trim())
+    .join("\n");
+}

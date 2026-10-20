@@ -673,3 +673,64 @@ export interface ChatSessionSummary {
   createdAt: string;
   updatedAt: string;
 }
+
+/* ----------------------------------------------------------------------------
+ * KBKT import — test-case workbooks into Jira (server/src/kbkt, routes/kbkt.ts)
+ * ------------------------------------------------------------------------- */
+
+export type KbktKind = "story" | "test" | "bug";
+
+/** Per-project; what jira_sync_config.json used to hard-code. */
+export interface KbktSettings {
+  issueTypes: { story: string; test: string; bug: string };
+  status: { pass: string; fail: string; pending: string; notrun: string; bugOpen: string; bugClosed: string };
+  /** Severity in "Danh sách lỗi" → priority name. */
+  priority: Record<string, string>;
+  linkType: string;
+  dueDateOn: KbktKind[];
+}
+
+export interface KbktOptions {
+  issueTypes: Array<{ name: string; subtask: boolean }>;
+  /** Issue type name → the statuses its workflow has. */
+  statuses: Record<string, string[]>;
+  priorities: string[];
+  linkTypes: string[];
+  epics: Array<{ key: string; summary: string }>;
+}
+
+export type KbktAction = "INFO" | "WARN" | "ERROR" | "SKIP" | "CREATE" | "UPDATE" | "MOVE" | "NO-MOVE" | "LINK" | "ATTACH";
+
+export interface KbktLogLine {
+  action: KbktAction;
+  message: string;
+}
+
+export interface KbktResult {
+  fileName: string;
+  code: string;
+  title: string;
+  /** "new:…" in a preview when the Story would be created. null = the run stopped on an error. */
+  storyKey: string | null;
+  stats: Partial<Record<KbktAction, number>>;
+  noTransition: Array<{ from: string; to: string; count: number }>;
+}
+
+export interface KbktPreview extends KbktResult {
+  version: number;
+  cases: number;
+  bugs: number;
+  log: KbktLogLine[];
+}
+
+export interface KbktRunParams {
+  epic?: string;
+  story?: string;
+  dueDate?: string;
+  force?: boolean;
+}
+
+export type KbktStreamEvent =
+  | ({ type: "log" } & KbktLogLine)
+  | ({ type: "done" } & KbktResult)
+  | { type: "error"; message: string; code?: string };
