@@ -14,6 +14,7 @@ import type { JiraUser, ResourceAbsence, ResourceProfile, ResourcePool, Task } f
 import { csvName, downloadCsv } from "../csv";
 import { buildEpicIndex, isTaskFiltering, matchesTaskFilter, type TaskFilter } from "../taskFilter";
 import FilterBar from "./FilterBar";
+import SavedFilterMenu from "./SavedFilterMenu";
 import ResourcePersonPanel from "./ResourcePersonPanel";
 
 interface Props {
@@ -219,6 +220,9 @@ export default function ResourceView({
         facets={["statuses", "types", "epics", "labels", "priorities", "overdue"]}
         matched={filteredTasks.length}
         total={tasks.length}
+        // Applies the whole shared filter, people included, so the Gantt shows
+        // the same saved view when you switch back.
+        leading={<SavedFilterMenu filter={filter} onApply={onFilterChange} myAccountId={myAccountId} />}
       />
       {filtering && (
         <div className="rv-notice">

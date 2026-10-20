@@ -35,6 +35,8 @@ import type {
   KbktRunParams,
   KbktSettings,
   KbktStreamEvent,
+  SavedFilter,
+  SavedFilterSpec,
 } from "./types";
 import { readSse } from "./sse";
 
@@ -282,6 +284,14 @@ export const api = {
     request<KbktSettings>("/kbkt/settings", { method: "PUT", body: JSON.stringify(settings) }),
   previewKbkt: (file: File, params: KbktRunParams) =>
     request<KbktPreview>(`/kbkt/preview${kbktQuery(params)}`, kbktUpload(file)),
+
+  // Saved filters (Gantt + resource tab). Only the creator can change or delete one.
+  listSavedFilters: () => request<SavedFilter[]>("/filters"),
+  createSavedFilter: (input: { name: string; shared: boolean; spec: SavedFilterSpec }) =>
+    request<SavedFilter>("/filters", { method: "POST", body: JSON.stringify(input) }),
+  updateSavedFilter: (id: string, input: { name?: string; shared?: boolean; spec?: SavedFilterSpec }) =>
+    request<SavedFilter>(`/filters/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(input) }),
+  deleteSavedFilter: (id: string) => request<void>(`/filters/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
   // AI planner. generatePlan is the slow one — it waits on the model — so callers
   // should show progress rather than assume it returns like the others.
