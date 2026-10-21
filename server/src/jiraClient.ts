@@ -155,11 +155,12 @@ export class JiraClient {
     return (text ? JSON.parse(text) : undefined) as T;
   }
 
-  async searchIssues(jql: string, fields: string[]): Promise<any[]> {
+  /** Every match, paged — or at most `limit`, for a picker that only shows the first few. */
+  async searchIssues(jql: string, fields: string[], limit?: number): Promise<any[]> {
     const issues: any[] = [];
     let nextPageToken: string | undefined;
     do {
-      const body: Record<string, unknown> = { jql, fields, maxResults: 100 };
+      const body: Record<string, unknown> = { jql, fields, maxResults: Math.min(100, limit ?? 100) };
       if (nextPageToken) body.nextPageToken = nextPageToken;
       const page = await this.request<{ issues: any[]; nextPageToken?: string }>(
         "/rest/api/3/search/jql",
@@ -167,8 +168,8 @@ export class JiraClient {
       );
       issues.push(...page.issues);
       nextPageToken = page.nextPageToken;
-    } while (nextPageToken);
-    return issues;
+    } while (nextPageToken && (limit === undefined || issues.length < limit));
+    return limit === undefined ? issues : issues.slice(0, limit);
   }
 
   /** `fields` narrows the response; omitted, Jira returns every navigable field. */

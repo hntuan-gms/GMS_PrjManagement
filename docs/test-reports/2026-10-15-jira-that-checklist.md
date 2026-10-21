@@ -115,7 +115,9 @@ Test tự động đã chứng minh: đọc file giống hệt `jira_sync.py` (c
 | C3 | Áp dụng | Story mới dưới Epic; mỗi dòng test là một Sub Testcase dưới Story, đúng trạng thái (P→Passed, F→Failed, PE→Pending, trống→Not run); Sub Bug có ưu tiên theo Mức độ; ảnh trong sheet "Hình ảnh lỗi" được đính kèm đúng lỗi; test ↔ lỗi có liên kết Relates; hạn hoàn thành = ngày đã chọn; nhãn `kbkt-…`, `tc-…`, `bug-…`, `result-…` | |
 | C4 | Áp dụng lại đúng file đó | Xem trước báo "Không có gì cần ghi lên Jira"; không có issue trùng | |
 | C5 | Sửa một kết quả trong file (P → F), nhập lại | Chỉ test đó đổi trạng thái + nhãn result; lỗi tương ứng mở lại | |
-| C6 | File `AI-33_…` mà AI-33 là Story có sẵn trong dự án | Test case vào dưới AI-33; AI-33 không bị đổi tên | |
+| C6 | File `AI-33_…` mà AI-33 là Story có sẵn trong dự án | Hộp thoại tự chọn "Story có sẵn" AI-33 (hiện tên); test case vào dưới AI-33; AI-33 không bị đổi tên, **không bị chuyển Epic** dù đang chọn Epic ở trên | |
+| C6b | File `AI-xx_…`, chọn "Story có sẵn" → tìm theo tên một Story, áp dụng | Hàng chục Sub Testcase / Sub Bug nằm dưới đúng Story đã chọn; không có Story mới nào được tạo | |
+| C6c | Workbook đã nhập vào Story riêng, nay chọn "Story có sẵn" khác rồi áp dụng | Các sub-task cũ **chuyển sang** Story mới chọn (Jira thật có cho đổi parent sub-task qua API không — ghi lại); có cảnh báo Story cũ không còn dùng | |
 | C7 | File của một workbook **đã đồng bộ bằng `jira_sync.py`** (dự án AI) | Xem trước: không có dòng "Tạo mới" nào — issue cũ được nhận ra theo nhãn | |
 | C8 | Đặt một trạng thái không có bước chuyển (ví dụ đổi "Đạt" sang trạng thái không với tới được) | Kết quả báo "không chuyển được …" thay vì im lặng; phần còn lại vẫn ghi | |
 | C9 | File lớn nhất có ảnh (~100 test case) | Áp dụng xong trong vòng 300 giây (giới hạn Cloud Run); nhật ký chạy dần | |

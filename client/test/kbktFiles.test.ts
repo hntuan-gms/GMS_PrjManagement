@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { fileVersion, nextWeekSunday, storyKeyFromFileName, storyParam, supersededBy } from "../src/kbktFiles";
+import { fileVersion, nextWeekSunday, storyKeyFromFileName, supersededBy } from "../src/kbktFiles";
 
 describe("storyKeyFromFileName", () => {
   it("reads the issue key before the first underscore, not AI-xx", () => {
@@ -8,18 +8,6 @@ describe("storyKeyFromFileName", () => {
     assert.equal(storyKeyFromFileName(String.raw`C:\fakepath\GPM-7_x.xlsx`), "GPM-7");
     assert.equal(storyKeyFromFileName("AI-xx_1A13_v1.xlsx"), null);
     assert.equal(storyKeyFromFileName("TestCase_1E127.xlsx"), null);
-  });
-});
-
-describe("storyParam", () => {
-  it("leaves the key from the file name to the server (the script's behaviour)", () => {
-    assert.equal(storyParam("AI-33", "AI-33"), undefined);
-    assert.equal(storyParam(" ai-33 ", "AI-33"), undefined);
-  });
-  it("sends an edited key explicitly, and an emptied box as a new Story", () => {
-    assert.equal(storyParam("AI-40", "AI-33"), "AI-40");
-    assert.equal(storyParam("", "AI-33"), "new");
-    assert.equal(storyParam("", null), "new");
   });
 });
 

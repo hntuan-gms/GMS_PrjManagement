@@ -33,6 +33,7 @@ import type {
   KbktOptions,
   KbktPreview,
   KbktRunParams,
+  KbktStory,
   KbktSettings,
   KbktStreamEvent,
 } from "./types";
@@ -282,6 +283,8 @@ export const api = {
     request<KbktSettings>("/kbkt/settings", { method: "PUT", body: JSON.stringify(settings) }),
   previewKbkt: (file: File, params: KbktRunParams) =>
     request<KbktPreview>(`/kbkt/preview${kbktQuery(params)}`, kbktUpload(file)),
+  /** Story-level issues of the project by key or title; empty query → the most recently touched. */
+  searchKbktStories: (q: string) => request<KbktStory[]>(`/kbkt/stories?q=${encodeURIComponent(q)}`),
 
   // AI planner. generatePlan is the slow one — it waits on the model — so callers
   // should show progress rather than assume it returns like the others.

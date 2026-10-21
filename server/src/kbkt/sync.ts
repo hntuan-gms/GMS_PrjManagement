@@ -262,7 +262,8 @@ export class KbktSync {
         "INFO",
         `Story có sẵn ${own.key} "${short(own.fields.summary ?? "", 50)}" (${what}): test case → ${names.test}, lỗi → ${names.bug}.`
       );
-      if (!ref && !ownEpic) this.log("WARN", `${own.key} chưa thuộc Epic nào — chọn Epic nếu muốn đưa nó vào một Epic.`);
+      // A fact, not a to-do: the dialog never moves an existing Story into an Epic.
+      if (!ref && !ownEpic) this.log("INFO", `${own.key} chưa thuộc Epic nào; Story giữ nguyên vị trí.`);
       if (existing.has(storyId)) {
         this.log(
           "WARN",

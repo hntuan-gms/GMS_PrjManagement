@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, kbktApply } from "../api";
-import { nextWeekSunday, storyKeyFromFileName, storyParam, supersededBy } from "../kbktFiles";
+import { nextWeekSunday, storyKeyFromFileName, supersededBy } from "../kbktFiles";
 import { todayIso } from "../resourceAllocation";
 import type {
   KbktAction,
@@ -11,6 +11,7 @@ import type {
   KbktResult,
   KbktRunParams,
   KbktSettings,
+  KbktStory,
 } from "../types";
 
 interface Props {
@@ -33,11 +34,19 @@ interface Props {
 interface Entry {
   id: string;
   file: File;
-  /** Story key in the file name, when it belongs to this project. */
-  fromName: string | null;
+  /**
+   * Where the test cases go. "existing": under `story`, a Story already in Jira —
+   * it is never moved or renamed. "own": under the file's own Story, created in
+   * the chosen Epic on the first import and found again by label afterwards.
+   */
+  mode: "existing" | "own";
+  story: KbktStory | null;
+  /** The file name's key is being looked up in Jira. */
+  checking?: boolean;
+  /** Why the dialog picked the mode it did, when that isn't obvious. */
+  note?: string;
   /** Story key in the file name that belongs to another project. */
   foreignKey: string | null;
-  story: string;
   preview?: KbktPreview;
   previewError?: string;
   log?: KbktLogLine[];
@@ -144,16 +153,58 @@ export default function KbktImportModal({ projectKey, onClose, onApplied }: Prop
     return list.map(({ preview: _p, previewError: _e, log: _l, result: _r, applyError: _a, ...rest }) => rest);
   }
 
+  function patchEntry(id: string, fn: (e: Entry) => Entry) {
+    // Functional: lookups resolve after other edits, and must not undo them.
+    setEntries((list) => list.map((x) => (x.id === id ? fn(x) : x)));
+  }
+
   function addFiles(files: FileList | File[]) {
     const added: Entry[] = [];
     for (const file of Array.from(files)) {
       if (!/\.xlsx$/i.test(file.name) || file.name.startsWith("~$")) continue;
       if (entries.some((e) => e.file.name === file.name) || added.some((e) => e.file.name === file.name)) continue;
       const key = storyKeyFromFileName(file.name);
-      const own = key && key.startsWith(`${projectKey}-`) ? key : null;
-      added.push({ id: String(nextId++), file, fromName: own, foreignKey: key && !own ? key : null, story: own ?? "" });
+      const ownProject = !!key && key.startsWith(`${projectKey}-`);
+      added.push({
+        id: String(nextId++),
+        file,
+        mode: ownProject ? "existing" : "own",
+        story: ownProject ? { key: key!, summary: "", type: "", status: "" } : null,
+        checking: ownProject,
+        foreignKey: key && !ownProject ? key : null,
+      });
     }
-    if (added.length) setEntries([...invalidate(), ...added]);
+    if (!added.length) return;
+    setEntries([...invalidate(), ...added]);
+    // "AI-33_….xlsx" names its Story; confirm it exists (and is Story level)
+    // before offering it, so a typo'd or deleted key falls back visibly.
+    for (const e of added) {
+      if (!e.checking || !e.story) continue;
+      const key = e.story.key;
+      api
+        .searchKbktStories(key)
+        .then((hits) => hits.find((h) => h.key === key) ?? null)
+        .catch(() => null)
+        .then((hit) =>
+          patchEntry(e.id, (x) =>
+            !x.checking
+              ? x
+              : hit
+                ? { ...x, checking: false, story: hit }
+                : {
+                    ...x,
+                    checking: false,
+                    mode: "own",
+                    story: null,
+                    note: `Tên file trỏ tới ${key} nhưng ${key} không có trong dự án (hoặc không phải Story) — dùng Story riêng của file. Chọn "Story có sẵn" để đưa vào Story khác.`,
+                  }
+          )
+        );
+    }
+  }
+
+  function setTarget(id: string, patch: Partial<Entry>) {
+    setEntries(invalidate(entries.map((x) => (x.id === id ? { ...x, checking: false, note: undefined, ...patch } : x))));
   }
 
   const superseded = useMemo(
@@ -164,12 +215,13 @@ export default function KbktImportModal({ projectKey, onClose, onApplied }: Prop
     [entries]
   );
 
-  const params = (e: Entry): KbktRunParams => ({
-    epic: epic || undefined,
-    story: storyParam(e.story, e.fromName),
-    dueDate: dueDate || undefined,
-    force,
-  });
+  // The Epic goes only with a file's own Story. Sent with an existing Story, the
+  // server would move that Story into the Epic — not what "put these test cases
+  // under AI-33" means.
+  const params = (e: Entry): KbktRunParams =>
+    e.mode === "existing"
+      ? { story: e.story?.key, dueDate: dueDate || undefined, force }
+      : { story: "new", epic: epic || undefined, dueDate: dueDate || undefined, force };
 
   async function previewAll() {
     setPhase("previewing");
@@ -177,10 +229,14 @@ export default function KbktImportModal({ projectKey, onClose, onApplied }: Prop
     setEntries(list);
     for (const e of list) {
       let patch: Partial<Entry>;
-      try {
-        patch = { preview: await api.previewKbkt(e.file, params(e)) };
-      } catch (err) {
-        patch = { previewError: errorText(err, "Không xem trước được file này.") };
+      if (e.mode === "existing" && !e.story) {
+        patch = { previewError: "Chưa chọn Story có sẵn cho file này." };
+      } else {
+        try {
+          patch = { preview: await api.previewKbkt(e.file, params(e)) };
+        } catch (err) {
+          patch = { previewError: errorText(err, "Không xem trước được file này.") };
+        }
       }
       list = list.map((x) => (x.id === e.id ? { ...x, ...patch } : x));
       setEntries(list);
@@ -288,16 +344,17 @@ export default function KbktImportModal({ projectKey, onClose, onApplied }: Prop
 
         <div className="kb-params">
           <label className="field">
-            <span>Epic cho Story mới</span>
+            <span>Epic cho Story riêng của file</span>
             <select
               value={epic}
-              disabled={busy}
+              // Only a file's own Story goes into the Epic; an existing Story stays put.
+              disabled={busy || (entries.length > 0 && entries.every((x) => x.mode === "existing"))}
               onChange={(e) => {
                 setEpic(e.target.value);
                 setEntries(invalidate());
               }}
             >
-              <option value="">— Giữ Epic của lần nhập trước / của Story có sẵn —</option>
+              <option value="">— Giữ Epic của lần nhập trước —</option>
               {options?.epics.map((ep) => (
                 <option key={ep.key} value={ep.key}>
                   {ep.key} — {ep.summary}
@@ -357,19 +414,41 @@ export default function KbktImportModal({ projectKey, onClose, onApplied }: Prop
                     </button>
                   </div>
 
-                  <label className="kb-story">
-                    <span>Story chứa test case</span>
-                    <input
-                      value={e.story}
-                      disabled={busy}
-                      placeholder="Để trống = tạo Story mới trong Epic đã chọn"
-                      onChange={(ev) => {
-                        const story = ev.target.value;
-                        setEntries(invalidate(entries.map((x) => (x.id === e.id ? { ...x, story } : x))));
-                      }}
-                    />
-                  </label>
-                  {e.foreignKey && !e.story && (
+                  <div className="kb-target" role="radiogroup" aria-label="Đưa test case và lỗi vào">
+                    <span className="kb-target-label">Đưa test case và lỗi vào</span>
+                    <label className="kb-check">
+                      <input
+                        type="radio"
+                        name={`kb-target-${e.id}`}
+                        checked={e.mode === "existing"}
+                        disabled={busy}
+                        onChange={() => setTarget(e.id, { mode: "existing" })}
+                      />
+                      Story có sẵn
+                    </label>
+                    <label className="kb-check">
+                      <input
+                        type="radio"
+                        name={`kb-target-${e.id}`}
+                        checked={e.mode === "own"}
+                        disabled={busy}
+                        onChange={() => setTarget(e.id, { mode: "own" })}
+                      />
+                      Story riêng của file (tạo lần đầu trong Epic ở trên, các lần sau dùng lại)
+                    </label>
+                  </div>
+                  {e.mode === "existing" &&
+                    (e.checking ? (
+                      <p className="kb-muted">Đang kiểm tra {e.story?.key} trên Jira…</p>
+                    ) : (
+                      <StoryPicker
+                        value={e.story}
+                        disabled={busy}
+                        onPick={(story) => setTarget(e.id, { story })}
+                      />
+                    ))}
+                  {e.note && <p className="kb-muted">{e.note}</p>}
+                  {e.foreignKey && e.mode === "own" && (
                     <p className="kb-muted">
                       Tên file trỏ tới {e.foreignKey}, thuộc dự án khác — sẽ tạo Story mới trong {projectKey}. Muốn dùng{" "}
                       {e.foreignKey} thì chuyển sang dự án đó rồi nhập lại.
@@ -471,7 +550,7 @@ export default function KbktImportModal({ projectKey, onClose, onApplied }: Prop
           ) : (
             <button onClick={close}>Đóng</button>
           )}
-          <button onClick={previewAll} disabled={busy || entries.length === 0}>
+          <button onClick={previewAll} disabled={busy || entries.length === 0 || entries.some((x) => x.checking)}>
             {phase === "previewing" ? "Đang xem trước…" : "Xem trước"}
           </button>
           <button className="primary" onClick={applyAll} disabled={busy || !previewed || toApply.length === 0}>
@@ -479,6 +558,96 @@ export default function KbktImportModal({ projectKey, onClose, onApplied }: Prop
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Pick the Story the test cases go under, by key ("AI-33", "33") or by words of
+ * its title. Searched on the server as you type: a project can hold thousands
+ * of Stories, so they are never all loaded. Empty box → the recently touched ones.
+ */
+function StoryPicker({
+  value,
+  disabled,
+  onPick,
+}: {
+  value: KbktStory | null;
+  disabled: boolean;
+  onPick: (story: KbktStory | null) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [hits, setHits] = useState<KbktStory[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const searching = !value;
+
+  useEffect(() => {
+    if (!searching) return;
+    let stale = false;
+    const timer = setTimeout(() => {
+      setHits(null);
+      setError(null);
+      api
+        .searchKbktStories(query.trim())
+        .then((h) => !stale && setHits(h))
+        .catch((e) => !stale && setError(errorText(e, "Không tìm được Story.")));
+    }, 250);
+    return () => {
+      stale = true;
+      clearTimeout(timer);
+    };
+  }, [query, searching]);
+
+  if (value) {
+    return (
+      <div className="kb-picked">
+        <span>
+          <strong>{value.key}</strong> — {value.summary || "(không có tên)"}
+          {value.type && (
+            <span className="kb-muted">
+              {" "}
+              · {value.type}
+              {value.status && ` · ${value.status}`}
+            </span>
+          )}
+        </span>
+        <button className="link-btn" disabled={disabled} onClick={() => onPick(null)}>
+          Đổi
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="kb-picker">
+      <input
+        value={query}
+        disabled={disabled}
+        placeholder="Tìm Story theo mã (vd. 33) hoặc tên"
+        aria-label="Tìm Story có sẵn"
+        onChange={(e) => setQuery(e.target.value)}
+      />
+      {error ? (
+        <div className="modal-error">{error}</div>
+      ) : hits === null ? (
+        <p className="kb-muted">Đang tìm…</p>
+      ) : hits.length === 0 ? (
+        <p className="kb-muted">Không có Story nào khớp trong dự án này.</p>
+      ) : (
+        <ul className="kb-picker-list" role="listbox" aria-label="Story trong dự án">
+          {hits.map((h) => (
+            <li key={h.key}>
+              <button type="button" role="option" aria-selected={false} disabled={disabled} onClick={() => onPick(h)}>
+                <strong>{h.key}</strong> {h.summary}
+                <span className="kb-muted">
+                  {" "}
+                  · {h.type} · {h.status}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

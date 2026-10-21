@@ -54,10 +54,3 @@ export function nextWeekSunday(todayIso: string): string {
   date.setUTCDate(date.getUTCDate() + 13 - weekday);
   return date.toISOString().slice(0, 10);
 }
-
-/** The `story` query parameter: omitted (from the file name), "new", or an explicit key. */
-export function storyParam(input: string, fromFileName: string | null): string | undefined {
-  const v = input.trim().toUpperCase();
-  if (fromFileName && v === fromFileName) return undefined;
-  return v || "new";
-}

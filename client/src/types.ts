@@ -723,6 +723,14 @@ export interface KbktPreview extends KbktResult {
   log: KbktLogLine[];
 }
 
+/** An issue that can hold the test cases (Story level), from the picker's search. */
+export interface KbktStory {
+  key: string;
+  summary: string;
+  type: string;
+  status: string;
+}
+
 export interface KbktRunParams {
   epic?: string;
   story?: string;

@@ -116,11 +116,42 @@ await step("xem trước lại cùng file → không còn gì cần ghi (khớp 
   await modal.locator(".footer-summary", { hasText: "Không có file nào cần ghi lên Jira." }).waitFor();
 });
 
-await step("đổi Story của file sang mã sai dự án → báo lỗi rõ ràng, không áp dụng được", async () => {
-  await card("_v2.xlsx").locator(".kb-story input").fill("GPM-4");
+await step("'Story có sẵn': tìm theo tên, chọn DEMO-50 → xem trước chỉ chuyển test case sang DEMO-50, không gửi Epic", async () => {
+  const c = card("_v2.xlsx");
+  await c.getByLabel("Story có sẵn").check();
+  await c.locator(".kb-picker input").fill("đăng nhập");
+  await c.locator(".kb-picker-list button", { hasText: "DEMO-50" }).click();
+  await c.locator(".kb-picked", { hasText: "UC đăng nhập hệ thống" }).waitFor();
   await preview();
-  await card("_v2.xlsx").locator(".modal-error", { hasText: "dự án GPM" }).waitFor();
-  assert.ok(await applyBtn.isDisabled());
+  const chips = await c.locator(".kb-chips").first().textContent();
+  assert.match(chips, /Cập nhật\s*9/);
+  assert.doesNotMatch(chips, /Tạo mới/);
+  const q = (await posts("/api/kbkt/preview")).at(-1).q;
+  assert.equal(q.story, "DEMO-50");
+  assert.equal(q.epic, undefined, "the Epic must not be sent with an existing Story");
+});
+
+await step("áp dụng → mọi test case và lỗi nằm dưới DEMO-50; DEMO-50 giữ nguyên Epic và tên", async () => {
+  await applyBtn.click();
+  await card("_v2.xlsx").locator(".kb-notice-ok", { hasText: "Xong — Story DEMO-50." }).waitFor();
+  const issues = await (await fetch(API + "/api/__kbkt/issues")).json();
+  const subs = issues.filter((i) => i.labels.some((l) => /^(tc|bug)-/.test(l)));
+  assert.equal(subs.length, 9);
+  assert.ok(subs.every((i) => i.parent === "DEMO-50"), JSON.stringify(subs.map((i) => i.parent)));
+  const story = issues.find((i) => i.key === "DEMO-50");
+  assert.deepEqual([story.parent, story.summary], ["DEMO-1", "UC đăng nhập hệ thống"]);
+});
+
+await step("file tên 'DEMO-50_…' tự chọn Story DEMO-50; mã không có thì quay về Story riêng và nói rõ", async () => {
+  const named = path.join(dir, "DEMO-50_1E127_BaoCao_v3.xlsx");
+  const missing = path.join(dir, "DEMO-999_1E127_BaoCao_v4.xlsx");
+  fs.writeFileSync(named, bytes);
+  fs.writeFileSync(missing, bytes);
+  await modal.locator('input[type="file"]').setInputFiles([named, missing]);
+  await card("DEMO-50_").locator(".kb-picked", { hasText: "UC đăng nhập hệ thống" }).waitFor();
+  assert.ok(await card("DEMO-50_").getByLabel("Story có sẵn").isChecked());
+  await card("DEMO-999_").locator(".kb-muted", { hasText: "DEMO-999 không có trong dự án" }).waitFor();
+  assert.ok(await card("DEMO-999_").getByLabel(/Story riêng của file/).isChecked());
 });
 
 await step("không có lỗi trình duyệt", async () => {

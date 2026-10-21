@@ -51,7 +51,7 @@ let chatAborts = 0;
 const app = express();
 app.use(express.json());
 app.use((req, _res, next) => {
-  if (req.method !== "GET" && !req.path.startsWith("/api/__")) log.push({ m: req.method, p: req.path, b: req.body });
+  if (req.method !== "GET" && !req.path.startsWith("/api/__")) log.push({ m: req.method, p: req.path, b: req.body, q: req.query });
   next();
 });
 
@@ -233,9 +233,28 @@ app.post("/api/ai/chat", (req, res) => {
 
 // KBKT import: the REAL parser and sync engine against an in-memory Jira, so the
 // dialog is driven end to end — upload, preview, streamed apply, re-sync.
-let kbktJira = new FakeJira("DEMO");
+// DEMO-50 is a Story that already exists, for "Story có sẵn".
+const newKbktJira = () => {
+  const jira = new FakeJira("DEMO");
+  jira.issues.set("DEMO-50", {
+    key: "DEMO-50",
+    fields: { summary: "UC đăng nhập hệ thống", issuetype: { name: "Story", hierarchyLevel: 0 }, status: { name: "In Progress" }, labels: [], parent: { key: "DEMO-1" }, issuelinks: [], attachment: [] },
+  });
+  return jira;
+};
+let kbktJira = newKbktJira();
 let kbktSettings = structuredClone(DEFAULT_SETTINGS);
-app.post("/api/__kbkt/reset", (_q, r) => { kbktJira = new FakeJira("DEMO"); kbktSettings = structuredClone(DEFAULT_SETTINGS); r.json({}); });
+app.post("/api/__kbkt/reset", (_q, r) => { kbktJira = newKbktJira(); kbktSettings = structuredClone(DEFAULT_SETTINGS); r.json({}); });
+app.get("/api/__kbkt/issues", (_q, r) => r.json([...kbktJira.issues.values()].map((i) => ({ key: i.key, summary: i.fields.summary, parent: i.fields.parent?.key ?? null, labels: i.fields.labels }))));
+// Story-level issues by key or title words, like the real route (minus JQL).
+app.get("/api/kbkt/stories", (req, res) => {
+  const q = String(req.query.q ?? "").trim().toLowerCase();
+  const key = /^(?:demo-)?(\d+)$/.exec(q);
+  res.json([...kbktJira.issues.values()]
+    .filter((i) => i.fields.issuetype?.name === "Story")
+    .filter((i) => (key ? i.key === `DEMO-${key[1]}` : !q || String(i.fields.summary).toLowerCase().includes(q)))
+    .map((i) => ({ key: i.key, summary: i.fields.summary, type: i.fields.issuetype.name, status: i.fields.status?.name ?? "" })));
+});
 app.get("/api/__kbkt/sample", (_q, r) => r.type("application/octet-stream").send(Buffer.from(sampleWorkbook())));
 app.get("/api/kbkt/options", (_q, r) => r.json({
   issueTypes: [{ name: "Epic", subtask: false }, { name: "Story", subtask: false }, { name: "Sub Testcase", subtask: true }, { name: "Sub-Bug", subtask: true }],

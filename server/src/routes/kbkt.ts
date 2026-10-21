@@ -58,6 +58,56 @@ kbktRouter.get("/options", async (req, res, next) => {
   }
 });
 
+/**
+ * Issues that can hold the test cases — the picker for "Story có sẵn". Story
+ * level only (hierarchy 0, not a sub-task): Jira refuses a sub-task under an
+ * Epic or under another sub-task. Searched live rather than listed, because a
+ * project can have thousands; an empty query returns the most recently touched.
+ */
+kbktRouter.get("/stories", async (req, res, next) => {
+  const { jira, session } = req.auth!;
+  const projectKey = session.projectKey!;
+  try {
+    const raw = typeof req.query.q === "string" ? req.query.q.trim().slice(0, 100) : "";
+    const types = (await jira.getProjectIssueTypes(projectKey)).filter(
+      (t) => !t.subtask && (t.hierarchyLevel ?? (t.name.toLowerCase() === "epic" ? 1 : 0)) === 0
+    );
+    if (types.length === 0) {
+      res.json([]);
+      return;
+    }
+    const scope =
+      `project = "${projectKey}" AND issuetype in (` + types.map((t) => `"${t.name.replace(/"/g, "")}"`).join(", ") + `)`;
+    // "AI-33" or just "33" → that key; anything else → a text search on the title.
+    // Characters JQL's text search reserves are dropped rather than escaped:
+    // nobody looks for a Story by its punctuation.
+    const keyMatch = new RegExp(`^(?:${projectKey}-)?(\\d+)$`, "i").exec(raw);
+    const words = raw.replace(/[+\-&|!(){}[\]^~*?\\:"']/g, " ").trim();
+    const clause = keyMatch
+      ? ` AND key = "${projectKey}-${keyMatch[1]}"`
+      : words
+        ? ` AND summary ~ "${words}*"`
+        : "";
+    const issues = await jira
+      .searchIssues(`${scope}${clause} ORDER BY updated DESC`, ["summary", "issuetype", "status"], 30)
+      .catch((err) => {
+        // A key that doesn't exist is a 400 from JQL ("issue does not exist"), not an empty result.
+        if (keyMatch && err?.status === 400) return [];
+        throw err;
+      });
+    res.json(
+      issues.map((i) => ({
+        key: i.key as string,
+        summary: String(i.fields?.summary ?? ""),
+        type: String(i.fields?.issuetype?.name ?? ""),
+        status: String(i.fields?.status?.name ?? ""),
+      }))
+    );
+  } catch (err) {
+    next(err);
+  }
+});
+
 kbktRouter.get("/settings", async (req, res, next) => {
   const { session } = req.auth!;
   try {

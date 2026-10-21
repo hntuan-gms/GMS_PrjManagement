@@ -110,6 +110,25 @@ describe("KbktSync", () => {
     assert.ok(other.log.some((l) => l.action === "ERROR" && l.message.includes("dự án GPM")));
   });
 
+  it("an explicitly chosen existing Story gets every sub-issue and is neither moved nor renamed", async () => {
+    const jira = new FakeJira();
+    jira.issues.set("AI-40", {
+      key: "AI-40",
+      fields: { summary: "UC đã có", issuetype: { name: "Story", hierarchyLevel: 0 }, labels: [], parent: { key: "AI-7" } },
+    });
+    const { result, count } = await run(jira, { apply: true, storyKey: "AI-40", epicRef: null });
+    assert.equal(result.storyKey, "AI-40");
+    assert.equal(count("ERROR"), 0);
+    assert.equal(count("UPDATE"), 0);
+    const subs = [...jira.issues.values()].filter((i) => i.fields.labels.some((l: string) => /^(tc|bug)-/.test(l)));
+    assert.equal(subs.length, 9);
+    assert.ok(subs.every((i) => i.fields.parent?.key === "AI-40"));
+    assert.deepEqual(jira.issues.get("AI-40").fields.parent, { key: "AI-7" });
+    assert.equal(jira.issues.get("AI-40").fields.summary, "UC đã có");
+    // No Story of the file's own was made.
+    assert.ok(![...jira.issues.values()].some((i) => i.fields.labels.includes("story-1E_127")));
+  });
+
   it("storyKey null makes a new Story even when the file name names one", async () => {
     const jira = new FakeJira();
     jira.issues.set("AI-33", { key: "AI-33", fields: { summary: "Báo cáo", issuetype: { name: "Story", hierarchyLevel: 0 }, labels: [], parent: null } });
