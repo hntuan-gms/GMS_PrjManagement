@@ -742,3 +742,32 @@ export type KbktStreamEvent =
   | ({ type: "log" } & KbktLogLine)
   | ({ type: "done" } & KbktResult)
   | { type: "error"; message: string; code?: string };
+
+/**
+ * A named filter over the Gantt / resource tab (server/src/savedFilters.ts holds
+ * the same spec). "@me" in `people` stands for whoever applies it, so a shared
+ * "Của tôi" filter shows each person their own work.
+ */
+export interface SavedFilterSpec {
+  people: string[];
+  statuses: string[];
+  types: string[];
+  epics: string[];
+  labels: string[];
+  priorities: string[];
+  onlyOverdue: boolean;
+}
+
+export interface SavedFilter {
+  id: string;
+  name: string;
+  /** false = only its creator sees it; true = everyone who can open the project. */
+  shared: boolean;
+  spec: SavedFilterSpec;
+  createdBy: string;
+  /** The signed-in user created it — the only one who may change or delete it. */
+  mine: boolean;
+  /** From Jira's member list; null when that lookup failed. */
+  ownerName: string | null;
+  updatedAt: string;
+}

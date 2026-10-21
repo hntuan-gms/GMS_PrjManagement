@@ -5,10 +5,14 @@ import "gantt-task-react/dist/index.css";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { csvName, downloadCsv, type CsvCell } from "../csv";
 import { computeCriticalPath } from "../criticalPath";
+import { resolveBaselines } from "../baselineGeometry";
 import { orderByWbs, resolveRanges, toGanttTasks } from "../ganttMapping";
 import type { DependencyType, Task } from "../types";
+import { overlayCsvCells, overlayCsvHeader } from "../wbsExport";
+import BaselineOverlay from "./BaselineOverlay";
 import DependencyOverlay from "./DependencyOverlay";
 import IssueTypeIcon from "./IssueTypeIcon";
+import SavedFilterMenu from "./SavedFilterMenu";
 
 // "Spotlight" colours used only while the critical-path toggle is on: critical
 // bars get an unambiguous red-orange, everything else is dimmed to grey so the
@@ -248,6 +252,25 @@ function saveColumns(ids: ColumnId[]): void {
   }
 }
 
+// Per browser, like the columns: whether someone reads the plan against its baseline is a habit.
+const BASELINE_KEY = "gms.gantt.baseline";
+
+function loadShowBaseline(): boolean {
+  try {
+    return localStorage.getItem(BASELINE_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+
+function saveShowBaseline(on: boolean): void {
+  try {
+    localStorage.setItem(BASELINE_KEY, on ? "on" : "off");
+  } catch {
+    // Not remembered across reloads; still applies now.
+  }
+}
+
 interface Props {
   tasks: Task[];
   collapsed: Set<string>;
@@ -321,6 +344,7 @@ export default function GanttView({
   const { viewMode, columnWidth } = pickScale(pixelsPerDay);
   const [showCriticalPath, setShowCriticalPath] = useState(false);
   const [showDependencies, setShowDependencies] = useState(true);
+  const [showBaseline, setShowBaseline] = useState(loadShowBaseline);
   const query = filter.text;
   const setQuery = (text: string) => onFilterChange({ ...filter, text });
   // gantt-task-react scrolls to `viewDate` whenever its value changes. The
@@ -493,6 +517,8 @@ export default function GanttView({
   // Deliberately resolved from the FULL tree, before any search filtering: a parent's
   // rolled-up bar must span all of its children, not just the ones matching the query.
   const ranges = useMemo(() => resolveRanges(ordered), [ordered]);
+  // Same full-tree rule, so an Epic's baseline rolls up its children like its bar does.
+  const baselines = useMemo(() => resolveBaselines(ordered), [ordered]);
 
   const epicOf = useMemo(() => buildEpicIndex(tasks), [tasks]);
   const matchIds = useMemo(
@@ -619,11 +645,15 @@ export default function GanttView({
     // Matches only: the table keeps their ancestors for indentation, but a sheet of
     // "what the filter found" should not list parents the filter excluded.
     const list = ordered.filter((o) => !matchIds || matchIds.has(o.task.id));
-    const header = ["Mã", "Tên công việc", ...columns.map((c) => c.long)];
+    // The overlay block (dependencies, baseline, and % unless it is already a
+    // visible column) always follows: it is the data Jira's own export lacks.
+    const includePct = !columnIds.includes("pct");
+    const header = ["Mã", "Tên công việc", ...columns.map((c) => c.long), ...overlayCsvHeader(includePct)];
     const body = list.map((o) => [
       o.task.id,
       o.task.summary,
       ...columns.map((c) => csvValue(c.id, o.task, ranges.get(o.task.id))),
+      ...overlayCsvCells(o.task, ranges.get(o.task.id), baselines.get(o.task.id), includePct),
     ]);
     downloadCsv(csvName(`wbs-${tasks[0]?.id.split("-")[0] ?? "du-an"}`, today), [header, ...body]);
   }
@@ -783,6 +813,16 @@ export default function GanttView({
         >
           Phụ thuộc
         </button>
+        <button
+          className={showBaseline ? "active" : ""}
+          onClick={() => {
+            setShowBaseline(!showBaseline);
+            saveShowBaseline(!showBaseline);
+          }}
+          title="Ẩn/hiện thanh baseline mờ dưới mỗi thanh để so lịch hiện tại với lịch đã chốt (đỏ = kết thúc muộn hơn baseline). Lưu baseline: chọn công việc rồi dùng ô Baseline… trên thanh chọn."
+        >
+          Baseline
+        </button>
         <button onClick={goToToday} title="Cuộn biểu đồ tới ngày hôm nay">
           Hôm nay
         </button>
@@ -831,7 +871,10 @@ export default function GanttView({
             )}
           </div>
         )}
-        <button onClick={exportCsv} title="Tải bảng WBS (các cột đang hiện, theo bộ lọc) về file CSV mở được bằng Excel">
+        <button
+          onClick={exportCsv}
+          title="Tải bảng WBS (các cột đang hiện, theo bộ lọc) kèm % hoàn thành, phụ thuộc và baseline về file CSV mở được bằng Excel"
+        >
           Xuất CSV
         </button>
         <button onClick={onImportKbkt} title="Tạo/cập nhật test case và lỗi trong Jira từ file kịch bản kiểm thử (KBKT) .xlsx">
@@ -913,6 +956,7 @@ export default function GanttView({
         myAccountId={myAccountId}
         matched={matchIds?.size}
         total={tasks.length}
+        leading={<SavedFilterMenu filter={filter} onApply={onFilterChange} myAccountId={myAccountId} />}
       />
       <div className="gantt-body" ref={bodyRef}>
         {rows.length === 0 ? (
@@ -980,6 +1024,16 @@ export default function GanttView({
                 onEditDependency={onEditDependency}
                 onDeleteDependency={onDeleteDependency}
               />
+              {showBaseline && (
+                <BaselineOverlay
+                  bodyEl={bodyEl}
+                  rows={rowTasks}
+                  ranges={ranges}
+                  baselines={baselines}
+                  measureKey={measureKey}
+                  pxPerDay={columnWidth / DAYS_PER_COLUMN[viewMode]}
+                />
+              )}
             </>
           )
         )}

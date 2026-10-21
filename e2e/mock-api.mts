@@ -5,6 +5,8 @@ import express from "express";
 import { computeProgress } from "../server/src/progress.ts";
 import { parseWorkbook } from "../server/src/kbkt/parse.ts";
 import { DEFAULT_SETTINGS, validateSettings } from "../server/src/kbkt/settings.ts";
+import { AppError } from "../server/src/errors.ts";
+import { validateFilterInput } from "../server/src/savedFilters.ts";
 import { KbktSync, type LogLine } from "../server/src/kbkt/sync.ts";
 import { XlsxFormatError } from "../server/src/kbkt/xlsx.ts";
 import { FakeJira } from "../server/test/kbktFakeJira.ts";
@@ -38,6 +40,8 @@ let tasks: any[] = [
   { id: "DEMO-8", summary: "Kiểm thử tích hợp", issueType: "Task", wbsParentId: "DEMO-2", assigneeAccountId: "binh", startDate: day(8), dueDate: day(14) },
   { id: "DEMO-9", summary: "Công việc chưa có ngày", issueType: "Task", assigneeAccountId: "me", startDate: null, dueDate: null },
 ].map((t: any) => ({ ...base, baselineStart: t.startDate, baselineDue: t.dueDate, ...t, assigneeName: nameOf(t.assigneeAccountId ?? null) }));
+// Scripts share this process; one that moves dates puts the seed back afterwards.
+const SEED = structuredClone(tasks);
 
 let comments: Record<string, any[]> = {
   "DEMO-3": [
@@ -57,6 +61,7 @@ app.use((req, _res, next) => {
 
 app.get("/api/__log", (_q, r) => r.json({ log, chatAborts }));
 app.post("/api/__reset", (_q, r) => { log.length = 0; chatAborts = 0; r.json({}); });
+app.post("/api/__tasks/reset", (_q, r) => { tasks = structuredClone(SEED); r.json({}); });
 
 app.get("/api/auth/me", (_q, r) => r.json({
   user: users[0], site: { cloudId: "c1", url: "https://example.atlassian.net", name: "Example" },
@@ -92,7 +97,7 @@ app.patch("/api/tasks/:id", (req, res) => {
     const name = b.statusTransition === "11" ? "In Progress" : b.statusTransition === "31" ? "Done" : b.statusTransition;
     t.statusName = name; t.statusCategory = map[name];
   }
-  for (const k of ["summary", "description", "startDate", "priority", "labels", "percentComplete", "estimateHours", "durationDays"]) if (b[k] !== undefined) t[k] = b[k];
+  for (const k of ["summary", "description", "startDate", "priority", "labels", "percentComplete", "estimateHours", "durationDays", "baselineStart", "baselineDue", "predecessors"]) if (b[k] !== undefined) t[k] = b[k];
   if (b.startDate !== undefined && b.startDate) t.dueDate = day(Math.round((Date.parse(b.startDate) - Date.parse(TODAY)) / 86400000) + (t.durationDays ?? 1) - 1);
   res.json({ ...t, cascaded: [] });
 });
@@ -302,6 +307,42 @@ app.post("/api/kbkt/apply", kbktRaw, async (req, res) => {
   const result = await new KbktSync(kbktJira as any, "DEMO", kbktSettings, (l) => send("log", l)).run(run.wb, run.fileName, { ...run.options, apply: true });
   send("done", { fileName: run.fileName, ...result });
   res.end();
+});
+
+// Saved filters: the REAL validator, an in-memory table, and the signed-in user
+// is always "me". One filter shared by someone else, to show the shared section.
+let filterSeq = 0;
+const newFilter = (createdBy: string, input: any) => ({
+  id: `00000000-0000-4000-8000-${String(++filterSeq).padStart(12, "0")}`,
+  createdBy, name: input.name, shared: input.shared, spec: input.spec, updatedAt: new Date().toISOString(),
+});
+let savedFilters: any[] = [
+  newFilter("anh", validateFilterInput({ name: "Việc gấp của nhóm", shared: true, spec: { labels: ["urgent"] } }, false)),
+];
+const viewOf = (f: any) => ({ ...f, mine: f.createdBy === "me", ownerName: nameOf(f.createdBy) });
+const filterError = (res: express.Response, e: unknown) =>
+  res.status(e instanceof AppError ? e.status : 500).json({ error: (e as Error).message });
+app.get("/api/filters", (_q, r) => r.json(savedFilters.filter((f) => f.createdBy === "me" || f.shared).map(viewOf)));
+app.post("/api/filters", (req, res) => {
+  try {
+    const f = newFilter("me", validateFilterInput(req.body, false));
+    savedFilters.push(f);
+    res.status(201).json(viewOf(f));
+  } catch (e) { filterError(res, e); }
+});
+app.patch("/api/filters/:id", (req, res) => {
+  try {
+    const f = savedFilters.find((x) => x.id === req.params.id && x.createdBy === "me");
+    if (!f) return res.status(404).json({ error: "Không tìm thấy bộ lọc, hoặc bạn không phải người tạo bộ lọc này." });
+    Object.assign(f, validateFilterInput(req.body, true), { updatedAt: new Date().toISOString() });
+    res.json(viewOf(f));
+  } catch (e) { filterError(res, e); }
+});
+app.delete("/api/filters/:id", (req, res) => {
+  const before = savedFilters.length;
+  savedFilters = savedFilters.filter((x) => !(x.id === req.params.id && x.createdBy === "me"));
+  if (savedFilters.length === before) return res.status(404).json({ error: "Không tìm thấy bộ lọc." });
+  res.status(204).end();
 });
 
 const port = Number(process.env.MOCK_PORT ?? 4000);

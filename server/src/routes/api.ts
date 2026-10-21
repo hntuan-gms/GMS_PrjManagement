@@ -5,6 +5,7 @@ import { progressRouter } from "./progress.js";
 import { boardRouter } from "./board.js";
 import { timesheetRouter } from "./timesheet.js";
 import { kbktRouter } from "./kbkt.js";
+import { filtersRouter } from "./filters.js";
 import { requireAuth, requireProject, requireStaff } from "../auth/middleware.js";
 import { badRequest } from "../errors.js";
 import { TaskActivity } from "../taskActivity.js";
@@ -27,11 +28,13 @@ apiRouter.use("/progress", progressRouter);
 apiRouter.use("/board", boardRouter);
 apiRouter.use("/timesheet", timesheetRouter);
 apiRouter.use("/kbkt", kbktRouter);
+apiRouter.use("/filters", filtersRouter);
 
 // Jira's own default attachment limit is 10 MB; this only has to sit above it
 // and below Cloud Run's 32 MB request cap, so Jira's message is the one people see.
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const LINK_URL = /^https?:\/\/\S+$/i;
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 // GET /meta used to live here, returning the same SessionMeta as
 // /api/auth/me. Nothing ever fetched it, and having two copies of that object is
@@ -119,6 +122,15 @@ apiRouter.patch("/tasks/:id", requireProject, async (req, res, next) => {
     if (input.priority !== undefined && typeof input.priority !== "string") {
       next(badRequest("Độ ưu tiên không hợp lệ."));
       return;
+    }
+    // Written straight into a DATE column; a malformed value would surface as a
+    // Postgres error (500) instead of saying what was wrong.
+    for (const field of ["baselineStart", "baselineDue"] as const) {
+      const v = input[field];
+      if (v !== undefined && v !== null && (typeof v !== "string" || !ISO_DATE.test(v))) {
+        next(badRequest("Ngày baseline phải có dạng YYYY-MM-DD."));
+        return;
+      }
     }
 
     // Cross-project predecessors can't be enforced: the cascade only loads issues

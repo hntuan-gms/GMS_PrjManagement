@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { priorityRank } from "../boardModel";
 import { EMPTY_TASK_FILTER, facetCount, isTaskFiltering, type TaskFilter } from "../taskFilter";
 import type { Task } from "../types";
@@ -21,6 +21,8 @@ interface Props {
   /** "12 / 80" counter shown while filtering. */
   matched?: number;
   total?: number;
+  /** Rendered first in the bar — the saved-filter menu. */
+  leading?: ReactNode;
 }
 
 const ALL_FACETS: FilterFacet[] = ["people", "statuses", "types", "epics", "labels", "priorities", "overdue"];
@@ -107,7 +109,16 @@ export function MultiSelect({
  * ProjectWorkspace so the Gantt and the resource tab narrow the same set, and so
  * a facet picked on one is still there on the other.
  */
-export default function FilterBar({ tasks, filter, onChange, myAccountId, facets = ALL_FACETS, matched, total }: Props) {
+export default function FilterBar({
+  tasks,
+  filter,
+  onChange,
+  myAccountId,
+  facets = ALL_FACETS,
+  matched,
+  total,
+  leading,
+}: Props) {
   const has = (f: FilterFacet) => facets.includes(f);
 
   const options = useMemo(() => {
@@ -150,6 +161,7 @@ export default function FilterBar({ tasks, filter, onChange, myAccountId, facets
 
   return (
     <div className="tf-bar">
+      {leading}
       {has("people") && (
         <>
           <button

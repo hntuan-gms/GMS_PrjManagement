@@ -374,6 +374,44 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
   }
 
   /**
+   * Freezes the current schedule as the baseline (or clears it) — the same write
+   * as the assistant's `set_baseline`. Tasks synced from Jira start with none, so
+   * without this the Gantt's baseline strips would be empty for most projects.
+   * An Epic with children is skipped: its baseline is drawn as its children's
+   * span, like its bar.
+   */
+  function handleBulkBaseline(mode: "save" | "clear") {
+    const parentIds = new Set(tasks.map((t) => t.wbsParentId).filter(Boolean));
+    const picked = selectedTasks();
+    const rollup = (t: Task) => t.issueType.toLowerCase() === "epic" && parentIds.has(t.id);
+    if (mode === "clear") {
+      const target = picked.filter((t) => !rollup(t) && (t.baselineStart || t.baselineDue));
+      if (target.length === 0) {
+        setSyncError("Các công việc đã chọn chưa có baseline nào để xoá.");
+        return;
+      }
+      if (!window.confirm(`Xoá baseline của ${target.length} công việc? Không hoàn tác được.`)) return;
+      return runBulk("xoá baseline", target.map((t) => t.id), () => ({ baselineStart: null, baselineDue: null }));
+    }
+    const target = picked.filter((t) => t.startDate && !rollup(t));
+    const skipped = picked.filter((t) => !target.includes(t)).map((t) => t.id);
+    const overwrite = target.filter((t) => t.baselineStart || t.baselineDue).length;
+    if (
+      overwrite > 0 &&
+      !window.confirm(`${overwrite} công việc đã có baseline sẽ bị ghi đè bằng lịch hiện tại. Tiếp tục?`)
+    ) {
+      return;
+    }
+    const byId = new Map(target.map((t) => [t.id, t]));
+    return runBulk(
+      "lưu baseline",
+      target.map((t) => t.id),
+      (id) => ({ baselineStart: byId.get(id)!.startDate, baselineDue: byId.get(id)!.dueDate }),
+      skipped
+    );
+  }
+
+  /**
    * PATCH /tasks/:id now returns the edited task plus every other task the
    * dependency cascade moved (`cascaded`) in the same response, so applying both
    * here is enough — no follow-up GET /tasks needed. That follow-up used to be
@@ -659,6 +697,21 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
                 {s}
               </option>
             ))}
+          </select>
+          <select
+            className="selection-select"
+            value=""
+            disabled={deleting || bulkBusy !== null}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v === "save" || v === "clear") handleBulkBaseline(v);
+            }}
+            aria-label="Lưu hoặc xoá baseline của các công việc đã chọn"
+            title="Baseline là lịch đã chốt để so với lịch hiện tại trên Gantt"
+          >
+            <option value="">Baseline…</option>
+            <option value="save">Lưu baseline = lịch hiện tại</option>
+            <option value="clear">Xoá baseline</option>
           </select>
           <span className="selection-shift">
             <button
