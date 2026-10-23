@@ -72,6 +72,74 @@ const VIEW_MODE_LABEL: Partial<Record<ViewMode, string>> = {
   [ViewMode.Week]: "Tuần",
   [ViewMode.Month]: "Tháng",
 };
+
+type ToolbarIconName = "critical" | "link" | "layers" | "download" | "upload" | "columns";
+
+/** Small outline glyphs for the toolbar — one per action, so a row of identical
+ * text pills doesn't have to be read word by word to tell toggles from one-shot
+ * actions apart. Inline rather than an icon package: ten paths isn't worth a
+ * dependency, and `IssueTypeIcon` already sets the precedent in this codebase. */
+function ToolbarIcon({ name }: { name: ToolbarIconName }) {
+  const PATHS: Record<ToolbarIconName, ReactNode> = {
+    critical: (
+      <>
+        <path d="M5 21V4" />
+        <path d="M5 4h13l-2.5 4L18 12H5" />
+      </>
+    ),
+    link: (
+      <>
+        <path d="M9 17H7a5 5 0 0 1 0-10h2" />
+        <path d="M15 7h2a5 5 0 1 1 0 10h-2" />
+        <path d="M8 12h8" />
+      </>
+    ),
+    layers: (
+      <>
+        <path d="M12 3 3 8l9 5 9-5-9-5Z" />
+        <path d="M3 16l9 5 9-5" />
+        <path d="M3 12l9 5 9-5" />
+      </>
+    ),
+    download: (
+      <>
+        <path d="M12 3v11" />
+        <path d="M7 10l5 5 5-5" />
+        <path d="M5 21h14" />
+      </>
+    ),
+    upload: (
+      <>
+        <path d="M12 21V10" />
+        <path d="M7 15l5-5 5 5" />
+        <path d="M5 3h14" />
+      </>
+    ),
+    columns: (
+      <>
+        <rect x="3" y="4" width="5" height="16" rx="1.2" />
+        <rect x="9.5" y="4" width="5" height="16" rx="1.2" />
+        <rect x="16" y="4" width="5" height="16" rx="1.2" />
+      </>
+    ),
+  };
+  return (
+    <svg
+      className="tbi"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {PATHS[name]}
+    </svg>
+  );
+}
 // A column narrower than this can't fit its own label; wider than this, zooming
 // in stops helping and just wastes horizontal space. Both modes' comfort bands
 // overlap on purpose — see pickScale — so the handoff between them has room to
@@ -789,40 +857,46 @@ export default function GanttView({
   return (
     <div className="gantt-wrap">
       <div className="gantt-toolbar">
-        {[ViewMode.Day, ViewMode.Week, ViewMode.Month].map((vm) => (
-          <button
-            key={vm}
-            className={viewMode === vm ? "active" : ""}
-            onClick={() => setPixelsPerDay(DEFAULT_PIXELS_PER_DAY[vm])}
-          >
-            {VIEW_MODE_LABEL[vm]}
-          </button>
-        ))}
+        <div className="seg-group" role="group" aria-label="Chia theo">
+          {[ViewMode.Day, ViewMode.Week, ViewMode.Month].map((vm) => (
+            <button
+              key={vm}
+              className={viewMode === vm ? "active" : ""}
+              onClick={() => setPixelsPerDay(DEFAULT_PIXELS_PER_DAY[vm])}
+            >
+              {VIEW_MODE_LABEL[vm]}
+            </button>
+          ))}
+        </div>
         <span className="gantt-toolbar-divider" aria-hidden="true" />
         <button
-          className={showCriticalPath ? "active critical-toggle" : "critical-toggle"}
+          className={showCriticalPath ? "active toggle-pill critical-toggle" : "toggle-pill critical-toggle"}
           onClick={() => setShowCriticalPath((v) => !v)}
           title="Chuỗi công việc quyết định thời gian hoàn thành dự án — trễ bất kỳ task nào trong chuỗi này sẽ làm trễ cả dự án"
         >
+          <ToolbarIcon name="critical" />
           Đường găng
         </button>
         <button
-          className={showDependencies ? "active" : ""}
+          className={showDependencies ? "active toggle-pill" : "toggle-pill"}
           onClick={() => setShowDependencies((v) => !v)}
           title="Ẩn/hiện mũi tên phụ thuộc giữa các task (FS/SS/FF/SF). Kéo từ đầu hoặc đuôi một task sang task khác để tạo phụ thuộc mới."
         >
+          <ToolbarIcon name="link" />
           Phụ thuộc
         </button>
         <button
-          className={showBaseline ? "active" : ""}
+          className={showBaseline ? "active toggle-pill" : "toggle-pill"}
           onClick={() => {
             setShowBaseline(!showBaseline);
             saveShowBaseline(!showBaseline);
           }}
           title="Ẩn/hiện thanh baseline mờ dưới mỗi thanh để so lịch hiện tại với lịch đã chốt (đỏ = kết thúc muộn hơn baseline). Lưu baseline: chọn công việc rồi dùng ô Baseline… trên thanh chọn."
         >
+          <ToolbarIcon name="layers" />
           Baseline
         </button>
+        <span className="gantt-toolbar-divider" aria-hidden="true" />
         <button onClick={goToToday} title="Cuộn biểu đồ tới ngày hôm nay">
           Hôm nay
         </button>
@@ -841,10 +915,11 @@ export default function GanttView({
         <button onClick={() => onSetCollapsed([])} disabled={collapsed.size === 0} title="Mở rộng mọi nhóm công việc">
           Mở rộng
         </button>
+        <span className="gantt-toolbar-divider" aria-hidden="true" />
         {unscheduled.length > 0 && (
           <div className="col-chooser" ref={unscheduledRef}>
             <button
-              className={unscheduledOpen ? "active" : ""}
+              className={unscheduledOpen ? "active warning-pill" : "warning-pill"}
               onClick={() => setUnscheduledOpen((v) => !v)}
               aria-expanded={unscheduledOpen}
               title="Công việc chưa có ngày bắt đầu nên không có thanh trên biểu đồ"
@@ -875,9 +950,11 @@ export default function GanttView({
           onClick={exportCsv}
           title="Tải bảng WBS (các cột đang hiện, theo bộ lọc) kèm % hoàn thành, phụ thuộc và baseline về file CSV mở được bằng Excel"
         >
+          <ToolbarIcon name="download" />
           Xuất CSV
         </button>
         <button onClick={onImportKbkt} title="Tạo/cập nhật test case và lỗi trong Jira từ file kịch bản kiểm thử (KBKT) .xlsx">
+          <ToolbarIcon name="upload" />
           Nhập KBKT
         </button>
         <div className="col-chooser" ref={chooserRef}>
@@ -887,6 +964,7 @@ export default function GanttView({
             aria-expanded={chooserOpen}
             title="Chọn cột hiển thị trong bảng WBS"
           >
+            <ToolbarIcon name="columns" />
             Cột ({columns.length}) ▾
           </button>
           {chooserOpen && (
