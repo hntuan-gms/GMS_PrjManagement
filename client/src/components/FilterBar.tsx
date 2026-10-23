@@ -27,6 +27,43 @@ interface Props {
 
 const ALL_FACETS: FilterFacet[] = ["people", "statuses", "types", "epics", "labels", "priorities", "overdue"];
 
+/** Tiny glyphs so the bar reads as "two instant toggles, then a row of value
+ * pickers" at a glance instead of a wall of identical gray pills. */
+function FbIcon({ name }: { name: "user" | "alert" | "caret" }) {
+  const common = {
+    width: 13,
+    height: 13,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 2,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    "aria-hidden": true as const,
+    className: "fb-icon",
+  };
+  if (name === "user")
+    return (
+      <svg {...common}>
+        <circle cx="12" cy="8" r="4" />
+        <path d="M4 20c0-4.4 3.6-7 8-7s8 2.6 8 7" />
+      </svg>
+    );
+  if (name === "alert")
+    return (
+      <svg {...common}>
+        <path d="M12 3 2 20h20L12 3Z" />
+        <path d="M12 10v4" />
+        <path d="M12 16.8v.1" />
+      </svg>
+    );
+  return (
+    <svg {...common} width="10" height="10" strokeWidth="2.4">
+      <path d="M6 9l6 6 6-6" />
+    </svg>
+  );
+}
+
 function toggled(set: Set<string>, value: string): Set<string> {
   const next = new Set(set);
   if (next.has(value)) next.delete(value);
@@ -73,7 +110,8 @@ export function MultiSelect({
         aria-expanded={open}
       >
         {label}
-        {selected.size > 0 ? ` (${selected.size})` : ""} ▾
+        {selected.size > 0 ? ` (${selected.size})` : ""}
+        <FbIcon name="caret" />
       </button>
       {open && (
         <div className="col-chooser-menu tf-menu" role="menu">
@@ -159,26 +197,44 @@ export default function FilterBar({
   const mine = filter.people.has(myAccountId);
   const filtering = isTaskFiltering(filter);
 
+  // The two single-click toggles read at a glance (icon + is-on tint); the
+  // value pickers that follow all share the same "dropdown" shape, so the bar
+  // scans as two distinct groups instead of one undifferentiated row.
+  const hasPickers = has("people") || has("statuses") || has("types") || has("epics") || has("labels") || has("priorities");
+
   return (
     <div className="tf-bar">
       {leading}
       {has("people") && (
-        <>
-          <button
-            type="button"
-            className={`tf-btn${mine ? " is-on" : ""}`}
-            onClick={() => onChange({ ...filter, people: toggled(filter.people, myAccountId) })}
-            title="Chỉ các công việc giao cho tôi"
-          >
-            Của tôi
-          </button>
-          <MultiSelect
-            label="Người phụ trách"
-            options={options.people}
-            selected={filter.people}
-            onChange={(people) => onChange({ ...filter, people })}
-          />
-        </>
+        <button
+          type="button"
+          className={`tf-btn${mine ? " is-on" : ""}`}
+          onClick={() => onChange({ ...filter, people: toggled(filter.people, myAccountId) })}
+          title="Chỉ các công việc giao cho tôi"
+        >
+          <FbIcon name="user" />
+          Của tôi
+        </button>
+      )}
+      {has("overdue") && (
+        <button
+          type="button"
+          className={`tf-btn${filter.onlyOverdue ? " is-on" : ""}`}
+          onClick={() => onChange({ ...filter, onlyOverdue: !filter.onlyOverdue })}
+          title="Quá hạn và chưa xong"
+        >
+          <FbIcon name="alert" />
+          Quá hạn
+        </button>
+      )}
+      {(has("people") || has("overdue")) && hasPickers && <span className="tf-divider" aria-hidden="true" />}
+      {has("people") && (
+        <MultiSelect
+          label="Người phụ trách"
+          options={options.people}
+          selected={filter.people}
+          onChange={(people) => onChange({ ...filter, people })}
+        />
       )}
       {has("statuses") && (
         <MultiSelect
@@ -219,16 +275,6 @@ export default function FilterBar({
           selected={filter.priorities}
           onChange={(priorities) => onChange({ ...filter, priorities })}
         />
-      )}
-      {has("overdue") && (
-        <button
-          type="button"
-          className={`tf-btn${filter.onlyOverdue ? " is-on" : ""}`}
-          onClick={() => onChange({ ...filter, onlyOverdue: !filter.onlyOverdue })}
-          title="Quá hạn và chưa xong"
-        >
-          Quá hạn
-        </button>
       )}
       {filtering && (
         <>
