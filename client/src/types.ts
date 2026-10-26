@@ -269,6 +269,8 @@ export interface TransitionField {
   kind: "text" | "textarea" | "select" | "number" | "date" | "unsupported";
   /** Only for `select`: the option's id is what is sent back. */
   options?: Array<{ id: string; label: string }>;
+  /** Offered as a guess (Jira's refusal named no field we know): the form does not insist on it. */
+  optional?: boolean;
 }
 
 export interface TaskTransition {

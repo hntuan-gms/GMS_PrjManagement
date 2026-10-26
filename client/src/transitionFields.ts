@@ -28,7 +28,7 @@ export function neededFieldsFrom(err: unknown): NeededFields | null {
 
 /** Fields the person has not answered yet. A field that cannot be filled here never counts as answered. */
 export function missingFields(fields: TransitionField[], values: Record<string, string>): TransitionField[] {
-  return fields.filter((f) => f.kind === "unsupported" || !(values[f.id] ?? "").trim());
+  return fields.filter((f) => f.kind === "unsupported" || (!f.optional && !(values[f.id] ?? "").trim()));
 }
 
 /** The same field asked by several issues' transitions, once. */

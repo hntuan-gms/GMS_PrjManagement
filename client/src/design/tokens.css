@@ -117,6 +117,11 @@
   --control-placeholder: var(--color-text-muted);
   --control-font-size: var(--font-size-sm);
   --control-disabled-bg: var(--color-bg);
+  /* The same field at form size: inside a window or dialog, where fields are read and filled
+     rather than scanned in a toolbar. One height for every one-line field, whatever its kind. */
+  --control-h-form: 36px;
+  --control-px-form: 12px;
+  --control-font-size-form: var(--font-size-md);
 
   /* Menu and popover panel: also the list a <select> opens. */
   --menu-bg: var(--color-surface);

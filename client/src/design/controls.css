@@ -35,6 +35,43 @@
 :where(select) {
   cursor: pointer;
 }
+/* Form size. Windows, dialogs and labelled fields hold every one-line field to one height and
+   one text size — a text box, a date, a select and a number no longer disagree by a few pixels.
+   A field that is deliberately something else (a title edited in place, the box inside a chip
+   list) sets its own height and wins by specificity. */
+:where(.modal, .dlg, .field)
+  :where(
+    input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="color"], [type="hidden"], [type="button"], [type="submit"], [type="reset"], [type="image"]),
+    select
+  ) {
+  height: var(--control-h-form);
+  padding-block: 0;
+  padding-inline: var(--control-px-form);
+  font-size: var(--control-font-size-form);
+}
+:where(.modal, .dlg, .field) :where(textarea) {
+  padding: 8px var(--control-px-form);
+  font-size: var(--control-font-size-form);
+  line-height: 1.5;
+}
+/* The ring a focused field wears, the same on every kind (a keyboard focus ring is never the browser's). */
+/* Specificity here is deliberate (:is, not :where): it has to beat the page-wide :focus-visible outline. */
+:is(
+    input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="color"], [type="hidden"], [type="button"], [type="submit"], [type="reset"], [type="image"]),
+    select,
+    textarea
+  ):focus-visible {
+  outline: none;
+  box-shadow: var(--control-ring);
+}
+/* The date field's own calendar button follows the app's pointer and weight. */
+:where(input[type="date"], input[type="datetime-local"], input[type="time"])::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.6;
+}
+:where(input[type="date"], input[type="datetime-local"], input[type="time"])::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}
 /* Checkboxes, radios and sliders keep the platform's control but wear the app's colour. */
 :where(input[type="checkbox"], input[type="radio"], input[type="range"]) {
   accent-color: var(--color-primary);
@@ -79,6 +116,11 @@
     border-radius: var(--menu-radius);
     box-shadow: var(--menu-shadow);
     max-height: min(360px, 60vh);
+    /* A long title must not make the list wider than the window it opens from. */
+    max-width: min(520px, calc(100vw - 32px));
+    /* The platform's scrollbar (grey bar, arrow buttons) is the loudest thing left in the list. */
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border-strong) transparent;
   }
   select option {
     display: flex;
@@ -89,10 +131,24 @@
     font-size: var(--font-size-md);
     color: var(--control-fg);
     cursor: pointer;
+    /* A title that does not fit ends in an ellipsis instead of being cut mid-word. */
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
   }
   select option:hover,
+  select option:focus,
   select option:focus-visible {
     background: var(--menu-item-hover);
+    /* The row the keyboard is on is shown by its fill, like every menu; the browser's own ring
+       around it (the global :focus-visible outline) made the selected row look like a text box. */
+    outline: none;
+    box-shadow: none;
+  }
+  select option:checked:hover,
+  select option:checked:focus-visible {
+    background: var(--menu-item-selected-bg);
   }
   select option:checked {
     background: var(--menu-item-selected-bg);

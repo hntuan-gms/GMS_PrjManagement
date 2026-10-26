@@ -1,4 +1,5 @@
-import { useId, useState } from "react";
+import { useState } from "react";
+import SuggestInput from "./SuggestInput";
 
 interface Props {
   value: string[];
@@ -15,7 +16,6 @@ interface Props {
  */
 export default function LabelsInput({ value, onChange, suggestions = [], placeholder = "Thêm nhãn…" }: Props) {
   const [draft, setDraft] = useState("");
-  const listId = useId();
 
   function commit(raw: string) {
     const parts = raw
@@ -39,12 +39,12 @@ export default function LabelsInput({ value, onChange, suggestions = [], placeho
           </button>
         </span>
       ))}
-      <input
+      <SuggestInput
         value={draft}
-        list={listId}
+        suggestions={suggestions.filter((s) => !value.includes(s)).slice(0, 200).map((s) => ({ value: s }))}
+        onPick={(v) => commit(v)}
         placeholder={value.length === 0 ? placeholder : ""}
-        onChange={(e) => {
-          const v = e.target.value;
+        onChange={(v) => {
           // A typed space or comma ends the label; anything else keeps building it.
           if (/[\s,]$/.test(v)) commit(v);
           else setDraft(v);
@@ -59,14 +59,6 @@ export default function LabelsInput({ value, onChange, suggestions = [], placeho
         }}
         onBlur={() => commit(draft)}
       />
-      <datalist id={listId}>
-        {suggestions
-          .filter((s) => !value.includes(s))
-          .slice(0, 200)
-          .map((s) => (
-            <option key={s} value={s} />
-          ))}
-      </datalist>
     </div>
   );
 }

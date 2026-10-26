@@ -22,6 +22,7 @@ export type ErrorCode =
   | "SESSION_TOO_LARGE"
   | "JIRA_UPSTREAM"
   | "NO_PROJECT_SELECTED"
+  | "PROJECT_NOT_ACCESSIBLE"
   | "STAFF_ONLY"
   | "RESOURCES_ADMIN_ONLY"
   | "BAD_REQUEST"
@@ -47,6 +48,10 @@ export const authRequired = () =>
 
 export const noProjectSelected = () =>
   new AppError(409, "NO_PROJECT_SELECTED", "Chưa chọn dự án Jira.");
+
+/** A tab named a project this account cannot browse (access removed since, or a key typed by hand). */
+export const projectNotAccessible = (key: string) =>
+  new AppError(403, "PROJECT_NOT_ACCESSIBLE", `Bạn không có quyền truy cập dự án ${key}.`);
 
 export const staffOnly = () =>
   new AppError(

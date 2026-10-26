@@ -17,6 +17,8 @@ export interface TransitionField {
   kind: TransitionFieldKind;
   /** Only for `select`. */
   options?: Array<{ id: string; label: string }>;
+  /** Offered because it might be what the workflow wants, not known to be: the form does not insist on it. */
+  optional?: boolean;
 }
 
 /** What Jira reports per field under `transitions.fields` and `editmeta`. */
@@ -87,12 +89,33 @@ export function fieldValue(f: TransitionField, raw: string): unknown | null {
  * with case, spacing and diacritics folded ("RootCause" ↔ "Root Cause").
  */
 export function fieldsNamedIn(message: string, editable: Record<string, JiraFieldMeta> | undefined): TransitionField[] {
+  return fieldsNamedInAny(message, editable).filter((f) => f.kind !== "unsupported");
+}
+
+/**
+ * The same match, keeping fields a one-line form cannot fill: knowing the refusal is about
+ * a user picker called "RootCause" still lets the caller name it and point at Jira, which
+ * beats a bare "Mở công việc trên Jira để xem điều kiện còn thiếu".
+ */
+export function fieldsNamedInAny(message: string, fields: Record<string, JiraFieldMeta> | undefined): TransitionField[] {
   const text = foldName(message);
-  return Object.entries(editable ?? {})
+  return Object.entries(fields ?? {})
     .filter(([, m]) => {
       const name = foldName(m.name ?? "");
       return name.length >= 3 && text.includes(name);
     })
-    .map(([id, m]) => describeField(id, m))
+    .map(([id, m]) => describeField(id, m));
+}
+
+/**
+ * Fields on a transition's screen that are not required but could be filled here. When a
+ * validator refuses with a sentence that names no field we can find ("Nguyên nhân gốc?"
+ * for a field called RootCause), these are the boxes the person most plausibly forgot —
+ * offered as optional, never presented as required.
+ */
+export function optionalTransitionFields(fields: Record<string, JiraFieldMeta> | undefined): TransitionField[] {
+  return Object.entries(fields ?? {})
+    .filter(([id, m]) => !(m.required && !m.hasDefaultValue) && id !== "comment")
+    .map(([id, m]) => ({ ...describeField(id, m), optional: true }))
     .filter((f) => f.kind !== "unsupported");
 }

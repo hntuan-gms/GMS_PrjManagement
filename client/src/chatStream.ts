@@ -1,3 +1,4 @@
+import { projectHeaders } from "./api";
 import { todayIso } from "./resourceAllocation";
 import { readSse } from "./sse";
 import type { UsageStats } from "./types";
@@ -43,7 +44,7 @@ export async function* streamChat(
   const res = await fetch(`${API_BASE}/ai/chat`, {
     method: "POST",
     credentials: "include",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...projectHeaders() },
     // The local date travels with the message so "overdue" in the chat matches
     // the report page, which also uses the browser's date (see todayIso).
     // tzOffsetMinutes: sprint dates are Jira datetimes, and which calendar day

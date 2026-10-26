@@ -14,6 +14,7 @@ import {
 import { loadAuthConfig } from "../auth/config.js";
 import { clearAuthCookies, clearCookie, oauthCookieName } from "../auth/cookies.js";
 import { requireAuth } from "../auth/middleware.js";
+import { forgetProjectList, resolveProject } from "../auth/projectScope.js";
 import {
   commitAccess,
   commitOAuthFlow,
@@ -179,8 +180,17 @@ authRouter.get("/callback", async (req, res, next) => {
 });
 
 /** Session probe. Returns 401 when logged out — the client treats that as "show login". */
-authRouter.get("/me", requireAuth, (req, res) => {
-  const { session } = req.auth!;
+authRouter.get("/me", requireAuth, async (req, res, next) => {
+  const { session, jira } = req.auth!;
+  let project;
+  try {
+    // This tab's project (X-Project-Key) when it names one the account can browse, else the
+    // session's — so a tab opened next to another one on a different project keeps its own.
+    project = await resolveProject(req, jira, session);
+  } catch (err) {
+    next(err);
+    return;
+  }
   const meta: SessionMeta = {
     user: {
       accountId: session.accountId,
@@ -188,7 +198,7 @@ authRouter.get("/me", requireAuth, (req, res) => {
       avatarUrl: session.avatarUrl,
     },
     site: { cloudId: session.cloudId, url: session.siteUrl, name: session.siteName },
-    project: session.projectKey ? { key: session.projectKey, name: session.projectName ?? session.projectKey } : null,
+    project,
     startDateFieldId: req.auth!.startDateFieldId,
     // This is the copy the client actually reads — /api/meta returns the same
     // shape but nothing fetches it, so changing only that one left the warning
@@ -245,6 +255,7 @@ authRouter.post("/logout", async (req, res) => {
   const session = readSession(req);
   if (session) {
     forgetTokens(session.cloudId, session.accountId);
+    forgetProjectList(session.cloudId, session.accountId);
     // Best-effort: clearing the cookie is what actually logs the browser out,
     // so a DB hiccup here must not turn a clean logout into a 500.
     await deleteRefreshToken(session.cloudId, session.accountId).catch(() => {});

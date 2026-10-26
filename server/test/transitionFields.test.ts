@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { describeField, fieldValue, fieldsNamedIn, requiredTransitionFields, type JiraFieldMeta } from "../src/transitionFields.js";
+import { describeField, fieldValue, fieldsNamedIn, fieldsNamedInAny, optionalTransitionFields, requiredTransitionFields, type JiraFieldMeta } from "../src/transitionFields.js";
 
 const meta = (o: Partial<JiraFieldMeta>): JiraFieldMeta => ({ name: "Field", ...o });
 
@@ -70,5 +70,30 @@ describe("fieldsNamedIn", () => {
   it("skips fields it cannot fill and messages that name nothing", () => {
     assert.deepEqual(fieldsNamedIn("Reviewer is required", editable), []);
     assert.deepEqual(fieldsNamedIn("Bước này bị chặn", editable), []);
+  });
+});
+
+describe("a refusal that names a field only the move's screen has", () => {
+  const screen: Record<string, JiraFieldMeta> = {
+    resolution: { name: "Resolution", required: true, schema: { type: "resolution" }, allowedValues: [{ id: "1", name: "Done" }] },
+    customfield_7: { name: "Root Cause", required: false, schema: { type: "string", custom: "x:textfield" } },
+    customfield_8: { name: "Reviewer", required: false, schema: { type: "user" } },
+    comment: { name: "Comment", required: false, schema: { type: "comment-array" } },
+  };
+
+  it("finds an optional screen field by the name the sentence quotes, even folded", () => {
+    assert.deepEqual(fieldsNamedInAny("Vui lòng nhập RootCause", screen).map((f) => f.id), ["customfield_7"]);
+  });
+
+  it("keeps a field a form cannot fill, so the caller can still name it", () => {
+    const f = fieldsNamedInAny("Reviewer must be set", screen);
+    assert.deepEqual(f.map((x) => [x.id, x.kind]), [["customfield_8", "unsupported"]]);
+    assert.deepEqual(fieldsNamedIn("Reviewer must be set", screen), []);
+  });
+
+  it("offers the fillable optional boxes as guesses, never the required ones, comment or unsupported kinds", () => {
+    const o = optionalTransitionFields(screen);
+    assert.deepEqual(o.map((f) => f.id), ["customfield_7"]);
+    assert.equal(o[0].optional, true);
   });
 });

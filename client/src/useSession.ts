@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ApiError, api, loginUrl, setUnauthorizedHandler } from "./api";
+import { ApiError, api, loginUrl, setTabProject, setUnauthorizedHandler } from "./api";
 import { clearTasksCache } from "./tasksCache";
 import { clearViewCache } from "./viewCache";
 import type { Session } from "./types";
@@ -59,6 +59,9 @@ export function useSession() {
   const refresh = useCallback(async () => {
     try {
       const next = await api.getSession();
+      // Pin this tab to the project it is on, so another tab choosing a different one
+      // (which rewrites the session's default) cannot move it.
+      setTabProject(next.project?.key ?? null);
       setSession(next);
       setStatus(next.project ? "ready" : "needsProject");
     } catch (e) {
@@ -91,6 +94,7 @@ export function useSession() {
     // The saved project data belongs to whoever was signed in; the next person on this browser must not find it.
     clearTasksCache();
     clearViewCache();
+    setTabProject(null);
     setSession(null);
     setAuthError(null);
     setStatus("anonymous");
@@ -98,6 +102,7 @@ export function useSession() {
 
   const selectProject = useCallback(async (key: string) => {
     const project = await api.selectProject(key);
+    setTabProject(project.key);
     setSession((prev) => (prev ? { ...prev, project } : prev));
     setStatus("ready");
   }, []);

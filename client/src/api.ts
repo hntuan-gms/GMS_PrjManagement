@@ -82,6 +82,36 @@ export class NetworkError extends Error {
   }
 }
 
+/**
+ * The project THIS tab is on. The session cookie holds one project for the whole browser,
+ * so a second tab on another project used to rewrite it under the first. Each tab keeps its
+ * own in sessionStorage (a new tab starts empty and takes the session's default; a
+ * duplicated tab inherits it) and names it on every request.
+ */
+const TAB_PROJECT_KEY = "gms.tab.project";
+let tabProject: string | null = (() => {
+  try {
+    return sessionStorage.getItem(TAB_PROJECT_KEY);
+  } catch {
+    return null;
+  }
+})();
+
+export function setTabProject(key: string | null): void {
+  tabProject = key;
+  try {
+    if (key) sessionStorage.setItem(TAB_PROJECT_KEY, key);
+    else sessionStorage.removeItem(TAB_PROJECT_KEY);
+  } catch {
+    // Without storage the tab still holds it in memory until reloaded.
+  }
+}
+
+/** Headers every call to the API carries to say which project it is about. */
+export function projectHeaders(): Record<string, string> {
+  return tabProject ? { "X-Project-Key": tabProject } : {};
+}
+
 let unauthorizedHandler: (() => void) | null = null;
 let notifiedUnauthorized = false;
 
@@ -101,7 +131,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       ...init,
       // Required for the session cookie to be sent at all.
       credentials: "include",
-      headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+      headers: { "Content-Type": "application/json", ...projectHeaders(), ...(init?.headers ?? {}) },
     });
   } catch {
     throw new NetworkError("Không kết nối được tới máy chủ.");
@@ -147,7 +177,7 @@ function kbktUpload(file: File): RequestInit {
   return {
     method: "POST",
     body: file,
-    headers: { "Content-Type": "application/octet-stream", "X-File-Name": encodeURIComponent(file.name) },
+    headers: { "Content-Type": "application/octet-stream", "X-File-Name": encodeURIComponent(file.name), ...projectHeaders() },
   };
 }
 

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import type { IssueLink, LinkType, Task } from "../types";
+import SuggestInput from "./SuggestInput";
 
 interface Props {
   task: Task;
@@ -116,10 +117,10 @@ export default function TaskLinks({ task, allTasks }: Props) {
               </option>
             ))}
           </select>
-          <input
-            list={`links-${task.id}`}
+          <SuggestInput
             value={otherKey}
-            onChange={(e) => setOtherKey(e.target.value)}
+            onChange={setOtherKey}
+            suggestions={allTasks.filter((t) => t.id !== task.id).slice(0, 300).map((t) => ({ value: t.id, hint: t.summary.slice(0, 50) }))}
             placeholder="Mã, ví dụ ABC-12"
             onKeyDown={(e) => {
               if (e.key === "Enter") {
@@ -128,16 +129,6 @@ export default function TaskLinks({ task, allTasks }: Props) {
               }
             }}
           />
-          <datalist id={`links-${task.id}`}>
-            {allTasks
-              .filter((t) => t.id !== task.id)
-              .slice(0, 300)
-              .map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.summary.slice(0, 50)}
-                </option>
-              ))}
-          </datalist>
           <button type="button" onClick={add} disabled={busy || !otherKey.trim()}>
             + Liên kết
           </button>

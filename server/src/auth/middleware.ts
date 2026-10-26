@@ -6,12 +6,13 @@
  */
 import type { NextFunction, Request, Response } from "express";
 import { AtlassianAuthError } from "./atlassian.js";
-import { authRequired, noProjectSelected, staffOnly } from "../errors.js";
+import { authRequired, noProjectSelected, projectNotAccessible, staffOnly } from "../errors.js";
 import { getSprintFieldId, getStartDateFieldId, startDateFieldOverride } from "../fieldDiscovery.js";
 import { JiraClient } from "../jiraClient.js";
 import { TaskService } from "../taskService.js";
 import { clearAuthCookies } from "./cookies.js";
 import { deleteRefreshToken } from "./refreshTokenStore.js";
+import { requestedProjectKey, resolveProject } from "./projectScope.js";
 import { commitAccess, readAccess, readSession, type SessionData } from "./session.js";
 import { ensureAccessToken } from "./tokens.js";
 
@@ -91,26 +92,38 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   }
 }
 
-/** Adds the project-bound TaskService. Apply to /tasks, /users, /sync. */
-export function requireProject(req: Request, _res: Response, next: NextFunction): void {
+/**
+ * Adds the project-bound TaskService. Apply to /tasks, /users, /sync.
+ *
+ * The project is the one this request's tab names (`X-Project-Key`), falling back to the
+ * session's. From here on `auth.session.projectKey` is that project for every route, so
+ * two tabs on two projects never see each other's.
+ */
+export async function requireProject(req: Request, _res: Response, next: NextFunction): Promise<void> {
   const auth = req.auth;
   if (!auth) {
     next(authRequired());
     return;
   }
-  if (!auth.session.projectKey) {
-    next(noProjectSelected());
-    return;
+  try {
+    const project = await resolveProject(req, auth.jira, auth.session);
+    if (!project) {
+      next(requestedProjectKey(req) ? projectNotAccessible(requestedProjectKey(req)!) : noProjectSelected());
+      return;
+    }
+    auth.session = { ...auth.session, projectKey: project.key, projectName: project.name };
+    auth.taskService = new TaskService(auth.jira, {
+      cloudId: auth.session.cloudId,
+      accountId: auth.session.accountId,
+      siteUrl: auth.session.siteUrl,
+      projectKey: project.key,
+      startDateFieldId: auth.startDateFieldId,
+      sprintFieldId: auth.sprintFieldId,
+    });
+    next();
+  } catch (err) {
+    next(err);
   }
-  auth.taskService = new TaskService(auth.jira, {
-    cloudId: auth.session.cloudId,
-    accountId: auth.session.accountId,
-    siteUrl: auth.session.siteUrl,
-    projectKey: auth.session.projectKey,
-    startDateFieldId: auth.startDateFieldId,
-    sprintFieldId: auth.sprintFieldId,
-  });
-  next();
 }
 
 /**

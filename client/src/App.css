@@ -543,41 +543,13 @@ button.menu-item > .icon {
   letter-spacing: -0.01em;
 }
 
-.field input,
-.field select,
-.field textarea {
-  padding: 8px 12px;
-  border: 1px solid var(--control-border);
-  border-radius: var(--control-radius);
-  font-size: 13.5px;
-  color: var(--control-fg);
-  font-family: inherit;
-  background-color: var(--control-bg);
-  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
-}
-
-.field input:hover:not(:disabled),
-.field select:hover:not(:disabled),
-.field textarea:hover:not(:disabled) {
-  border-color: var(--control-border-hover);
-}
-
+/* A labelled field is the shared control (design/controls.css) at form size — it adds nothing of its own. */
 .field input:focus,
 .field select:focus,
 .field textarea:focus {
   outline: none;
   border-color: var(--control-border-focus);
   box-shadow: var(--control-ring);
-}
-
-.field input::placeholder,
-.field textarea::placeholder {
-  color: var(--control-placeholder);
-  font-size: 13px;
-}
-
-.field select {
-  min-height: 36px;
 }
 
 .field textarea {
@@ -1026,12 +998,9 @@ button.menu-item > .icon {
   margin-top: 4px;
 }
 
-.pred-add select,
+/* The selects and boxes beside a button are the shared control at form size, like every field above them. */
 .pred-add input {
-  padding: 7px 10px;
-  border: 1.5px solid var(--color-border);
-  border-radius: var(--radius-md);
-  font-size: 13px;
+  min-width: 0;
 }
 
 /* ==========================================================================
@@ -7485,24 +7454,34 @@ button.tf-chip-x:hover:not(:disabled) {
   align-items: center;
   gap: 4px;
   padding: 4px 6px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface);
-  min-height: 34px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--control-radius);
+  background: var(--control-bg);
+  min-height: var(--control-h-form);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.labels-input:hover:not(:focus-within) {
+  border-color: var(--control-border-hover);
 }
 .labels-input:focus-within {
-  outline: 2px solid var(--color-primary-border);
-  border-color: var(--color-primary);
+  border-color: var(--control-border-focus);
+  box-shadow: var(--control-ring);
 }
 .labels-input input {
   flex: 1;
   min-width: 90px;
+  height: auto;
   border: none;
   outline: none;
+  box-shadow: none;
   padding: 2px 4px;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--control-font-size-form);
   background: transparent;
+}
+/* The ring belongs to the whole box (:focus-within above), not to the bare input inside it. */
+.labels-input input:focus-visible {
+  box-shadow: none;
 }
 .label-chip {
   display: inline-flex;
@@ -8372,6 +8351,11 @@ button.tf-chip-x:hover:not(:disabled) {
 .tfield-req {
   color: var(--color-danger);
 }
+.tfield-opt {
+  font-style: normal;
+  font-weight: 400;
+  color: var(--color-text-muted);
+}
 .bulk-status-menu {
   width: 320px;
 }
@@ -8501,6 +8485,7 @@ button.selection-trigger {
   border-left: 1px solid var(--color-border);
 }
 .td-title {
+  height: auto;
   margin: 0 -10px;
   padding: 6px 10px;
   border: 1px solid transparent;
@@ -8674,4 +8659,54 @@ button.selection-trigger {
 }
 .td-pair input {
   width: 100%;
+}
+
+/* A button that sits in a row with fields is as tall as they are, so the row reads as one line. */
+.pred-add > button,
+.log-inline > button,
+.att-link-add > button,
+.watchers > button {
+  height: var(--control-h-form);
+  padding-block: 0;
+}
+
+/* --- completions under a text box (SuggestInput.tsx): the same panel and rows as every menu --- */
+.suggest-list {
+  position: fixed;
+  z-index: var(--z-dialog);
+  margin: 0;
+  padding: var(--menu-padding);
+  list-style: none;
+  max-height: 260px;
+  overflow-y: auto;
+  background: var(--menu-bg);
+  border: 1px solid var(--menu-border);
+  border-radius: var(--menu-radius);
+  box-shadow: var(--menu-shadow);
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-strong) transparent;
+}
+.suggest-item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: var(--menu-item-py) var(--menu-item-px);
+  border-radius: var(--menu-item-radius);
+  font-size: var(--font-size-md);
+  color: var(--control-fg);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.suggest-item b {
+  flex: none;
+  font-weight: 600;
+}
+.suggest-item span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--color-text-secondary);
+}
+.suggest-item.is-active {
+  background: var(--menu-item-hover);
 }

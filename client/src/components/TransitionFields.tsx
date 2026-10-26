@@ -18,7 +18,14 @@ export function TransitionFieldsForm({ fields, values, onChange, jiraUrl }: Form
       {fields.map((f) => (
         <label key={f.id} className="field">
           <span>
-            {f.name} <b className="tfield-req" title="Bắt buộc">*</b>
+            {f.name}{" "}
+            {f.optional ? (
+              <em className="tfield-opt">(có thể là ô này)</em>
+            ) : (
+              <b className="tfield-req" title="Bắt buộc">
+                *
+              </b>
+            )}
           </span>
           {f.kind === "textarea" ? (
             <textarea rows={3} value={values[f.id] ?? ""} onChange={(e) => set(f.id, e.target.value)} />

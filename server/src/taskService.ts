@@ -1,7 +1,7 @@
 import { getProjectMembers, type ProjectMembers } from "./projectMembers.js";
 import { adfToText, textToAdf } from "./adf.js";
 import { JiraApiError, matchTransition, type JiraClient } from "./jiraClient.js";
-import { describeField, fieldValue, fieldsNamedIn, requiredTransitionFields, type JiraFieldMeta, type TransitionField } from "./transitionFields.js";
+import { describeField, fieldValue, fieldsNamedInAny, optionalTransitionFields, requiredTransitionFields, type JiraFieldMeta, type TransitionField } from "./transitionFields.js";
 import * as store from "./store.js";
 import { isAssignableType } from "./types.js";
 import { checkStructure, type StructureNode } from "./structure.js";
@@ -422,8 +422,17 @@ export class TaskService {
       );
     }
 
+    // A box on the screen that is not marked required but that a validator insists on anyway
+    // (the form offered it after the first refusal): sent with the move like any other.
+    const screenAll = match.fields ?? {};
+    for (const [fid, meta] of Object.entries(screenAll)) {
+      if (fid in fields || fid === "comment") continue;
+      const v = fieldValue(describeField(fid, meta), values[fid] ?? "");
+      if (v !== null) fields[fid] = v;
+    }
+
     // Values for fields that are not on the screen are issue fields a validator wants set first.
-    const onScreen = new Set(Object.keys(match.fields ?? {}));
+    const onScreen = new Set(Object.keys(screenAll));
     const extraIds = Object.keys(values).filter((k) => !onScreen.has(k) && values[k].trim());
     if (extraIds.length > 0) {
       const editable = await this.jira.getEditMeta(id).catch((): Record<string, JiraFieldMeta> => ({}));
@@ -451,14 +460,35 @@ export class TaskService {
       } catch {
         // Not JSON: the message is all there is.
       }
-      const byId = named.filter((k) => editable[k]).map((k) => describeField(k, editable[k]));
-      const hinted = [...byId, ...fieldsNamedIn(said, editable)]
-        .filter((f, i, all) => f.kind !== "unsupported" && all.findIndex((g) => g.id === f.id) === i)
+      // The transition's own screen counts too, not only what the issue lets people edit: a box
+      // that exists only on the move's screen (RootCause on the way to Resolved, not required
+      // there but demanded by a validator) is in neither editmeta nor the required list.
+      const known: Record<string, JiraFieldMeta> = { ...editable, ...screenAll };
+      const byId = named.filter((k) => known[k]).map((k) => describeField(k, known[k]));
+      const hinted = [...byId, ...fieldsNamedInAny(said, known)]
+        .filter((f, i, all) => all.findIndex((g) => g.id === f.id) === i)
         .filter((f) => !(f.id in values));
-      if (hinted.length > 0) {
+      // A field we can name but not fill (a user picker) still beats a bare refusal: it tells
+      // the person which box to go and fill in Jira.
+      const showable = hinted.some((f) => f.kind !== "unsupported") ? hinted.filter((f) => f.kind !== "unsupported") : hinted;
+      if (showable.length > 0) {
         throw new AppError(400, "TRANSITION_FIELDS_REQUIRED", said || `Chuyển sang "${toStatus}" cần nhập thêm thông tin.`, {
           toStatusName: toStatus,
-          fields: hinted,
+          fields: showable,
+          reason: said,
+        });
+      }
+      // Nothing in the sentence names a field we know. The move's own optional boxes are the
+      // likeliest thing the workflow wants; offer them rather than a dead end.
+      const optional = optionalTransitionFields(screenAll).filter((f) => !(f.id in values));
+      console.warn(
+        `[transition] ${id} -> "${toStatus}" refused: ${JSON.stringify(said)}; ` +
+          `screen=${JSON.stringify(Object.values(screenAll).map((m) => m.name))} editable=${Object.keys(editable).length} fields`
+      );
+      if (optional.length > 0) {
+        throw new AppError(400, "TRANSITION_FIELDS_REQUIRED", said || `Chuyển sang "${toStatus}" cần nhập thêm thông tin.`, {
+          toStatusName: toStatus,
+          fields: optional,
           reason: said,
         });
       }

@@ -35,6 +35,12 @@ describe("missingFields", () => {
     const f: TransitionField = { id: "u", name: "Reviewer", kind: "unsupported" };
     assert.deepEqual(missingFields([f], { u: "someone" }).map((x) => x.id), ["u"]);
   });
+
+  it("does not insist on a field offered only as a guess", () => {
+    const guess: TransitionField = { ...text("g", "Root Cause"), optional: true };
+    assert.deepEqual(missingFields([guess], {}), []);
+    assert.deepEqual(missingFields([guess, text("b")], {}).map((f) => f.id), ["b"]);
+  });
 });
 
 describe("uniqueFields", () => {

@@ -71,6 +71,8 @@ app.post("/api/__restore", (_q, r) => {
   savedFilters = savedFilters.filter((f) => f.createdBy !== "me");
   watching = false;
   listDelayMs = 0;
+  sessionProject = "DEMO";
+  tasksSeen = [];
   log.length = 0;
   r.json({});
 });
@@ -105,17 +107,47 @@ app.post("/api/__tasks/generate", (req, r) => {
   r.json({ count: out.length });
 });
 
-app.get("/api/auth/me", (_q, r) => r.json({
-  user: users[0], site: { cloudId: "c1", url: "https://example.atlassian.net", name: "Example" },
-  project: { key: "DEMO", name: "Dự án mẫu" }, startDateFieldId: null, overlayEphemeral: false, staff: true,
-}));
-app.get("/api/auth/projects", (_q, r) => r.json([{ id: "1", key: "DEMO", name: "Dự án mẫu", avatarUrl: null }]));
+// Two projects, and the session's own "current project" the way the real cookie holds it — shared
+// by every tab. A request that names its project (X-Project-Key) is served that one instead.
+const PROJECTS = [
+  { id: "1", key: "DEMO", name: "Dự án mẫu", avatarUrl: null },
+  { id: "2", key: "OTHER", name: "Dự án khác", avatarUrl: null },
+];
+let sessionProject = "DEMO";
+const projectOf = (req: express.Request) => {
+  const asked = String(req.get("x-project-key") ?? "");
+  return PROJECTS.find((p) => p.key === asked) ?? PROJECTS.find((p) => p.key === sessionProject)!;
+};
+let tasksSeen: Array<{ project: string | null }> = [];
+app.get("/api/auth/me", (req, r) => {
+  const p = projectOf(req);
+  r.json({
+    user: users[0], site: { cloudId: "c1", url: "https://example.atlassian.net", name: "Example" },
+    project: { key: p.key, name: p.name }, startDateFieldId: null, overlayEphemeral: false, staff: true,
+  });
+});
+app.get("/api/auth/projects", (_q, r) => r.json(PROJECTS));
+app.post("/api/auth/project", (req, r) => {
+  const p = PROJECTS.find((x) => x.key === req.body?.key);
+  if (!p) return r.status(400).json({ error: "Không có quyền", code: "BAD_REQUEST" });
+  sessionProject = p.key;
+  r.json({ key: p.key, name: p.name });
+});
+app.get("/api/__tasks-seen", (_q, r) => r.json({ seen: tasksSeen, sessionProject }));
 
 // Like the real server: the list carries no description (the edit modal asks for it), and
 // the list can be made slow to prove that a saved copy shows first.
 let listDelayMs = 0;
 app.post("/api/__delay", (req, r) => { listDelayMs = Number(req.body?.ms ?? 0); r.json({}); });
-app.get("/api/tasks", (_q, r) => {
+const otherProjectTasks = () => [{ ...base, id: "OTHER-1", summary: "Việc của dự án khác", issueType: "Task", startDate: day(0), dueDate: day(2), durationDays: 3 }];
+app.post("/api/sync", (req, r) => {
+  tasksSeen.push({ project: req.get("x-project-key") ?? null });
+  const list = projectOf(req).key === "OTHER" ? otherProjectTasks() : tasks.map(({ description: _d, ...rest }) => rest);
+  r.json({ syncedAt: new Date().toISOString(), count: list.length, tasks: list });
+});
+app.get("/api/tasks", (req, r) => {
+  tasksSeen.push({ project: req.get("x-project-key") ?? null });
+  if (projectOf(req).key === "OTHER") return r.json(otherProjectTasks());
   const body = tasks.map(({ description: _d, ...rest }) => rest);
   if (listDelayMs > 0) setTimeout(() => r.json(body), listDelayMs);
   else r.json(body);
