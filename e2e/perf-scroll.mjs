@@ -30,7 +30,8 @@ await fetch(API + "/api/__tasks/generate", { method: "POST", headers: { "content
 
 const t0 = Date.now();
 await page.goto(APP);
-await page.waitForFunction((n) => document.querySelectorAll(".wbs-row").length >= n, Math.floor(ROWS * 0.9), { timeout: 120_000 });
+// A big list is drawn a window at a time (client/src/ganttWindow.ts), so the DOM holds far fewer rows than the project has.
+await page.waitForFunction((n) => document.querySelectorAll(".wbs-row").length >= n, Math.min(Math.floor(ROWS * 0.9), 60), { timeout: 120_000 });
 console.log(`(lỗi trình duyệt khi vừa vẽ xong: ${errors.length})`);
 console.log(`rows: ${await page.locator(".wbs-row").count()} drawn ${Date.now() - t0}ms after navigation`);
 await page.waitForTimeout(Number(process.env.SETTLE_MS ?? 1500));

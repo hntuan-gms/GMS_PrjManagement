@@ -3,11 +3,12 @@ import FilterBar, { type JqlControl } from "./FilterBar";
 import TimelineMarkers from "./TimelineMarkers";
 import { Gantt, ViewMode, type Task as GanttTaskT } from "gantt-task-react";
 import "gantt-task-react/dist/index.css";
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { axisSentinels, isWindowed, windowEnd, windowRows, windowStartFor } from "../ganttWindow";
 import { csvName, downloadCsv, type CsvCell } from "../csv";
 import { computeCriticalPath } from "../criticalPath";
 import { resolveBaselines } from "../baselineGeometry";
-import { orderByWbs, resolveRanges, toGanttTasks } from "../ganttMapping";
+import { orderByWbs, resolveRanges, toGanttTasks, type OrderedTask } from "../ganttMapping";
 import type { DependencyType, ProjectVersion, Task } from "../types";
 import { isMilestone } from "../timelineGeometry";
 import { overlayCsvCells, overlayCsvHeader } from "../wbsExport";
@@ -45,7 +46,20 @@ const DAY_MS = 86_400_000;
  * identity instead; the current closures reach them through context, which
  * re-renders them in place on every change.
  */
-const WbsListContext = createContext<{ header: ReactNode; table: ReactNode } | null>(null);
+type WbsRow = OrderedTask;
+
+interface WbsList {
+  header: ReactNode;
+  /** The whole table, built ahead; null when the chart is windowed and the table follows the library's rows. */
+  table: ReactNode;
+  buildTable: (list: WbsRow[]) => ReactNode;
+  rows: WbsRow[];
+  /** task id → position in `rows`; present only when windowed. */
+  rowIndex: Map<string, number> | null;
+  /** The window the library has actually drawn: first row and how many. */
+  onCommitted: (start: number, count: number) => void;
+}
+const WbsListContext = createContext<WbsList | null>(null);
 const useWbsList = () => {
   const ctx = useContext(WbsListContext);
   if (!ctx) throw new Error("WBS list rendered outside GanttView");
@@ -54,8 +68,75 @@ const useWbsList = () => {
 function WbsListHeader() {
   return <>{useWbsList().header}</>;
 }
-function WbsListTable() {
-  return <>{useWbsList().table}</>;
+function WbsListTable({ tasks }: { tasks: GanttTaskT[] }) {
+  const ctx = useWbsList();
+  // Windowed: the rows are whatever the library has in `tasks` right now — it adopts a new
+  // window one render after GanttView asks for it, and drawing the table from the same list
+  // is what keeps a row and its bar on the same line.
+  const list = useMemo(() => {
+    if (!ctx.rowIndex) return null;
+    const out: WbsRow[] = [];
+    for (const t of tasks) {
+      const i = ctx.rowIndex.get(t.id);
+      if (i !== undefined) out.push(ctx.rows[i]);
+    }
+    return out;
+  }, [ctx, tasks]);
+  const node = useMemo(() => (list ? ctx.buildTable(list) : ctx.table), [ctx, list]);
+  useLayoutEffect(() => {
+    if (!list || list.length === 0 || !ctx.rowIndex) return;
+    // In the same commit as the new rows and bars, so the offset below them is never out of step.
+    ctx.onCommitted(ctx.rowIndex.get(list[0].task.id)!, list.length);
+  }, [ctx, list]);
+  return <>{node}</>;
+}
+
+/**
+ * A big chart's own vertical scroll. The page's native scrollbar drives it: a spacer as
+ * tall as the full list gives the scrollbar its length, and the chart sits in a sticky
+ * stage that stays on screen while only a window of rows exists inside it.
+ */
+function VirtualStage({
+  windowed,
+  scrollerRef,
+  stageRef,
+  onScroll,
+  totalHeight,
+  height,
+  children,
+}: {
+  windowed: boolean;
+  scrollerRef: RefObject<HTMLDivElement | null>;
+  stageRef: RefObject<HTMLDivElement | null>;
+  onScroll: () => void;
+  totalHeight: number;
+  height: number;
+  children: ReactNode;
+}) {
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!windowed || !el) return;
+    // The library scrolls vertically by itself on a plain wheel and cancels the event, which
+    // would stop the page's scrollbar from ever seeing it. Left alone (not cancelled), the
+    // browser scrolls it natively; sideways, Shift and pinch-zoom still go to the chart.
+    function onWheel(e: WheelEvent) {
+      if (e.ctrlKey || e.shiftKey || e.deltaX !== 0) return;
+      e.stopPropagation();
+    }
+    el.addEventListener("wheel", onWheel, { capture: true });
+    return () => el.removeEventListener("wheel", onWheel, { capture: true });
+  }, [windowed, stageRef]);
+
+  if (!windowed) return <>{children}</>;
+  return (
+    <div className="gantt-vscroll" ref={scrollerRef} onScroll={onScroll}>
+      <div style={{ height: totalHeight }}>
+        <div className="gantt-stage" ref={stageRef} style={{ height }}>
+          {children}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // How many calendar days one column spans in each mode (gantt-task-react's own
@@ -795,7 +876,7 @@ export default function GanttView({
       },
     [byId]
   );
-  const ganttTasks = useMemo(() => {
+  const allGanttTasks = useMemo(() => {
     const base = toGanttTasks(rows, ranges);
     if (!showCriticalPath) return base;
     return base.map((t) => ({
@@ -804,6 +885,65 @@ export default function GanttView({
     }));
   }, [rows, ranges, showCriticalPath, criticalIds]);
 
+  /* ---- a big list is drawn a window at a time (ganttWindow.ts) ---- */
+  const windowed = isWindowed(rows.length);
+  const viewportRows = Math.ceil(ganttHeight / ROW_HEIGHT);
+  // What the page scrollbar asks for, and what the library has actually drawn so far. The
+  // library adopts a new window one render late, so anything that reads the DOM (the overlays,
+  // the offset below) follows the second, and only the library's own task list follows the first.
+  const [wantedStart, setWantedStart] = useState(0);
+  const [drawn, setDrawn] = useState({ start: 0, count: 0 });
+  const start = windowed ? Math.min(wantedStart, Math.max(0, rows.length - windowRows(viewportRows))) : 0;
+  const end = windowed ? windowEnd(start, rows.length, viewportRows) : rows.length;
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const drawnStartRef = useRef(0);
+  // Rows move up by how far the page is scrolled past the first drawn row. A CSS variable on
+  // the stage, not state: a scroll event only writes it, and a row the library has just
+  // created already has the right offset on its first frame.
+  const applyOffset = useCallback(() => {
+    const sc = scrollerRef.current;
+    const stage = stageRef.current;
+    if (!sc || !stage) return;
+    stage.style.setProperty("--gms-row-offset", `${sc.scrollTop - drawnStartRef.current * ROW_HEIGHT}px`);
+  }, []);
+  const onCommitted = useCallback(
+    (s: number, count: number) => {
+      drawnStartRef.current = s;
+      applyOffset();
+      setDrawn((prev) => (prev.start === s && prev.count === count ? prev : { start: s, count }));
+    },
+    [applyOffset]
+  );
+  const onVScroll = () => {
+    const sc = scrollerRef.current;
+    if (!sc) return;
+    applyOffset();
+    const s = windowStartFor(sc.scrollTop, ROW_HEIGHT, rows.length, viewportRows);
+    setWantedStart((prev) => (prev === s ? prev : s));
+  };
+  const ganttTasks = useMemo(() => {
+    if (!windowed) return allGanttTasks;
+    // Two invisible bars hold the date axis where the whole list puts it (ganttWindow.axisSentinels).
+    const sentinels = axisSentinels(allGanttTasks, (id, s, e): GanttTaskT => ({
+      id,
+      name: "",
+      start: s,
+      end: e,
+      progress: 0,
+      type: "task",
+      dependencies: [],
+      isDisabled: true,
+      styles: { backgroundColor: "transparent", progressColor: "transparent", backgroundSelectedColor: "transparent" },
+    }));
+    return [...allGanttTasks.slice(start, end), ...sentinels];
+  }, [windowed, allGanttTasks, start, end]);
+  // The bars the DOM has, for the overlays that measure them.
+  const drawnGanttTasks = useMemo(
+    () => (windowed ? allGanttTasks.slice(drawn.start, drawn.start + drawn.count) : allGanttTasks),
+    [windowed, allGanttTasks, drawn]
+  );
+
   // Bumped whenever a bar's actual on-screen position could have changed, so
   // DependencyOverlay knows when to re-measure. Own dates in ms rather than
   // object identity, since ganttTasks gets a new array/Date identity on every
@@ -811,10 +951,13 @@ export default function GanttView({
   const measureKey = useMemo(
     () =>
       `${viewMode}:${columnWidth}:${listWidth}:` +
-      ganttTasks.map((t) => `${t.id}=${t.start.getTime()}-${t.end.getTime()}`).join(","),
-    [viewMode, columnWidth, listWidth, ganttTasks]
+      drawnGanttTasks.map((t) => `${t.id}=${t.start.getTime()}-${t.end.getTime()}`).join(","),
+    [viewMode, columnWidth, listWidth, drawnGanttTasks]
   );
-  const rowTasks = useMemo(() => rows.map((r) => r.task), [rows]);
+  const rowTasks = useMemo(
+    () => (windowed ? rows.slice(drawn.start, drawn.start + drawn.count) : rows).map((r) => r.task),
+    [windowed, rows, drawn]
+  );
 
   // gantt-task-react does NOT size its TaskList wrapper to listCellWidth itself —
   // it only forwards that value as a `rowWidth` prop and expects the consumer's own
@@ -842,10 +985,10 @@ export default function GanttView({
     [columns, listWidth]
   );
 
-  const table = useMemo(
-    () => (
-    <div style={{ width: listWidth }}>
-      {rows.map(({ task, depth, hasChildren }) => (
+  const buildTable = useCallback(
+    (list: WbsRow[]) => (
+    <div className="wbs-rows" style={{ width: listWidth }}>
+      {list.map(({ task, depth, hasChildren }) => (
         <div
           key={task.id}
           className={`wbs-row ${matchIds?.has(task.id) ? "wbs-row-match" : ""} ${
@@ -907,7 +1050,12 @@ export default function GanttView({
     ),
     [rows, matchIds, selectedIds, selectedId, showCriticalPath, criticalIds, listWidth, columns, collapsed, ranges, today, onSelect, onOpenEdit, onToggleCollapse]
   );
-  const wbsList = useMemo(() => ({ header, table }), [header, table]);
+  const table = useMemo(() => (windowed ? null : buildTable(rows)), [windowed, buildTable, rows]);
+  const rowIndex = useMemo(() => (windowed ? new Map(rows.map((r, i) => [r.task.id, i])) : null), [windowed, rows]);
+  const wbsList = useMemo<WbsList>(
+    () => ({ header, table, buildTable, rows, rowIndex, onCommitted }),
+    [header, table, buildTable, rows, rowIndex, onCommitted]
+  );
 
   return (
     <div className="gantt-wrap">
@@ -1115,6 +1263,14 @@ export default function GanttView({
           bodySize.width > 0 && (
             <>
               <WbsListContext.Provider value={wbsList}>
+              <VirtualStage
+                windowed={windowed}
+                scrollerRef={scrollerRef}
+                stageRef={stageRef}
+                onScroll={onVScroll}
+                totalHeight={rows.length * ROW_HEIGHT + HEADER_HEIGHT + SCROLLBAR_RESERVE}
+                height={bodySize.height}
+              >
               <Gantt
                 tasks={ganttTasks}
                 viewMode={viewMode}
@@ -1155,6 +1311,7 @@ export default function GanttView({
                 }}
                 onProgressChange={(t: GanttTaskT) => onProgressChange(t.id, Math.round(t.progress))}
               />
+              </VirtualStage>
               </WbsListContext.Provider>
               <div
                 className={`gantt-divider ${dragging ? "dragging" : ""}`}

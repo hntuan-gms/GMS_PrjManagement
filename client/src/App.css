@@ -1203,6 +1203,30 @@ button.danger:hover:not(:disabled) {
   overflow: hidden;
 }
 
+/* A big chart (ganttWindow.ts): the page scrollbar drives a sticky stage that holds only a window
+   of rows, moved up by how far the page is scrolled past the first one it holds. */
+.gantt-vscroll {
+  position: absolute;
+  inset: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+.gantt-stage {
+  position: sticky;
+  top: 0;
+  overflow: hidden;
+}
+/* The library's own vertical scrollbar (its compiled class, like _9w8d5 in GanttView): the page
+   scrollbar replaces it. If an upgrade renames it, the cost is two scrollbars, nothing breaks. */
+.gantt-stage ._1eT-t {
+  display: none;
+}
+.gantt-stage .wbs-rows,
+.gantt-stage svg:has(g.content) {
+  transform: translateY(calc(var(--gms-row-offset, 0px) * -1));
+  will-change: transform;
+}
+
 .gantt-divider {
   position: absolute;
   top: 0;
