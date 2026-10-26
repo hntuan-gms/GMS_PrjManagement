@@ -139,6 +139,8 @@ export interface TaskUpdateInput {
   baselineDue?: string | null;
   /** A transition id from GET /tasks/:id/transitions (a name also works). */
   statusTransition?: string;
+  /** What the move asks for besides the status: field id → what was typed or picked. */
+  transitionFields?: Record<string, string>;
   /** Jira's Original estimate, in hours (> 0). */
   estimateHours?: number;
   /** A priority name from GET /priorities. */
@@ -260,11 +262,22 @@ export interface BulkTaskCreateResult {
 }
 
 /** A move the issue's workflow allows from where it is now. */
+/** A box the workflow wants filled in before an issue may move (e.g. "RootCause" on the way to Done). */
+export interface TransitionField {
+  id: string;
+  name: string;
+  kind: "text" | "textarea" | "select" | "number" | "date" | "unsupported";
+  /** Only for `select`: the option's id is what is sent back. */
+  options?: Array<{ id: string; label: string }>;
+}
+
 export interface TaskTransition {
   id: string;
   name: string;
   toStatusName: string;
   toCategory: "new" | "indeterminate" | "done";
+  /** Required to make this move; empty for most workflows. */
+  fields: TransitionField[];
 }
 
 export interface TaskAttachments {

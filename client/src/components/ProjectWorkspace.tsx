@@ -20,6 +20,7 @@ import type {
   Task,
   TaskUpdateInput,
   TaskUpdateResponse,
+  TransitionField,
 } from "../types";
 import { isAssignableType } from "../types";
 import BoardView from "./BoardView";
@@ -33,6 +34,10 @@ import ProgressReportView from "./ProgressReportView";
 import ResourceView from "./ResourceView";
 import TaskEditModal from "./TaskEditModal";
 import { Icon } from "./Icons";
+import BulkStatusMenu from "./BulkStatusMenu";
+import { useDialogs } from "./dialogContext";
+import { TransitionFieldsDialog } from "./TransitionFields";
+import { neededFieldsFrom } from "../transitionFields";
 import Toolbar, { type WorkspaceView } from "./Toolbar";
 import TimesheetView from "./TimesheetView";
 
@@ -47,6 +52,7 @@ const OVERLAY_WARNING =
   "được cập nhật. Ngày bắt đầu và ngày kết thúc vẫn được đồng bộ với Jira.";
 
 export default function ProjectWorkspace({ session, onSwitchProject, onLogout }: Props) {
+  const dialogs = useDialogs();
   // What this browser saw last time, shown at once while the fresh copy loads (tasksCache.ts).
   // Read once, on the first render; the workspace is keyed by project so it never goes stale.
   const cacheKey = tasksCacheKey(session.site.cloudId, session.user.accountId, session.project?.key ?? "");
@@ -157,6 +163,8 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
   const [deleting, setDeleting] = useState(false);
   // Progress text while a bulk action runs ("Đang gán 3/10…"); null when idle.
   const [bulkBusy, setBulkBusy] = useState<string | null>(null);
+  // A bulk status change Jira stopped for a missing box: ask once, then send the rest again.
+  const [bulkNeeds, setBulkNeeds] = useState<{ statusName: string; ids: string[]; fields: TransitionField[]; reason?: string } | null>(null);
   const [shiftDays, setShiftDays] = useState(1);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   // Open with an optional parent: "+ Sub-task" in the edit modal pre-fills it.
@@ -411,11 +419,11 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
       return !(self.wbsParentId && picked.has(self.wbsParentId));
     });
     if (ids.length === 0) return;
-    const ok = window.confirm(
-      ids.length === 1
-        ? `Xoá ${ids[0]} khỏi Jira? Không hoàn tác được.`
-        : `Xoá ${ids.length} công việc khỏi Jira? Không hoàn tác được.`
-    );
+    const ok = await dialogs.confirm({
+      title: "Xoá khỏi Jira",
+      message: ids.length === 1 ? `Xoá ${ids[0]} khỏi Jira? Không hoàn tác được.` : `Xoá ${ids.length} công việc khỏi Jira? Không hoàn tác được.`,
+      tone: "danger",
+    });
     if (!ok) return;
 
     setDeleting(true);
@@ -454,7 +462,9 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
     verb: string,
     ids: string[],
     edit: (id: string) => TaskUpdateInput,
-    skipped: string[] = []
+    skipped: string[] = [],
+    /** Takes a failure the caller can fix itself; true means handled, so it is not reported as one. */
+    takeover?: (id: string, err: unknown) => boolean
   ) {
     if (ids.length === 0) {
       setSyncError(`Không có công việc nào phù hợp để ${verb}.`);
@@ -467,6 +477,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
         await api.updateTask(ids[i], edit(ids[i]));
       } catch (e) {
         if (e instanceof ApiError && e.status === 401) return;
+        if (takeover?.(ids[i], e)) continue;
         failed.push(`${ids[i]} (${e instanceof Error ? e.message : "lỗi"})`);
       }
     }
@@ -489,9 +500,32 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
     return runBulk(accountId ? "gán" : "bỏ gán", ok.map((t) => t.id), () => ({ assigneeAccountId: accountId }), skipped);
   }
 
-  function handleBulkStatus(statusName: string) {
-    const picked = selectedTasks().filter((t) => t.statusName !== statusName);
-    return runBulk("đổi trạng thái", picked.map((t) => t.id), () => ({ statusTransition: statusName }));
+  /**
+   * `ids` and `values` come from the status menu, which already asked each workflow what it
+   * allows and for what it needs. A box only a validator demands is discovered here instead:
+   * the first refusal that names fields opens a dialog, and the ones still waiting are sent
+   * again with the answer.
+   */
+  async function handleBulkStatus(statusName: string, ids: string[], values: Record<string, string> = {}) {
+    let needed: { fields: TransitionField[]; reason?: string } | null = null;
+    const waiting: string[] = [];
+    await runBulk(
+      "đổi trạng thái",
+      ids,
+      () => ({ statusTransition: statusName, ...(Object.keys(values).length > 0 ? { transitionFields: values } : {}) }),
+      [],
+      (id, err) => {
+        const n = neededFieldsFrom(err);
+        if (!n) return false;
+        needed ??= n;
+        waiting.push(id);
+        return true;
+      }
+    );
+    if (needed && waiting.length > 0) {
+      const n = needed as { fields: TransitionField[]; reason?: string };
+      setBulkNeeds({ statusName, ids: waiting, fields: n.fields, reason: n.reason });
+    }
   }
 
   function handleBulkShift(days: number) {
@@ -513,7 +547,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
    * An Epic with children is skipped: its baseline is drawn as its children's
    * span, like its bar.
    */
-  function handleBulkBaseline(mode: "save" | "clear") {
+  async function handleBulkBaseline(mode: "save" | "clear") {
     const parentIds = new Set(tasks.map((t) => t.wbsParentId).filter(Boolean));
     const picked = selectedTasks();
     const rollup = (t: Task) => t.issueType.toLowerCase() === "epic" && parentIds.has(t.id);
@@ -523,7 +557,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
         setSyncError("Các công việc đã chọn chưa có baseline nào để xoá.");
         return;
       }
-      if (!window.confirm(`Xoá baseline của ${target.length} công việc? Không hoàn tác được.`)) return;
+      if (!(await dialogs.confirm({ message: `Xoá baseline của ${target.length} công việc? Không hoàn tác được.`, tone: "danger" }))) return;
       return runBulk("xoá baseline", target.map((t) => t.id), () => ({ baselineStart: null, baselineDue: null }));
     }
     const target = picked.filter((t) => t.startDate && !rollup(t));
@@ -531,7 +565,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
     const overwrite = target.filter((t) => t.baselineStart || t.baselineDue).length;
     if (
       overwrite > 0 &&
-      !window.confirm(`${overwrite} công việc đã có baseline sẽ bị ghi đè bằng lịch hiện tại. Tiếp tục?`)
+      !(await dialogs.confirm({ message: `${overwrite} công việc đã có baseline sẽ bị ghi đè bằng lịch hiện tại. Tiếp tục?`, confirmLabel: "Ghi đè" }))
     ) {
       return;
     }
@@ -824,22 +858,11 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
               </option>
             ))}
           </select>
-          <select
-            className="selection-select"
-            value=""
+          <BulkStatusMenu
+            tasks={selectedTasks()}
             disabled={deleting || bulkBusy !== null}
-            onChange={(e) => {
-              if (e.target.value) handleBulkStatus(e.target.value);
-            }}
-            aria-label="Đổi trạng thái các công việc đã chọn"
-          >
-            <option value="">Đổi trạng thái…</option>
-            {[...new Set(tasks.map((t) => t.statusName))].sort((a, b) => a.localeCompare(b, "vi")).map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
+            onApply={(statusName, ids, values) => void handleBulkStatus(statusName, ids, values)}
+          />
           <select
             className="selection-select"
             value=""
@@ -887,6 +910,21 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
           </button>
           {bulkBusy && <span className="selection-hint">{bulkBusy}</span>}
         </div>
+      )}
+
+      {bulkNeeds && (
+        <TransitionFieldsDialog
+          title={`Chuyển ${bulkNeeds.ids.length} việc sang “${bulkNeeds.statusName}”`}
+          message={bulkNeeds.reason ?? "Quy trình Jira yêu cầu nhập thông tin này trước khi chuyển."}
+          fields={bulkNeeds.fields}
+          applyLabel="Chuyển"
+          onCancel={() => setBulkNeeds(null)}
+          onApply={(values) => {
+            const { statusName, ids } = bulkNeeds;
+            setBulkNeeds(null);
+            void handleBulkStatus(statusName, ids, values);
+          }}
+        />
       )}
 
       <div className="app-body">

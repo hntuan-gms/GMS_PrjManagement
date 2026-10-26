@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import type { Session } from "../types";
 import { Icon } from "./Icons";
+import { useDialogs } from "./dialogContext";
 import Popover from "./Popover";
 
 export type WorkspaceView = "gantt" | "board" | "timesheet" | "resource" | "report";
@@ -50,6 +51,7 @@ export default function Toolbar({
   // bare <img src>, so a fallback is mandatory rather than defensive.
   const [avatarFailed, setAvatarFailed] = useState(false);
   const { user, project, site } = session;
+  const dialogs = useDialogs();
 
   const avatar =
     user.avatarUrl && !avatarFailed ? (
@@ -174,9 +176,9 @@ export default function Toolbar({
                 type="button"
                 role="menuitem"
                 className="menu-item"
-                onClick={() => {
+                onClick={async () => {
                   close();
-                  if (syncing && !confirm("Đang đồng bộ. Vẫn đăng xuất?")) return;
+                  if (syncing && !(await dialogs.confirm({ message: "Đang đồng bộ. Vẫn đăng xuất?", confirmLabel: "Đăng xuất" }))) return;
                   onLogout();
                 }}
               >

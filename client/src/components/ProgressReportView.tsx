@@ -9,6 +9,7 @@ import AiBrief from "./AiBrief";
 import { MultiSelect } from "./FilterBar";
 import ProgressTrendChart from "./ProgressTrendChart";
 import { PeopleBars, PhaseBars, ProgressGauge, ScheduleTimeline, StatusDonut, type WorkState } from "./progressCharts";
+import { useDialogs } from "./dialogContext";
 
 interface Props {
   tasks: Task[];
@@ -86,6 +87,7 @@ function signed(n: number): string {
 }
 
 export default function ProgressReportView({ tasks, focusReportId, canGenerate, onOpenEdit, cacheScope, refreshing }: Props) {
+  const dialogs = useDialogs();
   // The last figures this tab showed for today's unscoped view, so reopening it paints at once.
   const [overview, setOverview] = useState<ProgressOverview | null>(
     () => readViewCache<ProgressOverview>(cacheScope, "progress", overviewParams(todayIso(), { types: [] })) ?? null
@@ -166,7 +168,7 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
   }
 
   async function removeReport(id: string) {
-    if (!window.confirm("Xoá báo cáo này khỏi lịch sử? Không hoàn tác được.")) return;
+    if (!(await dialogs.confirm({ message: "Xoá báo cáo này khỏi lịch sử? Không hoàn tác được.", tone: "danger" }))) return;
     try {
       await api.deleteProgressReport(id);
       setShown((s) => (s?.id === id ? null : s));

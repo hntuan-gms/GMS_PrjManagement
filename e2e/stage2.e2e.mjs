@@ -146,9 +146,11 @@ await step("cột Sprint, Thành phần, Phiên bản chọn được và có d�
   for (const name of ["Sprint", "Thành phần (components)", "Phiên bản (fix versions)"]) {
     await page.locator(".col-chooser-item", { hasText: name }).locator("input").check();
   }
-  await page.keyboard.press("Escape");
   const row = (await rowsText()).find((t) => t.includes("DEMO-5"));
   assert(row.includes("Sprint 7") && row.includes("Backend") && row.includes("1.0"), row);
+  // Back to the default columns: a wide table leaves the chart too little room for the drags below.
+  await page.locator(".view-menu .col-chooser-foot button", { hasText: "Mặc định" }).click();
+  await page.keyboard.press("Escape");
 });
 
 console.log("\n== Bộ lọc đã lưu và JQL ==");
@@ -169,6 +171,7 @@ async function saveCurrentAs(name) {
 async function deleteSaved(name) {
   await openSavedMenu();
   await page.locator(".sf-item", { hasText: name }).locator(".sf-delete").click();
+  await page.locator(".dlg button.danger-solid").click();
   await page.waitForFunction((n) => ![...document.querySelectorAll(".sf-apply")].some((b) => b.textContent === n), name);
   await page.keyboard.press("Escape");
 }

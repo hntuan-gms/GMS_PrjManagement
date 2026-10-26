@@ -14,6 +14,8 @@ interface Props {
   /** Extra classes for the panel. */
   menuClassName?: string;
   align?: "start" | "end";
+  /** "top" opens upward — for a trigger at the bottom of the window (the selection bar). */
+  placement?: "bottom" | "top";
   /** "menu" is a list of actions (arrow keys move between `role="menuitem"`s); "dialog" holds
    * controls such as checkboxes and inputs and is walked with Tab. */
   role?: "menu" | "dialog";
@@ -41,6 +43,7 @@ export default function Popover({
   className = "",
   menuClassName = "",
   align = "start",
+  placement = "bottom",
   role = "dialog",
   caret = true,
   active,
@@ -149,7 +152,7 @@ export default function Popover({
         {caret && <Icon name="chevronDown" size={12} className="caret" />}
       </button>
       {open && (
-        <div ref={menuRef} className={`popover-menu popover-${align} ${menuClassName}`} role={role} aria-label={menuLabel}>
+        <div ref={menuRef} className={`popover-menu popover-${align}${placement === "top" ? " popover-up" : ""} ${menuClassName}`} role={role} aria-label={menuLabel}>
           {typeof children === "function" ? children({ close }) : children}
         </div>
       )}

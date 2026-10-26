@@ -1,11 +1,12 @@
 import { getProjectMembers, type ProjectMembers } from "./projectMembers.js";
 import { adfToText, textToAdf } from "./adf.js";
-import { JiraApiError, type JiraClient } from "./jiraClient.js";
+import { JiraApiError, matchTransition, type JiraClient } from "./jiraClient.js";
+import { describeField, fieldValue, fieldsNamedIn, requiredTransitionFields, type JiraFieldMeta, type TransitionField } from "./transitionFields.js";
 import * as store from "./store.js";
 import { isAssignableType } from "./types.js";
 import { checkStructure, type StructureNode } from "./structure.js";
 import { resolvePerson, resolvePriority } from "./ai/toolUtils.js";
-import { badRequest } from "./errors.js";
+import { AppError, badRequest } from "./errors.js";
 import type {
   BulkTaskCreateInput,
   BulkTaskCreateResult,
@@ -373,9 +374,11 @@ export class TaskService {
   /** What the issue's workflow allows from its current status — the edit modal's status list. */
   async listTransitions(
     id: string
-  ): Promise<Array<{ id: string; name: string; toStatusName: string; toCategory: "new" | "indeterminate" | "done" }>> {
+  ): Promise<
+    Array<{ id: string; name: string; toStatusName: string; toCategory: "new" | "indeterminate" | "done"; fields: TransitionField[] }>
+  > {
     this.assertOwnKey(id);
-    const transitions = await this.jira.getTransitions(id);
+    const transitions = await this.jira.getTransitions(id, true);
     return transitions
       .filter((t) => t.to?.name)
       .map((t) => ({
@@ -383,7 +386,88 @@ export class TaskService {
         name: t.name,
         toStatusName: t.to!.name,
         toCategory: statusCategoryKey(t.to!.statusCategory?.key ?? "new"),
+        // What the move cannot go ahead without — the "RootCause" box before Done.
+        fields: requiredTransitionFields(t.fields),
       }));
+  }
+
+  /**
+   * Moves the issue, supplying what its workflow asks for on the way.
+   *
+   * Jira refused this with a bare 400 and a sentence only the workflow's author could place
+   * ("Vui lòng nhập RootCause"), and the UI offered no way to fill it. Two sources, one answer:
+   * a field on the transition's own screen is known up front; one a validator demands is only
+   * named in the refusal, so it is looked up among the issue's editable fields. Either way the
+   * caller gets TRANSITION_FIELDS_REQUIRED with the fields to ask for, and sends them back as
+   * `transitionFields`. Anything else Jira says is passed on as TRANSITION_REFUSED, in words.
+   */
+  private async applyTransition(id: string, wanted: string, values: Record<string, string> = {}): Promise<void> {
+    const match = matchTransition(id, await this.jira.getTransitions(id, true), wanted);
+    const toStatus = match.to?.name ?? wanted;
+    const screen = requiredTransitionFields(match.fields);
+
+    const fields: Record<string, unknown> = {};
+    const missing: TransitionField[] = [];
+    for (const f of screen) {
+      const v = fieldValue(f, values[f.id] ?? "");
+      if (v === null) missing.push(f);
+      else fields[f.id] = v;
+    }
+    if (missing.length > 0) {
+      throw new AppError(
+        400,
+        "TRANSITION_FIELDS_REQUIRED",
+        `Chuyển ${id} sang "${toStatus}" cần nhập: ${missing.map((f) => f.name).join(", ")}.`,
+        { toStatusName: toStatus, fields: missing }
+      );
+    }
+
+    // Values for fields that are not on the screen are issue fields a validator wants set first.
+    const onScreen = new Set(Object.keys(match.fields ?? {}));
+    const extraIds = Object.keys(values).filter((k) => !onScreen.has(k) && values[k].trim());
+    if (extraIds.length > 0) {
+      const editable = await this.jira.getEditMeta(id).catch((): Record<string, JiraFieldMeta> => ({}));
+      const issueFields: Record<string, unknown> = {};
+      for (const fid of extraIds) {
+        const meta = editable[fid];
+        if (!meta) continue;
+        const v = fieldValue(describeField(fid, meta), values[fid]);
+        if (v !== null) issueFields[fid] = v;
+      }
+      if (Object.keys(issueFields).length > 0) await this.jira.updateIssueFields(id, issueFields);
+    }
+
+    try {
+      await this.jira.transitionIssueById(id, match.id, fields);
+    } catch (err) {
+      if (!(err instanceof JiraApiError) || err.status !== 400) throw err;
+      const said = err.summary;
+      // A field Jira names by id, or whose name the message quotes, that the person can still fill.
+      const editable = await this.jira.getEditMeta(id).catch((): Record<string, JiraFieldMeta> => ({}));
+      let named: string[] = [];
+      try {
+        const parsed = JSON.parse(err.body);
+        if (parsed?.errors && typeof parsed.errors === "object") named = Object.keys(parsed.errors);
+      } catch {
+        // Not JSON: the message is all there is.
+      }
+      const byId = named.filter((k) => editable[k]).map((k) => describeField(k, editable[k]));
+      const hinted = [...byId, ...fieldsNamedIn(said, editable)]
+        .filter((f, i, all) => f.kind !== "unsupported" && all.findIndex((g) => g.id === f.id) === i)
+        .filter((f) => !(f.id in values));
+      if (hinted.length > 0) {
+        throw new AppError(400, "TRANSITION_FIELDS_REQUIRED", said || `Chuyển sang "${toStatus}" cần nhập thêm thông tin.`, {
+          toStatusName: toStatus,
+          fields: hinted,
+          reason: said,
+        });
+      }
+      throw new AppError(
+        400,
+        "TRANSITION_REFUSED",
+        `Jira không cho chuyển ${id} sang "${toStatus}": ${said || "quy trình từ chối bước này."} Mở công việc trên Jira để xem điều kiện còn thiếu.`
+      );
+    }
   }
 
   /** Issue keys outside the session's project are refused before Jira is asked anything. */
@@ -483,7 +567,7 @@ export class TaskService {
       await this.jira.assignIssue(id, input.assigneeAccountId);
     }
     if (input.statusTransition) {
-      await this.jira.transitionIssue(id, input.statusTransition);
+      await this.applyTransition(id, input.statusTransition, input.transitionFields);
     }
 
     const overlayPatch: Record<string, unknown> = {};

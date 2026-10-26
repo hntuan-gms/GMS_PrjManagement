@@ -27,7 +27,10 @@ export type IconName =
   | "users"
   | "lock"
   | "alert"
-  | "switch";
+  | "switch"
+  | "external"
+  | "trash"
+  | "subtask";
 
 /** One outline family (24 grid, 2px stroke) so the header and toolbar read as a set.
  * Inline rather than an icon package: a few dozen paths isn't worth a dependency, and
@@ -182,6 +185,25 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M12 3 2 20h20L12 3Z" />
       <path d="M12 10v4" />
       <path d="M12 16.8v.1" />
+    </>
+  ),
+  external: (
+    <>
+      <path d="M7 17 17 7" />
+      <path d="M8 7h9v9" />
+    </>
+  ),
+  trash: (
+    <>
+      <path d="M3 6h18" />
+      <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />
+      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+    </>
+  ),
+  subtask: (
+    <>
+      <path d="M6 3v10a3 3 0 0 0 3 3h9" />
+      <path d="M15 12l3 4-3 4" />
     </>
   ),
   switch: (

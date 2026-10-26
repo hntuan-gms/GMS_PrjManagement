@@ -62,12 +62,15 @@ export class ApiError extends Error {
   // the client tsconfig sets erasableSyntaxOnly.
   readonly status: number;
   readonly code: string | undefined;
+  /** Structured extras some errors carry — the fields a status change needs (TRANSITION_FIELDS_REQUIRED). */
+  readonly details: unknown;
 
-  constructor(status: number, message: string, code?: string) {
+  constructor(status: number, message: string, code?: string, details?: unknown) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
+    this.details = details;
   }
 }
 
@@ -114,7 +117,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
         unauthorizedHandler();
       }
     }
-    throw new ApiError(res.status, body.error ?? `Request failed: ${res.status}`, body.code);
+    throw new ApiError(res.status, body.error ?? `Request failed: ${res.status}`, body.code, body.details);
   }
 
   notifiedUnauthorized = false;
@@ -165,7 +168,7 @@ export async function* kbktApply(file: File, params: KbktRunParams, signal: Abor
   if (!res.ok || !res.body) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
     if (res.status === 401 && unauthorizedHandler) unauthorizedHandler();
-    throw new ApiError(res.status, body.error ?? `Request failed: ${res.status}`, body.code);
+    throw new ApiError(res.status, body.error ?? `Request failed: ${res.status}`, body.code, body.details);
   }
   yield* readSse<KbktStreamEvent>(res);
 }

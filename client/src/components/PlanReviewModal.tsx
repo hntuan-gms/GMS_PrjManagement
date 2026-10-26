@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { isAssignableType, type JiraUser, type PlanResponse } from "../types";
+import { useDialogs } from "./dialogContext";
 
 interface Props {
   /** The staged plan to review, produced by the assistant's create_plan tool. */
@@ -21,6 +22,7 @@ interface Props {
  * length visibly moves everything downstream of it before anything is committed.
  */
 export default function PlanReviewModal({ runId, users, onClose, onApplied }: Props) {
+  const dialogs = useDialogs();
   const [plan, setPlan] = useState<PlanResponse | null>(null);
   const [busy, setBusy] = useState<"loading" | "saving" | "applying" | null>("loading");
   const [error, setError] = useState<string | null>(null);
@@ -105,7 +107,7 @@ export default function PlanReviewModal({ runId, users, onClose, onApplied }: Pr
   /** Throws the whole staged plan away. Nothing was created yet, so nothing in Jira changes. */
   async function discard() {
     if (!plan) return;
-    if (!window.confirm("Huỷ kế hoạch này? Các dòng chưa tạo sẽ bị bỏ và không khôi phục được.")) return;
+    if (!(await dialogs.confirm({ title: "Huỷ kế hoạch", message: "Các dòng chưa tạo sẽ bị bỏ và không khôi phục được.", tone: "danger", confirmLabel: "Huỷ kế hoạch", cancelLabel: "Giữ lại" }))) return;
     setBusy("saving");
     setError(null);
     try {

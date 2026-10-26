@@ -132,9 +132,14 @@ app.get("/api/issue-types", (_q, r) => r.json([
   { name: "Epic", subtask: false }, { name: "Story", subtask: false }, { name: "Task", subtask: false },
   { name: "Bug", subtask: false }, { name: "Công việc con", subtask: true },
 ]));
+// Like a real workflow: Done has a screen that asks for RootCause; Rejected has none, but a
+// validator refuses the move until a reason is on the issue (learned only from the refusal).
+const ROOT_CAUSE = { id: "customfield_9", name: "RootCause", kind: "text" };
+const REJECT_REASON = { id: "customfield_8", name: "Lý do từ chối", kind: "text" };
 app.get("/api/tasks/:id/transitions", (_q, r) => r.json([
-  { id: "11", name: "Start", toStatusName: "In Progress", toCategory: "indeterminate" },
-  { id: "31", name: "Done", toStatusName: "Done", toCategory: "done" },
+  { id: "11", name: "Start", toStatusName: "In Progress", toCategory: "indeterminate", fields: [] },
+  { id: "31", name: "Done", toStatusName: "Done", toCategory: "done", fields: [ROOT_CAUSE] },
+  { id: "41", name: "Reject", toStatusName: "Rejected", toCategory: "done", fields: [] },
 ]));
 app.get("/api/tasks/:id/attachments", (_q, r) => r.json({ files: [], links: [] }));
 
@@ -147,9 +152,24 @@ app.patch("/api/tasks/:id", (req, res) => {
     t.assigneeAccountId = b.assigneeAccountId; t.assigneeName = nameOf(b.assigneeAccountId);
   }
   if (b.statusTransition) {
-    const map: any = { "In Progress": "indeterminate", Done: "done", "To Do": "new" };
-    if (!map[b.statusTransition] && !["11", "31"].includes(b.statusTransition)) return res.status(400).json({ error: `Không chuyển được sang "${b.statusTransition}".` });
-    const name = b.statusTransition === "11" ? "In Progress" : b.statusTransition === "31" ? "Done" : b.statusTransition;
+    const map: any = { "In Progress": "indeterminate", Done: "done", "To Do": "new", Rejected: "done" };
+    if (!map[b.statusTransition] && !["11", "31", "41"].includes(b.statusTransition)) return res.status(400).json({ error: `Không chuyển được sang "${b.statusTransition}".` });
+    const name = b.statusTransition === "11" ? "In Progress" : b.statusTransition === "31" ? "Done" : b.statusTransition === "41" ? "Rejected" : b.statusTransition;
+    const given = (b.transitionFields ?? {}) as Record<string, string>;
+    if (name === "Done" && !(given[ROOT_CAUSE.id] ?? "").trim()) {
+      return res.status(400).json({
+        error: `Chuyển ${t.id} sang "Done" cần nhập: RootCause.`,
+        code: "TRANSITION_FIELDS_REQUIRED",
+        details: { toStatusName: "Done", fields: [ROOT_CAUSE] },
+      });
+    }
+    if (name === "Rejected" && !(given[REJECT_REASON.id] ?? "").trim()) {
+      return res.status(400).json({
+        error: "Vui lòng nhập Lý do từ chối",
+        code: "TRANSITION_FIELDS_REQUIRED",
+        details: { toStatusName: "Rejected", fields: [REJECT_REASON], reason: "Vui lòng nhập Lý do từ chối" },
+      });
+    }
     t.statusName = name; t.statusCategory = map[name];
   }
   if (b.issueType !== undefined) {

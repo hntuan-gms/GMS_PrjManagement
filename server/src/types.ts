@@ -115,6 +115,11 @@ export interface TaskUpdateInput {
   baselineDue?: string | null;
   /** A transition id from GET /tasks/:id/transitions, or a transition/status name. */
   statusTransition?: string;
+  /**
+   * What the move asks for besides the status — field id → what the person typed or picked
+   * (an option's id for a select). See GET /tasks/:id/transitions for the fields.
+   */
+  transitionFields?: Record<string, string>;
   /** Jira's Original estimate, in hours. Must be > 0; it is written through `timetracking`. */
   estimateHours?: number;
   /** A priority name from GET /priorities. */

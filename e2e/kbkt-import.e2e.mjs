@@ -17,6 +17,7 @@ const problems = [];
 page.on("pageerror", (e) => problems.push("pageerror: " + e.message));
 page.on("console", (m) => m.type() === "error" && problems.push("console: " + m.text()));
 const dialogs = [];
+let confirmationText = "";
 page.on("dialog", (d) => {
   dialogs.push(d.message());
   d.accept();
@@ -98,8 +99,13 @@ await step("chọn Epic → xem lại: bản _v1 bị bỏ qua, bản _v2 sẽ t
 
 await step("áp dụng → xác nhận, ghi đúng 1 file, nhật ký chạy dần và kết thúc bằng Story mới", async () => {
   await applyBtn.click();
+  // The app's own confirmation (not the browser's): it names how many issues will be created.
+  const confirmation = page.locator(".dlg");
+  await confirmation.waitFor();
+  confirmationText = await confirmation.textContent();
+  await confirmation.locator("button.primary").click();
   await card("_v2.xlsx").locator(".kb-notice-ok", { hasText: /Xong — Story DEMO-\d+/ }).waitFor();
-  assert.ok(dialogs.some((d) => d.includes("tạo 10 issue")), dialogs.join(" | "));
+  assert.ok(confirmationText.includes("tạo 10 issue"), confirmationText);
   const applied = await posts("/api/kbkt/apply");
   assert.equal(applied.length, 1);
   const log = await card("_v2.xlsx").locator(".kb-log li").allTextContents();
@@ -134,6 +140,11 @@ await step("'Story có sẵn': tìm theo tên, chọn DEMO-50 → xem trước c
 
 await step("áp dụng → mọi test case và lỗi nằm dưới DEMO-50; DEMO-50 giữ nguyên Epic và tên", async () => {
   await applyBtn.click();
+  // The app's own confirmation (not the browser's): it names how many issues will be created.
+  const confirmation = page.locator(".dlg");
+  await confirmation.waitFor();
+  confirmationText = await confirmation.textContent();
+  await confirmation.locator("button.primary").click();
   await card("_v2.xlsx").locator(".kb-notice-ok", { hasText: "Xong — Story DEMO-50." }).waitFor();
   const issues = await (await fetch(API + "/api/__kbkt/issues")).json();
   const subs = issues.filter((i) => i.labels.some((l) => /^(tc|bug)-/.test(l)));

@@ -65,8 +65,8 @@ await step("thanh baseline nằm dưới thanh thực tế, đúng lịch thì g
 });
 await step("Xoá baseline (có xác nhận) → PATCH null, thanh biến mất", async () => {
   await selectRow("DEMO-5");
-  page.once("dialog", (d) => d.accept());
   await page.selectOption(baselineSelect, "clear");
+  await page.locator(".dlg button.danger-solid").click();
   await page.waitForFunction(() => !document.querySelector('.baseline-bar[data-task-id="DEMO-5"]'));
   const b = await lastPatch("DEMO-5");
   assert.equal(b.baselineStart, null);
@@ -189,8 +189,8 @@ await step("đổi sang riêng tư rồi xoá bộ lọc của mình", async () 
   const mine = page.locator(".sf-item", { hasText: "Phần việc riêng" });
   await mine.locator(".text-btn", { hasText: "Chia sẻ" }).click();
   await mine.locator(".text-btn", { hasText: "Riêng tư" }).waitFor();
-  page.once("dialog", (d) => d.accept());
   await mine.locator(".sf-delete").click();
+  await page.locator(".dlg button.danger-solid").click();
   await page.waitForFunction(() => ![...document.querySelectorAll(".sf-apply")].some((b) => b.textContent === "Phần việc riêng"));
 });
 

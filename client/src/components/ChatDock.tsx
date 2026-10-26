@@ -5,6 +5,7 @@ import { streamChat, type RetryMode } from "../chatStream";
 import type { ViewFilterSpec } from "../viewFilter";
 import ChatMarkdown from "./ChatMarkdown";
 import type { ChatMessage, ChatSessionSummary, Money, UsageStats } from "../types";
+import { useDialogs } from "./dialogContext";
 
 interface Props {
   /**
@@ -125,6 +126,7 @@ function formatTokens(n: number): string {
  * plan, and an empty panel for that long reads as a hang.
  */
 export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProjectChanged, onApplyFilter, knownKeys, onOpenIssue }: Props) {
+  const dialogs = useDialogs();
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(() => readStored(storageKey));
@@ -227,7 +229,7 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
   }
 
   async function deleteSession(id: string) {
-    if (!window.confirm("Xoá cuộc trò chuyện này? Bạn sẽ không mở lại được.")) return;
+    if (!(await dialogs.confirm({ message: "Xoá cuộc trò chuyện này? Bạn sẽ không mở lại được.", tone: "danger" }))) return;
     setSessions((prev) => prev?.filter((x) => x.id !== id) ?? prev);
     await api.deleteChatSession(id).catch((e: Error) => setError(e.message));
     if (id === sessionId) {

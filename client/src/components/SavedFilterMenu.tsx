@@ -4,6 +4,7 @@ import { fromSavedSpec, matchesSaved, toSavedSpec } from "../savedFilters";
 import { facetCount, type TaskFilter } from "../taskFilter";
 import type { SavedFilter } from "../types";
 import { Icon } from "./Icons";
+import { useDialogs } from "./dialogContext";
 
 interface Props {
   filter: TaskFilter;
@@ -21,6 +22,7 @@ const errorText = (e: unknown) => (e instanceof Error ? e.message : "Có lỗi x
  * shared one can only be applied — the server refuses anything else.
  */
 export default function SavedFilterMenu({ filter, onApply, myAccountId }: Props) {
+  const dialogs = useDialogs();
   const [open, setOpen] = useState(false);
   const [filters, setFilters] = useState<SavedFilter[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -106,15 +108,18 @@ export default function SavedFilterMenu({ filter, onApply, myAccountId }: Props)
     });
   }
 
-  function rename(f: SavedFilter) {
-    const next = window.prompt("Tên mới cho bộ lọc:", f.name)?.trim();
+  async function rename(f: SavedFilter) {
+    const next = await dialogs.prompt({ title: "Đổi tên bộ lọc", label: "Tên mới", initial: f.name });
     if (next && next !== f.name) void run(() => api.updateSavedFilter(f.id, { name: next }));
   }
 
-  function remove(f: SavedFilter) {
-    if (window.confirm(`Xoá bộ lọc "${f.name}"?${f.shared ? " Người khác trong dự án cũng sẽ không còn thấy nó." : ""}`)) {
-      void run(() => api.deleteSavedFilter(f.id));
-    }
+  async function remove(f: SavedFilter) {
+    const ok = await dialogs.confirm({
+      title: "Xoá bộ lọc",
+      message: `Xoá bộ lọc "${f.name}"?${f.shared ? " Người khác trong dự án cũng sẽ không còn thấy nó." : ""}`,
+      tone: "danger",
+    });
+    if (ok) void run(() => api.deleteSavedFilter(f.id));
   }
 
   return (

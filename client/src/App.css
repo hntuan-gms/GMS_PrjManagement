@@ -2,51 +2,7 @@
    GMS PrjManagement - Modern Design System
    ========================================================================== */
 
-:root {
-  --color-bg: #f8fafc;
-  --color-surface: #ffffff;
-  --color-border: #e2e8f0;
-  --color-border-hover: #cbd5e1;
-  --color-text-primary: #0f172a;
-  --color-text-secondary: #475569;
-  --color-text-muted: #64748b;
-  --color-primary: #2563eb;
-  --color-primary-hover: #1d4ed8;
-  --color-primary-light: #eff6ff;
-  --color-primary-border: #93c5fd;
-  --color-danger: #dc2626;
-  --color-danger-hover: #b91c1c;
-  --color-danger-light: #fef2f2;
-  --color-danger-border: #fecaca;
-  --color-success: #16a34a;
-  --color-success-light: #ecfdf5;
-  --color-success-border: #a7f3d0;
-  --color-warning: #d97706;
-  --color-warning-light: #fffbeb;
-  --color-warning-border: #fde68a;
-  
-  --header-h: 52px;
-  --toolbar-h: 48px;
-  --control-h-header: 36px;
-  --control-h: 32px;
-  --color-ghost-hover: #f1f5f9;
-  /* Amber text dark enough for 4.5:1 on --color-warning-light (--color-warning is not). */
-  --color-warning-text: #92400e;
-
-  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -4px rgba(0, 0, 0, 0.04);
-  --shadow-modal: 0 20px 25px -5px rgba(0, 0, 0, 0.12), 0 8px 10px -6px rgba(0, 0, 0, 0.08);
-
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
-  --radius-full: 9999px;
-
-  --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
-  --transition-normal: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
+/* Tokens live in design/tokens.css; base form controls and dialogs in design/controls.css. */
 
 * {
   box-sizing: border-box;
@@ -591,46 +547,37 @@ button.menu-item > .icon {
 .field select,
 .field textarea {
   padding: 8px 12px;
-  border: 1.5px solid var(--color-border);
-  border-radius: var(--radius-md);
+  border: 1px solid var(--control-border);
+  border-radius: var(--control-radius);
   font-size: 13.5px;
-  color: var(--color-text-primary);
+  color: var(--control-fg);
   font-family: inherit;
-  background: var(--color-surface);
-  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.02);
-  transition: all var(--transition-fast);
+  background-color: var(--control-bg);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
-.field input:hover,
-.field select:hover,
-.field textarea:hover {
-  border-color: var(--color-border-hover);
+.field input:hover:not(:disabled),
+.field select:hover:not(:disabled),
+.field textarea:hover:not(:disabled) {
+  border-color: var(--control-border-hover);
 }
 
 .field input:focus,
 .field select:focus,
 .field textarea:focus {
   outline: none;
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
-  background: #ffffff;
+  border-color: var(--control-border-focus);
+  box-shadow: var(--control-ring);
 }
 
 .field input::placeholder,
 .field textarea::placeholder {
-  color: #94a3b8;
+  color: var(--control-placeholder);
   font-size: 13px;
 }
 
 .field select {
-  appearance: none;
-  -webkit-appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 10px center;
-  background-size: 14px;
-  padding-right: 32px;
-  cursor: pointer;
+  min-height: 36px;
 }
 
 .field textarea {
@@ -1608,6 +1555,14 @@ kbd {
   color: var(--color-text-muted);
   background: #f8fafc;
   letter-spacing: 0.02em;
+}
+
+/* Selecting rows is what a click and Shift+click do here; the browser's own text selection would
+   paint the dragged-over cells blue on top of that. Double-click opens the task to copy from. */
+.wbs-row,
+.wbs-header {
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .wbs-row {
@@ -2833,16 +2788,17 @@ kbd {
   left: 50%;
   bottom: 32px;
   transform: translateX(-50%);
+  /* A fixed box with left: 50% would be offered only half the window to grow into, and wrap. */
+  width: max-content;
   z-index: 35;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   max-width: calc(100vw - 240px);
-  height: var(--toolbar-h);
-  padding: 0 12px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  background: #ffffff;
+  min-height: var(--toolbar-h);
+  padding: 8px 12px;
+  background: var(--color-surface);
   border: 1px solid var(--color-primary-border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-modal);
@@ -7143,14 +7099,14 @@ tr.is-selected .ts-person {
   min-width: 150px;
   max-width: 340px;
   height: var(--control-h);
-  border: 1px solid var(--color-border-hover);
-  border-radius: var(--radius-md);
-  background: var(--color-surface);
+  border: 1px solid var(--control-border);
+  border-radius: var(--control-radius);
+  background: var(--control-bg);
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 .tf-search:focus-within {
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+  border-color: var(--control-border-focus);
+  box-shadow: var(--control-ring);
 }
 .tf-search .popover {
   position: static;
@@ -8328,12 +8284,7 @@ button.tf-chip-x:hover:not(:disabled) {
   padding: 0 10px;
   border: 1px solid var(--color-border-hover);
   border-radius: var(--radius-md);
-  background-color: var(--color-surface);
   box-shadow: none;
-  font: inherit;
-  font-size: 12.5px;
-  color: var(--color-text-primary);
-  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 .ts-toolbar select:hover,
 .pr-filter select:hover,
@@ -8345,7 +8296,7 @@ button.tf-chip-x:hover:not(:disabled) {
 .selection-select:hover,
 .selection-shift input:hover,
 .ts-person-filter:hover {
-  border-color: #94a3b8;
+  border-color: var(--control-border-hover);
 }
 .ts-toolbar select:focus,
 .pr-filter select:focus,
@@ -8358,28 +8309,12 @@ button.tf-chip-x:hover:not(:disabled) {
 .selection-shift input:focus,
 .ts-person-filter:focus {
   outline: none;
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+  border-color: var(--control-border-focus);
+  box-shadow: var(--control-ring);
 }
 .bd-search::placeholder,
 .rv-controls input::placeholder {
   color: var(--color-text-muted);
-}
-/* Selects: our chevron instead of the platform's. */
-.ts-toolbar select,
-.pr-filter select,
-.bd-lanepick select,
-.selection-select,
-.ts-person-filter,
-.rv-assign-select {
-  appearance: none;
-  -webkit-appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 9px center;
-  background-size: 14px;
-  padding-right: 28px;
-  cursor: pointer;
 }
 .rv-controls input[type="date"] {
   min-width: 140px;
@@ -8387,17 +8322,13 @@ button.tf-chip-x:hover:not(:disabled) {
 /* The small "Gán…" picker inside a resource row: same family, smaller. */
 .rv-assign-select {
   height: 26px;
-  padding: 0 24px 0 8px;
-  border-color: var(--color-border-hover);
-  border-radius: var(--radius-md);
-  background-color: var(--color-surface);
-  background-position: right 7px center;
-  background-size: 12px;
+  padding: 0 8px;
+  font-size: 11.5px;
 }
 .rv-assign-select:focus {
   outline: none;
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+  border-color: var(--control-border-focus);
+  box-shadow: var(--control-ring);
 }
 /* The multi-select pills that sit beside those fields (Loại, Trạng thái, Epic…) take their height and corners. */
 .bd-filters .tf-btn,
@@ -8426,4 +8357,321 @@ button.tf-chip-x:hover:not(:disabled) {
 }
 .bd-chipbtn.is-on {
   border-color: var(--color-primary-border);
+}
+
+/* --- status change: boxes a workflow wants filled, and the selection bar's status menu --- */
+.popover-up {
+  top: auto;
+  bottom: calc(100% + 6px);
+}
+.tfield-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.tfield-req {
+  color: var(--color-danger);
+}
+.bulk-status-menu {
+  width: 320px;
+}
+.bulk-status-item {
+  gap: var(--space-3);
+}
+.bulk-status-item .menu-item-text {
+  flex: 1;
+  min-width: 0;
+}
+.bulk-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--slate-400);
+}
+.bulk-dot.is-indeterminate {
+  background: var(--color-focus);
+}
+.bulk-dot.is-done {
+  background: var(--color-success);
+}
+.bulk-count {
+  flex: none;
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-secondary);
+}
+.bulk-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-1);
+}
+.bulk-fields-note {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+.bulk-fields-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+button.selection-trigger {
+  height: var(--control-h);
+  padding: 0 var(--control-px);
+  border-color: var(--control-border);
+  border-radius: var(--control-radius);
+  font-size: var(--control-font-size);
+  font-weight: 400;
+  color: var(--control-fg);
+  box-shadow: none;
+}
+
+/* ==========================================================================
+   Task detail (TaskEditModal): a header, a main column for what the work IS (title, description,
+   attachments, links, discussion) and a side panel for how it is MANAGED (status, people, dates,
+   effort, classification), then a footer that stays put. Fields are grouped by what a person
+   looks for, so the common ones (status, owner, dates) are at the top of the panel and the
+   rarely touched ones (components, versions) at the bottom.
+   ========================================================================== */
+.modal.modal-detail {
+  width: min(1120px, 96vw);
+  height: min(90vh, 880px);
+  max-height: none;
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+}
+.modal-detail:focus {
+  outline: none;
+}
+.td-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  padding: 12px 16px 12px 20px;
+  border-bottom: 1px solid var(--color-border);
+}
+.td-header .modal-id {
+  font-size: 15px;
+}
+.td-header .modal-jira-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 4px;
+}
+.td-header-spacer {
+  flex: 1;
+}
+.td-dirty {
+  padding: 2px 10px;
+  border: 1px solid var(--color-warning-border);
+  border-radius: var(--radius-full);
+  background: var(--color-warning-light);
+  color: var(--color-warning-text);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+}
+.td-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+}
+.td-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+  overflow-y: auto;
+  padding: 20px 24px;
+  scroll-padding-bottom: 24px;
+}
+.td-side {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  overflow-y: auto;
+  padding: 16px 20px 24px;
+  background: var(--color-bg);
+  border-left: 1px solid var(--color-border);
+}
+.td-title {
+  margin: 0 -10px;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.td-title:hover:not(:focus) {
+  background: var(--color-ghost-hover);
+}
+.td-title:focus {
+  outline: none;
+  background: var(--color-surface);
+  border-color: var(--control-border-focus);
+  box-shadow: var(--control-ring);
+}
+.td-main .field textarea {
+  min-height: 110px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.td-section {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+}
+.td-section > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+.td-section > summary::-webkit-details-marker {
+  display: none;
+}
+.td-section > summary:focus-visible {
+  outline-offset: -2px;
+  border-radius: var(--radius-lg);
+}
+.td-section-caret {
+  color: var(--color-text-muted);
+  transition: rotate var(--transition-fast);
+}
+.td-section[open] > summary .td-section-caret {
+  rotate: 90deg;
+}
+.td-section-hint {
+  padding: 0 7px;
+  border-radius: var(--radius-full);
+  background: var(--color-ghost-hover);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  line-height: 18px;
+}
+.td-section-body {
+  padding: 0 14px 14px;
+}
+
+.td-group-title {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+.td-group-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.td-group .field {
+  flex: none;
+}
+.td-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.td-label {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+.td-pct {
+  margin-left: 6px;
+  color: var(--color-primary);
+}
+.td-needs {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-warning-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-warning-light);
+}
+.td-needs-note {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-warning-text);
+}
+.td-bar {
+  height: 6px;
+  overflow: hidden;
+  border-radius: var(--radius-full);
+  background: var(--color-border);
+}
+.td-bar span {
+  display: block;
+  height: 100%;
+  background: var(--color-primary);
+}
+.td-bar.is-over span {
+  background: var(--color-warning);
+}
+.td-side .log-inline .log-date,
+.td-side .log-inline .log-hours {
+  width: calc(50% - 3px);
+}
+.td-side .pred-add {
+  flex-wrap: wrap;
+}
+.td-footer {
+  flex: none;
+  margin: 0;
+  padding: 12px 20px;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+.td-footer button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.td-error {
+  flex: none;
+  margin: 0 20px 8px;
+  white-space: pre-line;
+}
+@media (max-width: 900px) {
+  .td-body {
+    grid-template-columns: 1fr;
+    overflow-y: auto;
+  }
+  .td-main,
+  .td-side {
+    overflow: visible;
+  }
+  .td-side {
+    border-left: none;
+    border-top: 1px solid var(--color-border);
+  }
+}
+
+/* The two fields side by side in the details panel shrink with it instead of spilling past its edge. */
+.td-pair > .field,
+.td-pair input {
+  min-width: 0;
+}
+.td-pair input {
+  width: 100%;
 }

@@ -368,11 +368,12 @@ function csvValue(id: ColumnId, t: Task, r: { start: string; end: string } | und
   }
 }
 
-// What the table always showed, so nobody's Gantt changes until they ask.
-const DEFAULT_COLUMNS: ColumnId[] = ["assignee", "pct"];
+// What a person scanning a plan reads first: what kind of work, where it stands, how urgent,
+// who has it, how far along. The rest (dates, estimates, labels…) is a tick away in "Hiển thị".
+const DEFAULT_COLUMNS: ColumnId[] = ["type", "status", "priority", "assignee", "pct"];
 const COLUMNS_KEY = "gms.gantt.columns";
 const KEY_COL_WIDTH = 75;
-const MIN_NAME_WIDTH = 200;
+const MIN_NAME_WIDTH = 180;
 
 function loadColumns(): ColumnId[] {
   try {
@@ -382,6 +383,27 @@ function loadColumns(): ColumnId[] {
     // Private mode or a mangled value — the defaults are a fine answer.
   }
   return DEFAULT_COLUMNS;
+}
+
+const LIST_WIDTH_KEY = "gms.gantt.listWidth";
+
+/** Where this person last dragged the divider; null = fit the chosen columns. */
+function loadListWidth(): number | null {
+  try {
+    const n = Number(localStorage.getItem(LIST_WIDTH_KEY));
+    return Number.isFinite(n) && n > 0 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveListWidth(width: number | null): void {
+  try {
+    if (width === null) localStorage.removeItem(LIST_WIDTH_KEY);
+    else localStorage.setItem(LIST_WIDTH_KEY, String(Math.round(width)));
+  } catch {
+    // Not remembered across reloads; still applies now.
+  }
 }
 
 function saveColumns(ids: ColumnId[]): void {
@@ -520,8 +542,9 @@ export default function GanttView({
       saveColumns(next);
       return next;
     });
-    // Let the divider re-fit the new set of columns.
+    // Let the divider re-fit the new set of columns (and forget the old drag, which was for the old set).
     setListWidthOverride(null);
+    saveListWidth(null);
   }
 
   const criticalIds = useMemo(() => computeCriticalPath(tasks), [tasks]);
@@ -533,7 +556,7 @@ export default function GanttView({
   // during render isn't safe — this effect is the one place that's allowed to.
   const [bodyEl, setBodyEl] = useState<HTMLDivElement | null>(null);
   const [bodySize, setBodySize] = useState({ width: 0, height: 0 });
-  const [listWidthOverride, setListWidthOverride] = useState<number | null>(null);
+  const [listWidthOverride, setListWidthOverride] = useState<number | null>(loadListWidth);
   const [dragging, setDragging] = useState(false);
 
   useEffect(() => {
@@ -553,7 +576,9 @@ export default function GanttView({
   // Wide enough for the chosen columns plus a readable name — more columns
   // push the divider right rather than squeezing the task names to nothing.
   const neededListWidth = KEY_COL_WIDTH + MIN_NAME_WIDTH + columnsWidth;
-  const defaultListWidth = Math.max(bodySize.width > 0 ? Math.round(bodySize.width / 2) : 320, neededListWidth);
+  // Just what the chosen columns and a readable name need, so the divider sits well to the left
+  // and the chart gets the rest. It used to start at half the window whatever the columns were.
+  const defaultListWidth = neededListWidth + 60;
   const maxListWidth = Math.max(MIN_LIST_WIDTH, bodySize.width - MIN_CHART_WIDTH);
   const listWidth = Math.min(maxListWidth, Math.max(MIN_LIST_WIDTH, listWidthOverride ?? defaultListWidth));
   const ganttHeight = Math.max(ROW_HEIGHT, bodySize.height - HEADER_HEIGHT - SCROLLBAR_RESERVE);
@@ -633,12 +658,16 @@ export default function GanttView({
     e.preventDefault();
     const startX = e.clientX;
     const startWidth = listWidth;
+    let latest = startWidth;
     setDragging(true);
     function onMove(ev: MouseEvent) {
-      setListWidthOverride(startWidth + (ev.clientX - startX));
+      latest = startWidth + (ev.clientX - startX);
+      setListWidthOverride(latest);
     }
     function onUp() {
       setDragging(false);
+      // Clamped like the rendered width, so a wild drag is not remembered as an unusable one.
+      if (latest !== startWidth) saveListWidth(Math.min(maxListWidth, Math.max(MIN_LIST_WIDTH, latest)));
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     }

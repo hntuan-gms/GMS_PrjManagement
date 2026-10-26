@@ -25,13 +25,17 @@ export type ErrorCode =
   | "STAFF_ONLY"
   | "RESOURCES_ADMIN_ONLY"
   | "BAD_REQUEST"
+  | "TRANSITION_FIELDS_REQUIRED"
+  | "TRANSITION_REFUSED"
   | "INTERNAL";
 
 export class AppError extends Error {
   constructor(
     public readonly status: number,
     public readonly code: ErrorCode,
-    message: string
+    message: string,
+    /** Structured extras for the client (the fields a transition needs), sent as `details`. */
+    public readonly details?: unknown
   ) {
     super(message);
     this.name = "AppError";
@@ -72,11 +76,12 @@ interface Mapped {
   code: ErrorCode;
   error: string;
   retryAfter?: string;
+  details?: unknown;
 }
 
 function mapError(err: unknown): Mapped {
   if (err instanceof AppError) {
-    return { status: err.status, code: err.code, error: err.message };
+    return { status: err.status, code: err.code, error: err.message, details: err.details };
   }
 
   if (err instanceof JiraTransitionError) {
@@ -189,5 +194,5 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
 
   if (mapped.retryAfter) res.setHeader("Retry-After", mapped.retryAfter);
   if (res.headersSent) return;
-  res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
+  res.status(mapped.status).json({ error: mapped.error, code: mapped.code, ...(mapped.details !== undefined ? { details: mapped.details } : {}) });
 }

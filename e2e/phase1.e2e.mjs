@@ -118,7 +118,9 @@ await step("đổi trạng thái hàng loạt → statusTransition", async () =>
   await reset();
   await page.locator(".wbs-row", { hasText: "DEMO-5" }).click();
   await page.locator(".wbs-row", { hasText: "DEMO-6" }).click({ modifiers: ["Control"] });
-  await page.locator(".selection-bar select").nth(1).selectOption({ label: "In Progress" });
+  // The status menu offers what the workflow allows (with how many of the selection can take it).
+  await page.locator(".selection-bar .selection-trigger", { hasText: "Đổi trạng thái" }).click();
+  await page.locator(".bulk-status-item", { hasText: "In Progress" }).click();
   await page.waitForFunction(async () => (await (await fetch("/api/__log")).json()).log.filter((l) => l.m === "PATCH").length >= 2);
   assert.ok((await patches()).every((x) => x.b.statusTransition === "In Progress"));
 });

@@ -1,0 +1,211 @@
+/* ==========================================================================
+   Base controls
+   What a bare <input>, <select> or <textarea> looks like anywhere in the app, so a new field
+   needs no class to match the rest. Every rule is wrapped in :where(), which carries no
+   specificity: a component that styles its own field (a chromeless search box, a modal's
+   .field) simply wins, and nothing here can fight it.
+   ========================================================================== */
+:where(
+    input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="color"], [type="hidden"], [type="button"], [type="submit"], [type="reset"], [type="image"]),
+    select,
+    textarea
+  ) {
+  font: inherit;
+  font-size: var(--control-font-size);
+  color: var(--control-fg);
+  background-color: var(--control-bg);
+  border: 1px solid var(--control-border);
+  border-radius: var(--control-radius);
+  padding: 6px var(--control-px);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+:where(input, select, textarea):hover:not(:disabled) {
+  border-color: var(--control-border-hover);
+}
+:where(input, select, textarea):focus-visible {
+  border-color: var(--control-border-focus);
+}
+:where(input, select, textarea):disabled {
+  background-color: var(--control-disabled-bg);
+  cursor: not-allowed;
+}
+:where(input, textarea)::placeholder {
+  color: var(--control-placeholder);
+}
+:where(select) {
+  cursor: pointer;
+}
+/* Checkboxes, radios and sliders keep the platform's control but wear the app's colour. */
+:where(input[type="checkbox"], input[type="radio"], input[type="range"]) {
+  accent-color: var(--color-primary);
+}
+
+/* --------------------------------------------------------------------------
+   Select
+   Where the browser can draw a select's popup from CSS (appearance: base-select), the list
+   that opens is ours too — same panel, same rows, same selected state as every other menu.
+   Elsewhere it falls back to the platform's list, still with our closed state and chevron.
+   -------------------------------------------------------------------------- */
+@supports (appearance: base-select) {
+  select,
+  ::picker(select) {
+    appearance: base-select;
+  }
+  select {
+    display: inline-flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    text-align: left;
+  }
+  select::picker-icon {
+    content: "";
+    flex: none;
+    width: 14px;
+    height: 14px;
+    background-color: var(--color-text-muted);
+    -webkit-mask: var(--icon-chevron) center / contain no-repeat;
+    mask: var(--icon-chevron) center / contain no-repeat;
+    transition: rotate var(--transition-fast);
+  }
+  select:open::picker-icon {
+    rotate: 180deg;
+  }
+  ::picker(select) {
+    margin-top: 4px;
+    padding: var(--menu-padding);
+    background: var(--menu-bg);
+    border: 1px solid var(--menu-border);
+    border-radius: var(--menu-radius);
+    box-shadow: var(--menu-shadow);
+    max-height: min(360px, 60vh);
+  }
+  select option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: var(--menu-item-py) var(--menu-item-px);
+    border-radius: var(--menu-item-radius);
+    font-size: var(--font-size-md);
+    color: var(--control-fg);
+    cursor: pointer;
+  }
+  select option:hover,
+  select option:focus-visible {
+    background: var(--menu-item-hover);
+  }
+  select option:checked {
+    background: var(--menu-item-selected-bg);
+    color: var(--menu-item-selected-fg);
+    font-weight: 600;
+  }
+  select option:disabled {
+    color: var(--color-text-muted);
+    cursor: not-allowed;
+  }
+  /* The tick goes to the end of the row, where the eye looks for "which one is on". */
+  select option::checkmark {
+    order: 1;
+    margin-left: auto;
+    color: var(--menu-item-selected-fg);
+  }
+  select optgroup {
+    font-size: var(--font-size-xs);
+    font-weight: 700;
+    color: var(--color-text-muted);
+  }
+}
+@supports not (appearance: base-select) {
+  select {
+    appearance: none;
+    -webkit-appearance: none;
+    padding-right: 28px;
+    background-image: var(--icon-chevron-url);
+    background-repeat: no-repeat;
+    background-position: right 9px center;
+    background-size: 14px;
+  }
+}
+:root {
+  --icon-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  --icon-chevron-url: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
+
+/* --------------------------------------------------------------------------
+   Dialog: a confirmation or a question (Dialog.tsx). Replaces window.confirm/prompt, which
+   draw the browser's own window — a different font, a different button, the page's address
+   in the title — over an app that looks like nothing else.
+   -------------------------------------------------------------------------- */
+.dlg-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-dialog);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+  background: var(--color-overlay);
+  backdrop-filter: blur(3px);
+}
+.dlg {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: var(--dialog-w);
+  max-width: 100%;
+  padding: var(--dialog-padding);
+  background: var(--color-surface);
+  border-radius: var(--dialog-radius);
+  box-shadow: var(--dialog-shadow), 0 0 0 1px rgba(0, 0, 0, 0.05);
+}
+.dlg-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--color-text-primary);
+}
+.dlg-body {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+  white-space: pre-line;
+}
+.dlg-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+.dlg-field input {
+  height: 36px;
+  font-weight: 400;
+  font-size: var(--font-size-lg);
+}
+.dlg-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding-top: var(--space-1);
+}
+.dlg-actions button {
+  height: 36px;
+  padding: 0 var(--space-4);
+}
+
+/* A solid destructive action (the confirm button of a danger dialog); every other red button stays an outline. */
+button.danger-solid {
+  background: var(--color-danger);
+  border-color: var(--color-danger-hover);
+  color: #ffffff;
+  font-weight: 600;
+  box-shadow: var(--shadow-sm);
+}
+button.danger-solid:hover:not(:disabled) {
+  background: var(--color-danger-hover);
+  border-color: var(--color-danger-hover);
+  color: #ffffff;
+}

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api, kbktApply } from "../api";
 import { nextWeekSunday, storyKeyFromFileName, supersededBy } from "../kbktFiles";
 import { todayIso } from "../resourceAllocation";
+import { useDialogs } from "./dialogContext";
 import type {
   KbktAction,
   KbktKind,
@@ -106,6 +107,7 @@ function LogList({ lines }: { lines: KbktLogLine[] }) {
 }
 
 export default function KbktImportModal({ projectKey, onClose, onApplied }: Props) {
+  const dialogs = useDialogs();
   const [entries, setEntries] = useState<Entry[]>([]);
   const [epic, setEpic] = useState("");
   const [dueDate, setDueDate] = useState(() => nextWeekSunday(todayIso()));
@@ -134,8 +136,8 @@ export default function KbktImportModal({ projectKey, onClose, onApplied }: Prop
   }, []);
 
   const busy = phase !== "idle";
-  const close = () => {
-    if (phase === "applying" && !window.confirm("Đang ghi lên Jira. Dừng lại và đóng?")) return;
+  const close = async () => {
+    if (phase === "applying" && !(await dialogs.confirm({ message: "Đang ghi lên Jira. Dừng lại và đóng?", confirmLabel: "Dừng và đóng", cancelLabel: "Tiếp tục ghi" }))) return;
     abortRef.current?.abort();
     onClose();
   };
@@ -254,7 +256,12 @@ export default function KbktImportModal({ projectKey, onClose, onApplied }: Prop
     const targets = entries.filter(runnable);
     if (targets.length === 0) return;
     const creates = targets.reduce((n, e) => n + (e.preview!.stats.CREATE ?? 0), 0);
-    if (!window.confirm(`Ghi ${targets.length} file lên Jira dự án ${projectKey}${creates ? ` (tạo ${creates} issue)` : ""}?`)) return;
+    const proceed = await dialogs.confirm({
+      title: "Ghi lên Jira",
+      message: `Ghi ${targets.length} file lên Jira dự án ${projectKey}${creates ? ` (tạo ${creates} issue)` : ""}?`,
+      confirmLabel: "Ghi lên Jira",
+    });
+    if (!proceed) return;
     setPhase("applying");
     const abort = new AbortController();
     abortRef.current = abort;

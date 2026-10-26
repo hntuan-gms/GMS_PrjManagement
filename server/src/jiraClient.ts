@@ -8,6 +8,7 @@
  */
 import { JIRA_API_BASE } from "./auth/config.js";
 import { textToAdf } from "./adf.js";
+import type { JiraFieldMeta } from "./transitionFields.js";
 
 export interface JiraClientOptions {
   cloudId: string;
@@ -15,6 +16,13 @@ export interface JiraClientOptions {
   getAccessToken: () => Promise<string> | string;
   /** Invoked once on a 401 to force a refresh before a single retry. */
   onUnauthorized?: () => Promise<string | null>;
+}
+
+export interface JiraTransition {
+  id: string;
+  name: string;
+  to?: { id: string; name: string; statusCategory?: { key: string } };
+  fields?: Record<string, JiraFieldMeta>;
 }
 
 /** A transition the workflow doesn't offer — the user's request, not Jira's failure. */
@@ -33,6 +41,24 @@ export function foldName(s: string): string {
     .replace(/đ/gi, "d")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "");
+}
+
+/**
+ * The transition a caller means: an id, a target status name or a transition name, with case,
+ * spacing and diacritics folded (see transitionIssue for why names alone were BUG-05).
+ */
+export function matchTransition(key: string, transitions: JiraTransition[], wanted: string): JiraTransition {
+  const want = foldName(wanted);
+  const match =
+    transitions.find((t) => t.id === wanted) ??
+    transitions.find((t) => foldName(t.to?.name ?? "") === want) ??
+    transitions.find((t) => foldName(t.name) === want);
+  if (match) return match;
+  const allowed = [...new Set(transitions.map((t) => t.to?.name ?? t.name))];
+  throw new JiraTransitionError(
+    `Quy trình của ${key} không cho chuyển sang "${wanted}" từ trạng thái hiện tại. ` +
+      (allowed.length ? `Có thể chuyển sang: ${allowed.join(", ")}.` : "Không có bước chuyển nào khả dụng.")
+  );
 }
 
 export class JiraApiError extends Error {
@@ -301,20 +327,27 @@ export class JiraClient {
     });
   }
 
-  async getTransitions(
-    key: string
-  ): Promise<Array<{ id: string; name: string; to?: { id: string; name: string; statusCategory?: { key: string } } }>> {
-    const res = await this.request<{
-      transitions: Array<{ id: string; name: string; to?: { id: string; name: string; statusCategory?: { key: string } } }>;
-    }>(`/rest/api/3/issue/${encodeURIComponent(key)}/transitions`);
+  /** `withFields` adds what each transition's screen asks for (the "RootCause" box before Done). */
+  async getTransitions(key: string, withFields = false): Promise<JiraTransition[]> {
+    const res = await this.request<{ transitions: JiraTransition[] }>(
+      `/rest/api/3/issue/${encodeURIComponent(key)}/transitions${withFields ? "?expand=transitions.fields" : ""}`
+    );
     return res.transitions;
   }
 
-  async transitionIssueById(key: string, transitionId: string): Promise<void> {
+  async transitionIssueById(key: string, transitionId: string, fields?: Record<string, unknown>): Promise<void> {
     await this.request(`/rest/api/3/issue/${encodeURIComponent(key)}/transitions`, {
       method: "POST",
-      body: JSON.stringify({ transition: { id: transitionId } }),
+      body: JSON.stringify({ transition: { id: transitionId }, ...(fields && Object.keys(fields).length > 0 ? { fields } : {}) }),
     });
+  }
+
+  /** The fields this user may edit on the issue, with their types — to find one a refusal names. */
+  async getEditMeta(key: string): Promise<Record<string, JiraFieldMeta>> {
+    const res = await this.request<{ fields?: Record<string, JiraFieldMeta> }>(
+      `/rest/api/3/issue/${encodeURIComponent(key)}/editmeta`
+    );
+    return res.fields ?? {};
   }
 
   /** Every status each issue type of the project can be in — the status board's columns. */
@@ -479,19 +512,7 @@ export class JiraClient {
    * counts as much as the transition's own label.
    */
   async transitionIssue(key: string, wanted: string): Promise<{ id: string; name: string; toStatusName: string | null }> {
-    const transitions = await this.getTransitions(key);
-    const want = foldName(wanted);
-    const match =
-      transitions.find((t) => t.id === wanted) ??
-      transitions.find((t) => foldName(t.to?.name ?? "") === want) ??
-      transitions.find((t) => foldName(t.name) === want);
-    if (!match) {
-      const allowed = [...new Set(transitions.map((t) => t.to?.name ?? t.name))];
-      throw new JiraTransitionError(
-        `Quy trình của ${key} không cho chuyển sang "${wanted}" từ trạng thái hiện tại. ` +
-          (allowed.length ? `Có thể chuyển sang: ${allowed.join(", ")}.` : "Không có bước chuyển nào khả dụng.")
-      );
-    }
+    const match = matchTransition(key, await this.getTransitions(key), wanted);
     await this.transitionIssueById(key, match.id);
     return { id: match.id, name: match.name, toStatusName: match.to?.name ?? null };
   }
