@@ -1194,7 +1194,14 @@ button.tb-icon {
 
 /* "Hiển thị" panel: switches, then the table's columns. */
 .view-menu {
-  width: 340px;
+  width: 400px;
+}
+.view-menu .col-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+.view-menu .col-grid .col-chooser-item {
+  min-width: 0;
 }
 .switch-row {
   display: flex;
@@ -8298,4 +8305,125 @@ button.tf-chip-x:hover:not(:disabled) {
   .kb-log-action {
     flex-basis: 90px;
   }
+}
+
+/* ==========================================================================
+   Compact form controls
+   The inputs and selects that sit in toolbars (outside a modal's .field) used to be
+   styled one by one — or left to the browser — so they looked unlike the rest. They
+   share one look now, the same language as .field: rounded 1px border, a chevron we
+   draw ourselves on selects, a blue ring on focus. 32px, like the toolbar buttons.
+   ========================================================================== */
+.ts-toolbar select,
+.pr-filter select,
+.pr-filter input,
+.rv-controls input[type="date"],
+.rv-controls input[type="search"],
+.bd-search,
+.bd-lanepick select,
+.selection-select,
+.selection-shift input,
+.ts-person-filter {
+  height: var(--control-h);
+  padding: 0 10px;
+  border: 1px solid var(--color-border-hover);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface);
+  box-shadow: none;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--color-text-primary);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.ts-toolbar select:hover,
+.pr-filter select:hover,
+.pr-filter input:hover,
+.rv-controls input[type="date"]:hover,
+.rv-controls input[type="search"]:hover,
+.bd-search:hover,
+.bd-lanepick select:hover,
+.selection-select:hover,
+.selection-shift input:hover,
+.ts-person-filter:hover {
+  border-color: #94a3b8;
+}
+.ts-toolbar select:focus,
+.pr-filter select:focus,
+.pr-filter input:focus,
+.rv-controls input[type="date"]:focus,
+.rv-controls input[type="search"]:focus,
+.bd-search:focus,
+.bd-lanepick select:focus,
+.selection-select:focus,
+.selection-shift input:focus,
+.ts-person-filter:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+.bd-search::placeholder,
+.rv-controls input::placeholder {
+  color: var(--color-text-muted);
+}
+/* Selects: our chevron instead of the platform's. */
+.ts-toolbar select,
+.pr-filter select,
+.bd-lanepick select,
+.selection-select,
+.ts-person-filter,
+.rv-assign-select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+  background-size: 14px;
+  padding-right: 28px;
+  cursor: pointer;
+}
+.rv-controls input[type="date"] {
+  min-width: 140px;
+}
+/* The small "Gán…" picker inside a resource row: same family, smaller. */
+.rv-assign-select {
+  height: 26px;
+  padding: 0 24px 0 8px;
+  border-color: var(--color-border-hover);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface);
+  background-position: right 7px center;
+  background-size: 12px;
+}
+.rv-assign-select:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+/* The multi-select pills that sit beside those fields (Loại, Trạng thái, Epic…) take their height and corners. */
+.bd-filters .tf-btn,
+.pr-filters .tf-btn,
+.pr-filters .tf-select > .tf-btn {
+  height: var(--control-h);
+  padding: 0 10px;
+  border-color: var(--color-border-hover);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  font-size: 12.5px;
+}
+.bd-filters .tf-btn.is-on,
+.pr-filters .tf-btn.is-on {
+  background: var(--color-primary-light);
+  border-color: var(--color-primary-border);
+}
+/* Buttons that share a row with those fields: same height and corners, not full pills. */
+.bd-chipbtn,
+.rv-controls .rv-preset {
+  height: var(--control-h);
+  padding: 0 11px;
+  border-color: var(--color-border-hover);
+  border-radius: var(--radius-md);
+  font-size: 12.5px;
+}
+.bd-chipbtn.is-on {
+  border-color: var(--color-primary-border);
 }

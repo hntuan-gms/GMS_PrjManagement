@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FocusEvent, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type FocusEvent, type KeyboardEvent, type ReactNode } from "react";
 import { Icon } from "./Icons";
 
 interface Props {
@@ -54,6 +54,7 @@ export default function Popover({
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const focusFirst = useRef(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   function setOpen(next: boolean) {
     setOpenState(next);
@@ -72,6 +73,20 @@ export default function Popover({
     window.addEventListener("mousedown", onDown);
     return () => window.removeEventListener("mousedown", onDown);
   }, [open, onOpenChange]);
+
+  // A panel anchored near a window edge (the filter panel when the toolbar has wrapped) is
+  // slid back inside it, rather than cut off. Measured after paint, before the browser draws.
+  useLayoutEffect(() => {
+    const el = menuRef.current;
+    if (!open || !el) return;
+    el.style.transform = "";
+    const r = el.getBoundingClientRect();
+    const margin = 8;
+    const over = r.right - (window.innerWidth - margin);
+    const under = margin - r.left;
+    if (over > 0) el.style.transform = `translateX(${-Math.min(over, Math.max(0, r.left - margin))}px)`;
+    else if (under > 0) el.style.transform = `translateX(${under}px)`;
+  }, [open]);
 
   // Opened from the keyboard: land on the first item instead of leaving focus on the trigger.
   useEffect(() => {
@@ -134,7 +149,7 @@ export default function Popover({
         {caret && <Icon name="chevronDown" size={12} className="caret" />}
       </button>
       {open && (
-        <div className={`popover-menu popover-${align} ${menuClassName}`} role={role} aria-label={menuLabel}>
+        <div ref={menuRef} className={`popover-menu popover-${align} ${menuClassName}`} role={role} aria-label={menuLabel}>
           {typeof children === "function" ? children({ close }) : children}
         </div>
       )}

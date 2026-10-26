@@ -1134,12 +1134,14 @@ export default function GanttView({
               />
               <div className="menu-sep" role="separator" />
               <div className="menu-heading">Cột bảng WBS ({columns.length})</div>
-              {COLUMNS.map((c) => (
-                <label key={c.id} className="col-chooser-item">
-                  <input type="checkbox" checked={columnIds.includes(c.id)} onChange={() => toggleColumn(c.id)} />
-                  {c.long}
-                </label>
-              ))}
+              <div className="col-grid">
+                {COLUMNS.map((c) => (
+                  <label key={c.id} className="col-chooser-item">
+                    <input type="checkbox" checked={columnIds.includes(c.id)} onChange={() => toggleColumn(c.id)} />
+                    {c.long}
+                  </label>
+                ))}
+              </div>
               <div className="col-chooser-foot">
                 <button
                   type="button"
