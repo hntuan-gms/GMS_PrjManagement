@@ -25,6 +25,14 @@
   --color-warning-light: #fffbeb;
   --color-warning-border: #fde68a;
   
+  --header-h: 52px;
+  --toolbar-h: 48px;
+  --control-h-header: 36px;
+  --control-h: 32px;
+  --color-ghost-hover: #f1f5f9;
+  /* Amber text dark enough for 4.5:1 on --color-warning-light (--color-warning is not). */
+  --color-warning-text: #92400e;
+
   --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
   --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
   --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -4px rgba(0, 0, 0, 0.04);
@@ -187,76 +195,148 @@ button.danger:hover:not(:disabled) {
 }
 
 /* ==========================================================================
-   Toolbar
+   Header
+   Controls here are 36px (--control-h-header); the toolbar under it uses 32px.
+   Only "Task mới" is a solid button: the rest are ghost until hovered.
    ========================================================================== */
 .toolbar {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 10px 20px;
+  gap: 12px;
+  min-height: var(--header-h);
+  padding: 0 16px;
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
-  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.02);
   flex-wrap: wrap;
+  position: relative;
   z-index: 10;
 }
 
 .toolbar-left {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
+  min-width: 0;
 }
 
-.toolbar-left h1 {
-  font-size: 16px;
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-primary);
+  flex: none;
+}
+
+.brand h1 {
+  font-size: 15px;
   font-weight: 700;
   letter-spacing: -0.02em;
   margin: 0;
   white-space: nowrap;
   color: var(--color-text-primary);
-  display: flex;
-  align-items: center;
+}
+
+/* Header buttons: 36px, borderless until hovered. */
+button.hd-btn {
+  height: var(--control-h-header);
+  padding: 0 12px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--color-text-secondary);
+}
+button.hd-btn:hover:not(:disabled) {
+  background: var(--color-ghost-hover);
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--color-text-primary);
+}
+button.hd-btn.is-open {
+  background: var(--color-ghost-hover);
+}
+/* The one solid action in the header — keeps button.primary's fill. */
+button.hd-btn.primary {
+  padding: 0 14px;
+  border-color: #1d4ed8;
+  background: linear-gradient(180deg, #3b82f6 0%, var(--color-primary) 100%);
+  color: #ffffff;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.08), inset 0 1px 0 0 rgba(255, 255, 255, 0.2);
+}
+button.hd-btn.primary:hover:not(:disabled) {
+  border-color: #1e40af;
+  background: linear-gradient(180deg, var(--color-primary) 0%, var(--color-primary-hover) 100%);
+  color: #ffffff;
+  box-shadow: 0 2px 5px 0 rgba(37, 99, 235, 0.28);
+}
+
+/* The project badge doubles as the project switcher. */
+.toolbar-left .popover {
+  min-width: 0;
+}
+button.project-switch {
   gap: 8px;
+  max-width: 340px;
+  min-width: 0;
+  color: var(--color-text-primary);
 }
-
-.toolbar-left h1::before {
-  content: "📊";
-  font-size: 18px;
-}
-
-.project-badge {
+.proj-key {
+  flex: none;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  background: var(--color-primary-light);
+  color: var(--color-primary-hover);
   font-size: 12px;
-  font-weight: 600;
-  padding: 4px 10px;
-  border-radius: var(--radius-full);
-  background: var(--color-success-light);
-  color: #065f46;
-  border: 1px solid var(--color-success-border);
+  font-weight: 700;
+  line-height: 1.4;
+}
+.proj-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
+  font-size: 13.5px;
+  font-weight: 600;
 }
 
+/* Underline tabs: the active one is marked by a bar sitting on the header's own border. */
 .toolbar-tabs {
   display: flex;
-  background: #f1f5f9;
-  padding: 3px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--color-border);
-  gap: 2px;
-  margin-left: auto;
+  align-self: stretch;
+  gap: 4px;
+  margin: 0 0 0 8px;
+  /* Lets the active bar cover the header's 1px bottom border. */
+  margin-bottom: -1px;
 }
-
 .toolbar-tabs button {
+  height: auto;
+  padding: 0 12px;
   border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
   background: transparent;
-  padding: 5px 14px;
-  border-radius: var(--radius-sm);
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--color-text-muted);
   box-shadow: none;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+.toolbar-tabs button:hover:not(:disabled) {
+  background: transparent;
+  border-color: transparent;
+  border-bottom-color: var(--color-border-hover);
+  box-shadow: none;
+  color: var(--color-text-primary);
+}
+.toolbar-tabs button:active:not(:disabled) {
+  transform: none;
+}
+.toolbar-tabs button.active,
+.toolbar-tabs button.active:hover:not(:disabled) {
+  border-bottom-color: var(--color-primary);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+.toolbar-tabs button:focus-visible {
+  outline-offset: -3px;
 }
 
 .tab-badge {
@@ -275,60 +355,32 @@ button.danger:hover:not(:disabled) {
   line-height: 1;
 }
 
-.toolbar-tabs button:hover:not(.active) {
-  color: var(--color-text-primary);
-  background: rgba(255, 255, 255, 0.6);
-}
-
-.toolbar-tabs button.active {
-  background: var(--color-surface);
-  color: var(--color-text-primary);
-  font-weight: 600;
-  box-shadow: var(--shadow-sm);
-}
-
 .toolbar-right {
   display: flex;
   align-items: center;
   gap: 8px;
+  margin-left: auto;
 }
 
 .sync-time {
   font-size: 12px;
   color: var(--color-text-muted);
-  display: flex;
-  align-items: center;
-  gap: 4px;
+  white-space: nowrap;
 }
 
-.toolbar-divider {
-  width: 1px;
-  height: 22px;
-  background: var(--color-border);
-  margin: 0 4px;
-}
-
-.user-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 10px 4px 4px;
+/* The account menu: avatar only, name and sign-out inside. */
+button.hd-avatar {
+  width: var(--control-h-header);
+  padding: 0;
   border-radius: var(--radius-full);
-  border: 1px solid var(--color-border);
-  background: #f8fafc;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--color-text-primary);
 }
-
 .user-avatar {
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   border-radius: var(--radius-full);
   flex: none;
   object-fit: cover;
 }
-
 .user-avatar-fallback {
   display: inline-flex;
   align-items: center;
@@ -338,12 +390,167 @@ button.danger:hover:not(:disabled) {
   font-size: 11px;
   font-weight: 600;
 }
+.menu-profile {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+}
+.menu-profile-name {
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.menu-current {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px 6px;
+}
+.menu-current-name {
+  min-width: 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
 
-.user-name {
-  max-width: 130px;
+@media (max-width: 1280px) {
+  .sync-time {
+    display: none;
+  }
+}
+@media (max-width: 1100px) {
+  .brand h1 {
+    display: none;
+  }
+}
+
+/* --- menus and popovers (Popover.tsx) --- */
+.popover {
+  position: relative;
+  display: inline-flex;
+}
+.popover-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  min-width: 220px;
+  max-width: min(92vw, 440px);
+  max-height: min(70vh, 560px);
+  overflow-y: auto;
+  padding: 6px;
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+}
+.popover-start {
+  left: 0;
+}
+.popover-end {
+  right: 0;
+}
+.popover .caret {
+  flex: none;
+  opacity: 0.7;
+  transition: transform var(--transition-fast);
+}
+.popover .is-open > .caret {
+  transform: rotate(180deg);
+}
+.menu-heading {
+  padding: 4px 8px 6px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+.menu-sep {
+  flex: none;
+  height: 1px;
+  margin: 6px 2px;
+  background: var(--color-border);
+}
+.menu-scroll {
+  display: flex;
+  flex-direction: column;
+  max-height: 280px;
+  overflow-y: auto;
+}
+button.menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  box-shadow: none;
+  color: var(--color-text-primary);
+  font-size: 13px;
+  text-align: left;
+  white-space: normal;
+}
+button.menu-item:hover:not(:disabled),
+button.menu-item:focus-visible {
+  background: var(--color-ghost-hover);
+  border-color: transparent;
+  box-shadow: none;
+}
+button.menu-item:focus-visible,
+.unscheduled-item:focus-visible {
+  outline-offset: -2px;
+}
+button.menu-item > .icon {
+  color: var(--color-text-secondary);
+}
+.menu-item-text {
+  display: flex;
+  flex-direction: column;
+}
+.menu-item-text small {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--color-text-secondary);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
+  clip: rect(0, 0, 0, 0);
   white-space: nowrap;
+  border: 0;
+}
+.icon {
+  flex: none;
+}
+.icon.spin {
+  animation: icon-spin 1s linear infinite;
+}
+@keyframes icon-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .icon.spin {
+    animation: none;
+  }
+  .popover .caret,
+  input.switch,
+  input.switch::after {
+    transition: none;
+  }
 }
 
 .app-body {
@@ -892,145 +1099,200 @@ button.danger:hover:not(:disabled) {
   flex-direction: column;
 }
 
-.gantt-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 7px 16px;
-  border-bottom: 1px solid var(--color-border);
-  background: #ffffff;
-  flex: none;
-}
+/* --- the toolbar's right-hand controls (GanttView passes them to FilterBar as `trailing`) --- */
 
-.gantt-toolbar button {
-  border: 1px solid var(--color-border);
-  background: #ffffff;
-  color: var(--color-text-secondary);
-  padding: 4px 9px;
-  border-radius: var(--radius-md);
-  font-size: 12.5px;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
-}
-
-.gantt-toolbar button:hover:not(:disabled) {
-  border-color: var(--color-border-hover);
-  color: var(--color-text-primary);
-}
-
-.gantt-toolbar button:disabled {
-  cursor: default;
-  opacity: 0.45;
-}
-
-.tbi {
-  margin-right: 4px;
-  vertical-align: -2px;
-}
-
-/* Generic "menu open" state for a plain dropdown trigger (Cột, Chưa có ngày) —
-   a quieter cue than the feature toggles below, since it just means "open", not
-   "on". The more specific rules further down (seg-group/toggle-pill/critical/
-   warning) win over this on the buttons that use them. */
-.gantt-toolbar button.active {
-  background: var(--color-bg);
-  border-color: var(--color-border-hover);
-  color: var(--color-text-primary);
-}
-
-/* View-mode switch (Ngày/Tuần/Tháng): one connected pill, not three loose
-   buttons — it picks a mode, it isn't a set of independent toggles. */
+/* Ngày | Tuần | Tháng: one tinted track, the current mode raised on it. */
 .seg-group {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
+  height: var(--control-h);
   padding: 2px;
-  background: var(--color-bg);
-  gap: 1px;
+  gap: 2px;
+  border-radius: var(--radius-md);
+  background: var(--color-ghost-hover);
 }
-
 .seg-group button {
+  height: 100%;
+  padding: 0 10px;
   border: none;
+  border-radius: var(--radius-sm);
   background: transparent;
-  border-radius: calc(var(--radius-md) - 2px);
-  padding: 4px 9px;
+  box-shadow: none;
+  font-size: 12.5px;
+  color: var(--color-text-secondary);
 }
-
 .seg-group button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.6);
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--color-text-primary);
+}
+.seg-group button.active,
+.seg-group button.active:hover:not(:disabled) {
   background: #ffffff;
-}
-
-.seg-group button.active {
-  background: #0f172a;
-  color: #ffffff;
-}
-
-/* Display toggles (Đường găng/Phụ thuộc/Baseline): "on" reads as a feature
-   switched on, not as a selected mode, so it gets the same soft accent as an
-   applied filter chip rather than the segmented switch's solid fill. */
-.gantt-toolbar button.toggle-pill.active {
-  background: var(--color-primary-light);
-  border-color: var(--color-primary-border);
-  color: var(--color-primary);
+  box-shadow: var(--shadow-sm);
+  color: var(--color-text-primary);
   font-weight: 600;
 }
-
-/* Bug/critical-path keeps its own fixed red when on — worth spotting at a
-   glance, see ganttMapping.ts. Declared after .toggle-pill.active so it wins. */
-.critical-toggle.active {
-  background: var(--color-danger-light) !important;
-  border-color: var(--color-danger-border) !important;
-  color: var(--color-danger) !important;
+.seg-group button:active:not(:disabled) {
+  transform: none;
 }
 
-/* "Chưa có ngày": a data-quality notice, not a plain action — amber like the
-   rest of the app's warning chips, so it reads as "needs attention" at a glance. */
-.warning-pill {
-  background: var(--color-warning-light) !important;
-  border-color: var(--color-warning-border) !important;
-  color: var(--color-warning) !important;
+/* Toolbar buttons: 32px, no border until hovered. */
+button.tb-btn {
+  height: var(--control-h);
+  padding: 0 10px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  font-size: 12.5px;
+  color: var(--color-text-secondary);
 }
-
-.warning-pill.active {
-  box-shadow: inset 0 0 0 1px var(--color-warning);
+button.tb-btn:hover:not(:disabled) {
+  background: var(--color-ghost-hover);
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--color-text-primary);
 }
-
-.gantt-toolbar-divider {
-  width: 1px;
-  height: 22px;
-  background: var(--color-border);
-  margin: 0 5px;
+button.tb-btn.is-open {
+  background: var(--color-ghost-hover);
+  color: var(--color-text-primary);
+}
+button.tb-btn:disabled {
+  opacity: 0.4;
+}
+button.tb-icon {
+  width: var(--control-h);
+  padding: 0;
+}
+.tb-sep {
   flex: none;
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: var(--color-border);
 }
 
+/* "Hôm nay" and the note it leaves when today is outside the chart. */
+.tb-today {
+  position: relative;
+  display: inline-flex;
+}
 .gantt-today-note {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 45;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: #0f172a;
+  color: #ffffff;
   font-size: 12px;
-  color: var(--color-text-muted);
+  white-space: nowrap;
+  box-shadow: var(--shadow-md);
 }
 
-/* --- JQL (phase 2 / 2.7) --- */
-.tf-jql {
-  flex-basis: 100%;
-  display: flex;
-  align-items: center;
-  gap: 8px;
+/* "Hiển thị" panel: switches, then the table's columns. */
+.view-menu {
+  width: 340px;
 }
-.tf-jql input {
+.switch-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.switch-row:hover {
+  background: var(--color-ghost-hover);
+}
+.switch-row > .icon {
+  margin-top: 2px;
+  color: var(--color-text-secondary);
+}
+.switch-text {
   flex: 1;
-  min-width: 240px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.switch-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+.switch-hint {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--color-text-secondary);
+}
+input.switch {
+  appearance: none;
+  flex: none;
+  position: relative;
+  width: 32px;
+  height: 18px;
+  margin: 2px 0 0;
+  border-radius: var(--radius-full);
+  background: #64748b;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+input.switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #ffffff;
+  transition: transform var(--transition-fast);
+}
+input.switch:checked {
+  background: var(--color-primary);
+}
+input.switch:checked::after {
+  transform: translateX(14px);
+}
+.view-menu .col-chooser-foot {
+  margin-top: 4px;
+}
+
+.io-menu {
+  min-width: 340px;
+}
+.help-menu {
+  width: 320px;
+}
+.help-list {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 14px;
+  margin: 0;
+  padding: 2px 8px 6px;
   font-size: 12.5px;
 }
-.tf-jql-error {
-  color: var(--color-danger);
-  font-size: 12px;
+.help-list dt {
+  font-weight: 600;
+  color: var(--color-text-primary);
+  white-space: nowrap;
 }
-.tf-jql-note {
-  color: var(--color-text-muted);
-  font-size: 12px;
+.help-list dd {
+  margin: 0;
+  color: var(--color-text-secondary);
 }
+kbd {
+  padding: 1px 5px;
+  border: 1px solid var(--color-border-hover);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--color-bg);
+  font: inherit;
+  font-size: 11.5px;
+}
+
 .tf-empty.is-error {
   color: var(--color-danger);
 }
@@ -1137,63 +1399,6 @@ button.danger:hover:not(:disabled) {
   overflow: auto;
   padding-left: 18px;
   font-size: 13px;
-}
-
-.critical-toggle.active {
-  background: #dc2626 !important;
-  border-color: #b91c1c !important;
-  color: #ffffff !important;
-}
-
-/* Gantt Search */
-.gantt-search {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-left: auto;
-  /* Shrinks before the toolbar overflows or wraps, so a new button does not push the row to two lines. */
-  flex: 0 1 200px;
-  min-width: 110px;
-}
-
-.gantt-search input {
-  padding: 5px 10px;
-  border: 1.5px solid var(--color-border);
-  border-radius: var(--radius-md);
-  font-size: 12.5px;
-  width: 100%;
-  min-width: 0;
-  background: var(--color-surface);
-  color: var(--color-text-primary);
-  transition: all var(--transition-fast);
-}
-
-.gantt-search input:focus {
-  outline: none;
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
-}
-
-.gantt-search-count {
-  font-size: 12px;
-  color: var(--color-text-muted);
-  white-space: nowrap;
-  font-weight: 500;
-}
-
-.gantt-search-clear {
-  line-height: 1;
-  padding: 2px 7px;
-  font-size: 14px;
-  color: var(--color-text-muted);
-  border-radius: var(--radius-sm);
-  background: #f1f5f9;
-  border: 1px solid var(--color-border);
-}
-
-.gantt-search-clear:hover {
-  background: #e2e8f0;
-  color: var(--color-text-primary);
 }
 
 .gantt-body {
@@ -2612,34 +2817,46 @@ button.danger:hover:not(:disabled) {
 }
 
 /* --- Bulk selection ------------------------------------------------------ */
-.selection-bar,
-.selection-idle {
+/* Fixed to the bottom of the window, so it is in no row of the page. Appearing or going away
+   therefore never moves the table: if it did, a double-click on a row would land its second
+   click on another row. It sits low rather than over the toolbar because one click selects,
+   and a bar over the toolbar would hide search and zoom nearly all the time. */
+.selection-bar {
+  position: fixed;
+  left: 50%;
+  bottom: 32px;
+  transform: translateX(-50%);
+  z-index: 35;
   display: flex;
   align-items: center;
-  gap: 12px;
-  box-sizing: border-box;
-  /* One fixed height for both states: if the bar changed the page's height when it
-     appeared, a double-click on a row would land its second click on another row. */
-  height: 48px;
-  flex-shrink: 0;
-  padding: 0 20px;
+  gap: 8px;
+  max-width: calc(100vw - 240px);
+  height: var(--toolbar-h);
+  padding: 0 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: #ffffff;
+  border: 1px solid var(--color-primary-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-modal);
   font-size: 13px;
   color: var(--color-text-primary);
 }
-.selection-bar {
-  background: var(--color-primary-light);
-  border-bottom: 1px solid var(--color-primary-border);
-  overflow: hidden;
+.selection-bar > * {
+  flex: none;
 }
-.selection-idle {
-  color: var(--color-text-muted);
-  font-size: 12px;
-  border-bottom: 1px solid var(--color-border);
+.selection-bar button {
+  height: var(--control-h);
+  padding: 0 12px;
+}
+.selection-count {
+  margin-right: 4px;
+  white-space: nowrap;
 }
 .selection-hint {
   margin-left: auto;
   font-size: 12px;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
 }
 
 /* --- Assistant dock ------------------------------------------------------ */
@@ -6359,11 +6576,6 @@ button.att-remove:hover:not(:disabled) {
   margin-top: 4px;
   padding: 6px 8px 2px;
 }
-.gantt-toolbar .col-chooser-foot button {
-  border: none;
-  padding: 0;
-  background: none;
-}
 .wbs-col-extra {
   flex-shrink: 0;
   font-size: 12px;
@@ -6780,21 +6992,44 @@ tr.is-selected .ts-person {
   color: var(--color-text-muted);
   cursor: default;
 }
-.gantt-toolbar .col-chooser-foot button.text-btn {
-  font-size: 12.5px;
-}
-
 /* --- shared task filter bar (FilterBar.tsx) --- */
+/* One 48px row: 32px controls with 8px above and below. The Gantt's selection bar is the same
+   height and lies exactly over it. */
 .tf-bar {
   display: flex;
-  align-items: center;
-  gap: 6px;
   flex-wrap: wrap;
-  padding: 6px 16px;
+  align-items: center;
+  column-gap: 8px;
+  min-height: var(--toolbar-h);
+  padding: 8px 16px;
   border-bottom: 1px solid var(--color-border);
   background: #ffffff;
   flex: none;
 }
+/* The left group takes what the right one leaves and gives way down to its own minimum;
+   below that the right group drops to a second line instead of sitting on top of it. */
+.tf-left {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 0;
+  min-width: min-content;
+}
+.tf-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  margin-left: auto;
+}
+/* Narrower than this the two menus keep only their icon (they still have an aria-label). */
+@media (max-width: 1400px) {
+  .tb-btn .tb-label {
+    display: none;
+  }
+}
+
+/* The legacy pill, still used by the board's and the report's pickers (MultiSelect). */
 .tf-btn {
   display: inline-flex;
   align-items: center;
@@ -6812,7 +7047,6 @@ tr.is-selected .ts-person {
 .tf-btn:hover {
   border-color: var(--color-border-hover);
 }
-.gantt-toolbar .tf-btn.is-on,
 .tf-btn.is-on {
   background: var(--color-primary-light);
   border-color: var(--color-primary-border);
@@ -6822,23 +7056,12 @@ tr.is-selected .ts-person {
 .fb-icon {
   flex: none;
 }
-/* The value pickers (Người phụ trách/Trạng thái/Loại/Epic/Nhãn/Ưu tiên) get a
-   flatter, slightly tinted shape — a "select", not a toggle — so they read as
-   one visual family distinct from the two instant on/off chips before the
-   divider. */
 .tf-select > .tf-btn {
   border-radius: var(--radius-md);
   background: var(--color-bg);
 }
 .tf-select > .tf-btn:not(.is-on):hover {
   background: #ffffff;
-}
-.tf-divider {
-  width: 1px;
-  height: 18px;
-  background: var(--color-border);
-  margin: 0 2px;
-  flex: none;
 }
 .tf-menu {
   max-height: 320px;
@@ -6856,9 +7079,330 @@ tr.is-selected .ts-person {
   font-size: 12.5px;
   color: var(--color-text-muted);
 }
+
+/* In the toolbar the same class is a flat 32px ghost: border only on the search box (an input),
+   a tint only where something is switched on. */
+.tf-bar .tf-btn,
+.tf-bar .tf-select > .tf-btn {
+  height: var(--control-h);
+  padding: 0 10px;
+  gap: 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  box-shadow: none;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+.tf-bar .tf-btn:hover:not(:disabled),
+.tf-bar .tf-select > .tf-btn:not(.is-on):hover {
+  background: var(--color-ghost-hover);
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--color-text-primary);
+}
+.tf-bar .tf-btn.is-open {
+  background: var(--color-ghost-hover);
+}
+.tf-bar .tf-btn.is-on,
+.tf-bar .tf-btn.is-on:hover:not(:disabled) {
+  background: var(--color-primary-light);
+  border-color: transparent;
+  color: var(--color-primary);
+  font-weight: 600;
+}
+/* "Chưa có ngày (n)": a data-quality warning, amber but dark enough to read (4.5:1+). */
+.tf-bar .tf-btn.warning-pill {
+  background: var(--color-warning-light);
+  border-color: var(--color-warning-border);
+  color: var(--color-warning-text);
+  font-weight: 600;
+}
+.tf-bar .tf-btn.warning-pill:hover:not(:disabled),
+.tf-bar .tf-btn.warning-pill.is-open {
+  background: #fef3c7;
+  border-color: var(--color-warning-border);
+  color: var(--color-warning-text);
+}
+
+/* Search with the JQL switch inside its right end. The JQL panel anchors to the whole box
+   (the popover wrapper is made static so `.tf-search` is its containing block). */
+.tf-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1 1 260px;
+  min-width: 150px;
+  max-width: 340px;
+  height: var(--control-h);
+  border: 1px solid var(--color-border-hover);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.tf-search:focus-within {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+.tf-search .popover {
+  position: static;
+}
+.tf-search-icon {
+  position: absolute;
+  left: 9px;
+  color: var(--color-text-muted);
+  pointer-events: none;
+}
+.tf-search input {
+  /* width 0 + flex-grow: an <input> otherwise reports ~190px as its minimum, which kept the
+     whole toolbar from fitting at 1280px. */
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  height: 100%;
+  padding: 0 8px 0 30px;
+  border: none;
+  outline: none;
+  background: transparent;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--color-text-primary);
+}
+.tf-search input::placeholder {
+  color: var(--color-text-muted);
+}
+.tf-search input::-webkit-search-cancel-button {
+  appearance: none;
+  display: none;
+}
+button.tf-search-clear {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-full);
+  background: transparent;
+  box-shadow: none;
+  color: var(--color-text-muted);
+}
+button.tf-search-clear:hover:not(:disabled) {
+  background: var(--color-ghost-hover);
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--color-text-primary);
+}
+.tf-bar .tf-search .tf-jql-toggle {
+  flex: none;
+  height: 24px;
+  margin-right: 3px;
+  padding: 0 8px;
+  background: var(--color-ghost-hover);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+/* --- JQL (phase 2 / 2.7) --- */
+.tf-jql-menu {
+  left: 0;
+  width: 520px;
+}
+.tf-jql {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px;
+}
+.tf-jql-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tf-jql input {
+  flex: 1;
+  min-width: 0;
+  height: var(--control-h);
+  padding: 0 10px;
+  border: 1px solid var(--color-border-hover);
+  border-radius: var(--radius-md);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+}
+button.tf-run {
+  height: var(--control-h);
+  padding: 0 14px;
+  border-color: var(--color-primary-border);
+  background: var(--color-primary-light);
+  box-shadow: none;
+  color: var(--color-primary-hover);
+  font-weight: 600;
+}
+button.tf-run:hover:not(:disabled) {
+  background: #dbeafe;
+  border-color: var(--color-primary);
+  box-shadow: none;
+  color: var(--color-primary-hover);
+}
+.tf-jql-error {
+  color: var(--color-danger);
+  font-size: 12px;
+}
+.tf-jql-note {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+/* --- the "Bộ lọc" panel: one collapsible section per facet --- */
+.tf-filter-menu {
+  width: 300px;
+  min-width: 0;
+  max-height: min(70vh, 480px);
+  padding: 4px;
+}
+.tf-facet + .tf-facet {
+  border-top: 1px solid var(--color-ghost-hover);
+}
+button.tf-facet-head {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+  height: 36px;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  box-shadow: none;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  text-align: left;
+}
+button.tf-facet-head:hover:not(:disabled) {
+  background: var(--color-ghost-hover);
+  border-color: transparent;
+  box-shadow: none;
+}
+button.tf-facet-head:focus-visible {
+  outline-offset: -2px;
+}
+.tf-facet-name {
+  flex: 1;
+  min-width: 0;
+}
+.tf-facet.is-open .caret {
+  transform: rotate(180deg);
+}
+.tf-facet-body {
+  display: flex;
+  flex-direction: column;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 2px 4px 8px 12px;
+}
+.tf-facet-body .tf-item-label {
+  max-width: 220px;
+}
+.tf-facet-reset {
+  align-self: flex-start;
+  margin: 4px 0 0 4px;
+}
+.tf-badge {
+  flex: none;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--radius-full);
+  background: var(--color-primary);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+
+/* --- active filters: only present while something is narrowing the list --- */
+.tf-active {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg);
+  flex: none;
+}
+.tf-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 340px;
+  height: 24px;
+  padding: 0 2px 0 9px;
+  border: 1px solid var(--color-primary-border);
+  border-radius: var(--radius-full);
+  background: var(--color-primary-light);
+  color: var(--color-primary-hover);
+  font-size: 12px;
+  font-weight: 500;
+}
+.tf-chip.is-error {
+  border-color: var(--color-danger-border);
+  background: var(--color-danger-light);
+  color: var(--color-danger-hover);
+}
+.tf-chip-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+button.tf-chip-open {
+  height: auto;
+  padding: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+  font: inherit;
+  display: block;
+  text-align: left;
+}
+button.tf-chip-open:hover:not(:disabled) {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  text-decoration: underline;
+}
+button.tf-chip-x {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-left: 2px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-full);
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+}
+button.tf-chip-x:hover:not(:disabled) {
+  background: rgba(37, 99, 235, 0.16);
+  border-color: transparent;
+  box-shadow: none;
+  color: inherit;
+}
+.tf-chip.is-error button.tf-chip-x:hover:not(:disabled) {
+  background: rgba(220, 38, 38, 0.14);
+}
 .tf-count {
   font-size: 12px;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   margin-left: 4px;
 }
 .tf-clear {
@@ -6866,6 +7410,12 @@ tr.is-selected .ts-person {
 }
 
 /* --- saved filters (SavedFilterMenu.tsx), first item of .tf-bar --- */
+.sf-trigger-label {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .sf-menu {
   min-width: 380px;
   max-height: 420px;
@@ -6940,13 +7490,14 @@ tr.is-selected .ts-person {
 
 /* --- bulk actions in the Gantt selection bar --- */
 .selection-select {
-  padding: 4px 8px;
+  padding: 0 8px;
   border-radius: var(--radius-md);
   border: 1px solid var(--color-border);
   background: var(--color-surface);
   font: inherit;
   font-size: 12.5px;
   max-width: 180px;
+  height: var(--control-h);
 }
 .selection-shift {
   display: inline-flex;
@@ -6956,6 +7507,7 @@ tr.is-selected .ts-person {
 }
 .selection-shift input {
   width: 52px;
+  height: var(--control-h);
   padding: 3px 6px;
   border-radius: var(--radius-md);
   border: 1px solid var(--color-border);

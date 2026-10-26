@@ -15,6 +15,8 @@ import { overlayCsvCells, overlayCsvHeader } from "../wbsExport";
 import BaselineOverlay from "./BaselineOverlay";
 import DependencyOverlay from "./DependencyOverlay";
 import IssueTypeIcon from "./IssueTypeIcon";
+import { Icon, type IconName } from "./Icons";
+import Popover from "./Popover";
 import SavedFilterMenu from "./SavedFilterMenu";
 
 // "Spotlight" colours used only while the critical-path toggle is on: critical
@@ -156,73 +158,33 @@ const VIEW_MODE_LABEL: Partial<Record<ViewMode, string>> = {
   [ViewMode.Month]: "Tháng",
 };
 
-type ToolbarIconName = "critical" | "link" | "layers" | "download" | "upload" | "columns";
-
-/** Small outline glyphs for the toolbar — one per action, so a row of identical
- * text pills doesn't have to be read word by word to tell toggles from one-shot
- * actions apart. Inline rather than an icon package: ten paths isn't worth a
- * dependency, and `IssueTypeIcon` already sets the precedent in this codebase. */
-function ToolbarIcon({ name }: { name: ToolbarIconName }) {
-  const PATHS: Record<ToolbarIconName, ReactNode> = {
-    critical: (
-      <>
-        <path d="M5 21V4" />
-        <path d="M5 4h13l-2.5 4L18 12H5" />
-      </>
-    ),
-    link: (
-      <>
-        <path d="M9 17H7a5 5 0 0 1 0-10h2" />
-        <path d="M15 7h2a5 5 0 1 1 0 10h-2" />
-        <path d="M8 12h8" />
-      </>
-    ),
-    layers: (
-      <>
-        <path d="M12 3 3 8l9 5 9-5-9-5Z" />
-        <path d="M3 16l9 5 9-5" />
-        <path d="M3 12l9 5 9-5" />
-      </>
-    ),
-    download: (
-      <>
-        <path d="M12 3v11" />
-        <path d="M7 10l5 5 5-5" />
-        <path d="M5 21h14" />
-      </>
-    ),
-    upload: (
-      <>
-        <path d="M12 21V10" />
-        <path d="M7 15l5-5 5 5" />
-        <path d="M5 3h14" />
-      </>
-    ),
-    columns: (
-      <>
-        <rect x="3" y="4" width="5" height="16" rx="1.2" />
-        <rect x="9.5" y="4" width="5" height="16" rx="1.2" />
-        <rect x="16" y="4" width="5" height="16" rx="1.2" />
-      </>
-    ),
-  };
+/** One row of the "Hiển thị" panel: a display option as a real switch, with the sentence
+ * that used to live in the button's tooltip — a tooltip nobody hovers explains nothing. */
+function SwitchRow({
+  icon,
+  label,
+  hint,
+  checked,
+  onChange,
+}: {
+  icon: IconName;
+  label: string;
+  hint: string;
+  checked: boolean;
+  onChange: (next: boolean) => void;
+}) {
   return (
-    <svg
-      className="tbi"
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      {PATHS[name]}
-    </svg>
+    <label className="switch-row">
+      <Icon name={icon} />
+      <span className="switch-text">
+        <span className="switch-label">{label}</span>
+        <span className="switch-hint">{hint}</span>
+      </span>
+      <input type="checkbox" role="switch" className="switch" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+    </label>
   );
 }
+
 // A column narrower than this can't fit its own label; wider than this, zooming
 // in stops helping and just wastes horizontal space. Both modes' comfort bands
 // overlap on purpose — see pickScale — so the handoff between them has room to
@@ -537,8 +499,6 @@ export default function GanttView({
   const [showCriticalPath, setShowCriticalPath] = useState(false);
   const [showDependencies, setShowDependencies] = useState(true);
   const [showBaseline, setShowBaseline] = useState(loadShowBaseline);
-  const query = filter.text;
-  const setQuery = (text: string) => onFilterChange({ ...filter, text });
   // gantt-task-react scrolls to `viewDate` whenever its value changes. The
   // nonce nudges the millisecond so pressing "Hôm nay" again — after scrolling
   // away — is a different value and scrolls again; a day column can't tell.
@@ -548,12 +508,8 @@ export default function GanttView({
     const [y, m, d] = iso.split("-").map(Number);
     setViewDate(new Date(y, m - 1, d, 0, 0, 0, viewNonce.current++ % 900));
   }, []);
-  const [unscheduledOpen, setUnscheduledOpen] = useState(false);
-  const unscheduledRef = useRef<HTMLDivElement>(null);
   // Per browser, not per project: which columns someone reads is a habit, not a property of the plan.
   const [columnIds, setColumnIds] = useState<ColumnId[]>(loadColumns);
-  const [chooserOpen, setChooserOpen] = useState(false);
-  const chooserRef = useRef<HTMLDivElement>(null);
   // Kept in COLUMNS order whatever order they were ticked in, so the table never reshuffles.
   const columns = useMemo(() => COLUMNS.filter((c) => columnIds.includes(c.id)), [columnIds]);
   const columnsWidth = columns.reduce((s, c) => s + c.width, 0);
@@ -568,21 +524,6 @@ export default function GanttView({
     setListWidthOverride(null);
   }
 
-  useEffect(() => {
-    if (!chooserOpen) return;
-    function onDown(e: MouseEvent) {
-      if (chooserRef.current && !chooserRef.current.contains(e.target as Node)) setChooserOpen(false);
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setChooserOpen(false);
-    }
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [chooserOpen]);
   const criticalIds = useMemo(() => computeCriticalPath(tasks), [tasks]);
   const byId = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
 
@@ -817,22 +758,6 @@ export default function GanttView({
     if (first) scrollToDate(first);
   }, [filter.text, matchIds, ranges, scrollToDate]);
 
-  useEffect(() => {
-    if (!unscheduledOpen) return;
-    function onDown(e: MouseEvent) {
-      if (unscheduledRef.current && !unscheduledRef.current.contains(e.target as Node)) setUnscheduledOpen(false);
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setUnscheduledOpen(false);
-    }
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [unscheduledOpen]);
-
   function exportCsv() {
     // Matches only: the table keeps their ancestors for indentation, but a sheet of
     // "what the filter found" should not list parents the filter excluded.
@@ -1059,132 +984,156 @@ export default function GanttView({
 
   return (
     <div className="gantt-wrap">
-      <div className="gantt-toolbar">
-        <div className="seg-group" role="group" aria-label="Chia theo">
-          {[ViewMode.Day, ViewMode.Week, ViewMode.Month].map((vm) => (
-            <button
-              key={vm}
-              className={viewMode === vm ? "active" : ""}
-              onClick={() => setPixelsPerDay(DEFAULT_PIXELS_PER_DAY[vm])}
-            >
-              {VIEW_MODE_LABEL[vm]}
-            </button>
-          ))}
-        </div>
-        <span className="gantt-toolbar-divider" aria-hidden="true" />
-        <button
-          className={showCriticalPath ? "active toggle-pill critical-toggle" : "toggle-pill critical-toggle"}
-          onClick={() => setShowCriticalPath((v) => !v)}
-          title="Chuỗi công việc quyết định thời gian hoàn thành dự án — trễ bất kỳ task nào trong chuỗi này sẽ làm trễ cả dự án"
-        >
-          <ToolbarIcon name="critical" />
-          Đường găng
-        </button>
-        <button
-          className={showDependencies ? "active toggle-pill" : "toggle-pill"}
-          onClick={() => setShowDependencies((v) => !v)}
-          title="Ẩn/hiện mũi tên phụ thuộc giữa các task (FS/SS/FF/SF). Kéo từ đầu hoặc đuôi một task sang task khác để tạo phụ thuộc mới."
-        >
-          <ToolbarIcon name="link" />
-          Phụ thuộc
-        </button>
-        <button
-          className={showBaseline ? "active toggle-pill" : "toggle-pill"}
-          onClick={() => {
-            setShowBaseline(!showBaseline);
-            saveShowBaseline(!showBaseline);
-          }}
-          title="Ẩn/hiện thanh baseline mờ dưới mỗi thanh để so lịch hiện tại với lịch đã chốt (đỏ = kết thúc muộn hơn baseline). Lưu baseline: chọn công việc rồi dùng ô Baseline… trên thanh chọn."
-        >
-          <ToolbarIcon name="layers" />
-          Baseline
-        </button>
-        <span className="gantt-toolbar-divider" aria-hidden="true" />
-        {/* Icon only: the toolbar has to stay one row at 1500px (e2e/phase3-overlay checks it). */}
-        <button
-          onClick={undo.onUndo}
-          disabled={!undo.label}
-          aria-label="Hoàn tác"
-          title={undo.label ? `Hoàn tác: ${undo.label} (Ctrl+Z)` : "Hoàn tác — chưa có thao tác kéo thả nào trong phiên này"}
-        >
-          ↶
-        </button>
-        <button onClick={goToToday} title="Cuộn biểu đồ tới ngày hôm nay">
-          Hôm nay
-        </button>
-        {todayNote && (
-          <span className="gantt-today-note" role="status">
-            {todayNote}
-          </span>
-        )}
-        <button
-          onClick={() => onSetCollapsed(parentIds)}
-          disabled={parentIds.length === 0}
-          title="Thu gọn mọi nhóm công việc"
-        >
-          Thu gọn
-        </button>
-        <button onClick={() => onSetCollapsed([])} disabled={collapsed.size === 0} title="Mở rộng mọi nhóm công việc">
-          Mở rộng
-        </button>
-        <span className="gantt-toolbar-divider" aria-hidden="true" />
-        {unscheduled.length > 0 && (
-          <div className="col-chooser" ref={unscheduledRef}>
-            <button
-              className={unscheduledOpen ? "active warning-pill" : "warning-pill"}
-              onClick={() => setUnscheduledOpen((v) => !v)}
-              aria-expanded={unscheduledOpen}
+      {/* One row. Left: find and narrow (search, JQL, saved views, quick switches, the
+          "Bộ lọc" panel). Right: how the chart looks and what goes in or out of it. The
+          selection bar lays itself over this row rather than pushing the page down. */}
+      <FilterBar
+        className="gantt-toolbar"
+        tasks={tasks}
+        filter={filter}
+        onChange={onFilterChange}
+        myAccountId={myAccountId}
+        matched={matchIds?.size}
+        total={tasks.length}
+        showSearch
+        leading={<SavedFilterMenu filter={filter} onApply={onFilterChange} myAccountId={myAccountId} />}
+        jql={jql}
+        extras={
+          unscheduled.length > 0 && (
+            <Popover
+              className="tf-btn warning-pill"
+              role="menu"
+              menuLabel="Công việc chưa có ngày"
               title="Công việc chưa có ngày bắt đầu nên không có thanh trên biểu đồ"
+              label={
+                <>
+                  <Icon name="alert" size={14} />
+                  Chưa có ngày ({unscheduled.length})
+                </>
+              }
             >
-              Chưa có ngày ({unscheduled.length}) ▾
+              {({ close }) => (
+                <>
+                  <div className="menu-heading">Bấm để đặt ngày</div>
+                  <div className="menu-scroll">
+                    {unscheduled.map((t) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        role="menuitem"
+                        className="unscheduled-item"
+                        onClick={() => {
+                          close();
+                          onOpenEdit(t);
+                        }}
+                      >
+                        <b>{t.id}</b> {t.summary}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </Popover>
+          )
+        }
+        trailing={
+          <>
+            <div className="seg-group" role="group" aria-label="Chia theo">
+              {[ViewMode.Day, ViewMode.Week, ViewMode.Month].map((vm) => (
+                <button
+                  key={vm}
+                  type="button"
+                  className={viewMode === vm ? "active" : ""}
+                  aria-pressed={viewMode === vm}
+                  onClick={() => setPixelsPerDay(DEFAULT_PIXELS_PER_DAY[vm])}
+                >
+                  {VIEW_MODE_LABEL[vm]}
+                </button>
+              ))}
+            </div>
+            <span className="tb-today">
+              <button type="button" className="tb-btn" onClick={goToToday} title="Cuộn biểu đồ tới ngày hôm nay">
+                Hôm nay
+              </button>
+              {todayNote && (
+                <span className="gantt-today-note" role="status">
+                  {todayNote}
+                </span>
+              )}
+            </span>
+            <span className="tb-sep" aria-hidden="true" />
+            <button
+              type="button"
+              className="tb-btn tb-icon"
+              onClick={undo.onUndo}
+              disabled={!undo.label}
+              aria-label="Hoàn tác"
+              title={undo.label ? `Hoàn tác: ${undo.label} (Ctrl+Z)` : "Hoàn tác — chưa có thao tác kéo thả nào trong phiên này"}
+            >
+              <Icon name="undo" />
             </button>
-            {unscheduledOpen && (
-              <div className="col-chooser-menu tf-menu" role="menu">
-                <div className="col-chooser-title">Bấm để đặt ngày</div>
-                {unscheduled.map((t) => (
-                  <button
-                    key={t.id}
-                    type="button"
-                    className="unscheduled-item"
-                    onClick={() => {
-                      setUnscheduledOpen(false);
-                      onOpenEdit(t);
-                    }}
-                  >
-                    <b>{t.id}</b> {t.summary}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-        <button onClick={onOpenImport} title="Nhập nhiều công việc từ file CSV hoặc dán từ Excel">
-          Nhập…
-        </button>
-        <button
-          onClick={exportCsv}
-          title="Tải bảng WBS (các cột đang hiện, theo bộ lọc) kèm % hoàn thành, phụ thuộc và baseline về file CSV mở được bằng Excel"
-        >
-          <ToolbarIcon name="download" />
-          Xuất CSV
-        </button>
-        <button onClick={onImportKbkt} title="Tạo/cập nhật test case và lỗi trong Jira từ file kịch bản kiểm thử (KBKT) .xlsx">
-          <ToolbarIcon name="upload" />
-          Nhập KBKT
-        </button>
-        <div className="col-chooser" ref={chooserRef}>
-          <button
-            className={chooserOpen ? "active" : ""}
-            onClick={() => setChooserOpen((v) => !v)}
-            aria-expanded={chooserOpen}
-            title="Chọn cột hiển thị trong bảng WBS"
-          >
-            <ToolbarIcon name="columns" />
-            Cột ({columns.length}) ▾
-          </button>
-          {chooserOpen && (
-            <div className="col-chooser-menu" role="menu">
-              <div className="col-chooser-title">Hiển thị cột</div>
+            <button
+              type="button"
+              className="tb-btn tb-icon"
+              onClick={() => onSetCollapsed(parentIds)}
+              disabled={parentIds.length === 0}
+              aria-label="Thu gọn tất cả nhóm"
+              title="Thu gọn mọi nhóm công việc"
+            >
+              <Icon name="collapseAll" />
+            </button>
+            <button
+              type="button"
+              className="tb-btn tb-icon"
+              onClick={() => onSetCollapsed([])}
+              disabled={collapsed.size === 0}
+              aria-label="Mở rộng tất cả nhóm"
+              title="Mở rộng mọi nhóm công việc"
+            >
+              <Icon name="expandAll" />
+            </button>
+            <span className="tb-sep" aria-hidden="true" />
+            <Popover
+              className="tb-btn"
+              align="end"
+              ariaLabel="Hiển thị"
+              menuLabel="Tuỳ chọn hiển thị"
+              menuClassName="view-menu"
+              title="Đường găng, mũi tên phụ thuộc, baseline và các cột của bảng WBS"
+              label={
+                <>
+                  <Icon name="eye" />
+                  <span className="tb-label">Hiển thị</span>
+                </>
+              }
+            >
+              <div className="menu-heading">Biểu đồ</div>
+              <SwitchRow
+                icon="critical"
+                label="Đường găng"
+                hint="Chuỗi việc quyết định ngày hoàn thành — trễ một việc trong chuỗi là trễ cả dự án."
+                checked={showCriticalPath}
+                onChange={setShowCriticalPath}
+              />
+              <SwitchRow
+                icon="link"
+                label="Phụ thuộc"
+                hint="Mũi tên FS/SS/FF/SF giữa các việc. Kéo từ đầu hoặc đuôi một thanh sang thanh khác để nối."
+                checked={showDependencies}
+                onChange={setShowDependencies}
+              />
+              <SwitchRow
+                icon="layers"
+                label="Baseline"
+                hint="Thanh mờ dưới mỗi thanh: lịch đã chốt (đỏ = kết thúc muộn hơn). Lưu baseline bằng ô Baseline… trên thanh chọn."
+                checked={showBaseline}
+                onChange={(next) => {
+                  setShowBaseline(next);
+                  saveShowBaseline(next);
+                }}
+              />
+              <div className="menu-sep" role="separator" />
+              <div className="menu-heading">Cột bảng WBS ({columns.length})</div>
               {COLUMNS.map((c) => (
                 <label key={c.id} className="col-chooser-item">
                   <input type="checkbox" checked={columnIds.includes(c.id)} onChange={() => toggleColumn(c.id)} />
@@ -1193,6 +1142,7 @@ export default function GanttView({
               ))}
               <div className="col-chooser-foot">
                 <button
+                  type="button"
                   className="text-btn"
                   onClick={() => {
                     setColumnIds(DEFAULT_COLUMNS);
@@ -1202,6 +1152,7 @@ export default function GanttView({
                   Mặc định
                 </button>
                 <button
+                  type="button"
                   className="text-btn"
                   onClick={() => {
                     const all = COLUMNS.map((c) => c.id);
@@ -1212,46 +1163,122 @@ export default function GanttView({
                   Tất cả
                 </button>
               </div>
-            </div>
-          )}
-        </div>
-
-        <div className="gantt-search">
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") setQuery("");
-            }}
-            placeholder="Tìm theo mã hoặc tên công việc..."
-            aria-label="Tìm công việc"
-          />
-          {query && (
-            <button
-              className="gantt-search-clear"
-              onClick={() => setQuery("")}
-              aria-label="Xoá tìm kiếm"
+            </Popover>
+            <Popover
+              className="tb-btn"
+              role="menu"
+              align="end"
+              ariaLabel="Nhập / Xuất"
+              menuLabel="Nhập / Xuất"
+              menuClassName="io-menu"
+              title="Nhập công việc từ CSV / Excel / KBKT, hoặc xuất bảng WBS ra CSV"
+              label={
+                <>
+                  <Icon name="importExport" />
+                  <span className="tb-label">Nhập / Xuất</span>
+                </>
+              }
             >
-              ×
-            </button>
-          )}
-        </div>
-      </div>
+              {({ close }) => (
+                <>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="menu-item"
+                    onClick={() => {
+                      close();
+                      onOpenImport();
+                    }}
+                  >
+                    <Icon name="upload" />
+                    <span className="menu-item-text">
+                      Nhập công việc…
+                      <small>Từ file CSV hoặc dán từ Excel</small>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="menu-item"
+                    onClick={() => {
+                      close();
+                      onImportKbkt();
+                    }}
+                  >
+                    <Icon name="upload" />
+                    <span className="menu-item-text">
+                      Nhập KBKT…
+                      <small>Tạo/cập nhật test case và lỗi trong Jira từ kịch bản kiểm thử .xlsx</small>
+                    </span>
+                  </button>
+                  <div className="menu-sep" role="separator" />
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="menu-item"
+                    onClick={() => {
+                      close();
+                      exportCsv();
+                    }}
+                  >
+                    <Icon name="download" />
+                    <span className="menu-item-text">
+                      Xuất CSV
+                      <small>Bảng WBS theo cột và bộ lọc đang chọn, kèm %, phụ thuộc và baseline</small>
+                    </span>
+                  </button>
+                </>
+              )}
+            </Popover>
+            <Popover
+              className="tb-btn tb-icon"
+              align="end"
+              caret={false}
+              ariaLabel="Thao tác và phím tắt"
+              menuLabel="Thao tác và phím tắt"
+              menuClassName="help-menu"
+              title="Thao tác và phím tắt"
+              label={<Icon name="help" />}
+            >
+              <div className="menu-heading">Chọn công việc</div>
+              <dl className="help-list">
+                <dt>Nhấp</dt>
+                <dd>chọn một công việc</dd>
+                <dt>
+                  <kbd>Ctrl</kbd>/<kbd>Cmd</kbd> + nhấp
+                </dt>
+                <dd>chọn thêm</dd>
+                <dt>
+                  <kbd>Shift</kbd> + nhấp
+                </dt>
+                <dd>chọn cả dải</dd>
+                <dt>Nhấp đúp</dt>
+                <dd>mở chi tiết</dd>
+                <dt>
+                  <kbd>Esc</kbd>
+                </dt>
+                <dd>bỏ chọn</dd>
+              </dl>
+              <div className="menu-sep" role="separator" />
+              <div className="menu-heading">Biểu đồ</div>
+              <dl className="help-list">
+                <dt>
+                  <kbd>Ctrl</kbd>/<kbd>Cmd</kbd> + <kbd>Z</kbd>
+                </dt>
+                <dd>hoàn tác thao tác kéo thanh</dd>
+                <dt>
+                  <kbd>Ctrl</kbd> + cuộn
+                </dt>
+                <dd>phóng to / thu nhỏ trục thời gian</dd>
+              </dl>
+            </Popover>
+          </>
+        }
+      />
       {/* The empty state lives inside .gantt-body rather than replacing it: the
           ResizeObserver attaches to bodyRef once on mount, so unmounting this node
           when a query matches nothing would leave the observer bound to a detached
           element and freeze bodySize once the query was cleared again. */}
-      <FilterBar
-        tasks={tasks}
-        filter={filter}
-        onChange={onFilterChange}
-        myAccountId={myAccountId}
-        matched={matchIds?.size}
-        total={tasks.length}
-        leading={<SavedFilterMenu filter={filter} onApply={onFilterChange} myAccountId={myAccountId} />}
-        jql={jql}
-      />
       <div className="gantt-body" ref={bodyRef}>
         {rows.length === 0 ? (
           <div className="empty-state">

@@ -3,6 +3,7 @@ import fs from "node:fs";
 import assert from "node:assert/strict";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { ioAction, openFilterPanel, pickFacet } from "./toolbar.mjs";
 
 const OUT = path.join(path.dirname(fileURLToPath(import.meta.url)), "shots");
 fs.mkdirSync(OUT, { recursive: true });
@@ -30,11 +31,7 @@ const reset = () => fetch(API + "/api/__reset", { method: "POST" });
 const rows = () => page.$$eval(".wbs-row", (r) => r.map((x) => x.textContent));
 const tab = (name) => page.locator(".toolbar-tabs button", { hasText: name }).click();
 const has = (rs, key) => rs.some((t) => t.includes(key));
-async function pickMulti(label, value) {
-  await page.locator(".tf-bar .tf-btn", { hasText: label }).first().click();
-  await page.locator(".tf-menu .col-chooser-item", { hasText: value }).first().click();
-  await page.keyboard.press("Escape");
-}
+const pickMulti = (label, value) => pickFacet(page, label, value);
 async function clearFilter() { const b = page.locator(".tf-clear"); if (await b.count()) await b.click(); }
 
 page.setDefaultTimeout(8000);
@@ -56,17 +53,15 @@ await step("Xoá lọc trả lại đủ dòng", async () => {
 await step("lọc theo nhãn và NHỚ sau khi tải lại trang", async () => {
   await pickMulti("Nhãn", "urgent");
   await page.reload(); await page.waitForSelector(".wbs-row");
-  const on = await page.$$eval(".tf-btn.is-on", (b) => b.map((x) => x.textContent));
-  assert.ok(on.some((t) => t.includes("Nhãn (1)")), "bộ lọc nhãn không được nhớ: " + on);
+  const chips = await page.$$eval(".tf-chip", (b) => b.map((x) => x.textContent));
+  assert.ok(chips.some((t) => t.includes("Nhãn: urgent")), "bộ lọc nhãn không được nhớ: " + chips);
   const r = await rows();
   assert.ok(has(r, "DEMO-3") && !has(r, "DEMO-6"));
   await clearFilter();
 });
 await step("lọc theo ưu tiên (giống bộ lọc của Bảng)", async () => {
-  await page.locator(".tf-bar .tf-btn", { hasText: "Ưu tiên" }).first().click();
   // Exact match: "High" must not tick "Highest", which sorts before it.
-  await page.locator(".tf-menu .col-chooser-item", { hasText: /^High$/ }).click();
-  await page.keyboard.press("Escape");
+  await pickFacet(page, "Ưu tiên", /^High$/);
   await page.waitForFunction(() => document.querySelector(".tf-count")?.textContent.includes("1/9"));
   const r = await rows();
   assert.ok(has(r, "DEMO-3") && !has(r, "DEMO-7"), "lọc ưu tiên sai: " + r.join("|"));
@@ -78,15 +73,15 @@ await step("'Của tôi' → 1/9 và nhắc task chưa có ngày", async () => {
   await clearFilter();
 });
 await step("tìm theo chữ khớp cả tên người phụ trách", async () => {
-  await page.fill(".gantt-search input", "Lê Chi");
+  await page.fill(".tf-search input", "Lê Chi");
   await page.waitForFunction(() => document.querySelector(".tf-count")?.textContent.includes("1/9"));
   assert.ok(has(await rows(), "DEMO-6"));
   await clearFilter();
 });
 await step("Thu gọn / Mở rộng tất cả", async () => {
-  await page.locator(".gantt-toolbar button", { hasText: "Thu gọn" }).click();
+  await page.locator(".gantt-toolbar button[aria-label='Thu gọn tất cả nhóm']").click();
   await page.waitForFunction(() => document.querySelectorAll(".wbs-row").length === 2);
-  await page.locator(".gantt-toolbar button", { hasText: "Mở rộng" }).click();
+  await page.locator(".gantt-toolbar button[aria-label='Mở rộng tất cả nhóm']").click();
   await page.waitForFunction(() => document.querySelectorAll(".wbs-row").length >= 8);
 });
 await step("danh sách 'Chưa có ngày' mở được task", async () => {
@@ -98,7 +93,7 @@ await step("danh sách 'Chưa có ngày' mở được task", async () => {
 });
 await step("'Hôm nay' không gây lỗi", async () => { await page.locator(".gantt-toolbar button", { hasText: "Hôm nay" }).click(); });
 await step("xuất CSV: BOM + đúng cột + có dữ liệu", async () => {
-  const [dl] = await Promise.all([page.waitForEvent("download"), page.locator(".gantt-toolbar button", { hasText: "Xuất CSV" }).click()]);
+  const [dl] = await Promise.all([page.waitForEvent("download"), ioAction(page, "Xuất CSV")]);
   const txt = fs.readFileSync(await dl.path(), "utf8");
   assert.ok(txt.charCodeAt(0) === 0xfeff, "thiếu BOM");
   assert.ok(txt.includes("Mã,Tên công việc") && txt.includes("DEMO-5"), txt.slice(0, 120));
@@ -234,13 +229,13 @@ await page.reload(); await page.waitForSelector(".wbs-row");
 await step("tab Nguồn lực: có bộ lọc, KHÔNG có ô người phụ trách", async () => {
   await tab("Nguồn lực");
   await page.waitForSelector(".resource-view .tf-bar");
-  const btns = await page.$$eval(".resource-view .tf-btn", (b) => b.map((x) => x.textContent));
-  assert.ok(btns.some((t) => t.includes("Trạng thái")) && !btns.some((t) => t.includes("Người phụ trách")), btns.join("|"));
+  await openFilterPanel(page);
+  const facets = await page.$$eval(".resource-view .tf-facet-head", (b) => b.map((x) => x.textContent));
+  assert.ok(facets.some((t) => t.includes("Trạng thái")) && !facets.some((t) => t.includes("Người phụ trách")), facets.join("|"));
+  await page.keyboard.press("Escape");
 });
 await step("lọc → hiện cảnh báo mức tải chỉ tính phần khớp", async () => {
-  await page.locator(".resource-view .tf-btn", { hasText: "Trạng thái" }).click();
-  await page.locator(".tf-menu .col-chooser-item", { hasText: "To Do" }).first().click();
-  await page.keyboard.press("Escape");
+  await pickFacet(page, "Trạng thái", "To Do");
   await page.waitForSelector(".rv-notice");
   assert.ok((await page.textContent(".rv-notice")).includes("Đang lọc"));
   await clearFilter();
@@ -369,7 +364,7 @@ await step("form tạo việc gửi kèm Ưu tiên, Nhãn và Ước lượng (k
   await page.keyboard.press("Escape");
   await tab("Gantt");
   await reset();
-  await page.locator("button", { hasText: "+ Task mới" }).click();
+  await page.locator(".toolbar button", { hasText: "Task mới" }).click();
   await page.waitForSelector(".modal .task-input-field");
   await page.fill(".modal .task-input-field", "Việc có ưu tiên và nhãn");
   await page.locator(".modal .field", { hasText: "Độ ưu tiên" }).locator("select").selectOption("High");

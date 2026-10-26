@@ -4,6 +4,7 @@
 // against the stand-in API — what Jira does with these writes is the checklist's job.
 import assert from "node:assert/strict";
 import { chromium } from "playwright-core";
+import { ioAction, openDisplay, pickFacet } from "./toolbar.mjs";
 
 const API = process.env.E2E_API ?? "http://localhost:4000";
 const browser = await chromium.launch({ channel: "chrome", headless: true });
@@ -44,11 +45,13 @@ const clearFilter = async () => {
   if (await page.locator(".tf-clear").count()) await page.locator(".tf-clear").click();
   await page.waitForFunction(() => document.querySelectorAll(".wbs-row").length >= 8);
 };
-async function pick(label, value) {
-  await page.locator(".tf-bar .tf-btn", { hasText: label }).first().click();
-  await page.locator(".tf-menu .col-chooser-item", { hasText: value }).first().click();
-  await page.keyboard.press("Escape");
-}
+const pick = (label, value) => pickFacet(page, label, value);
+// With the JQL panel open it covers the chips, so its own button is the way; shut, the chip's × is.
+const dropJql = async () => {
+  const inPanel = page.locator(".tf-jql button", { hasText: "Bỏ JQL" });
+  if (await inPanel.count()) await inPanel.click();
+  else await page.locator(".tf-chip button[aria-label='Bỏ JQL']").click();
+};
 
 await restore();
 await page.goto(process.env.E2E_APP ?? "http://localhost:5173/");
@@ -139,7 +142,7 @@ await step("lọc theo thành phần / phiên bản / sprint", async () => {
   await clearFilter();
 });
 await step("cột Sprint, Thành phần, Phiên bản chọn được và có dữ liệu", async () => {
-  await page.locator(".gantt-toolbar button", { hasText: /^Cột/ }).click();
+  await openDisplay(page);
   for (const name of ["Sprint", "Thành phần (components)", "Phiên bản (fix versions)"]) {
     await page.locator(".col-chooser-item", { hasText: name }).locator("input").check();
   }
@@ -184,25 +187,28 @@ await step("lưu bộ lọc có thành phần → gửi đúng, áp lại thì k
   await clearFilter();
 });
 await step("lưu bộ lọc chỉ có JQL → áp lại thì ô JQL có chữ và Jira được hỏi lại", async () => {
-  if (!(await page.locator(".tf-jql").count())) await page.locator(".tf-bar .tf-btn", { hasText: "JQL" }).click();
+  if (!(await page.locator(".tf-jql").count())) await page.locator(".tf-jql-toggle").click();
   await page.fill(".tf-jql input", "assignee = anh");
   await page.locator(".tf-jql button[type=submit]").click();
   await page.waitForFunction(() => document.querySelector(".tf-count")?.textContent.includes("2/9"));
   const post = await saveCurrentAs("Của Anh (JQL)");
   assert.equal(post.b.spec.jql, "assignee = anh");
   await page.keyboard.press("Escape");
-  await page.locator(".tf-jql button", { hasText: "Bỏ JQL" }).click();
+  await dropJql();
   await page.waitForFunction(() => !document.querySelector(".tf-clear"));
   await openSavedMenu();
   await page.locator(".sf-apply", { hasText: "Của Anh (JQL)" }).click();
   await page.waitForFunction(() => document.querySelector(".tf-count")?.textContent.includes("2/9"));
+  // The JQL panel stays shut when a saved filter brings its query; the chip shows it, the panel edits it.
+  assert((await page.textContent(".tf-chip-open")).includes("assignee = anh"));
+  await page.locator(".tf-jql-toggle").click();
   assert.equal(await page.inputValue(".tf-jql input"), "assignee = anh");
   await deleteSaved("Của Anh (JQL)");
-  await page.locator(".tf-jql button", { hasText: "Bỏ JQL" }).click();
+  await dropJql();
   await page.waitForFunction(() => !document.querySelector(".tf-clear"));
 });
 await step("JQL: Jira trả khoá, màn hình lọc đúng và nói trả bao nhiêu", async () => {
-  if (!(await page.locator(".tf-jql").count())) await page.locator(".tf-bar .tf-btn", { hasText: "JQL" }).click();
+  if (!(await page.locator(".tf-jql").count())) await page.locator(".tf-jql-toggle").click();
   await page.fill(".tf-jql input", "assignee = anh");
   await page.locator(".tf-jql button[type=submit]").click();
   await page.waitForFunction(() => document.querySelector(".tf-jql-note")?.textContent.includes("Jira trả 2 việc"));
@@ -218,7 +224,7 @@ await step("JQL sai: báo lỗi của Jira, KHÔNG làm trống biểu đồ", a
   await page.waitForFunction(() => document.querySelectorAll(".wbs-row").length >= 8);
 });
 await step("bỏ JQL gỡ hẳn bộ lọc", async () => {
-  await page.locator(".tf-jql button", { hasText: "Bỏ JQL" }).click();
+  await dropJql();
   await page.waitForFunction(() => !document.querySelector(".tf-clear"));
 });
 
@@ -273,7 +279,7 @@ await step("Ctrl+Z cũng hoàn tác, nhưng không khi đang gõ trong ô nhập
   await page.waitForFunction(async () => (await (await fetch("/api/__log")).json()).log.some((l) => l.m === "PATCH" && l.p === "/api/tasks/DEMO-6"));
   await page.waitForFunction(() => !document.querySelector(".gantt-toolbar button[title^='Hoàn tác']")?.disabled);
   // Typing in the search box: Ctrl+Z belongs to that field.
-  await page.locator(".gantt-search input").click();
+  await page.locator(".tf-search input").click();
   await page.keyboard.press("Control+z");
   await page.waitForTimeout(400);
   assert.equal((await patchesFor("DEMO-6")).length, 1, "Ctrl+Z trong ô tìm kiếm không được hoàn tác bản kế hoạch");
@@ -294,7 +300,7 @@ const SHEET = [
   "Việc cuối\tTask\t2026-11-10\t2\tDEMO-2",
 ].join("\n");
 await step("dán từ Excel: tự nhận cột theo tiêu đề, xem trước và chỉ ra dòng lỗi", async () => {
-  await page.locator(".gantt-toolbar button", { hasText: "Nhập…" }).click();
+  await ioAction(page, "Nhập công việc");
   await page.fill(".import-modal textarea", SHEET);
   await page.waitForSelector(".import-preview table");
   const mapped = await page.$$eval(".import-map select", (s) => s.map((x) => x.value));
@@ -329,7 +335,7 @@ await step("đóng → bảng WBS có các công việc vừa nhập, việc con
   assert(epic >= 0 && story === epic + 1, `Epic ${epic}, Story ${story}`);
 });
 await step("bảng không có cột Tên thì không cho nhập và nói rõ", async () => {
-  await page.locator(".gantt-toolbar button", { hasText: "Nhập…" }).click();
+  await ioAction(page, "Nhập công việc");
   await page.fill(".import-modal textarea", "Cột A\tCột B\nxxx\tyyy");
   await page.waitForSelector(".import-map");
   // Headers nobody recognises: the first column is assumed to be the title. Taking that away leaves nothing to import.

@@ -3,6 +3,7 @@ import { ApiError, api } from "../api";
 import { fromSavedSpec, matchesSaved, toSavedSpec } from "../savedFilters";
 import { facetCount, type TaskFilter } from "../taskFilter";
 import type { SavedFilter } from "../types";
+import { Icon } from "./Icons";
 
 interface Props {
   filter: TaskFilter;
@@ -128,7 +129,8 @@ export default function SavedFilterMenu({ filter, onApply, myAccountId }: Props)
         aria-expanded={open}
         title="Lưu bộ lọc đang chọn thành bộ lọc có tên, áp dụng lại hoặc chia sẻ với cả dự án"
       >
-        {active ? `Bộ lọc: ${active.name}` : "Bộ lọc đã lưu"} ▾
+        <span className="sf-trigger-label">{active ? `Bộ lọc: ${active.name}` : "Bộ lọc đã lưu"}</span>
+        <Icon name="chevronDown" size={12} className="caret" />
       </button>
       {open && (
         <div className="col-chooser-menu tf-menu sf-menu" role="menu">
@@ -150,7 +152,8 @@ export default function SavedFilterMenu({ filter, onApply, myAccountId }: Props)
                   onClick={() => void run(() => api.updateSavedFilter(f.id, { shared: !f.shared }))}
                   title={f.shared ? "Đang chia sẻ với cả dự án — bấm để chỉ mình tôi thấy" : "Chỉ mình tôi thấy — bấm để chia sẻ với cả dự án"}
                 >
-                  {f.shared ? "👥 Chia sẻ" : "🔒 Riêng tư"}
+                  <Icon name={f.shared ? "users" : "lock"} size={12} />
+                  {f.shared ? "Chia sẻ" : "Riêng tư"}
                 </button>
                 <button
                   type="button"

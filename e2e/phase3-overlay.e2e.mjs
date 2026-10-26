@@ -2,6 +2,7 @@
 import { chromium } from "playwright-core";
 import fs from "node:fs";
 import assert from "node:assert/strict";
+import { displaySwitch, ioAction, openDisplay } from "./toolbar.mjs";
 
 const API = process.env.E2E_API ?? "http://localhost:4000";
 const browser = await chromium.launch({ channel: "chrome", headless: true });
@@ -39,13 +40,14 @@ await page.goto(process.env.E2E_APP ?? "http://localhost:5173/");
 await page.waitForSelector(".wbs-row");
 
 console.log("\n== G3#13 Baseline trên Gantt ==");
-await step("nút Baseline bật sẵn, toolbar vẫn một dòng ở 1500px", async () => {
-  const btn = page.locator(".gantt-toolbar > button", { hasText: "Baseline" });
-  assert.ok((await btn.getAttribute("class"))?.includes("active"));
+await step("Baseline bật sẵn trong 'Hiển thị', toolbar vẫn một dòng ở 1500px", async () => {
+  await openDisplay(page);
+  assert.ok(await displaySwitch(page, "Baseline").isChecked());
+  await page.keyboard.press("Escape");
   // Items are centred, so their tops differ by a few px; a second row would start
   // below the bottom of the first.
   const { lowestTop, highestBottom, overflow } = await page.$eval(".gantt-toolbar", (bar) => {
-    const rects = [...bar.children].map((c) => c.getBoundingClientRect()).filter((r) => r.height > 0);
+    const rects = [...bar.querySelectorAll("button, input")].map((c) => c.getBoundingClientRect()).filter((r) => r.height > 0);
     return {
       lowestTop: Math.max(...rects.map((r) => r.top)),
       highestBottom: Math.min(...rects.map((r) => r.bottom)),
@@ -87,12 +89,13 @@ await step("dời task sau baseline → thanh đỏ, ghi 'Trễ N ngày'", async
   assert.ok(slip > 0);
   assert.match(await stripTitle("DEMO-5"), new RegExp(`Trễ ${slip} ngày`));
 });
-await step("tắt nút Baseline → ẩn hết thanh, bật lại → hiện lại", async () => {
-  const btn = page.locator(".gantt-toolbar > button", { hasText: "Baseline" });
-  await btn.click();
+await step("tắt công tắc Baseline → ẩn hết thanh, bật lại → hiện lại", async () => {
+  await openDisplay(page);
+  await displaySwitch(page, "Baseline").click();
   await page.waitForFunction(() => document.querySelectorAll(".baseline-bar").length === 0);
-  await btn.click();
+  await displaySwitch(page, "Baseline").click();
   await strip("DEMO-5").waitFor();
+  await page.keyboard.press("Escape");
 });
 
 console.log("\n== G3#12 Xuất CSV kèm overlay ==");
@@ -104,7 +107,7 @@ await step("CSV luôn có % hoàn thành, phụ thuộc, baseline và độ lệ
   });
   await page.reload();
   await page.waitForSelector(".wbs-row");
-  const [dl] = await Promise.all([page.waitForEvent("download"), page.locator(".gantt-toolbar button", { hasText: "Xuất CSV" }).click()]);
+  const [dl] = await Promise.all([page.waitForEvent("download"), ioAction(page, "Xuất CSV")]);
   const lines = fs.readFileSync(await dl.path(), "utf8").replace(/^﻿/, "").split(/\r?\n/).filter(Boolean);
   const header = lines[0].split(",");
   assert.deepEqual(header.slice(0, 2), ["Mã", "Tên công việc"]);

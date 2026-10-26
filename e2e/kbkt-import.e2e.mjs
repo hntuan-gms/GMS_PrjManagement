@@ -7,6 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { chromium } from "playwright-core";
+import { ioAction } from "./toolbar.mjs";
 
 const API = process.env.E2E_API ?? "http://localhost:4000";
 const browser = await chromium.launch({ channel: "chrome", headless: true });
@@ -56,8 +57,8 @@ const preview = async () => {
 const applyBtn = modal.locator("button.primary", { hasText: "Áp dụng lên Jira" });
 
 console.log("\n== Nhập KBKT ==");
-await step("nút 'Nhập KBKT' (cạnh Xuất CSV) mở hộp thoại, cấu hình dự án tải từ máy chủ", async () => {
-  await page.locator(".gantt-toolbar button", { hasText: "Nhập KBKT" }).click();
+await step("mục 'Nhập KBKT' (cạnh Xuất CSV, trong menu Nhập / Xuất) mở hộp thoại, cấu hình dự án tải từ máy chủ", async () => {
+  await ioAction(page, "Nhập KBKT");
   await modal.waitFor();
   await modal.locator(".kb-settings > summary").click();
   await modal.locator(".kb-settings-body").waitFor();

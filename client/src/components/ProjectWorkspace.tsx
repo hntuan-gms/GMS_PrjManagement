@@ -31,6 +31,7 @@ import KbktImportModal from "./KbktImportModal";
 import ProgressReportView from "./ProgressReportView";
 import ResourceView from "./ResourceView";
 import TaskEditModal from "./TaskEditModal";
+import { Icon } from "./Icons";
 import Toolbar, { type WorkspaceView } from "./Toolbar";
 import TimesheetView from "./TimesheetView";
 
@@ -793,17 +794,14 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
         </div>
       )}
 
-      {/* The strip keeps its height whether or not anything is selected. It used to
-          appear only on selection, which pushed the table down by its own height
-          between the two clicks of a double-click, so the second landed on another row. */}
-      {selectedIds.size === 0 && view === "gantt" && (
-        <div className="selection-idle">
-          Nhấp để chọn · Ctrl/Cmd để chọn thêm · Shift để chọn cả dải · nhấp đúp để mở chi tiết
-        </div>
-      )}
+      {/* Floats over the bottom of the chart instead of taking a row of its own: out of the
+          flow, so selecting never moves the page. It used to be a strip that appeared on
+          selection, which pushed the table down between the two clicks of a double-click,
+          so the second landed on another row. It must not cover the toolbar either — a
+          single click selects, so it is on screen most of the time. */}
       {selectedIds.size > 0 && view === "gantt" && (
-        <div className="selection-bar">
-          <span>
+        <div className="selection-bar" role="region" aria-label="Thao tác hàng loạt">
+          <span className="selection-count">
             Đã chọn <strong>{selectedIds.size}</strong> công việc
           </span>
           <button onClick={() => setSelectedIds(new Set())}>Bỏ chọn</button>
@@ -860,9 +858,10 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
             <button
               disabled={deleting || bulkBusy !== null}
               onClick={() => handleBulkShift(-shiftDays)}
+              aria-label="Dời lùi lại"
               title="Dời ngày bắt đầu lùi lại (giữ nguyên thời lượng)"
             >
-              ◀
+              <Icon name="chevronLeft" size={14} />
             </button>
             <input
               type="number"
@@ -876,16 +875,16 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
             <button
               disabled={deleting || bulkBusy !== null}
               onClick={() => handleBulkShift(shiftDays)}
+              aria-label="Dời tiến tới"
               title="Dời ngày bắt đầu tiến tới (giữ nguyên thời lượng)"
             >
-              ▶
+              <Icon name="chevronRight" size={14} />
             </button>
           </span>
           <button className="danger" onClick={handleDeleteSelected} disabled={deleting || bulkBusy !== null}>
             {deleting ? "Đang xoá..." : `Xoá ${selectedIds.size} công việc`}
           </button>
           {bulkBusy && <span className="selection-hint">{bulkBusy}</span>}
-          {!bulkBusy && <span className="selection-hint">Ctrl/Cmd để chọn thêm · Shift để chọn cả dải</span>}
         </div>
       )}
 
