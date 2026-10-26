@@ -8,7 +8,16 @@ import type {
   BulkTaskCreateInput,
   BulkTaskCreateResult,
   ChatMessage,
+  ImportResult,
+  ImportRow,
+  IssueLink,
   JiraUser,
+  LinkType,
+  ProjectComponent,
+  ProjectVersion,
+  SavedFilter,
+  SavedFilterSpec,
+  Watchers,
   PlanResponse,
   ActivityEntry,
   ProgressOverview,
@@ -128,6 +137,32 @@ export const api = {
   listPriorities: () => request<string[]>("/priorities"),
   listLabels: () => request<string[]>("/labels"),
   listIssueTypes: () => request<Array<{ name: string; subtask: boolean }>>("/issue-types"),
+  listComponents: () => request<ProjectComponent[]>("/components"),
+  listVersions: () => request<ProjectVersion[]>("/versions"),
+  listLinkTypes: () => request<LinkType[]>("/link-types"),
+  // Jira issue links (blocks / relates …). Not addTaskLink below, which uploads a web link.
+  getIssueLinks: (id: string) => request<IssueLink[]>(`/tasks/${encodeURIComponent(id)}/issue-links`),
+  addIssueLink: (id: string, input: { typeName: string; otherKey: string; direction: "outward" | "inward" }) =>
+    request<IssueLink[]>(`/tasks/${encodeURIComponent(id)}/issue-links`, { method: "POST", body: JSON.stringify(input) }),
+  removeIssueLink: (id: string, linkId: string) =>
+    request<IssueLink[]>(`/tasks/${encodeURIComponent(id)}/issue-links/${encodeURIComponent(linkId)}`, { method: "DELETE" }),
+  getTaskWatchers: (id: string) => request<Watchers>(`/tasks/${encodeURIComponent(id)}/watchers`),
+  setTaskWatching: (id: string, watching: boolean) =>
+    request<Watchers>(`/tasks/${encodeURIComponent(id)}/watchers`, { method: "PUT", body: JSON.stringify({ watching }) }),
+  /** Which of this project's issues match a JQL — the string goes to Jira as typed. */
+  searchJql: (jql: string) =>
+    request<{ keys: string[]; truncated: boolean }>("/tasks/jql", { method: "POST", body: JSON.stringify({ jql }) }),
+  /** Save current dates as the baseline for these tasks (or all, with no ids); clear removes it. */
+  setBaselines: (input: { ids?: string[]; clear?: boolean }) =>
+    request<{ updated: number; skipped: number }>("/tasks/baseline", { method: "POST", body: JSON.stringify(input) }),
+  importTasks: (rows: ImportRow[]) =>
+    request<ImportResult>("/tasks/import", { method: "POST", body: JSON.stringify({ rows }) }),
+  listSavedFilters: () => request<SavedFilter[]>("/filters"),
+  saveFilter: (input: { name: string; spec: SavedFilterSpec; shared: boolean }) =>
+    request<SavedFilter>("/filters", { method: "POST", body: JSON.stringify(input) }),
+  setFilterShared: (id: string, shared: boolean) =>
+    request<void>(`/filters/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ shared }) }),
+  deleteSavedFilter: (id: string) => request<void>(`/filters/${encodeURIComponent(id)}`, { method: "DELETE" }),
   createTask: (input: TaskCreateInput) =>
     request<Task>("/tasks", { method: "POST", body: JSON.stringify(input) }),
   createTasksBulk: (input: BulkTaskCreateInput) =>

@@ -1,5 +1,6 @@
 import { Type, type FunctionDeclaration } from "@google/genai";
 import type { TaskActivity } from "../taskActivity.js";
+import type { TaskExtras } from "../taskExtras.js";
 import type { TimesheetService } from "../timesheet.js";
 import type { BoardService } from "../agile/boardService.js";
 import { sprintFacts, velocityStats } from "../agile/sprintMetrics.js";
@@ -75,6 +76,8 @@ export interface ToolContext {
   timesheet: TimesheetService;
   /** Comments and change history of an issue — the task detail's reads and writes. */
   activity: TaskActivity;
+  /** Component / version option lists, issue links, watchers — what the task detail reads from Jira. */
+  extras: TaskExtras;
 }
 
 export interface ToolOutcome {

@@ -22,7 +22,7 @@ const team: JiraUser[] = [
 const project = (): Task[] => [
   task({ id: "P-1", summary: "Phase A", issueType: "Epic" }),
   task({ id: "P-2", summary: "Thiết kế màn hình đăng nhập", issueType: "Story", wbsParentId: "P-1", assigneeAccountId: "lan", assigneeName: "Trần Lan", priority: "High", labels: ["ui", "urgent"], dueDate: "2026-10-05" }),
-  task({ id: "P-3", summary: "Viết API thanh toán", wbsParentId: "P-1", assigneeAccountId: "q1", assigneeName: "Võ Đình Quang", priority: "Low", labels: ["backend"] }),
+  task({ id: "P-3", summary: "Viết API thanh toán", wbsParentId: "P-1", assigneeAccountId: "q1", assigneeName: "Võ Đình Quang", priority: "Low", labels: ["backend"], components: ["Backend"], fixVersions: ["1.0"] }),
   task({ id: "P-4", summary: "Kiểm thử", issueType: "Sub-task", wbsParentId: "P-2", statusName: "Done", statusCategory: "done" }),
   task({ id: "P-5", summary: "Kiểm thử", issueType: "Sub-task", wbsParentId: "P-3" }),
 ];
@@ -49,6 +49,10 @@ function makeCtx(tasks: Task[] = project()) {
         calls.created.push(input);
         return task({ id: "P-99", summary: input.summary, issueType: input.issueType as Task["issueType"] });
       },
+    },
+    extras: {
+      components: async () => [{ id: "1", name: "Backend" }, { id: "2", name: "UI" }],
+      versions: async () => [{ id: "1", name: "1.0", archived: false }, { id: "2", name: "1.1", archived: false }, { id: "3", name: "0.9", archived: true }],
     },
     activity: {
       addComment: async (id: string, text: string) => {
@@ -329,5 +333,59 @@ describe("get_task_comments / get_task_history (1.3, 1.4)", () => {
     const { ctx } = makeCtx();
     assert.ok("error" in (await run("get_task_comments", { taskId: "ZZ-1" }, ctx)).response);
     assert.ok("error" in (await run("get_task_history", { taskId: "ZZ-1" }, ctx)).response);
+  });
+});
+
+describe("components, versions, parent and type via update_task / search_tasks (phase 2 · stage 2)", () => {
+  it("adds a component by its spoken name, written as the project spells it, as the full set", async () => {
+    const { ctx, calls } = makeCtx();
+    await run("update_task", { taskId: "P-3", addComponents: ["ui"] }, ctx);
+    assert.deepEqual(calls.updates[0].input.components, ["Backend", "UI"]);
+  });
+
+  it("removes one and keeps the rest", async () => {
+    const { ctx, calls } = makeCtx();
+    await run("update_task", { taskId: "P-3", removeComponents: ["BACKEND"] }, ctx);
+    assert.deepEqual(calls.updates[0].input.components, []);
+  });
+
+  it("a name the project does not define is refused and lists the real ones — nothing is written", async () => {
+    const { ctx, calls } = makeCtx();
+    const out = await run("update_task", { taskId: "P-3", addComponents: ["Mobile"] }, ctx);
+    assert.equal(calls.updates.length, 0);
+    assert.deepEqual(out.response.available, ["Backend", "UI"]);
+  });
+
+  it("an archived version is not offered, one already set can still be removed", async () => {
+    const { ctx, calls } = makeCtx();
+    const refused = await run("update_task", { taskId: "P-3", addFixVersions: ["0.9"] }, ctx);
+    assert.ok("error" in refused.response);
+    await run("update_task", { taskId: "P-3", addFixVersions: ["1.1"], removeFixVersions: ["1.0"] }, ctx);
+    assert.deepEqual(calls.updates[0].input.fixVersions, ["1.1"]);
+  });
+
+  it("moves a task under a parent, or off its parent with 'none'", async () => {
+    const { ctx, calls } = makeCtx();
+    await run("update_task", { taskId: "P-3", parentKey: "p-1" }, ctx);
+    await run("update_task", { taskId: "P-3", parentKey: "none" }, ctx);
+    assert.deepEqual(calls.updates.map((u) => u.input.parentKey), ["P-1", null]);
+    assert.ok("error" in (await run("update_task", { taskId: "P-3", parentKey: "ZZ-9" }, ctx)).response);
+  });
+
+  it("changes the type only when it is different", async () => {
+    const { ctx, calls } = makeCtx();
+    await run("update_task", { taskId: "P-3", issueType: "Bug" }, ctx);
+    assert.equal(calls.updates[0].input.issueType, "Bug");
+    const same = await run("update_task", { taskId: "P-3", issueType: "task" }, ctx);
+    assert.equal(calls.updates.length, 1);
+    assert.ok("error" in same.response);
+  });
+
+  it("search_tasks finds by component and by version", async () => {
+    const { ctx } = makeCtx();
+    const ids = (o: { response: Record<string, unknown> }) => (o.response.tasks as Array<{ id: string }>).map((t) => t.id);
+    assert.deepEqual(ids(await run("search_tasks", { component: "backend" }, ctx)), ["P-3"]);
+    assert.deepEqual(ids(await run("search_tasks", { version: "1.0" }, ctx)), ["P-3"]);
+    assert.deepEqual(ids(await run("search_tasks", { version: "2.0" }, ctx)), []);
   });
 });

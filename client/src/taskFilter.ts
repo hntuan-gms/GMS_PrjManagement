@@ -19,7 +19,19 @@ export interface TaskFilter {
   /** Epic keys — a task matches through its nearest Epic ancestor (or itself). */
   epics: Set<string>;
   labels: Set<string>;
+  /** Component names. */
+  components: Set<string>;
+  /** Fix version names. */
+  versions: Set<string>;
+  /** Sprint names (the sprint a task is in — see Task.sprint). */
+  sprints: Set<string>;
   onlyOverdue: boolean;
+  /**
+   * A JQL the user typed, which Jira — not this code — evaluates. Only the text lives
+   * here (it is remembered with the rest of the filter); the matching issue keys are
+   * fetched by ProjectWorkspace and arrive through FilterContext.jqlKeys.
+   */
+  jql: string;
 }
 
 export const EMPTY_TASK_FILTER: TaskFilter = {
@@ -29,7 +41,11 @@ export const EMPTY_TASK_FILTER: TaskFilter = {
   types: new Set(),
   epics: new Set(),
   labels: new Set(),
+  components: new Set(),
+  versions: new Set(),
+  sprints: new Set(),
   onlyOverdue: false,
+  jql: "",
 };
 
 export function isTaskFiltering(f: TaskFilter): boolean {
@@ -40,6 +56,10 @@ export function isTaskFiltering(f: TaskFilter): boolean {
     f.types.size > 0 ||
     f.epics.size > 0 ||
     f.labels.size > 0 ||
+    f.components.size > 0 ||
+    f.versions.size > 0 ||
+    f.sprints.size > 0 ||
+    !!f.jql.trim() ||
     f.onlyOverdue
   );
 }
@@ -52,6 +72,10 @@ export function facetCount(f: TaskFilter): number {
     (f.types.size > 0 ? 1 : 0) +
     (f.epics.size > 0 ? 1 : 0) +
     (f.labels.size > 0 ? 1 : 0) +
+    (f.components.size > 0 ? 1 : 0) +
+    (f.versions.size > 0 ? 1 : 0) +
+    (f.sprints.size > 0 ? 1 : 0) +
+    (f.jql.trim() ? 1 : 0) +
     (f.onlyOverdue ? 1 : 0)
   );
 }
@@ -84,6 +108,12 @@ export function buildEpicIndex(tasks: Task[]): Map<string, string | null> {
 export interface FilterContext {
   today: string;
   epicOf: Map<string, string | null>;
+  /**
+   * Issue keys Jira returned for `filter.jql`. Null while they have not arrived (or
+   * the JQL failed): the JQL then restricts nothing, rather than blanking the chart
+   * for the length of a request or because of a typo.
+   */
+  jqlKeys?: Set<string> | null;
 }
 
 export function matchesTaskFilter(t: Task, f: TaskFilter, ctx: FilterContext): boolean {
@@ -99,6 +129,10 @@ export function matchesTaskFilter(t: Task, f: TaskFilter, ctx: FilterContext): b
     if (!f.epics.has(epic)) return false;
   }
   if (f.labels.size > 0 && !t.labels.some((l) => f.labels.has(l))) return false;
+  if (f.components.size > 0 && !t.components.some((c) => f.components.has(c))) return false;
+  if (f.versions.size > 0 && !t.fixVersions.some((v) => f.versions.has(v))) return false;
+  if (f.sprints.size > 0 && !(t.sprint && f.sprints.has(t.sprint.name))) return false;
+  if (f.jql.trim() && ctx.jqlKeys && !ctx.jqlKeys.has(t.id)) return false;
   if (f.onlyOverdue && !isOverdueTask(t, ctx.today)) return false;
   return true;
 }
@@ -119,7 +153,11 @@ interface Stored {
   types?: string[];
   epics?: string[];
   labels?: string[];
+  components?: string[];
+  versions?: string[];
+  sprints?: string[];
   onlyOverdue?: boolean;
+  jql?: string;
 }
 
 function load(key: string): TaskFilter {
@@ -135,7 +173,11 @@ function load(key: string): TaskFilter {
       types: arr(s.types),
       epics: arr(s.epics),
       labels: arr(s.labels),
+      components: arr(s.components),
+      versions: arr(s.versions),
+      sprints: arr(s.sprints),
       onlyOverdue: s.onlyOverdue === true,
+      jql: typeof s.jql === "string" ? s.jql : "",
     };
   } catch {
     return EMPTY_TASK_FILTER;
@@ -150,7 +192,11 @@ function save(key: string, f: TaskFilter): void {
       types: [...f.types],
       epics: [...f.epics],
       labels: [...f.labels],
+      components: [...f.components],
+      versions: [...f.versions],
+      sprints: [...f.sprints],
       onlyOverdue: f.onlyOverdue,
+      jql: f.jql,
     };
     localStorage.setItem(key, JSON.stringify(s));
   } catch {

@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { TaskActivity } from "../taskActivity.js";
+import { TaskExtras } from "../taskExtras.js";
 import { TimesheetService } from "../timesheet.js";
 import { AttachmentError, CHAT_BODY_LIMIT, parseAttachments, type ParsedAttachments } from "../ai/attachments.js";
 import { priceFor, priceTable } from "../ai/pricing.js";
@@ -255,6 +256,7 @@ aiRouter.post("/chat", requireProject, express.json({ limit: CHAT_BODY_LIMIT }),
       accountId: session.accountId,
       boardService: boardServiceFor(req),
       activity: new TaskActivity(req.auth!.jira, session.accountId),
+      extras: new TaskExtras(req.auth!.jira, { projectKey: session.projectKey!, accountId: session.accountId }),
       timesheet: new TimesheetService(req.auth!.jira, {
         cloudId: session.cloudId,
         projectKey: session.projectKey!,

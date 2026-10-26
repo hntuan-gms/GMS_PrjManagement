@@ -8,7 +8,11 @@ import NumberInput from "./NumberInput";
 import { HOURS_PER_DAY, localToday, roundHours } from "../taskForm";
 import DurationHint from "./DurationHint";
 import LabelsInput from "./LabelsInput";
+import NamePicker from "./NamePicker";
 import TaskDiscussion from "./TaskDiscussion";
+import TaskLinks from "./TaskLinks";
+import TaskWatchers from "./TaskWatchers";
+import { parentOptions, typeBlockedReason, type TypeInfo } from "../structure";
 
 interface Props {
   task: Task;
@@ -41,6 +45,15 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
   const [statusTransition, setStatusTransition] = useState("");
   const [priority, setPriority] = useState(task.priority ?? "");
   const [labels, setLabels] = useState<string[]>(task.labels);
+  const [components, setComponents] = useState<string[]>(task.components);
+  const [fixVersions, setFixVersions] = useState<string[]>(task.fixVersions);
+  const [issueType, setIssueType] = useState<string>(task.issueType);
+  const [parentKey, setParentKey] = useState(task.wbsParentId ?? "");
+  // Option lists come from Jira and only decorate the form, like priorities: a failed
+  // load leaves the current value in place and editable.
+  const [componentOptions, setComponentOptions] = useState<string[]>([]);
+  const [versionOptions, setVersionOptions] = useState<string[]>([]);
+  const [typeOptions, setTypeOptions] = useState<TypeInfo[]>([]);
   // Both lists come from Jira; they only decorate the form, so a failure leaves
   // the current value editable rather than blocking the save.
   const [priorityOptions, setPriorityOptions] = useState<string[]>([]);
@@ -88,6 +101,18 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
       .listLabels()
       .then((l) => alive && setLabelSuggestions(l))
       .catch(() => {});
+    api
+      .listComponents()
+      .then((c) => alive && setComponentOptions(c.map((x) => x.name)))
+      .catch(() => {});
+    api
+      .listVersions()
+      .then((v) => alive && setVersionOptions(v.filter((x) => !x.archived).map((x) => x.name)))
+      .catch(() => {});
+    api
+      .listIssueTypes()
+      .then((t) => alive && setTypeOptions(t))
+      .catch(() => {});
     return () => {
       alive = false;
     };
@@ -97,6 +122,11 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
     (t) => t.id !== task.id && !predecessors.some((p) => p.taskId === t.id)
   );
   const calendarDays = Math.max(1, Math.ceil(durationDays));
+  const isEpicType = issueType.toLowerCase() === "epic";
+  const parents = parentOptions(allTasks, task, typeOptions, issueType);
+  // An Epic has no parent, whatever the select last held.
+  const effectiveParent = isEpicType ? "" : parentKey;
+  const subtaskPicked = typeOptions.find((t) => t.name === issueType)?.subtask ?? false;
 
   function changeDuration(n: number | null) {
     if (n === null) return;
@@ -110,6 +140,7 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
     try {
       const labelsChanged =
         [...labels].sort().join("\n") !== [...task.labels].sort().join("\n");
+      const sameSet = (a: string[], b: string[]) => [...a].sort().join("\n") === [...b].sort().join("\n");
       const priorityChanged = priority !== "" && priority !== (task.priority ?? "");
       const estimateChanged = estimate !== null && estimate > 0 && estimate !== roundHours(task.estimateHours ?? -1);
       await onSave({
@@ -123,6 +154,10 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
         ...(statusTransition ? { statusTransition } : {}),
         ...(priorityChanged ? { priority } : {}),
         ...(labelsChanged ? { labels } : {}),
+        ...(!sameSet(components, task.components) ? { components } : {}),
+        ...(!sameSet(fixVersions, task.fixVersions) ? { fixVersions } : {}),
+        ...(issueType !== task.issueType ? { issueType } : {}),
+        ...(effectiveParent !== (task.wbsParentId ?? "") ? { parentKey: effectiveParent || null } : {}),
         ...(estimateChanged ? { estimateHours: estimate! } : {}),
       });
       if (hasPending(pending)) {
@@ -359,6 +394,58 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
           </div>
         </div>
 
+        <div className="field-row">
+          <label className="field">
+            <span>Loại công việc</span>
+            <select value={issueType} onChange={(e) => setIssueType(e.target.value)}>
+              {!typeOptions.some((t) => t.name === issueType) && <option value={issueType}>{issueType}</option>}
+              {typeOptions.map((t) => {
+                const why = typeBlockedReason(allTasks, task, t);
+                return (
+                  <option key={t.name} value={t.name} disabled={!!why}>
+                    {t.name}
+                    {why ? ` (${why})` : ""}
+                  </option>
+                );
+              })}
+            </select>
+            {issueType !== task.issueType && (
+              <small className="field-note">Jira chỉ đổi được khi quy trình và màn hình của hai loại tương thích.</small>
+            )}
+          </label>
+          <label className="field">
+            <span>Việc cha</span>
+            <select value={effectiveParent} disabled={isEpicType} onChange={(e) => setParentKey(e.target.value)}>
+              <option value="">{subtaskPicked ? "— Chọn việc cha —" : "— Không có —"}</option>
+              {/* The current parent stays selectable even if it is not a valid choice any more. */}
+              {effectiveParent && !parents.some((p) => p.id === effectiveParent) && <option value={effectiveParent}>{effectiveParent}</option>}
+              {parents.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.id} · {p.summary.slice(0, 40)}
+                </option>
+              ))}
+            </select>
+            {isEpicType && <small className="field-note">Epic không có việc cha.</small>}
+          </label>
+          <div className="field">
+            <span>Sprint</span>
+            <span className="field-note">
+              {task.sprint ? `${task.sprint.name}${task.sprint.state === "active" ? " (đang chạy)" : task.sprint.state === "closed" ? " (đã đóng)" : ""}` : "Chưa vào sprint"}
+            </span>
+          </div>
+        </div>
+
+        <div className="field-row">
+          <div className="field field-wide">
+            <span>Thành phần (components)</span>
+            <NamePicker value={components} options={componentOptions} onChange={setComponents} placeholder="+ Thêm thành phần…" emptyHint="Dự án chưa có thành phần nào." />
+          </div>
+          <div className="field field-wide">
+            <span>Phiên bản sửa lỗi / phát hành (fix versions)</span>
+            <NamePicker value={fixVersions} options={versionOptions} onChange={setFixVersions} placeholder="+ Thêm phiên bản…" emptyHint="Dự án chưa có phiên bản nào." />
+          </div>
+        </div>
+
         <div className="field">
           <span>Đính kèm &amp; liên kết</span>
           {existing && (existing.files.length > 0 || existing.links.length > 0) && (
@@ -429,6 +516,9 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
             <button onClick={addPredecessor}>+ Thêm</button>
           </div>
         </div>
+
+        <TaskLinks task={task} allTasks={allTasks} />
+        <TaskWatchers taskId={task.id} />
 
         <TaskDiscussion taskId={task.id} members={users} myAccountId={myAccountId} />
 

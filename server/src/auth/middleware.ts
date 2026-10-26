@@ -7,7 +7,7 @@
 import type { NextFunction, Request, Response } from "express";
 import { AtlassianAuthError } from "./atlassian.js";
 import { authRequired, noProjectSelected, staffOnly } from "../errors.js";
-import { getStartDateFieldId, startDateFieldOverride } from "../fieldDiscovery.js";
+import { getSprintFieldId, getStartDateFieldId, startDateFieldOverride } from "../fieldDiscovery.js";
 import { JiraClient } from "../jiraClient.js";
 import { TaskService } from "../taskService.js";
 import { clearAuthCookies } from "./cookies.js";
@@ -22,6 +22,7 @@ export interface RequestAuth {
   /** Only present once a project has been chosen (i.e. behind requireProject). */
   taskService: TaskService | null;
   startDateFieldId: string | null;
+  sprintFieldId: string | null;
 }
 
 /**
@@ -64,12 +65,16 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     const startDateFieldId =
       startDateFieldOverride() ?? (await getStartDateFieldId(jira, session.cloudId));
 
+    // One /field call serves both lookups (each caches per site for an hour).
+    const sprintFieldId = await getSprintFieldId(jira, session.cloudId);
+
     req.auth = {
       session,
       accessToken: result.accessToken,
       jira,
       taskService: null,
       startDateFieldId,
+      sprintFieldId,
     };
     next();
   } catch (err) {
@@ -103,6 +108,7 @@ export function requireProject(req: Request, _res: Response, next: NextFunction)
     siteUrl: auth.session.siteUrl,
     projectKey: auth.session.projectKey,
     startDateFieldId: auth.startDateFieldId,
+    sprintFieldId: auth.sprintFieldId,
   });
   next();
 }

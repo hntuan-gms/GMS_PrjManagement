@@ -101,3 +101,37 @@ Test tự động đã chứng minh phần code của ta; mục này chứng min
 | B18 | Đính kèm PDF và một file .md | Trợ lý đọc nội dung | |
 | B19 | Gửi tệp .exe hoặc >5 MB | Bị từ chối ngay, nói rõ lý do | |
 | B20 | Sau lượt có tệp, hỏi "như ảnh lúc nãy thì sao" | Trợ lý nói không còn thấy ảnh (không bịa nội dung) | |
+
+---
+
+## C. Giai đoạn 2 (chi tiết task và Gantt) — thử trên Jira thật
+
+Test tự động đã chứng minh phần giao diện và logic của ta với máy chủ giả; mục này chứng minh **Jira nhận và trả đúng**. Dùng dự án thử.
+
+| # | Thao tác | Phải thấy | Kết quả |
+|---|---|---|---|
+| C1 | Mở một task, thêm 1 thành phần và 1 phiên bản, lưu | Components / Fix versions trong Jira đúng; bỏ đi cũng bỏ thật | |
+| C2 | Dự án chưa có thành phần/phiên bản nào | Ô chọn ghi "Dự án chưa có…", không lỗi | |
+| C3 | Cột Sprint trên WBS, lọc theo Sprint — **không bật JIRA_AGILE** | Có tên sprint đúng (đang chạy ưu tiên); site không có Jira Software thì cột trống, không lỗi | |
+| C4 | Đổi việc cha của một Story sang Epic khác | Parent trong Jira đổi; Story chuyển nhóm trên WBS sau khi lưu | |
+| C5 | Bỏ việc cha ("— Không có —") của một Story dưới Epic | Jira nhận (`parent: null`) hoặc báo lỗi dễ hiểu — **ghi lại kết quả**, đây là chỗ chưa chắc | |
+| C6 | Đổi loại Task → Story (cùng quy trình), rồi thử loại khác quy trình | Cái đầu được; cái sau Jira từ chối và lời báo hiện trong modal | |
+| C7 | Thử tạo vòng: đặt Epic A làm con của Story thuộc A (qua trợ lý: "chuyển GPM-1 vào GPM-5") | Bị chặn trước khi gọi Jira, thông báo "vòng lặp" | |
+| C8 | Task đang có người phụ trách → đổi sang Epic | Bị chặn, nói phải bỏ người phụ trách | |
+| C9 | Thêm issue link "blocks" từ A sang B | Trong Jira: A **blocks** B (B "is blocked by" A) — **kiểm tra chiều**, đây là chỗ dễ ngược | |
+| C10 | Thêm link với task thuộc **dự án khác**; gỡ link | Được; gỡ xong biến mất trong Jira | |
+| C11 | Link "blocks" có làm dời lịch không? | **Không** (khác với mục Phụ thuộc) | |
+| C12 | Bấm Theo dõi / bỏ theo dõi | Jira hiện bạn trong Watchers; tài khoản không có quyền xem danh sách thì chỉ thấy số lượng + ghi chú | |
+| C13 | JQL: `assignee = currentUser() AND status != Done ORDER BY created` | Lọc đúng; có câu "Jira trả N việc"; ORDER BY không gây lỗi | |
+| C14 | JQL sai cú pháp / tên trường sai | Lỗi của Jira hiện cạnh ô, biểu đồ không bị trống | |
+| C15 | JQL cố mở rộng phạm vi: `status = Done) OR (project = KHAC` | Chỉ còn việc của dự án đang mở | |
+| C16 | Lưu bộ lọc có "Của tôi", chia sẻ; đăng nhập tài khoản khác mở | Người kia thấy bộ lọc; "Của tôi" áp lên **chính họ**; họ không xoá/sửa được của bạn | |
+| C17 | Đặt baseline cho cả dự án, rồi kéo vài thanh | Dải baseline đứng yên, thanh dời; dải đỏ khi trễ; Báo cáo (% kế hoạch) đổi theo | |
+| C18 | Đặt/xoá baseline: Jira có bị ghi gì không? | **Không** có thay đổi nào trong History của issue | |
+| C19 | Gắn nhãn `milestone` cho một task; tạo Version có ngày phát hành | Hình thoi ở cuối thanh; đường dọc cắm đúng ngày phát hành ở cả chế độ Ngày/Tuần/Tháng | |
+| C20 | Kéo thanh có phụ thuộc (đẩy việc sau), rồi Hoàn tác / Ctrl+Z | Cả thanh kéo và việc bị đẩy về đúng chỗ cũ, **trong Jira** (đối chiếu Due date) | |
+| C21 | Hoàn tác khi đang gõ ô tìm kiếm | Không hoàn tác bản kế hoạch | |
+| C22 | Nhập ~40 dòng (dán từ Excel) gồm Epic → Story → Sub-task bằng cột "Việc cha" là số dòng | Đúng cây trong Jira; chia thành nhiều đợt vẫn đúng cha | |
+| C23 | Dòng có ngày sai, người trùng tên, việc cha lỗi | Bị chặn/báo đúng số dòng của bảng; các dòng còn lại vẫn tạo | |
+| C24 | Nhập 150 dòng | Không bị cắt giữa chừng (đợt 25 dòng/lần); thời gian chấp nhận được | |
+| C25 | Trợ lý: "thêm thành phần Backend cho GPM-5", "chuyển GPM-5 vào Epic GPM-2", "đổi GPM-5 thành Bug" | Làm đúng; tên sai thì liệt kê tên có sẵn | |

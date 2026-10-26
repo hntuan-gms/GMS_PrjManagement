@@ -514,6 +514,9 @@ export class JiraClient {
     startDateFieldId?: string | null;
     assigneeAccountId?: string | null;
     labels?: string[];
+    components?: string[];
+    fixVersions?: string[];
+    priority?: string;
   }): Promise<{ id: string; key: string }> {
     const fields: Record<string, unknown> = {
       project: { key: input.projectKey },
@@ -526,6 +529,9 @@ export class JiraClient {
     if (input.startDate && input.startDateFieldId) fields[input.startDateFieldId] = input.startDate;
     if (input.assigneeAccountId) fields.assignee = { accountId: input.assigneeAccountId };
     if (input.labels && input.labels.length > 0) fields.labels = input.labels;
+    if (input.components && input.components.length > 0) fields.components = input.components.map((name) => ({ name }));
+    if (input.fixVersions && input.fixVersions.length > 0) fields.fixVersions = input.fixVersions.map((name) => ({ name }));
+    if (input.priority) fields.priority = { name: input.priority };
     return this.request(`/rest/api/3/issue`, { method: "POST", body: JSON.stringify({ fields }) });
   }
 
@@ -610,6 +616,86 @@ export class JiraClient {
       startAt += res.values.length;
     }
     return out;
+  }
+
+  /** Project components, for the picker and for validating a name before it is written. */
+  async getProjectComponents(projectKey: string): Promise<Array<{ id: string; name: string; description?: string }>> {
+    return this.request(`/rest/api/3/project/${encodeURIComponent(projectKey)}/components`);
+  }
+
+  /** Project versions (releases), newest first as Jira lists them. */
+  async getProjectVersions(
+    projectKey: string
+  ): Promise<Array<{ id: string; name: string; released?: boolean; archived?: boolean; releaseDate?: string; startDate?: string; description?: string }>> {
+    return this.request(`/rest/api/3/project/${encodeURIComponent(projectKey)}/versions`);
+  }
+
+  async getIssueLinkTypes(): Promise<Array<{ id: string; name: string; inward: string; outward: string }>> {
+    const res = await this.request<{ issueLinkTypes?: Array<{ id: string; name: string; inward: string; outward: string }> }>(
+      `/rest/api/3/issueLinkType`
+    );
+    return res.issueLinkTypes ?? [];
+  }
+
+  /** The issue's links only — the rest of the issue is not needed to show them. */
+  async getIssueLinks(key: string): Promise<any[]> {
+    const issue = await this.request<{ fields?: { issuelinks?: any[] } }>(
+      `/rest/api/3/issue/${encodeURIComponent(key)}?fields=issuelinks`
+    );
+    return issue.fields?.issuelinks ?? [];
+  }
+
+  /** `outwardKey` is the issue the type's outward text ("blocks") is said of; `inwardKey` the one it is said to. */
+  async createIssueLink(typeName: string, inwardKey: string, outwardKey: string): Promise<void> {
+    await this.request(`/rest/api/3/issueLink`, {
+      method: "POST",
+      body: JSON.stringify({ type: { name: typeName }, inwardIssue: { key: inwardKey }, outwardIssue: { key: outwardKey } }),
+    });
+  }
+
+  async deleteIssueLink(linkId: string): Promise<void> {
+    await this.request(`/rest/api/3/issueLink/${encodeURIComponent(linkId)}`, { method: "DELETE" });
+  }
+
+  async getWatchers(key: string): Promise<{ isWatching: boolean; watchCount: number; watchers?: any[] }> {
+    return this.request(`/rest/api/3/issue/${encodeURIComponent(key)}/watchers`);
+  }
+
+  async addWatcher(key: string, accountId: string): Promise<void> {
+    // The body is a bare JSON string, not an object — Jira's own quirk.
+    await this.request(`/rest/api/3/issue/${encodeURIComponent(key)}/watchers`, {
+      method: "POST",
+      body: JSON.stringify(accountId),
+    });
+  }
+
+  async removeWatcher(key: string, accountId: string): Promise<void> {
+    await this.request(
+      `/rest/api/3/issue/${encodeURIComponent(key)}/watchers?accountId=${encodeURIComponent(accountId)}`,
+      { method: "DELETE" }
+    );
+  }
+
+  /**
+   * Issue keys matching a JQL the user typed, capped. The caller decides what the
+   * query means (taskExtras.jqlKeys); this only pages. `truncated` says the cap cut
+   * the list short, so the screen can say so instead of silently showing a subset.
+   */
+  async searchKeys(jql: string, cap: number): Promise<{ keys: string[]; truncated: boolean }> {
+    const keys: string[] = [];
+    let nextPageToken: string | undefined;
+    do {
+      const body: Record<string, unknown> = { jql, fields: ["summary"], maxResults: 100 };
+      if (nextPageToken) body.nextPageToken = nextPageToken;
+      const page = await this.request<{ issues: Array<{ key: string }>; nextPageToken?: string }>(
+        "/rest/api/3/search/jql",
+        { method: "POST", body: JSON.stringify(body) }
+      );
+      keys.push(...page.issues.map((i) => i.key));
+      nextPageToken = page.nextPageToken;
+      if (keys.length >= cap) return { keys: keys.slice(0, cap), truncated: keys.length > cap || !!nextPageToken };
+    } while (nextPageToken);
+    return { keys, truncated: false };
   }
 
   async getFields(): Promise<Array<{ id: string; name: string; custom: boolean; schema?: { type?: string; custom?: string } }>> {

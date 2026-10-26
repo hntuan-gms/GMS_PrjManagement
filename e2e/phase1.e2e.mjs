@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const OUT = path.join(path.dirname(fileURLToPath(import.meta.url)), "shots");
 fs.mkdirSync(OUT, { recursive: true });
+const localToday = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 const API = process.env.E2E_API ?? "http://localhost:4000";
 const APP = process.env.E2E_APP ?? "http://localhost:5173/";
 
@@ -290,9 +291,9 @@ await step("tạo nhanh có chọn loại + người", async () => {
 console.log("\n== Báo cáo ==");
 await step("lọc theo người → số công việc khớp đúng máy chủ", async () => {
   await tab("Báo cáo"); await page.waitForSelector(".pr-filters");
-  const all = (await mock("/api/progress?asOf=" + new Date().toISOString().slice(0, 10))).metrics.counts.total;
+  const all = (await mock("/api/progress?asOf=" + localToday())).metrics.counts.total;
   await page.locator(".pr-filter", { hasText: "Người phụ trách" }).locator("select").selectOption({ label: "Nguyễn Anh" });
-  const want = (await mock("/api/progress?asOf=" + new Date().toISOString().slice(0, 10) + "&assignee=anh")).metrics.counts.total;
+  const want = (await mock("/api/progress?asOf=" + localToday() + "&assignee=anh")).metrics.counts.total;
   assert.ok(want < all, "dữ liệu thử không đủ để phân biệt");
   await page.waitForFunction((w) => document.querySelector(".pr-sub")?.textContent.includes(w + " công việc"), want);
   assert.ok((await page.textContent(".rv-notice")).includes("một phần"));

@@ -149,6 +149,7 @@ function systemPrompt(projectKey: string, tasks: Task[], today: string, team: Ji
     "  Lịch các việc phía sau tự dời theo; hãy báo lại việc nào đã bị dời (alsoMoved).",
     "- Cần chi tiết một việc (mô tả, việc con, phụ thuộc, trạng thái được phép) → get_task. Tìm việc theo chữ/người/trạng thái → search_tasks.",
     "- Đổi độ ưu tiên / nhãn → update_task (priority; addLabels, removeLabels — không cần đọc nhãn cũ). Tìm việc theo nhãn, ưu tiên, sprint → search_tasks.",
+    "- Thành phần (component), phiên bản (fix version), chuyển việc sang cha khác, đổi loại → update_task (addComponents/removeComponents, addFixVersions/removeFixVersions, parentKey, issueType). Tên thành phần/phiên bản phải có sẵn trong dự án; hệ thống tự khớp và báo lại danh sách nếu sai.",
     "- Đọc bình luận → get_task_comments. Viết bình luận / nhắn ai đó trong một việc → add_comment; tên người cần báo đưa vào mentions (Jira sẽ gửi thông báo cho họ).",
     "  Chỉ đăng bình luận khi người dùng bảo; tên mơ hồ thì hỏi lại, không đoán.",
     "- Lịch sử thay đổi (ai đổi gì, khi nào) → get_task_history.",

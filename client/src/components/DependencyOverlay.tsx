@@ -1,6 +1,7 @@
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { anchorPoint, buildDependencyPath, type BarRect } from "../dependencyGeometry";
+import { anchorPoint, buildDependencyPath } from "../dependencyGeometry";
+import { useBarRects } from "../useBarRects";
 import type { DependencyType, Task } from "../types";
 
 interface Props {
@@ -67,58 +68,10 @@ export default function DependencyOverlay({
   onEditDependency,
   onDeleteDependency,
 }: Props) {
-  const [portalTarget, setPortalTarget] = useState<SVGSVGElement | null>(null);
-  const [rects, setRects] = useState<Map<string, BarRect>>(new Map());
+  const { portalTarget, rects } = useBarRects(bodyEl, rows, measureKey);
   const [hover, setHover] = useState<{ taskId: string; edge: "start" | "end" } | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
   const [selected, setSelected] = useState<SelectedEdge | null>(null);
-
-  // Always current, read from inside the long-lived MutationObserver callback
-  // below rather than `rows` directly, which would otherwise close over a stale
-  // array from whichever render first set up the observer.
-  const rowsRef = useRef(rows);
-  rowsRef.current = rows;
-
-  useLayoutEffect(() => {
-    if (!bodyEl) return;
-
-    function measure() {
-      const contentG = bodyEl!.querySelector("g.content");
-      const svg = contentG?.closest("svg") as SVGSVGElement | null;
-      setPortalTarget((prev) => (prev === svg ? prev : svg));
-      if (!svg) return;
-      const barGroups = svg.querySelectorAll("g.bar > g");
-      const next = new Map<string, BarRect>();
-      barGroups.forEach((g, i) => {
-        const task = rowsRef.current[i];
-        const rect = task && g.querySelector("g[tabindex] rect");
-        if (!task || !rect) return;
-        next.set(task.id, {
-          x: parseFloat(rect.getAttribute("x") ?? "0"),
-          y: parseFloat(rect.getAttribute("y") ?? "0"),
-          width: parseFloat(rect.getAttribute("width") ?? "0"),
-          height: parseFloat(rect.getAttribute("height") ?? "0"),
-        });
-      });
-      setRects(next);
-    }
-
-    measure();
-
-    // gantt-task-react recomputes bar x/y/width/height (e.g. after a viewMode
-    // change) through its own internal effects, which can land a render *after*
-    // the one that changed measureKey — measuring only on measureKey can then
-    // read stale (pre-recompute) positions. Watching the actual bar attributes
-    // catches the library's real final DOM state regardless of its own timing.
-    const observer = new MutationObserver(measure);
-    observer.observe(bodyEl, {
-      subtree: true,
-      attributes: true,
-      attributeFilter: ["x", "y", "width", "height"],
-    });
-    return () => observer.disconnect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bodyEl, measureKey]);
 
   const dependencies = useMemo(() => {
     const edges: Array<{ predId: string; succId: string; type: DependencyType; lagDays: number }> = [];

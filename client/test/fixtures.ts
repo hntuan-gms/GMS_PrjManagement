@@ -22,6 +22,9 @@ const base: Task = {
   spentHours: null,
   priority: "Medium",
   labels: [],
+  components: [],
+  fixVersions: [],
+  sprint: null,
   jiraUrl: "",
 };
 

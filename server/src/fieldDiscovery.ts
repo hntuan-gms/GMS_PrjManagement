@@ -16,6 +16,23 @@ const TTL_MS = 60 * 60 * 1000;
 
 const cache = new Map<string, { value: string | null; expiresAt: number }>();
 
+type JiraField = Awaited<ReturnType<JiraClient["getFields"]>>[number];
+const fieldList = new Map<string, { fields: Promise<JiraField[]>; expiresAt: number }>();
+
+/**
+ * The site's field list, fetched once per hour and shared by every lookup below: the
+ * Start date and Sprint fields are both found in it, and each request would otherwise
+ * pay for GET /field twice while either answer is cold. A failed fetch is not kept.
+ */
+function fieldsOf(jira: JiraClient, cloudId: string): Promise<JiraField[]> {
+  const hit = fieldList.get(cloudId);
+  if (hit && hit.expiresAt > Date.now()) return hit.fields;
+  const fields = jira.getFields();
+  fieldList.set(cloudId, { fields, expiresAt: Date.now() + TTL_MS });
+  fields.catch(() => fieldList.delete(cloudId));
+  return fields;
+}
+
 /** Jira's datepicker custom field types, in schema.custom. */
 const DATE_FIELD_TYPES = [
   "com.atlassian.jira.plugin.system.customfieldtypes:datepicker",
@@ -35,7 +52,7 @@ export async function getStartDateFieldId(jira: JiraClient, cloudId: string): Pr
 
   let value: string | null = null;
   try {
-    const fields = await jira.getFields();
+    const fields = await fieldsOf(jira, cloudId);
     const match =
       fields.find(
         (f) =>
@@ -54,6 +71,32 @@ export async function getStartDateFieldId(jira: JiraClient, cloudId: string): Pr
   }
 
   cache.set(cloudId, { value, expiresAt: Date.now() + TTL_MS });
+  return value;
+}
+
+const sprintCache = new Map<string, { value: string | null; expiresAt: number }>();
+
+/**
+ * The site's Sprint field, or null when it has none (no Jira Software, or a
+ * team-managed project that keeps sprints elsewhere). Readable with the ordinary
+ * `read:jira-work` scope, which is why Task.sprint does not wait for JIRA_AGILE.
+ */
+export async function getSprintFieldId(jira: JiraClient, cloudId: string): Promise<string | null> {
+  const hit = sprintCache.get(cloudId);
+  if (hit && hit.expiresAt > Date.now()) return hit.value;
+  let value: string | null = null;
+  try {
+    const fields = await fieldsOf(jira, cloudId);
+    const match =
+      fields.find((f) => f.schema?.custom === "com.pyxis.greenhopper.jira:gh-sprint") ??
+      fields.find((f) => f.custom && f.name?.toLowerCase() === "sprint");
+    value = match?.id ?? null;
+  } catch (err) {
+    // Same stance as the Start date field: a failed lookup costs the Sprint column, not the request.
+    console.warn(`[fieldDiscovery] could not resolve Sprint field for ${cloudId}:`, err);
+    return null;
+  }
+  sprintCache.set(cloudId, { value, expiresAt: Date.now() + TTL_MS });
   return value;
 }
 

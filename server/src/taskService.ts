@@ -3,10 +3,14 @@ import { adfToText, textToAdf } from "./adf.js";
 import { JiraApiError, type JiraClient } from "./jiraClient.js";
 import * as store from "./store.js";
 import { isAssignableType } from "./types.js";
+import { checkStructure, type StructureNode } from "./structure.js";
+import { resolvePerson, resolvePriority } from "./ai/toolUtils.js";
 import { badRequest } from "./errors.js";
 import type {
   BulkTaskCreateInput,
   BulkTaskCreateResult,
+  ImportResult,
+  ImportRow,
   IssueTypeName,
   JiraUser,
   Predecessor,
@@ -31,7 +35,28 @@ const SEARCH_FIELDS = [
   "timespent",
   "priority",
   "labels",
+  "components",
+  "fixVersions",
 ];
+
+/** Component / version names: trimmed, de-duplicated, order kept. */
+function cleanNames(names: string[]): string[] {
+  return [...new Set(names.map((n) => n.trim()).filter(Boolean))];
+}
+
+/**
+ * The sprint to show for an issue that is in several (a carried-over one is in each
+ * it passed through): the running one, else the next, else the most recent closed.
+ */
+export function pickSprint(value: unknown): { id: number; name: string; state: string } | null {
+  if (!Array.isArray(value)) return null;
+  const sprints = value
+    .filter((s): s is { id: number; name: string; state?: string } => !!s && typeof s === "object" && typeof (s as any).id === "number" && typeof (s as any).name === "string")
+    .map((s) => ({ id: s.id, name: s.name, state: String(s.state ?? "").toLowerCase() }));
+  const rank = (state: string) => (state === "active" ? 0 : state === "future" ? 1 : 2);
+  sprints.sort((a, b) => rank(a.state) - rank(b.state) || b.id - a.id);
+  return sprints[0] ?? null;
+}
 
 /** Jira labels cannot contain whitespace; fold it to a hyphen rather than 400 on a typo. */
 function cleanLabels(labels: string[]): string[] {
@@ -66,6 +91,8 @@ export interface TaskContext {
   projectKey: string;
   /** Discovered per site; null means this site has no native Start date field. */
   startDateFieldId: string | null;
+  /** Discovered per site; null means no Jira Software, hence no Sprint column. */
+  sprintFieldId?: string | null;
 }
 
 export interface UpdateResult {
@@ -113,9 +140,7 @@ export class TaskService {
 
   async listTasks(): Promise<Task[]> {
     const jql = `project = ${this.ctx.projectKey} ORDER BY created ASC`;
-    const fields = this.ctx.startDateFieldId
-      ? [...SEARCH_FIELDS, this.ctx.startDateFieldId]
-      : SEARCH_FIELDS;
+    const fields = this.searchFields(true);
     // The whole project's overlays in one read, and one write for whatever
     // reconciliation changed. Against the old JSON file a read and a write per
     // task were free; against Postgres they are a round trip each, so a 100-task
@@ -156,6 +181,18 @@ export class TaskService {
     return tasks;
   }
 
+  /**
+   * What a search asks Jira for. The Start date field is only needed where dates are
+   * reconciled (listTasks); the Sprint field everywhere a Task is built, or a task the
+   * cascade returns would arrive with its sprint blanked.
+   */
+  private searchFields(withStartDate: boolean): string[] {
+    const fields = [...SEARCH_FIELDS];
+    if (withStartDate && this.ctx.startDateFieldId) fields.push(this.ctx.startDateFieldId);
+    if (this.ctx.sprintFieldId) fields.push(this.ctx.sprintFieldId);
+    return fields;
+  }
+
   private jiraStartDateOf(issue: any): string | null {
     if (!this.ctx.startDateFieldId) return null;
     return issue.fields?.[this.ctx.startDateFieldId] ?? null;
@@ -182,6 +219,9 @@ export class TaskService {
       spentHours: typeof f.timespent === "number" ? f.timespent / 3600 : null,
       priority: f.priority?.name ?? null,
       labels: Array.isArray(f.labels) ? f.labels : [],
+      components: Array.isArray(f.components) ? f.components.map((c: any) => String(c.name)) : [],
+      fixVersions: Array.isArray(f.fixVersions) ? f.fixVersions.map((v: any) => String(v.name)) : [],
+      sprint: this.ctx.sprintFieldId ? pickSprint(f[this.ctx.sprintFieldId]) : null,
       jiraUrl: `${this.ctx.siteUrl}/browse/${issue.key}`,
     };
   }
@@ -273,6 +313,58 @@ export class TaskService {
     return fields;
   }
 
+  /**
+   * Refuses a move in the WBS (new parent / new type) that would corrupt it. One
+   * project-wide read of parent + type, which is the price of being able to see a
+   * loop — a rare edit, so not worth caching.
+   */
+  private async assertStructure(id: string, input: TaskUpdateInput): Promise<void> {
+    this.assertOwnKey(id);
+    if (input.parentKey) this.assertOwnKey(input.parentKey);
+    const [issues, types] = await Promise.all([
+      this.jira.searchIssues(`project = ${this.ctx.projectKey}`, ["parent", "issuetype", "assignee"]),
+      this.listIssueTypes(),
+    ]);
+    const nodes: StructureNode[] = issues.map((i) => ({
+      id: i.key,
+      parentKey: i.fields?.parent?.key ?? null,
+      typeName: i.fields?.issuetype?.name ?? "",
+      subtask: !!i.fields?.issuetype?.subtask,
+      assigned: !!i.fields?.assignee,
+    }));
+    const problem = checkStructure(nodes, types, id, { parentKey: input.parentKey, issueType: input.issueType });
+    if (problem) throw badRequest(problem);
+  }
+
+  /**
+   * Saves each task's current dates as its baseline (or clears it), for the given
+   * tasks or every task. One read and one batched write, and NOTHING is written to
+   * Jira — a baseline lives only in the overlay. The read is also the permission
+   * check: only issues this user can see are touched.
+   */
+  async setBaselines(ids: string[] | null, clear: boolean): Promise<{ updated: number; skipped: number }> {
+    const tasks = await this.listTasks();
+    const wanted = ids ? new Set(ids) : null;
+    const chosen = tasks.filter((t) => !wanted || wanted.has(t.id));
+    // Without both dates there is nothing to save; clearing needs neither.
+    const usable = chosen.filter((t) => clear || (t.startDate && t.dueDate));
+    await store.setOverlays(
+      this.ctx.cloudId,
+      usable.map((t) => ({
+        issueKey: t.id,
+        overlay: {
+          startDate: t.startDate,
+          durationDays: t.durationDays,
+          percentComplete: t.percentComplete,
+          predecessors: t.predecessors,
+          baselineStart: clear ? null : t.startDate,
+          baselineDue: clear ? null : t.dueDate,
+        },
+      }))
+    );
+    return { updated: usable.length, skipped: chosen.length - usable.length };
+  }
+
   /** What the issue's workflow allows from its current status — the edit modal's status list. */
   async listTransitions(
     id: string
@@ -322,6 +414,10 @@ export class TaskService {
     // Duration is whole calendar days end to end (due = start + duration − 1);
     // a fraction would make every date downstream ambiguous.
     if (input.durationDays !== undefined) input = { ...input, durationDays: Math.max(1, Math.ceil(input.durationDays)) };
+    // A move in the tree is checked first of all — before any write — so a refused
+    // one leaves the task exactly as it was.
+    if (input.parentKey !== undefined || input.issueType !== undefined) await this.assertStructure(id, input);
+    if (input.parentKey) this.assertOwnKey(input.parentKey);
     // First, so a refused estimate leaves the task exactly as it was.
     if (input.estimateHours !== undefined) await this.setOriginalEstimate(id, input.estimateHours);
 
@@ -348,6 +444,10 @@ export class TaskService {
     if (input.description !== undefined) fields.description = textToAdf(input.description ?? "");
     if (input.priority) fields.priority = { name: input.priority };
     if (input.labels !== undefined) fields.labels = cleanLabels(input.labels);
+    if (input.components !== undefined) fields.components = cleanNames(input.components).map((name) => ({ name }));
+    if (input.fixVersions !== undefined) fields.fixVersions = cleanNames(input.fixVersions).map((name) => ({ name }));
+    if (input.parentKey !== undefined) fields.parent = input.parentKey ? { key: input.parentKey } : null;
+    if (input.issueType !== undefined) fields.issuetype = { name: input.issueType };
     if (scheduleTouched) Object.assign(fields, this.scheduleFields(newDue, newStart));
     if (Object.keys(fields).length > 0) {
       await this.jira.updateIssueFields(id, fields);
@@ -460,7 +560,7 @@ export class TaskService {
   private async cascadeSnapshot(): Promise<Task[]> {
     const jql = `project = ${this.ctx.projectKey} ORDER BY created ASC`;
     const [issues, overlays] = await Promise.all([
-      this.jira.searchIssues(jql, SEARCH_FIELDS),
+      this.jira.searchIssues(jql, this.searchFields(false)),
       store.getProjectOverlays(this.ctx.cloudId, this.ctx.projectKey),
     ]);
     return issues.map(
@@ -665,6 +765,9 @@ export class TaskService {
       startDateFieldId: this.ctx.startDateFieldId,
       assigneeAccountId,
       labels: input.labels ? cleanLabels(input.labels) : undefined,
+      components: input.components ? cleanNames(input.components) : undefined,
+      fixVersions: input.fixVersions ? cleanNames(input.fixVersions) : undefined,
+      priority: input.priority || undefined,
     });
     const key = created.key;
     if (input.estimateHours && input.estimateHours > 0) {
@@ -800,10 +903,136 @@ export class TaskService {
     return { created, errors, warnings };
   }
 
+  /**
+   * Creates tasks from imported rows, in order, one Jira write each (as createTasksBulk
+   * does, and for the same reason: every row gets its own overlay). Unlike the bulk
+   * dialog each row carries its own type, owner, dates and parent, and a parent can
+   * be "#N" — an earlier row of this same import — which is what lets a whole WBS
+   * come in from one sheet. A row that fails is reported with its sheet row number
+   * and the rest carry on; a row whose parent failed is skipped with that reason.
+   */
+  async importTasks(rows: ImportRow[]): Promise<ImportResult> {
+    if (!Array.isArray(rows) || rows.length === 0) throw badRequest("Không có dòng nào để nhập.");
+    if (rows.length > MAX_IMPORT_ROWS) throw badRequest(`Nhập tối đa ${MAX_IMPORT_ROWS} dòng mỗi lần; hãy chia nhỏ tệp.`);
+
+    const [team, priorities] = await Promise.all([
+      this.listUsers().catch(() => []),
+      rows.some((r) => r.priority) ? this.listPriorities().catch(() => [] as string[]) : Promise.resolve([] as string[]),
+    ]);
+    const keyOfRow = new Map<number, string>();
+    const created: Task[] = [];
+    const errors: ImportResult["errors"] = [];
+    const warnings: string[] = [];
+    const rowKeys: Record<number, string> = {};
+
+    for (const [i, row] of rows.entries()) {
+      const n = i + 1;
+      const summary = String(row.summary ?? "").trim();
+      const fail = (message: string) => errors.push({ row: n, summary, message });
+      if (!summary) {
+        fail("Thiếu tên công việc.");
+        continue;
+      }
+
+      let parent: string | null = null;
+      const rawParent = String(row.parent ?? "").trim();
+      if (rawParent) {
+        const ref = /^#(\d+)$/.exec(rawParent);
+        if (ref) {
+          const target = Number(ref[1]);
+          if (target >= n) {
+            fail(`Việc cha #${target} phải nằm ở dòng phía trên.`);
+            continue;
+          }
+          parent = keyOfRow.get(target) ?? null;
+          if (!parent) {
+            fail(`Việc cha ở dòng ${target} chưa được tạo (dòng đó bị lỗi).`);
+            continue;
+          }
+        } else if (new RegExp(`^${this.ctx.projectKey}-\\d+$`, "i").test(rawParent)) {
+          parent = rawParent.toUpperCase();
+        } else {
+          fail(`Mã việc cha "${rawParent}" không hợp lệ (cần dạng ${this.ctx.projectKey}-12 hoặc #3).`);
+          continue;
+        }
+      }
+
+      let assigneeAccountId: string | null = null;
+      const rawAssignee = String(row.assignee ?? "").trim();
+      if (rawAssignee) {
+        const byId = team.find((u) => u.accountId === rawAssignee);
+        const found = byId ? { person: byId } : resolvePerson(team, rawAssignee);
+        if ("error" in found) {
+          fail(found.error);
+          continue;
+        }
+        assigneeAccountId = found.person.accountId;
+      }
+
+      let priority: string | undefined;
+      if (row.priority) {
+        const p = resolvePriority(priorities, String(row.priority));
+        if ("error" in p) {
+          fail(p.error);
+          continue;
+        }
+        priority = p.name;
+      }
+
+      const startDate = row.startDate ? String(row.startDate).trim() : null;
+      if (startDate && !isRealDate(startDate)) {
+        fail(`Ngày bắt đầu "${startDate}" không hợp lệ (cần YYYY-MM-DD).`);
+        continue;
+      }
+      const duration = row.durationDays === undefined || row.durationDays === null ? undefined : Number(row.durationDays);
+      if (duration !== undefined && (!Number.isFinite(duration) || duration <= 0)) {
+        fail("Thời lượng phải là số ngày lớn hơn 0.");
+        continue;
+      }
+
+      try {
+        const task = await this.createTask(
+          {
+            summary,
+            issueType: (String(row.issueType ?? "").trim() || "Task") as IssueTypeName,
+            description: row.description ? String(row.description) : null,
+            wbsParentId: parent,
+            startDate,
+            durationDays: duration,
+            assigneeAccountId,
+            labels: row.labels,
+            priority,
+            estimateHours: row.estimateHours && row.estimateHours > 0 ? Number(row.estimateHours) : null,
+            components: row.components,
+            fixVersions: row.fixVersions,
+          },
+          warnings
+        );
+        created.push(task);
+        keyOfRow.set(n, task.id);
+        rowKeys[n] = task.id;
+      } catch (err) {
+        if (err instanceof JiraApiError && err.status === 401) throw err;
+        fail(err instanceof JiraApiError ? err.summary || err.message : (err as Error).message);
+      }
+    }
+    return { created, errors, warnings, rowKeys };
+  }
+
   async deleteTask(id: string): Promise<void> {
     await this.jira.deleteIssue(id);
     await store.deleteOverlay(this.ctx.cloudId, id);
   }
+}
+
+/** One import is bounded: each row is a Jira write, and Cloud Run's request timeout is 300 s. */
+export const MAX_IMPORT_ROWS = 200;
+
+/** A real calendar date in YYYY-MM-DD form — "2026-02-30" is not one. */
+export function isRealDate(iso: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return false;
+  const d = new Date(iso + "T00:00:00Z");
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === iso;
 }
 
 function addDays(isoDate: string, days: number): string {

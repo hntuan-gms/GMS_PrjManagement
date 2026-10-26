@@ -20,6 +20,7 @@ async function step(name, fn) {
   }
 }
 
+await fetch((process.env.E2E_API ?? "http://localhost:4000") + "/api/__restore", { method: "POST" });
 await page.goto(process.env.E2E_APP ?? "http://localhost:5173/");
 await page.waitForSelector(".wbs-row");
 

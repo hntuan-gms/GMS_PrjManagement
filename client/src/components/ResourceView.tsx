@@ -30,6 +30,8 @@ interface Props {
   filter: TaskFilter;
   onFilterChange: (f: TaskFilter) => void;
   myAccountId: string;
+  /** Issue keys Jira returned for the filter's JQL (null until they arrive). */
+  jqlKeys?: Set<string> | null;
 }
 
 /**
@@ -83,6 +85,7 @@ export default function ResourceView({
   onAssign,
   onOpenEdit,
   filter,
+  jqlKeys,
   onFilterChange,
   myAccountId,
 }: Props) {
@@ -111,9 +114,9 @@ export default function ResourceView({
   const filtering = isTaskFiltering(taskFacets);
   const filteredTasks = useMemo(() => {
     if (!filtering) return tasks;
-    const ctx = { today, epicOf: buildEpicIndex(tasks) };
+    const ctx = { today, epicOf: buildEpicIndex(tasks), jqlKeys };
     return tasks.filter((t) => matchesTaskFilter(t, taskFacets, ctx));
-  }, [tasks, taskFacets, filtering, today]);
+  }, [tasks, taskFacets, filtering, today, jqlKeys]);
 
   const load = useMemo(
     () =>

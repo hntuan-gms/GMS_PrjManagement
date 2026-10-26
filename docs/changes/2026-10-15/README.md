@@ -84,3 +84,60 @@
 - **Lọc theo sprint (1.2) cần `JIRA_AGILE=on`**; không có thì tool trả thông báo thiếu board.
 - **Bộ lọc của trợ lý trên Bảng:** Bảng không có ô lọc nhãn, nên một nhãn được đưa vào ô tìm kiếm, nhiều nhãn chỉ áp lên Gantt.
 - **Không làm:** gửi lại *ảnh* khi "Sửa" một câu hỏi có tệp (bị chặn thay vì làm sai).
+
+---
+
+# Giai đoạn 2 — Chi tiết task và Gantt
+
+- **Phạm vi làm:** 2.1–2.11. **Chưa commit/deploy.** Migration mới: `009_saved_filter.sql`. Không có biến môi trường mới.
+- Dựa trên nền đã commit (`ca51c41`): giai đoạn 0 và 1 đã nằm trong lịch sử git.
+
+## 1. Đã thay đổi gì
+
+| Mục | Thay đổi | File chính |
+|---|---|---|
+| 2.1 | **Thành phần** và **phiên bản** (fix versions): xem, sửa trong modal (chỉ *chọn* từ danh sách của dự án, vì Jira không nhận tên lạ), lọc, cột trên WBS; trợ lý sửa được qua `update_task` và tự khớp tên với tên của dự án | `NamePicker`, `taskService.ts`, `editTools.ts` |
+| 2.2 | **Issue link của Jira** (blocks, relates…): xem, thêm, gỡ, hiện *cạnh* phụ thuộc chứ không lẫn vào, có ghi chú "không dời lịch". Route `/issue-links` (tên `/links` đã dành cho liên kết web) | `taskExtras.ts`, `TaskLinks.tsx` |
+| 2.3 | **Người theo dõi**: xem danh sách (nếu có quyền), theo dõi / bỏ theo dõi chính mình | `TaskWatchers.tsx` |
+| 2.4 | **Đổi việc cha và đổi loại** có kiểm tra trước khi gọi Jira (không vòng lặp, Sub-task không làm cha, Epic không có cha và không có người phụ trách) | `structure.ts` (server + client) |
+| 2.5 | **Baseline trên thanh** (dải mỏng dưới thanh, đỏ khi trễ) và đặt/xoá baseline từ giao diện, cho việc đã chọn hoặc cả dự án; chỉ lưu trong ứng dụng | `BaselineMenu`, `TimelineMarkers`, `setBaselines` |
+| 2.6 | **Bộ lọc đã lưu và chia sẻ** theo dự án; "Của tôi" lưu thành `@me` nên người mở thấy việc của *họ* | `filterStore.ts`, `SavedFilterMenu` |
+| 2.7 | **Lọc bằng JQL**: chuỗi đi thẳng sang Jira (không tự viết bộ phân tích), chạy bằng token của người dùng, kết quả cắt về đúng dự án | `taskExtras.jqlKeys` |
+| 2.8 | **Trường Sprint** trên task: cột, bộ lọc; đọc qua trường Sprint của API thường nên *không* cần `JIRA_AGILE` | `fieldDiscovery.ts`, `pickSprint` |
+| 2.9 | **Mốc và phiên bản phát hành trên trục thời gian**: hình thoi cho task nhãn `milestone`, đường dọc tại ngày phát hành | `TimelineMarkers`, `timelineGeometry.ts` |
+| 2.10 | **Hoàn tác thao tác kéo** (nút + Ctrl/Cmd+Z), trong phiên, gồm cả việc bị cascade đẩy đi | `undo.ts`, `ProjectWorkspace` |
+| 2.11 | **Nhập từ CSV / dán từ Excel**: tự nhận cột, xem trước, chỉ ra dòng lỗi, "việc cha" là mã hoặc số dòng nên một bảng mô tả được cả cây; gửi theo đợt 25 dòng | `csvImport.ts`, `ImportModal`, `importTasks` |
+
+Kèm theo: `TaskEditModal` giờ có `key` theo task (mở task khác từ chat không còn giữ form của task cũ); `DependencyOverlay` dùng chung `useBarRects`; e2e tự chọn cổng trống và có `/api/__restore` để các file không dẫm lên dữ liệu của nhau.
+
+## 2. Quyết định đáng biết
+
+- **Issue link không phải phụ thuộc.** Jira "blocks" không có kiểu FS/SS/FF/SF, không có lag và không dời thanh nào; gộp vào mục Phụ thuộc sẽ hứa một hành vi lập lịch mà nó không có.
+- **Nhập .xlsx chưa làm**: cần thêm thư viện đọc bảng tính; "Lưu thành CSV UTF-8" và dán từ Excel phủ cùng nhu cầu. Nếu cần .xlsx thật, báo tôi.
+- **JQL sai không làm trống biểu đồ**; lỗi của Jira hiện cạnh ô và phần còn lại của bộ lọc vẫn chạy.
+- **Hoàn tác chỉ cho thao tác kéo** (thanh và %), không cho sửa trong modal, thao tác hàng loạt, trạng thái, người phụ trách — những cái đó là ghi lên Jira có hệ quả (chuyển trạng thái có thể gửi thông báo).
+- **Milestone = nhãn `milestone`** vì Jira không có khái niệm này; chỉ đổi cách vẽ, không đổi lịch.
+- **Vị trí các thứ không phải thanh được đo theo tỉ lệ của chính thanh gần nhất**, không theo một tỉ lệ chung: ở chế độ Tháng một cột 28–31 ngày nhưng cùng bề rộng nên tỉ lệ chung sẽ lệch dần.
+
+## 3. Lỗi tìm được trong lúc làm
+
+- Trình biên dịch báo trùng `POST /tasks/:id/links` với route liên kết web có sẵn — nếu không bắt được, thêm issue link sẽ làm hỏng việc đính kèm liên kết.
+- `toLinkViews` sập với phần tử `null` (test bắt được).
+- Test e2e cũ phụ thuộc múi giờ: máy chủ giả dùng ngày UTC còn client dùng ngày địa phương, nên sau nửa đêm giờ Việt Nam nhưng trước 07:00 UTC vài kiểm tra "trước/sau hôm nay" sai. Máy chủ giả giờ dùng ngày địa phương.
+
+## 4. Cách kiểm tra đã làm
+
+| Cách | Kết quả |
+|---|---|
+| `server`: `npm test` / `typecheck:test` / `npm run build` | 155 test đạt, sạch |
+| `client`: `npm test` / `typecheck:test` / `npm run lint` / `npm run build` | 89 test đạt; lint chỉ còn 2 cảnh báo có từ trước |
+| `cd e2e && npm test` | 5 file đạt: phase 1 (41 bước), nhấp đúp, Gantt nhỏ, trợ lý, **giai đoạn 2** (modal, bộ lọc, lưu bộ lọc, JQL, baseline, mốc/phát hành, kéo + hoàn tác bằng chuột thật, nhập) |
+
+## 5. Chưa kiểm tra / còn tồn tại
+
+- **Chưa thử với Jira thật.** Chỗ chưa chắc nhất: (a) **chiều của issue link** (`inwardIssue`/`outwardIssue` — suy ra từ tài liệu, checklist C9 để kiểm tra); (b) gỡ việc cha bằng `parent: null` (C5); (c) đổi loại giữa hai quy trình khác nhau (C6); (d) vị trí đường phát hành ở chế độ Tháng.
+- **Chưa thử với Postgres thật**: migration 009 và các câu SQL của `filterStore` chỉ qua `tsc`.
+- **Không có .xlsx**; tối đa 200 dòng mỗi lần nhập.
+- **Bộ lọc trên tab Nguồn lực** dùng được JQL nhưng không có ô nhập JQL ở đó (chỉ áp bộ lọc đã đặt từ Gantt).
+- **Trợ lý chưa lọc được theo thành phần/phiên bản/sprint** bằng `set_view_filter` (`search_tasks` thì có).
+- **Hoàn tác không cứu được** việc đã bị người khác sửa trong lúc đó: nó ghi đè về giá trị cũ.

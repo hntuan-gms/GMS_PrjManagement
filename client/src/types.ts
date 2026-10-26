@@ -18,6 +18,13 @@ export function isAssignableType(issueType: string | null | undefined): boolean 
   return (issueType ?? "").toLowerCase() !== "epic";
 }
 
+/** The sprint a task is in: the running one if any, else the next, else the latest closed. */
+export interface SprintRef {
+  id: number;
+  name: string;
+  state: string;
+}
+
 export interface Task {
   id: string;
   wbsParentId: string | null;
@@ -48,6 +55,12 @@ export interface Task {
   priority: string | null;
   /** Jira labels — free-form tags, no spaces. */
   labels: string[];
+  /** Project components, by name. */
+  components: string[];
+  /** Fix versions (releases), by name. */
+  fixVersions: string[];
+  /** From the site's Sprint field; null when in no sprint or the site has no Jira Software. */
+  sprint: SprintRef | null;
   jiraUrl: string;
 }
 
@@ -131,6 +144,109 @@ export interface TaskUpdateInput {
   priority?: string;
   /** The full label set the task should end up with (replaces, not merges). */
   labels?: string[];
+  /** The full component set, by name (replaces, not merges). */
+  components?: string[];
+  /** The full fix-version set, by name (replaces, not merges). */
+  fixVersions?: string[];
+  /** Move under this parent; null takes the task off its parent. */
+  parentKey?: string | null;
+  /** Change the issue type, by name. */
+  issueType?: string;
+}
+
+export interface ProjectComponent {
+  id: string;
+  name: string;
+}
+
+export interface ProjectVersion {
+  id: string;
+  name: string;
+  released: boolean;
+  archived: boolean;
+  releaseDate: string | null;
+  startDate: string | null;
+}
+
+/** A Jira issue link on a task — information, not scheduling (the FS/SS/FF/SF dependencies are ours). */
+export interface IssueLink {
+  id: string;
+  typeName: string;
+  /** "outward": this task is the subject of the text ("blocks"); "inward": its object ("is blocked by"). */
+  direction: "outward" | "inward";
+  label: string;
+  key: string;
+  summary: string;
+  status: string;
+  statusCategory: "new" | "indeterminate" | "done";
+  issueType: string;
+}
+
+export interface LinkType {
+  id: string;
+  name: string;
+  inward: string;
+  outward: string;
+}
+
+export interface Watchers {
+  isWatching: boolean;
+  count: number;
+  watchers: Array<{ accountId: string; displayName: string; avatarUrl: string | null }>;
+  /** False when Jira gave only the count (listing watchers needs a permission most people lack). */
+  listed: boolean;
+}
+
+/** The toolbar's filter in a storable shape — see savedFilter.ts. */
+export interface SavedFilterSpec {
+  text: string;
+  /** Account ids, or "@me" for whoever opens it. */
+  people: string[];
+  statuses: string[];
+  types: string[];
+  epics: string[];
+  labels: string[];
+  components: string[];
+  versions: string[];
+  sprints: string[];
+  onlyOverdue: boolean;
+  jql: string;
+}
+
+export interface SavedFilter {
+  id: string;
+  name: string;
+  shared: boolean;
+  /** Saved by the signed-in user: the only ones they can delete or un-share. */
+  mine: boolean;
+  ownerName: string;
+  spec: SavedFilterSpec;
+  updatedAt: string;
+}
+
+/** One line of an imported sheet — see csvImport.ts. */
+export interface ImportRow {
+  summary: string;
+  issueType?: string;
+  description?: string;
+  assignee?: string;
+  startDate?: string;
+  durationDays?: number;
+  /** An existing issue key, or "#N" for the Nth row of this same import (1-based, earlier rows only). */
+  parent?: string;
+  labels?: string[];
+  priority?: string;
+  estimateHours?: number;
+  components?: string[];
+  fixVersions?: string[];
+}
+
+export interface ImportResult {
+  created: Task[];
+  errors: Array<{ row: number; summary: string; message: string }>;
+  warnings: string[];
+  /** Sheet row (1-based) → the issue key it became. */
+  rowKeys: Record<number, string>;
 }
 
 export interface TaskCreateInput {

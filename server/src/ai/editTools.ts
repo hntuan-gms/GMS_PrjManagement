@@ -62,6 +62,8 @@ const SEARCH_TASKS: FunctionDeclaration = {
       parentKey: { type: Type.STRING, description: "Only children (at any depth) of this issue." },
       overdue: { type: Type.BOOLEAN },
       label: { type: Type.STRING, description: "Only tasks carrying this Jira label." },
+      component: { type: Type.STRING, description: "Only tasks in this project component." },
+      version: { type: Type.STRING, description: "Only tasks with this fix version (release)." },
       priority: { type: Type.STRING, description: "Priority as the user said it ('cao', 'High', 'khẩn cấp')." },
       sprint: {
         type: Type.STRING,
@@ -77,7 +79,7 @@ const SEARCH_TASKS: FunctionDeclaration = {
 const UPDATE_TASK: FunctionDeclaration = {
   name: "update_task",
   description:
-    "Change one task in Jira: title, description, status, priority, labels, schedule or % complete. Schedule changes run " +
+    "Change one task in Jira: title, description, status, priority, labels, components, fix versions, parent, type, schedule or % complete. Schedule changes run " +
     "the dependency cascade, so successors move too — report which ones. Give only the fields to change. " +
     "For several tasks, call it once per task (calls can run in parallel).",
   parameters: {
@@ -108,6 +110,15 @@ const UPDATE_TASK: FunctionDeclaration = {
         items: { type: Type.STRING },
         description: "The COMPLETE label set the task should end up with (replaces all). Prefer addLabels/removeLabels.",
       },
+      addComponents: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Project components to add (names as the user said them; matched to the project's own)." },
+      removeComponents: { type: Type.ARRAY, items: { type: Type.STRING } },
+      addFixVersions: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Fix versions (releases) to add, matched to the project's own." },
+      removeFixVersions: { type: Type.ARRAY, items: { type: Type.STRING } },
+      parentKey: {
+        type: Type.STRING,
+        description: "Move the task under this parent (an Epic or Story key). 'none' takes it off its parent. Refused if it would make a loop.",
+      },
+      issueType: { type: Type.STRING, description: "Change the issue type (Task, Story, Bug…). Jira may refuse if the workflows differ." },
       estimateHours: {
         type: Type.NUMBER,
         description: "Jira Original estimate in hours ('ước lượng 12 tiếng', '1.5 ngày công' = 12). > 0.",
@@ -486,6 +497,9 @@ function brief(t: Task) {
     percent: t.percentComplete,
     priority: t.priority,
     ...(t.labels.length > 0 ? { labels: t.labels } : {}),
+    ...(t.components.length > 0 ? { components: t.components } : {}),
+    ...(t.fixVersions.length > 0 ? { fixVersions: t.fixVersions } : {}),
+    ...(t.sprint ? { sprint: t.sprint.name } : {}),
   };
 }
 
@@ -608,6 +622,8 @@ async function runSearchTasks(args: Record<string, unknown>, ctx: ToolContext): 
   };
 
   const label = fold(str(args, "label"));
+  const component = fold(str(args, "component"));
+  const version = fold(str(args, "version"));
   let priority: string | null = null;
   if (str(args, "priority")) {
     const p = await priorityName(ctx, str(args, "priority"));
@@ -632,6 +648,8 @@ async function runSearchTasks(args: Record<string, unknown>, ctx: ToolContext): 
   const hits = ctx.tasks.filter((t) => {
     if (q && !q.split(" ").every((w) => fold(`${t.id} ${t.summary}`).includes(w))) return false;
     if (label && !t.labels.some((l) => fold(l) === label)) return false;
+    if (component && !t.components.some((c) => fold(c) === component)) return false;
+    if (version && !t.fixVersions.some((v) => fold(v) === version)) return false;
     if (priority && t.priority !== priority) return false;
     if (sprintKeys && !sprintKeys.has(t.id)) return false;
     if (who === "none" ? t.assigneeAccountId : who && !who.split(" ").every((w) => fold(t.assigneeName ?? "").includes(w))) return false;
@@ -689,6 +707,27 @@ async function runUpdateTask(args: Record<string, unknown>, ctx: ToolContext): P
     }
     if (next.length !== t.labels.length || next.some((l, i) => l !== t.labels[i])) input.labels = next;
   }
+  // Components and versions are not free-form in Jira: a name the project does not
+  // define is refused, so the spoken name is matched to the project's own first.
+  for (const [kind, add, remove, current] of [
+    ["components", "addComponents", "removeComponents", t.components],
+    ["fixVersions", "addFixVersions", "removeFixVersions", t.fixVersions],
+  ] as const) {
+    if (names(args[add]).length === 0 && names(args[remove]).length === 0) continue;
+    const next = await mergeNamed(ctx, kind, current, names(args[add]), names(args[remove]));
+    if ("error" in next) return { response: next };
+    if (next.names.length !== current.length || next.names.some((n, i) => n !== current[i])) input[kind] = next.names;
+  }
+  if (typeof args.parentKey === "string" && args.parentKey.trim()) {
+    const raw = args.parentKey.trim();
+    if (["none", "null", "khong", "khong co", "bo cha"].includes(fold(raw))) input.parentKey = null;
+    else {
+      const parent = findTaskIn(ctx.tasks, raw);
+      if (!parent) return notFound(raw);
+      input.parentKey = parent.id;
+    }
+  }
+  if (str(args, "issueType") && fold(str(args, "issueType")) !== fold(t.issueType)) input.issueType = str(args, "issueType");
 
   // Schedule: resolved to (start, duration) — the pair updateTask and the
   // cascade work in — whichever way the user put it.
@@ -1087,6 +1126,32 @@ async function priorityName(ctx: ToolContext, raw: string): Promise<{ name: stri
   let available = await ctx.taskService.listPriorities().catch(() => [] as string[]);
   if (available.length === 0) available = [...new Set(ctx.tasks.map((t) => t.priority).filter((p): p is string => !!p))];
   return resolvePriority(available, raw);
+}
+
+/**
+ * The project's own spelling of the names a person said ("backend" → "Backend"), added to
+ * and taken from `current`. Unknown names are an error that lists the real ones.
+ */
+export async function mergeNamed(
+  ctx: ToolContext,
+  kind: "components" | "fixVersions",
+  current: string[],
+  add: string[],
+  remove: string[]
+): Promise<{ names: string[] } | { error: string; available: string[] }> {
+  const options =
+    kind === "components"
+      ? (await ctx.extras.components()).map((c) => c.name)
+      : (await ctx.extras.versions()).filter((v) => !v.archived).map((v) => v.name);
+  const canon = (raw: string) => options.find((o) => fold(o) === fold(raw)) ?? current.find((o) => fold(o) === fold(raw));
+  const label = kind === "components" ? "thành phần" : "phiên bản";
+  for (const n of [...add, ...remove]) {
+    if (!canon(n)) return { error: `Dự án không có ${label} "${n}".`, available: options };
+  }
+  const drop = new Set(remove.map((n) => canon(n)!));
+  const next = current.filter((c) => !drop.has(c));
+  for (const n of add) if (!next.includes(canon(n)!)) next.push(canon(n)!);
+  return { names: next };
 }
 
 const names = (v: unknown): string[] => (Array.isArray(v) ? v.map((x) => String(x).trim()).filter(Boolean) : []);

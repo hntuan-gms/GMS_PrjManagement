@@ -1,12 +1,15 @@
 import { buildEpicIndex, filterTaskIds, type TaskFilter } from "../taskFilter";
-import FilterBar from "./FilterBar";
+import FilterBar, { type FilterAdvanced } from "./FilterBar";
+import BaselineMenu from "./BaselineMenu";
+import TimelineMarkers from "./TimelineMarkers";
 import { Gantt, ViewMode, type Task as GanttTaskT } from "gantt-task-react";
 import "gantt-task-react/dist/index.css";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { csvName, downloadCsv, type CsvCell } from "../csv";
 import { computeCriticalPath } from "../criticalPath";
 import { orderByWbs, resolveRanges, toGanttTasks } from "../ganttMapping";
-import type { DependencyType, Task } from "../types";
+import type { DependencyType, ProjectVersion, Task } from "../types";
+import { isMilestone } from "../timelineGeometry";
 import DependencyOverlay from "./DependencyOverlay";
 import IssueTypeIcon from "./IssueTypeIcon";
 
@@ -116,7 +119,7 @@ function pickScale(pixelsPerDay: number): { viewMode: ViewMode; columnWidth: num
 
 /* ---------------------------------------------------------------- columns */
 
-type ColumnId = "type" | "status" | "priority" | "labels" | "assignee" | "start" | "due" | "duration" | "estimate" | "spent" | "pct";
+type ColumnId = "type" | "status" | "priority" | "labels" | "components" | "versions" | "sprint" | "assignee" | "start" | "due" | "duration" | "estimate" | "spent" | "pct";
 
 interface ColumnDef {
   id: ColumnId;
@@ -150,6 +153,27 @@ const COLUMNS: ColumnDef[] = [
     long: "Nhãn (labels)",
     width: 110,
     cell: (t) => (t.labels.length > 0 ? <span title={t.labels.join(", ")}>{t.labels.join(", ")}</span> : "—"),
+  },
+  {
+    id: "components",
+    label: "Thành phần",
+    long: "Thành phần (components)",
+    width: 110,
+    cell: (t) => (t.components.length > 0 ? <span title={t.components.join(", ")}>{t.components.join(", ")}</span> : "—"),
+  },
+  {
+    id: "versions",
+    label: "Phiên bản",
+    long: "Phiên bản (fix versions)",
+    width: 100,
+    cell: (t) => (t.fixVersions.length > 0 ? <span title={t.fixVersions.join(", ")}>{t.fixVersions.join(", ")}</span> : "—"),
+  },
+  {
+    id: "sprint",
+    label: "Sprint",
+    long: "Sprint",
+    width: 96,
+    cell: (t) => (t.sprint ? <span title={`${t.sprint.name} (${t.sprint.state})`}>{t.sprint.name}</span> : "—"),
   },
   { id: "assignee", label: "Phụ trách", long: "Người phụ trách", width: 110, cell: (t) => t.assigneeName ?? "—" },
   { id: "start", label: "Bắt đầu", long: "Ngày bắt đầu", width: 76, cell: (t, r) => dm(r?.start ?? t.startDate) },
@@ -192,6 +216,12 @@ function csvValue(id: ColumnId, t: Task, r: { start: string; end: string } | und
       return t.priority;
     case "labels":
       return t.labels.join(", ");
+    case "components":
+      return t.components.join(", ");
+    case "versions":
+      return t.fixVersions.join(", ");
+    case "sprint":
+      return t.sprint?.name ?? "";
     case "assignee":
       return t.assigneeName;
     case "start":
@@ -267,6 +297,17 @@ interface Props {
     next: { type: DependencyType; lagDays: number }
   ) => void;
   onDeleteDependency: (successorId: string, predecessorId: string, type: DependencyType) => void;
+  /** Releases to draw as lines on the timeline. */
+  versions: ProjectVersion[];
+  /** Issue keys Jira returned for `filter.jql`; null until they arrive. */
+  jqlKeys: Set<string> | null;
+  /** Named filters and the JQL box. */
+  advancedFilter: FilterAdvanced;
+  /** What undo would take back (null = nothing to undo) and how to do it. */
+  undo: { label: string | null; onUndo: () => void };
+  /** Save (or clear) baselines for the selected tasks or all of them. */
+  onSetBaselines: (scope: "all" | "selected", clear: boolean) => Promise<void>;
+  onOpenImport: () => void;
 }
 
 function toIso(d: Date): string {
@@ -297,12 +338,38 @@ export default function GanttView({
   onAddDependency,
   onEditDependency,
   onDeleteDependency,
+  versions,
+  jqlKeys,
+  advancedFilter,
+  undo,
+  onSetBaselines,
+  onOpenImport,
 }: Props) {
   // The one zoom variable everything else derives from — see pickScale.
   const [pixelsPerDay, setPixelsPerDay] = useState(DEFAULT_PIXELS_PER_DAY[ViewMode.Week]);
   const { viewMode, columnWidth } = pickScale(pixelsPerDay);
   const [showCriticalPath, setShowCriticalPath] = useState(false);
   const [showDependencies, setShowDependencies] = useState(true);
+  // Off by default: every task is baselined when it is created, so a strip under every
+  // bar would be noise until someone is actually comparing against a plan.
+  const [showBaseline, setShowBaseline] = useState(() => {
+    try {
+      return localStorage.getItem("gms.gantt.baseline") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const [baselineBusy, setBaselineBusy] = useState(false);
+  function toggleBaseline() {
+    setShowBaseline((v) => {
+      try {
+        localStorage.setItem("gms.gantt.baseline", v ? "0" : "1");
+      } catch {
+        // Not remembered; still applies now.
+      }
+      return !v;
+    });
+  }
   const query = filter.text;
   const setQuery = (text: string) => onFilterChange({ ...filter, text });
   // gantt-task-react scrolls to `viewDate` whenever its value changes. The
@@ -475,11 +542,20 @@ export default function GanttView({
   // Deliberately resolved from the FULL tree, before any search filtering: a parent's
   // rolled-up bar must span all of its children, not just the ones matching the query.
   const ranges = useMemo(() => resolveRanges(ordered), [ordered]);
+  // The same roll-up over the committed dates, so an Epic's baseline strip spans its
+  // children's baselines exactly as its bar spans their current dates.
+  const baselineRanges = useMemo(
+    () =>
+      resolveRanges(
+        ordered.map((o) => ({ ...o, task: { ...o.task, startDate: o.task.baselineStart, dueDate: o.task.baselineDue } }))
+      ),
+    [ordered]
+  );
 
   const epicOf = useMemo(() => buildEpicIndex(tasks), [tasks]);
   const matchIds = useMemo(
-    () => filterTaskIds(tasks, filter, { today, epicOf }),
-    [tasks, filter, today, epicOf]
+    () => filterTaskIds(tasks, filter, { today, epicOf, jqlKeys }),
+    [tasks, filter, today, epicOf, jqlKeys]
   );
 
   /**
@@ -721,6 +797,11 @@ export default function GanttView({
             </span>
             <IssueTypeIcon type={task.issueType} />
             <span className={hasChildren ? "wbs-summary wbs-summary-parent" : "wbs-summary"}>
+              {isMilestone(task) && (
+                <span className="wbs-milestone" title="Mốc (nhãn milestone)" aria-hidden="true">
+                  ◆{" "}
+                </span>
+              )}
               {task.summary}
             </span>
           </div>
@@ -764,6 +845,28 @@ export default function GanttView({
           title="Ẩn/hiện mũi tên phụ thuộc giữa các task (FS/SS/FF/SF). Kéo từ đầu hoặc đuôi một task sang task khác để tạo phụ thuộc mới."
         >
           Phụ thuộc
+        </button>
+        <BaselineMenu
+          show={showBaseline}
+          onToggleShow={toggleBaseline}
+          selectedCount={selectedIds.size}
+          totalCount={tasks.length}
+          busy={baselineBusy}
+          onSet={(scope) => {
+            setBaselineBusy(true);
+            void onSetBaselines(scope, false).finally(() => setBaselineBusy(false));
+          }}
+          onClear={(scope) => {
+            setBaselineBusy(true);
+            void onSetBaselines(scope, true).finally(() => setBaselineBusy(false));
+          }}
+        />
+        <button
+          onClick={undo.onUndo}
+          disabled={!undo.label}
+          title={undo.label ? `Hoàn tác: ${undo.label} (Ctrl+Z)` : "Chưa có thao tác kéo thả nào để hoàn tác trong phiên này"}
+        >
+          ↶ Hoàn tác
         </button>
         <button onClick={goToToday} title="Cuộn biểu đồ tới ngày hôm nay">
           Hôm nay
@@ -813,6 +916,9 @@ export default function GanttView({
             )}
           </div>
         )}
+        <button onClick={onOpenImport} title="Nhập nhiều công việc từ file CSV hoặc dán từ Excel">
+          Nhập…
+        </button>
         <button onClick={exportCsv} title="Tải bảng WBS (các cột đang hiện, theo bộ lọc) về file CSV mở được bằng Excel">
           Xuất CSV
         </button>
@@ -892,6 +998,7 @@ export default function GanttView({
         myAccountId={myAccountId}
         matched={matchIds?.size}
         total={tasks.length}
+        advanced={advancedFilter}
       />
       <div className="gantt-body" ref={bodyRef}>
         {rows.length === 0 ? (
@@ -949,6 +1056,16 @@ export default function GanttView({
                 className={`gantt-divider ${dragging ? "dragging" : ""}`}
                 style={{ left: listWidth }}
                 onMouseDown={startDrag}
+              />
+              <TimelineMarkers
+                bodyEl={bodyEl}
+                rows={rowTasks}
+                ranges={ranges}
+                baselineRanges={baselineRanges}
+                versions={versions}
+                showBaseline={showBaseline}
+                showReleases
+                measureKey={measureKey}
               />
               <DependencyOverlay
                 bodyEl={bodyEl}

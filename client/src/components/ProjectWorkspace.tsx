@@ -1,17 +1,21 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { ApiError, NetworkError, api } from "../api";
 import { computeOptimisticCascade } from "../dependencyCascade";
 import { EMPTY_FILTER, type BoardFilter } from "../boardModel";
 import { EMPTY_TASK_FILTER, useTaskFilter } from "../taskFilter";
 import { toBoardFilter, toTaskFilter, type ViewFilterSpec } from "../viewFilter";
+import { toSavedSpec } from "../savedFilter";
+import { makeEntry, pushEntry, undoSteps, type UndoEntry } from "../undo";
 import { addDays, buildResourceLoad, defaultWindow, todayIso } from "../resourceAllocation";
 import type {
   BulkTaskCreateResult,
   DependencyType,
   JiraUser,
   Predecessor,
+  ProjectVersion,
   ResourcePool,
+  SavedFilter,
   Session,
   Task,
   TaskUpdateInput,
@@ -22,6 +26,7 @@ import BoardView from "./BoardView";
 import ChatDock from "./ChatDock";
 import CreateTaskModal from "./CreateTaskModal";
 import GanttView from "./GanttView";
+import ImportModal from "./ImportModal";
 import PlanReviewModal from "./PlanReviewModal";
 import ProgressReportView from "./ProgressReportView";
 import ResourceView from "./ResourceView";
@@ -70,6 +75,65 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
   // through here and taken once (BoardView's onIncomingFilterTaken).
   const [chatBoardFilter, setChatBoardFilter] = useState<BoardFilter | null>(null);
 
+  /* ---- JQL: the text lives in the filter, Jira's answer here ---- */
+  const [jqlKeys, setJqlKeys] = useState<Set<string> | null>(null);
+  const [jqlState, setJqlState] = useState({ running: false, error: null as string | null, truncated: false, count: null as number | null });
+  const jqlSeq = useRef(0);
+  const lastJql = useRef("");
+
+  const fetchJql = useCallback(async (jql: string) => {
+    const seq = ++jqlSeq.current;
+    setJqlState((s) => ({ ...s, running: true, error: null }));
+    try {
+      const r = await api.searchJql(jql);
+      if (seq !== jqlSeq.current) return; // a newer query was started meanwhile
+      setJqlKeys(new Set(r.keys));
+      setJqlState({ running: false, error: null, truncated: r.truncated, count: r.keys.length });
+    } catch (e) {
+      if (seq !== jqlSeq.current) return;
+      if (e instanceof ApiError && e.status === 401) return;
+      // A query Jira refused restricts nothing (see FilterContext.jqlKeys): the message
+      // says why, and the rest of the filter still works.
+      setJqlKeys(null);
+      setJqlState({ running: false, error: e instanceof Error ? e.message : "Không chạy được JQL.", truncated: false, count: null });
+    }
+  }, []);
+
+  // Whatever changes the filter's JQL — typing one, applying a saved filter, "Xoá lọc",
+  // a page reload with one remembered — ends up here, so the keys always match the text.
+  useEffect(() => {
+    const jql = taskFilter.jql.trim();
+    if (jql === lastJql.current) return;
+    lastJql.current = jql;
+    if (!jql) {
+      jqlSeq.current++;
+      setJqlKeys(null);
+      setJqlState({ running: false, error: null, truncated: false, count: null });
+      return;
+    }
+    void fetchJql(jql);
+  }, [taskFilter.jql, fetchJql]);
+
+  function runJql(jql: string) {
+    // The same text again means "run it again" — the tasks may have changed since.
+    if (jql === lastJql.current) void fetchJql(jql);
+    else setTaskFilter({ ...taskFilter, jql });
+  }
+
+  /* ---- saved filters and releases: small lists, loaded once, failures quiet ---- */
+  const [savedFilters, setSavedFilters] = useState<SavedFilter[] | null>(null);
+  const [versions, setVersions] = useState<ProjectVersion[]>([]);
+  useEffect(() => {
+    api.listSavedFilters().then(setSavedFilters).catch(() => setSavedFilters([]));
+    api.listVersions().then(setVersions).catch(() => {});
+  }, []);
+  const byName = (a: SavedFilter, b: SavedFilter) => a.name.localeCompare(b.name, "vi");
+
+  /* ---- undo: dragging bars and the % handle, this session only ---- */
+  const [undoStack, setUndoStack] = useState<UndoEntry[]>([]);
+  const [undoing, setUndoing] = useState(false);
+  const tasksRef = useRef<Task[]>([]);
+
   /** set_view_filter: one sentence → the same filters a person sets by hand. */
   function applyChatFilter(ev: { spec: ViewFilterSpec | null; view: "gantt" | "board" | null }) {
     setTaskFilter(ev.spec ? toTaskFilter(ev.spec) : EMPTY_TASK_FILTER);
@@ -94,6 +158,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
   const [creating, setCreating] = useState<false | { parentId?: string }>(false);
   // The plan being reviewed, opened from the assistant's table card.
   const [reviewRunId, setReviewRunId] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
   // A single global counter, bumped once per mutating request (schedule change,
   // progress change, add-dependency, modal save). `taskVersion` records, per task
   // id, the seq of the most recent thing that touched it — whether that task was
@@ -201,6 +266,69 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [editingTask, selectedIds, selectedId]);
+
+  tasksRef.current = tasks;
+
+  async function undo() {
+    const entry = undoStack.at(-1);
+    if (!entry || undoing) return;
+    setUndoStack((s) => s.slice(0, -1));
+    setUndoing(true);
+    // Each step is written, then the next is worked out from what that left behind:
+    // restoring the dragged task makes the cascade pull its zero-slack successors back
+    // by itself, and those then need no write of their own.
+    let working = tasksRef.current;
+    try {
+      for (let guard = 0; guard < entry.before.length + 3; guard++) {
+        const step = undoSteps(entry, working)[0];
+        if (!step) break;
+        const seq = nextSeq();
+        taskVersion.current.set(step.id, seq);
+        working = working.map((t) => (t.id === step.id ? { ...t, ...step.patch } : t));
+        setTasks(working);
+        const updated = await api.updateTask(step.id, step.patch);
+        const { cascaded, cascadeWarnings: _w, ...primary } = updated;
+        const fresh = new Map([primary, ...cascaded].map((t) => [t.id, t as Task]));
+        working = working.map((t) => fresh.get(t.id) ?? t);
+        setTasks((prev) => applyTaskUpdate(prev, updated, seq));
+      }
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) return;
+      setSyncError(e instanceof Error ? e.message : "Không hoàn tác được.");
+      await refreshTasks();
+    } finally {
+      setUndoing(false);
+    }
+  }
+  const undoRef = useRef(undo);
+  undoRef.current = undo;
+
+  // Ctrl/Cmd+Z undoes the last drag — but never while typing (the field's own undo
+  // owns the key there) or while a dialog is open on top of the chart.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key.toLowerCase() !== "z" || !(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable)) return;
+      if (editingTask || creating || reviewRunId || importing) return;
+      if (view !== "gantt") return;
+      e.preventDefault();
+      void undoRef.current();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [editingTask, creating, reviewRunId, importing, view]);
+
+  async function handleSetBaselines(scope: "all" | "selected", clear: boolean) {
+    try {
+      const r = await api.setBaselines({ ...(scope === "selected" ? { ids: [...selectedIds] } : {}), clear });
+      await refreshTasks();
+      setSyncError(r.skipped > 0 ? `Bỏ qua ${r.skipped} công việc chưa có đủ ngày nên chưa lưu baseline được.` : null);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) return;
+      setSyncError(e instanceof Error ? e.message : "Không lưu được baseline.");
+    }
+  }
 
   async function handleSync() {
     setSyncing(true);
@@ -427,6 +555,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
    */
   async function handleScheduleChange(id: string, startDate: string, durationDays: number) {
     const seq = nextSeq();
+    const before = tasks;
     const cascade = computeOptimisticCascade(tasks, id, startDate, durationDays);
     flushSync(() => {
       setTasks((prev) => prev.map((t) => cascade.get(t.id) ?? t));
@@ -435,6 +564,11 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
     try {
       const updated = await api.updateTask(id, { startDate, durationDays });
       setTasks((prev) => applyTaskUpdate(prev, updated, seq));
+      const was = before.find((t) => t.id === id);
+      if (was && (was.startDate !== startDate || was.durationDays !== durationDays)) {
+        const entry = makeEntry(`dời ${id}`, before, [id, ...cascade.keys(), ...updated.cascaded.map((t) => t.id)]);
+        if (entry) setUndoStack((s) => pushEntry(s, entry));
+      }
     } catch (e) {
       if ((taskVersion.current.get(id) ?? 0) > seq) return; // superseded by a newer drag
       setSyncError(e instanceof Error ? e.message : "Không thể lưu thay đổi lịch trình.");
@@ -444,11 +578,16 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
 
   async function handleProgressChange(id: string, percentComplete: number) {
     const seq = nextSeq();
+    const before = tasks;
     setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, percentComplete } : t)));
     taskVersion.current.set(id, seq);
     try {
       const updated = await api.updateTask(id, { percentComplete });
       setTasks((prev) => applyTaskUpdate(prev, updated, seq));
+      if (before.find((t) => t.id === id)?.percentComplete !== percentComplete) {
+        const entry = makeEntry(`đổi % ${id}`, before, [id]);
+        if (entry) setUndoStack((s) => pushEntry(s, entry));
+      }
     } catch (e) {
       if ((taskVersion.current.get(id) ?? 0) > seq) return;
       setSyncError(e instanceof Error ? e.message : "Không thể lưu % hoàn thành.");
@@ -714,6 +853,29 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
             onAddDependency={handleAddDependency}
             onEditDependency={handleEditDependency}
             onDeleteDependency={handleDeleteDependency}
+            versions={versions}
+            jqlKeys={jqlKeys}
+            advancedFilter={{
+              saved: savedFilters,
+              onSaveCurrent: async (name, shared) => {
+                const s = await api.saveFilter({ name, spec: toSavedSpec(taskFilter, session.user.accountId), shared });
+                setSavedFilters((prev) => [...(prev ?? []).filter((x) => x.id !== s.id), s].sort(byName));
+              },
+              onDeleteSaved: async (id) => {
+                await api.deleteSavedFilter(id);
+                setSavedFilters((prev) => (prev ?? []).filter((x) => x.id !== id));
+              },
+              onToggleShared: async (id, shared) => {
+                await api.setFilterShared(id, shared);
+                setSavedFilters((prev) => (prev ?? []).map((x) => (x.id === id ? { ...x, shared } : x)));
+              },
+              jql: jqlState,
+              onRunJql: runJql,
+              onClearJql: () => setTaskFilter({ ...taskFilter, jql: "" }),
+            }}
+            undo={{ label: undoing ? null : (undoStack.at(-1)?.label ?? null), onUndo: () => void undo() }}
+            onSetBaselines={handleSetBaselines}
+            onOpenImport={() => setImporting(true)}
           />
         ) : view === "timesheet" ? (
           <TimesheetView session={session} tasks={tasks} onOpenEdit={setEditingTask} onTasksChanged={refreshTasks} />
@@ -739,6 +901,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
             filter={taskFilter}
             onFilterChange={setTaskFilter}
             myAccountId={session.user.accountId}
+            jqlKeys={jqlKeys}
           />
         ) : (
           <ProgressReportView
@@ -750,8 +913,22 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
         )}
       </div>
 
+      {importing && (
+        <ImportModal
+          tasks={tasks}
+          onClose={() => setImporting(false)}
+          onImported={async () => {
+            await refreshTasks();
+          }}
+        />
+      )}
+
       {editingTask && (
         <TaskEditModal
+          // Every field in the form starts from this task, so a different task (opened from
+          // an issue key in the chat while this one is up) must be a fresh form, not the
+          // old one with the new task's title in the header.
+          key={editingTask.id}
           task={editingTask}
           allTasks={tasks}
           users={users}

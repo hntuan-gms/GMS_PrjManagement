@@ -7,7 +7,9 @@ import { timesheetRouter } from "./timesheet.js";
 import { requireAuth, requireProject, requireStaff } from "../auth/middleware.js";
 import { badRequest } from "../errors.js";
 import { TaskActivity } from "../taskActivity.js";
-import type { BulkTaskCreateInput, TaskCreateInput, TaskUpdateInput } from "../types.js";
+import { TaskExtras } from "../taskExtras.js";
+import { filtersRouter } from "./filters.js";
+import type { BulkTaskCreateInput, ImportRow, TaskCreateInput, TaskUpdateInput } from "../types.js";
 
 export const apiRouter = Router();
 
@@ -25,6 +27,7 @@ apiRouter.use("/resources", resourcesRouter);
 apiRouter.use("/progress", progressRouter);
 apiRouter.use("/board", boardRouter);
 apiRouter.use("/timesheet", timesheetRouter);
+apiRouter.use("/filters", filtersRouter);
 
 // Jira's own default attachment limit is 10 MB; this only has to sit above it
 // and below Cloud Run's 32 MB request cap, so Jira's message is the one people see.
@@ -91,6 +94,129 @@ apiRouter.post("/tasks", requireProject, async (req, res, next) => {
   }
 });
 
+/**
+ * Components, versions, issue links, watchers and JQL — what Jira owns and this app
+ * only shows or forwards (taskExtras.ts). Each call acts as the signed-in user, so
+ * Jira's own permissions decide what comes back.
+ */
+function extrasFor(req: express.Request): TaskExtras {
+  return new TaskExtras(req.auth!.jira, { projectKey: req.auth!.session.projectKey!, accountId: req.auth!.session.accountId });
+}
+
+apiRouter.get("/components", requireProject, async (req, res, next) => {
+  try {
+    res.json(await extrasFor(req).components());
+  } catch (err) {
+    next(err);
+  }
+});
+
+apiRouter.get("/versions", requireProject, async (req, res, next) => {
+  try {
+    res.json(await extrasFor(req).versions());
+  } catch (err) {
+    next(err);
+  }
+});
+
+apiRouter.get("/link-types", requireProject, async (req, res, next) => {
+  try {
+    res.json(await extrasFor(req).linkTypes());
+  } catch (err) {
+    next(err);
+  }
+});
+
+// "/issue-links", not "/links": POST /tasks/:id/links is already the web link (remotelink) upload.
+apiRouter.get("/tasks/:id/issue-links", requireProject, async (req, res, next) => {
+  try {
+    res.json(await extrasFor(req).links(ownKey(req)));
+  } catch (err) {
+    next(err);
+  }
+});
+
+apiRouter.post("/tasks/:id/issue-links", requireProject, async (req, res, next) => {
+  try {
+    const b = (req.body ?? {}) as { typeName?: unknown; otherKey?: unknown; direction?: unknown };
+    res.status(201).json(
+      await extrasFor(req).addLink(ownKey(req), {
+        typeName: String(b.typeName ?? ""),
+        otherKey: String(b.otherKey ?? ""),
+        direction: b.direction as "outward" | "inward",
+      })
+    );
+  } catch (err) {
+    next(err);
+  }
+});
+
+apiRouter.delete("/tasks/:id/issue-links/:linkId", requireProject, async (req, res, next) => {
+  try {
+    res.json(await extrasFor(req).removeLink(ownKey(req), req.params.linkId));
+  } catch (err) {
+    next(err);
+  }
+});
+
+apiRouter.get("/tasks/:id/watchers", requireProject, async (req, res, next) => {
+  try {
+    res.json(await extrasFor(req).watchers(ownKey(req)));
+  } catch (err) {
+    next(err);
+  }
+});
+
+apiRouter.put("/tasks/:id/watchers", requireProject, async (req, res, next) => {
+  try {
+    const watching = (req.body as { watching?: unknown } | undefined)?.watching;
+    if (typeof watching !== "boolean") {
+      next(badRequest("Cần chỉ rõ theo dõi hay bỏ theo dõi."));
+      return;
+    }
+    res.json(await extrasFor(req).setWatching(ownKey(req), watching));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** POST because a JQL can be long; it changes nothing. */
+apiRouter.post("/tasks/jql", requireProject, async (req, res, next) => {
+  try {
+    res.json(await extrasFor(req).jqlKeys(String((req.body as { jql?: unknown } | undefined)?.jql ?? "")));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Baselines for the given tasks (or all of them) — overlay only, nothing is written to Jira. */
+apiRouter.post("/tasks/baseline", requireProject, async (req, res, next) => {
+  try {
+    const b = (req.body ?? {}) as { ids?: unknown; clear?: unknown };
+    const service = req.auth!.taskService!;
+    let ids: string[] | null = null;
+    if (b.ids !== undefined && b.ids !== null) {
+      if (!Array.isArray(b.ids) || b.ids.some((x) => typeof x !== "string")) {
+        next(badRequest("Danh sách công việc không hợp lệ."));
+        return;
+      }
+      ids = b.ids as string[];
+      ids.forEach((id) => service.assertOwnKey(id));
+    }
+    res.json(await service.setBaselines(ids, b.clear === true));
+  } catch (err) {
+    next(err);
+  }
+});
+
+apiRouter.post("/tasks/import", requireProject, async (req, res, next) => {
+  try {
+    res.status(201).json(await req.auth!.taskService!.importTasks((req.body as { rows?: ImportRow[] } | undefined)?.rows ?? []));
+  } catch (err) {
+    next(err);
+  }
+});
+
 apiRouter.post("/tasks/bulk", requireProject, async (req, res, next) => {
   try {
     const input = req.body as BulkTaskCreateInput;
@@ -116,6 +242,21 @@ apiRouter.patch("/tasks/:id", requireProject, async (req, res, next) => {
     }
     if (input.priority !== undefined && typeof input.priority !== "string") {
       next(badRequest("Độ ưu tiên không hợp lệ."));
+      return;
+    }
+    for (const field of ["components", "fixVersions"] as const) {
+      const v = input[field];
+      if (v !== undefined && (!Array.isArray(v) || v.some((x) => typeof x !== "string"))) {
+        next(badRequest(`"${field}" phải là danh sách chuỗi.`));
+        return;
+      }
+    }
+    if (input.parentKey !== undefined && input.parentKey !== null && typeof input.parentKey !== "string") {
+      next(badRequest("Việc cha không hợp lệ."));
+      return;
+    }
+    if (input.issueType !== undefined && (typeof input.issueType !== "string" || !input.issueType.trim())) {
+      next(badRequest("Loại công việc không hợp lệ."));
       return;
     }
 

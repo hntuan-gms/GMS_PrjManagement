@@ -22,6 +22,13 @@ export function isAssignableType(issueType: string | null | undefined): boolean 
   return (issueType ?? "").toLowerCase() !== "epic";
 }
 
+/** The sprint a task is in: the active one if there is one, else the next, else the latest closed. */
+export interface SprintRef {
+  id: number;
+  name: string;
+  state: string;
+}
+
 /** Internal Task model — MS Project style, backed by a Jira issue plus a local schedule overlay. */
 export interface Task {
   id: string; // Jira issue key
@@ -48,6 +55,16 @@ export interface Task {
   priority: string | null;
   /** Jira labels — free-form tags, no spaces. */
   labels: string[];
+  /** Project components, by name. */
+  components: string[];
+  /** Fix versions (releases), by name. */
+  fixVersions: string[];
+  /**
+   * From the site's Sprint field, which is readable with the ordinary Jira scope —
+   * no Agile scope needed. Null when the task is in no sprint or the site has no
+   * Jira Software.
+   */
+  sprint: SprintRef | null;
   jiraUrl: string;
 }
 
@@ -103,11 +120,22 @@ export interface TaskUpdateInput {
   priority?: string;
   /** The full label set the issue should end up with (replaces, not merges). */
   labels?: string[];
+  /** The full component set, by name (replaces, not merges). */
+  components?: string[];
+  /** The full fix-version set, by name (replaces, not merges). */
+  fixVersions?: string[];
+  /** Move under this parent; null takes the task off its parent. Checked by structure.ts. */
+  parentKey?: string | null;
+  /** Change the issue type, by name. Checked by structure.ts, then by Jira's own workflow rules. */
+  issueType?: string;
 }
 
 export interface TaskCreateInput {
   summary: string;
   labels?: string[];
+  components?: string[];
+  fixVersions?: string[];
+  priority?: string;
   issueType: IssueTypeName;
   description?: string | null;
   wbsParentId?: string | null;
@@ -128,6 +156,33 @@ export interface BulkTaskCreateInput {
   durationDays?: number;
   assigneeAccountId?: string | null;
   estimateHours?: number | null;
+}
+
+/** One line of an imported sheet. Everything but the title is optional and given as a person would type it. */
+export interface ImportRow {
+  summary: string;
+  issueType?: string;
+  description?: string;
+  /** A person's name (diacritics optional) or accountId. */
+  assignee?: string;
+  startDate?: string;
+  durationDays?: number;
+  /** An existing issue key, or "#N" for the Nth row of this same import (1-based, earlier rows only). */
+  parent?: string;
+  labels?: string[];
+  priority?: string;
+  estimateHours?: number;
+  components?: string[];
+  fixVersions?: string[];
+}
+
+export interface ImportResult {
+  created: Task[];
+  /** `row` is 1-based, as the sheet shows it. */
+  errors: Array<{ row: number; summary: string; message: string }>;
+  warnings: string[];
+  /** Sheet row (1-based) → the issue key it became. Lets a client that sends a long sheet in pieces point later pieces at earlier rows. */
+  rowKeys: Record<number, string>;
 }
 
 export interface BulkTaskCreateResult {
