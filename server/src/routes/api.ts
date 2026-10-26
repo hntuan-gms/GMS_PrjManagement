@@ -43,9 +43,19 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 // client kept showing "your data will be lost on the next deploy" well after the
 // move to Postgres made that false. /api/auth/me is the only copy now.
 
+// The list leaves descriptions out (the heaviest field; only the edit modal reads one):
+// GET /tasks/:id/description fetches it when a task is opened.
 apiRouter.get("/tasks", requireProject, async (req, res, next) => {
   try {
-    res.json(await req.auth!.taskService!.listTasks());
+    res.json(await req.auth!.taskService!.listTasks({ description: false }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+apiRouter.get("/tasks/:id/description", requireProject, async (req, res, next) => {
+  try {
+    res.json({ description: await req.auth!.taskService!.getDescription(ownKey(req)) });
   } catch (err) {
     next(err);
   }
@@ -430,7 +440,7 @@ apiRouter.delete("/tasks/:id", requireProject, async (req, res, next) => {
 
 apiRouter.post("/sync", requireProject, async (req, res, next) => {
   try {
-    const tasks = await req.auth!.taskService!.listTasks();
+    const tasks = await req.auth!.taskService!.listTasks({ description: false });
     res.json({ syncedAt: new Date().toISOString(), count: tasks.length, tasks });
   } catch (err) {
     next(err);

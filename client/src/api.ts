@@ -226,6 +226,8 @@ export const api = {
   deleteComment: (id: string, commentId: string) =>
     request<void>(`/tasks/${encodeURIComponent(id)}/comments/${encodeURIComponent(commentId)}`, { method: "DELETE" }),
   listActivity: (id: string) => request<ActivityEntry[]>(`/tasks/${encodeURIComponent(id)}/activity`),
+  getTaskDescription: (id: string) =>
+    request<{ description: string | null }>(`/tasks/${encodeURIComponent(id)}/description`),
   getTaskAttachments: (id: string) =>
     request<TaskAttachments>(`/tasks/${encodeURIComponent(id)}/attachments`),
   // The file goes up as the raw body, its name in a header — see routes/api.ts.

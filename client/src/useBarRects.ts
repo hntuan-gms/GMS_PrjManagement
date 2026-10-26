@@ -17,6 +17,15 @@ import type { Task } from "./types";
  * render after the one that changed the key, so measuring on the key alone can read
  * pre-recompute positions.
  */
+function sameRects(a: Map<string, BarRect>, b: Map<string, BarRect>): boolean {
+  if (a.size !== b.size) return false;
+  for (const [id, r] of a) {
+    const o = b.get(id);
+    if (!o || o.x !== r.x || o.y !== r.y || o.width !== r.width || o.height !== r.height) return false;
+  }
+  return true;
+}
+
 export function useBarRects(bodyEl: HTMLElement | null, rows: Task[], measureKey: string) {
   const [portalTarget, setPortalTarget] = useState<SVGSVGElement | null>(null);
   const [rects, setRects] = useState<Map<string, BarRect>>(new Map());
@@ -47,17 +56,33 @@ export function useBarRects(bodyEl: HTMLElement | null, rows: Task[], measureKey
           height: parseFloat(rect.getAttribute("height") ?? "0"),
         });
       });
-      setRects(next);
+      // Same boxes → same state. A new Map every time re-rendered every arrow on any attribute
+      // change in the chart — including the ones the overlays' own output makes — which on a
+      // big project was a render loop (React's "Maximum update depth exceeded").
+      setRects((prev) => (sameRects(prev, next) ? prev : next));
     }
 
+    // One measurement per frame however many bars changed (a drag moves many at once).
+    let frame = 0;
+    const schedule = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        measure();
+      });
+    };
+
     measure();
-    const observer = new MutationObserver(measure);
+    const observer = new MutationObserver(schedule);
     observer.observe(bodyEl, {
       subtree: true,
       attributes: true,
       attributeFilter: ["x", "y", "width", "height"],
     });
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      if (frame) cancelAnimationFrame(frame);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bodyEl, measureKey]);
 

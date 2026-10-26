@@ -7,6 +7,7 @@ import { EMPTY_TASK_FILTER, useTaskFilter } from "../taskFilter";
 import { toBoardFilter, toTaskFilter, type ViewFilterSpec } from "../viewFilter";
 import { makeEntry, pushEntry, undoSteps, type UndoEntry } from "../undo";
 import { addDays, buildResourceLoad, defaultWindow, todayIso } from "../resourceAllocation";
+import { loadTasksCache, saveTasksCache, tasksCacheKey } from "../tasksCache";
 import type {
   BulkTaskCreateResult,
   DependencyType,
@@ -44,9 +45,15 @@ const OVERLAY_WARNING =
   "được cập nhật. Ngày bắt đầu và ngày kết thúc vẫn được đồng bộ với Jira.";
 
 export default function ProjectWorkspace({ session, onSwitchProject, onLogout }: Props) {
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [users, setUsers] = useState<JiraUser[]>([]);
-  const [loading, setLoading] = useState(true);
+  // What this browser saw last time, shown at once while the fresh copy loads (tasksCache.ts).
+  // Read once, on the first render; the workspace is keyed by project so it never goes stale.
+  const cacheKey = tasksCacheKey(session.site.cloudId, session.user.accountId, session.project?.key ?? "");
+  const [cached] = useState(() => loadTasksCache(cacheKey));
+  const [tasks, setTasks] = useState<Task[]>(cached?.tasks ?? []);
+  const [users, setUsers] = useState<JiraUser[]>(cached?.users ?? []);
+  const [loading, setLoading] = useState(!cached);
+  // True while a cached copy is on screen and the real one has not arrived.
+  const [showingCache, setShowingCache] = useState(!!cached);
   const [loadError, setLoadError] = useState<{ message: string; network: boolean } | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
@@ -175,22 +182,33 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
   }
 
   async function loadAll() {
-    setLoading(true);
+    // With a cached copy on screen nothing blocks: this only swaps the fresh data in.
+    if (!cached) setLoading(true);
     setLoadError(null);
+    const seqAtStart = seqCounter.current;
     try {
       const [t, u] = await Promise.all([api.listTasks(), api.listUsers()]);
-      setTasks(t);
       setUsers(u);
+      // A drag or edit made while the old copy was showing has its own refresh coming;
+      // this response was asked for before it and would put the old schedule back.
+      if (seqCounter.current === seqAtStart) {
+        setTasks(t);
+        saveTasksCache(cacheKey, t, u);
+      }
     } catch (e) {
       // The shell is already swapping in the login screen; a red banner here would
       // just flash during the transition.
       if (e instanceof ApiError && e.status === 401) return;
-      setLoadError({
-        message: e instanceof Error ? e.message : "Không tải được dữ liệu dự án.",
-        network: e instanceof NetworkError,
-      });
+      const message = e instanceof Error ? e.message : "Không tải được dữ liệu dự án.";
+      if (cached) {
+        // Keep working on what is shown, but say it may be out of date.
+        setSyncError(`Chưa làm mới được dữ liệu (${message}) — đang hiện bản lưu lần trước.`);
+      } else {
+        setLoadError({ message, network: e instanceof NetworkError });
+      }
     } finally {
       setLoading(false);
+      setShowingCache(false);
     }
   }
 
@@ -419,6 +437,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
   async function refreshTasks() {
     const t = await api.listTasks();
     setTasks(t);
+    saveTasksCache(cacheKey, t, users);
   }
 
   /**
@@ -750,6 +769,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
         onAddTask={() => setCreating({})}
         onSync={handleSync}
         syncing={syncing}
+        refreshing={showingCache}
         lastSyncedAt={lastSyncedAt}
         onSwitchProject={onSwitchProject}
         onLogout={onLogout}

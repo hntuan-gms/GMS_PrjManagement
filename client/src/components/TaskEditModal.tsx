@@ -33,7 +33,12 @@ const DEP_TYPES: DependencyType[] = ["FS", "SS", "FF", "SF"];
 
 export default function TaskEditModal({ task, allTasks, users, onClose, onSave, onDelete, onWorkLogged, myAccountId, onAddSubtask }: Props) {
   const [summary, setSummary] = useState(task.summary);
+  // The project list leaves descriptions out, so this is fetched on open. Until it is here
+  // the box is locked and the save omits the field: sending "" would wipe what Jira holds.
   const [description, setDescription] = useState(task.description ?? "");
+  const [needsDescription] = useState(task.description === undefined);
+  const [descriptionLoaded, setDescriptionLoaded] = useState(!needsDescription);
+  const [descriptionError, setDescriptionError] = useState(false);
   const [startDate, setStartDate] = useState(task.startDate ?? "");
   const [durationDays, setDurationDays] = useState(task.durationDays);
   const [estimate, setEstimate] = useState<number | null>(task.estimateHours !== null ? roundHours(task.estimateHours) : null);
@@ -89,6 +94,16 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
       .getTaskTransitions(task.id)
       .then((t) => alive && setTransitions(t))
       .catch((e) => alive && setTransitionsError(e instanceof Error ? e.message : "Không tải được trạng thái."));
+    if (needsDescription) {
+      api
+        .getTaskDescription(task.id)
+        .then((r) => {
+          if (!alive) return;
+          setDescription(r.description ?? "");
+          setDescriptionLoaded(true);
+        })
+        .catch(() => alive && setDescriptionError(true));
+    }
     api
       .getTaskAttachments(task.id)
       .then((a) => alive && setExisting(a))
@@ -116,7 +131,7 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
     return () => {
       alive = false;
     };
-  }, [task.id]);
+  }, [task.id, needsDescription]);
 
   const candidatePreds = allTasks.filter(
     (t) => t.id !== task.id && !predecessors.some((p) => p.taskId === t.id)
@@ -145,7 +160,7 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
       const estimateChanged = estimate !== null && estimate > 0 && estimate !== roundHours(task.estimateHours ?? -1);
       await onSave({
         summary,
-        description: description.trim() || null,
+        ...(descriptionLoaded ? { description: description.trim() || null } : {}),
         startDate: startDate || null,
         durationDays: calendarDays,
         percentComplete,
@@ -247,7 +262,13 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
 
         <label className="field">
           <span>Mô tả</span>
-          <textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} />
+          <textarea
+            rows={3}
+            value={description}
+            disabled={!descriptionLoaded}
+            placeholder={descriptionLoaded ? "" : descriptionError ? "Không tải được mô tả — chưa sửa được ở đây." : "Đang tải mô tả…"}
+            onChange={(e) => setDescription(e.target.value)}
+          />
         </label>
 
         <div className="field-row">

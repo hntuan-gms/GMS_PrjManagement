@@ -1,9 +1,13 @@
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
+import { ganttScrollPatch } from './vite.gantt-patch.ts'
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [ganttScrollPatch(), react()],
+  // The scroll patch rewrites the library's source, so dev must serve it as source too:
+  // pre-bundled dependencies skip plugin transforms.
+  optimizeDeps: { exclude: ['gantt-task-react'] },
   server: {
     // Proxy so dev is same-origin with the API. This is what lets the session
     // cookie stay SameSite=Lax in both dev and production — the CORS-with-

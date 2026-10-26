@@ -70,12 +70,40 @@ app.post("/api/__restore", (_q, r) => {
   issueLinks = [{ id: "L1", a: "DEMO-3", b: "DEMO-5", type: "Blocks" }];
   savedFilters = savedFilters.filter((f) => f.createdBy !== "me");
   watching = false;
+  listDelayMs = 0;
   log.length = 0;
   r.json({});
 });
 app.get("/api/__log", (_q, r) => r.json({ log, chatAborts }));
 app.post("/api/__reset", (_q, r) => { log.length = 0; chatAborts = 0; r.json({}); });
 app.post("/api/__tasks/reset", (_q, r) => { tasks = structuredClone(SEED); r.json({}); });
+// A big project, for measuring how the Gantt behaves with hundreds of rows (e2e/perf-scroll.mjs).
+// Epics > stories > tasks/bugs spread over about a year, a third of them chained by FS edges.
+app.post("/api/__tasks/generate", (req, r) => {
+  const n = Math.min(3000, Number(req.body?.n ?? 500));
+  const out: any[] = structuredClone(SEED);
+  const kinds = ["Task", "Task", "Bug", "Task", "Story"];
+  const who = ["anh", "binh", "chi", "me", null];
+  let epic: string | null = null;
+  for (let i = 0; i < n; i++) {
+    const id = `DEMO-${1000 + i}`;
+    const isEpic = i % 60 === 0;
+    const type = isEpic ? "Epic" : kinds[i % kinds.length];
+    if (isEpic) epic = id;
+    const start = (i * 3) % 330 - 20;
+    const dur = isEpic ? 40 : 2 + (i % 9);
+    const prev = out.at(-1);
+    out.push({
+      ...base, id, summary: `${type} số ${i} — việc thử nghiệm với tên khá dài để bảng rộng ra`, issueType: type,
+      wbsParentId: isEpic ? null : epic, startDate: day(start), dueDate: day(start + dur - 1), baselineStart: day(start), baselineDue: day(start + dur - 1),
+      durationDays: dur, assigneeAccountId: isEpic ? null : who[i % who.length], assigneeName: isEpic ? null : nameOf(who[i % who.length]),
+      statusName: i % 3 === 0 ? "Done" : "To Do", statusCategory: i % 3 === 0 ? "done" : "new",
+      predecessors: !isEpic && i % 3 === 1 && prev && prev.issueType !== "Epic" ? [{ taskId: prev.id, type: "FS", lagDays: 0 }] : [],
+    });
+  }
+  tasks = out;
+  r.json({ count: out.length });
+});
 
 app.get("/api/auth/me", (_q, r) => r.json({
   user: users[0], site: { cloudId: "c1", url: "https://example.atlassian.net", name: "Example" },
@@ -83,7 +111,20 @@ app.get("/api/auth/me", (_q, r) => r.json({
 }));
 app.get("/api/auth/projects", (_q, r) => r.json([{ id: "1", key: "DEMO", name: "Dự án mẫu", avatarUrl: null }]));
 
-app.get("/api/tasks", (_q, r) => r.json(tasks));
+// Like the real server: the list carries no description (the edit modal asks for it), and
+// the list can be made slow to prove that a saved copy shows first.
+let listDelayMs = 0;
+app.post("/api/__delay", (req, r) => { listDelayMs = Number(req.body?.ms ?? 0); r.json({}); });
+app.get("/api/tasks", (_q, r) => {
+  const body = tasks.map(({ description: _d, ...rest }) => rest);
+  if (listDelayMs > 0) setTimeout(() => r.json(body), listDelayMs);
+  else r.json(body);
+});
+app.get("/api/tasks/:id/description", (req, res) => {
+  const t = tasks.find((x) => x.id === req.params.id);
+  if (!t) return res.status(404).json({ error: "Không tìm thấy" });
+  res.json({ description: t.description ?? null });
+});
 app.get("/api/users", (_q, r) => r.json(users));
 app.get("/api/priorities", (_q, r) => r.json(["Highest", "High", "Medium", "Low", "Lowest"]));
 app.get("/api/labels", (_q, r) => r.json(["urgent", "backend", "frontend", "docs"]));

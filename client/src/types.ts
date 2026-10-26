@@ -29,7 +29,8 @@ export interface Task {
   id: string;
   wbsParentId: string | null;
   summary: string;
-  description: string | null;
+  /** Left out of the project list (it is heavy); undefined = not fetched, null = empty. See api.getTaskDescription. */
+  description?: string | null;
   issueType: IssueTypeName;
   statusName: string;
   statusCategory: "new" | "indeterminate" | "done";

@@ -45,17 +45,17 @@ const DAY_MS = 86_400_000;
  * identity instead; the current closures reach them through context, which
  * re-renders them in place on every change.
  */
-const WbsListContext = createContext<{ renderHeader: () => ReactNode; renderTable: () => ReactNode } | null>(null);
+const WbsListContext = createContext<{ header: ReactNode; table: ReactNode } | null>(null);
 const useWbsList = () => {
   const ctx = useContext(WbsListContext);
   if (!ctx) throw new Error("WBS list rendered outside GanttView");
   return ctx;
 };
 function WbsListHeader() {
-  return <>{useWbsList().renderHeader()}</>;
+  return <>{useWbsList().header}</>;
 }
 function WbsListTable() {
-  return <>{useWbsList().renderTable()}</>;
+  return <>{useWbsList().table}</>;
 }
 
 // How many calendar days one column spans in each mode (gantt-task-react's own
@@ -822,7 +822,8 @@ export default function GanttView({
   // roots stay at their shrink-to-fit content width, so dragging the divider moves
   // only the handle (which follows `listWidth` directly) while the WBS pane itself
   // never actually resizes.
-  const renderHeader = () => (
+  const header = useMemo(
+    () => (
     <div className="wbs-header" style={{ height: HEADER_HEIGHT, width: listWidth }}>
       <div className="wbs-col wbs-col-key">Mã</div>
       <div className="wbs-col wbs-col-name">Tên công việc</div>
@@ -837,9 +838,12 @@ export default function GanttView({
         </div>
       ))}
     </div>
+    ),
+    [columns, listWidth]
   );
 
-  const renderTable = () => (
+  const table = useMemo(
+    () => (
     <div style={{ width: listWidth }}>
       {rows.map(({ task, depth, hasChildren }) => (
         <div
@@ -900,7 +904,10 @@ export default function GanttView({
         </div>
       ))}
     </div>
+    ),
+    [rows, matchIds, selectedIds, selectedId, showCriticalPath, criticalIds, listWidth, columns, collapsed, ranges, today, onSelect, onOpenEdit, onToggleCollapse]
   );
+  const wbsList = useMemo(() => ({ header, table }), [header, table]);
 
   return (
     <div className="gantt-wrap">
@@ -1107,7 +1114,7 @@ export default function GanttView({
         ) : (
           bodySize.width > 0 && (
             <>
-              <WbsListContext.Provider value={{ renderHeader, renderTable }}>
+              <WbsListContext.Provider value={wbsList}>
               <Gantt
                 tasks={ganttTasks}
                 viewMode={viewMode}

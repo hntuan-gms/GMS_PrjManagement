@@ -39,6 +39,13 @@ const SEARCH_FIELDS = [
   "fixVersions",
 ];
 
+/** Runs `fn` and reports how long it took beside its result. */
+async function timed<T>(fn: () => Promise<T>): Promise<{ value: T; ms: number }> {
+  const start = Date.now();
+  const value = await fn();
+  return { value, ms: Date.now() - start };
+}
+
 /** Component / version names: trimmed, de-duplicated, order kept. */
 function cleanNames(names: string[]): string[] {
   return [...new Set(names.map((n) => n.trim()).filter(Boolean))];
@@ -138,17 +145,27 @@ export class TaskService {
     return getProjectMembers(this.jira, this.ctx.cloudId, this.ctx.projectKey, this.ctx.accountId);
   }
 
-  async listTasks(): Promise<Task[]> {
+  /**
+   * `description: false` leaves the description out of the search (the page load: it is
+   * the heaviest field and only the edit modal reads it, via getDescription); those tasks
+   * come back with `description` undefined, which is how a caller tells "not fetched"
+   * from "empty". The assistant, digests and reports want it, so true stays the default.
+   */
+  async listTasks(opts: { description?: boolean } = {}): Promise<Task[]> {
+    const t0 = Date.now();
     const jql = `project = ${this.ctx.projectKey} ORDER BY created ASC`;
-    const fields = this.searchFields(true);
+    const fields = this.searchFields(true).filter((f) => opts.description !== false || f !== "description");
     // The whole project's overlays in one read, and one write for whatever
     // reconciliation changed. Against the old JSON file a read and a write per
     // task were free; against Postgres they are a round trip each, so a 100-task
     // project would otherwise spend 200 of them inside a single page load.
-    const [issues, overlays] = await Promise.all([
-      this.jira.searchIssues(jql, fields),
-      store.getProjectOverlays(this.ctx.cloudId, this.ctx.projectKey),
+    const [jiraRes, overlayRes] = await Promise.all([
+      timed(() => this.jira.searchIssues(jql, fields)),
+      timed(() => store.getProjectOverlays(this.ctx.cloudId, this.ctx.projectKey)),
     ]);
+    const tReads = Date.now();
+    const issues = jiraRes.value;
+    const overlays = overlayRes.value;
 
     const tasks: Task[] = [];
     const toPersist: Array<{ issueKey: string; overlay: store.TaskOverlay }> = [];
@@ -165,7 +182,9 @@ export class TaskService {
       if (synthesizedDue) toWriteJira.push({ issueKey: issue.key, due: synthesizedDue, start: overlay.startDate! });
       tasks.push({ ...base, ...overlay, id: issue.key, dueDate: synthesizedDue ?? base.dueDate } as Task);
     }
+    const tReconcile = Date.now();
     await store.setOverlays(this.ctx.cloudId, toPersist);
+    const tPersist = Date.now();
     if (toWriteJira.length > 0) {
       // Best-effort and parallel, like the cascade's successor pushes: these are
       // independent issues, and one write failing (a permission quirk on a
@@ -178,7 +197,21 @@ export class TaskService {
         )
       );
     }
+    // Where a slow page load went. Jira and Postgres run side by side, so the longer of
+    // the two is what the request waited for.
+    console.log(
+      `[perf] listTasks ${this.ctx.projectKey}: ${tasks.length} tasks, jira ${jiraRes.ms}ms (${issues.length} issues), ` +
+        `overlays ${overlayRes.ms}ms, reconcile ${tReconcile - tReads}ms, persist ${tPersist - tReconcile}ms (${toPersist.length} rows), ` +
+        `jira writes ${Date.now() - tPersist}ms (${toWriteJira.length}), total ${Date.now() - t0}ms`
+    );
     return tasks;
+  }
+
+  /** The description of one issue, as plain text — what the list leaves out. */
+  async getDescription(id: string): Promise<string | null> {
+    this.assertOwnKey(id);
+    const issue = await this.jira.getIssue(id, ["description"]);
+    return issue.fields?.description ? adfToText(issue.fields.description) : null;
   }
 
   /**
@@ -204,7 +237,8 @@ export class TaskService {
       id: issue.key,
       wbsParentId: f.parent?.key ?? null,
       summary: f.summary,
-      description: f.description ? adfToText(f.description) : null,
+      // undefined = the search did not ask for it (see listTasks), unlike null = it is empty.
+      description: f.description === undefined ? undefined : f.description ? adfToText(f.description) : null,
       issueType: f.issuetype?.name as IssueTypeName,
       statusName: f.status?.name ?? "Không rõ",
       statusCategory: statusCategoryKey(f.status?.statusCategory?.key ?? "new"),

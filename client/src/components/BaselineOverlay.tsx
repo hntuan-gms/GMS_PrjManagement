@@ -72,14 +72,27 @@ export default function BaselineOverlay({ bodyEl, rows, ranges, baselines, measu
       );
     }
 
+    // One measurement per frame however many bars changed (see useBarRects).
+    let frame = 0;
+    const schedule = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        measure();
+      });
+    };
+
     measure();
-    const observer = new MutationObserver(measure);
+    const observer = new MutationObserver(schedule);
     observer.observe(bodyEl, {
       subtree: true,
       attributes: true,
       attributeFilter: ["x", "y", "width", "height"],
     });
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      if (frame) cancelAnimationFrame(frame);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bodyEl, measureKey]);
 

@@ -14,6 +14,8 @@ interface Props {
   onAddTask: () => void;
   onSync: () => void;
   syncing: boolean;
+  /** A saved copy is on screen while the current one loads. */
+  refreshing?: boolean;
   lastSyncedAt: string | null;
   onSwitchProject: () => void;
   onLogout: () => void;
@@ -37,6 +39,7 @@ export default function Toolbar({
   onAddTask,
   onSync,
   syncing,
+  refreshing,
   lastSyncedAt,
   onSwitchProject,
   onLogout,
@@ -90,8 +93,8 @@ export default function Toolbar({
             Đã đồng bộ: {new Date(lastSyncedAt).toLocaleTimeString("vi-VN")}
           </span>
         )}
-        <button onClick={onSync} disabled={syncing}>
-          {syncing ? "Đang đồng bộ..." : "⟳ Đồng bộ từ Jira"}
+        <button onClick={onSync} disabled={syncing || refreshing}>
+          {syncing ? "Đang đồng bộ..." : refreshing ? "Đang cập nhật..." : "⟳ Đồng bộ từ Jira"}
         </button>
         <button className="primary" onClick={onAddTask}>
           + Task mới

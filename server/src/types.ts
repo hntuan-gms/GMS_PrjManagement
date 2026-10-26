@@ -34,7 +34,8 @@ export interface Task {
   id: string; // Jira issue key
   wbsParentId: string | null; // Jira parent/epic key
   summary: string;
-  description: string | null;
+  /** undefined = not fetched (the project list leaves it out, see TaskService.listTasks); null = empty. */
+  description?: string | null;
   issueType: IssueTypeName;
   statusName: string;
   statusCategory: "new" | "indeterminate" | "done";
