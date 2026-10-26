@@ -50,7 +50,8 @@ progressRouter.get("/", requireProject, async (req, res, next) => {
   try {
     const asOf = asOfFrom(req.query.asOf);
     const [tasks, latest, history] = await Promise.all([
-      taskService!.listTasks(),
+      // No descriptions: nothing in computeProgress reads them, and they are the heaviest field of the search.
+      taskService!.listTasks({ description: false }),
       latestReport(session.cloudId, session.projectKey!),
       reportHistory(session.cloudId, session.projectKey!),
     ]);

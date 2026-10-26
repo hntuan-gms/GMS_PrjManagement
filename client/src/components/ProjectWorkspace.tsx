@@ -8,6 +8,7 @@ import { toBoardFilter, toTaskFilter, type ViewFilterSpec } from "../viewFilter"
 import { makeEntry, pushEntry, undoSteps, type UndoEntry } from "../undo";
 import { addDays, buildResourceLoad, defaultWindow, todayIso } from "../resourceAllocation";
 import { loadTasksCache, saveTasksCache, tasksCacheKey } from "../tasksCache";
+import { viewCacheScope } from "../viewCache";
 import type {
   BulkTaskCreateResult,
   DependencyType,
@@ -929,6 +930,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
             onTasksChanged={refreshTasks}
             incomingFilter={chatBoardFilter}
             onIncomingFilterTaken={() => setChatBoardFilter(null)}
+            refreshing={showingCache}
           />
         ) : view === "resource" ? (
           <ResourceView
@@ -950,6 +952,8 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
             focusReportId={focusReportId}
             canGenerate={session.staff}
             onOpenEdit={setEditingTask}
+            cacheScope={viewCacheScope(session.site.cloudId, session.user.accountId, session.project?.key ?? "")}
+            refreshing={showingCache}
           />
         )}
       </div>

@@ -95,6 +95,7 @@ export class TimesheetService {
     if ((Date.parse(to) - Date.parse(from)) / DAY_MS > MAX_RANGE_DAYS) {
       throw badRequest(`Mỗi lần xem tối đa ${MAX_RANGE_DAYS} ngày.`);
     }
+    const t0 = Date.now();
     const afterMs = localMidnightMs(from, tz);
     const beforeMs = localMidnightMs(addDays(to, 1), tz);
 
@@ -164,6 +165,10 @@ export class TimesheetService {
     }
     people.sort((a, b) => Number(a.outsider) - Number(b.outsider) || a.displayName.localeCompare(b.displayName, "vi"));
 
+    console.log(
+      `[perf] timesheet ${this.ctx.projectKey} ${from}..${to}: ${issues.length} issues, ${entries.length} worklogs, ` +
+        `${perIssue.filter((p) => !(p.issue.fields?.worklog && (p.issue.fields.worklog.total ?? 0) <= (p.issue.fields.worklog.worklogs?.length ?? 0))).length} extra worklog calls, total ${Date.now() - t0}ms`
+    );
     return { from, to, people, entries };
   }
 

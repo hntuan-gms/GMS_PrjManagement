@@ -4,6 +4,7 @@ import { computeCriticalPath } from "../criticalPath";
 import { todayIso } from "../resourceAllocation";
 import { csvName, downloadCsv } from "../csv";
 import { isAssignableType, type Health, type ProgressOverview, type ProgressReport, type ProgressScope, type Task } from "../types";
+import { readViewCache, writeViewCache } from "../viewCache";
 import AiBrief from "./AiBrief";
 import { MultiSelect } from "./FilterBar";
 import ProgressTrendChart from "./ProgressTrendChart";
@@ -19,7 +20,14 @@ interface Props {
    */
   canGenerate: boolean;
   onOpenEdit: (task: Task) => void;
+  /** Site + account + project, to key the last answer shown (viewCache.ts). */
+  cacheScope: string;
+  /** The workspace is still on its saved copy of the tasks; asking now would be answered twice. */
+  refreshing?: boolean;
 }
+
+const overviewParams = (asOf: string, scope: ProgressScope) =>
+  JSON.stringify([asOf, scope.assignee ?? "", scope.epic ?? "", [...(scope.types ?? [])].sort()]);
 
 /**
  * The progress report tab — a dashboard and an analyst side by side.
@@ -77,8 +85,11 @@ function signed(n: number): string {
   return v > 0 ? `+${v}` : `${v}`;
 }
 
-export default function ProgressReportView({ tasks, focusReportId, canGenerate, onOpenEdit }: Props) {
-  const [overview, setOverview] = useState<ProgressOverview | null>(null);
+export default function ProgressReportView({ tasks, focusReportId, canGenerate, onOpenEdit, cacheScope, refreshing }: Props) {
+  // The last figures this tab showed for today's unscoped view, so reopening it paints at once.
+  const [overview, setOverview] = useState<ProgressOverview | null>(
+    () => readViewCache<ProgressOverview>(cacheScope, "progress", overviewParams(todayIso(), { types: [] })) ?? null
+  );
   const [loadError, setLoadError] = useState<string | null>(null);
   const [shown, setShown] = useState<ProgressReport | null>(null);
   const [generating, setGenerating] = useState(false);
@@ -107,10 +118,12 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
   // write from the assistant moves these numbers, and the live layer is only
   // worth having if it actually is live.
   useEffect(() => {
+    if (refreshing) return;
     let alive = true;
     api
       .getProgress(asOf, scope)
       .then((data) => {
+        writeViewCache(cacheScope, "progress", overviewParams(asOf, scope), data);
         if (!alive) return;
         setOverview(data);
         setLoadError(null);
@@ -119,7 +132,7 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
     return () => {
       alive = false;
     };
-  }, [tasks, asOf, scope, reloadTick]);
+  }, [tasks, asOf, scope, reloadTick, refreshing, cacheScope]);
 
   // Which report the AI panel shows: an explicitly requested one (chat card,
   // history click) wins; otherwise the latest.

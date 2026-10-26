@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ApiError, api, loginUrl, setUnauthorizedHandler } from "./api";
 import { clearTasksCache } from "./tasksCache";
+import { clearViewCache } from "./viewCache";
 import type { Session } from "./types";
 
 export type AuthStatus = "checking" | "anonymous" | "needsProject" | "ready";
@@ -89,6 +90,7 @@ export function useSession() {
     }
     // The saved project data belongs to whoever was signed in; the next person on this browser must not find it.
     clearTasksCache();
+    clearViewCache();
     setSession(null);
     setAuthError(null);
     setStatus("anonymous");

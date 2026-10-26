@@ -106,6 +106,16 @@ export class BoardService {
   }
 
   async snapshot(boardId: number | null): Promise<BoardSnapshot> {
+    const t0 = Date.now();
+    const snap = await this.readSnapshot(boardId);
+    // Where a slow board load went, like the [perf] line listTasks writes.
+    console.log(
+      `[perf] board ${this.ctx.projectKey}: ${snap.mode}, ${snap.issues.length} issues, ${snap.sprints.length} sprints, total ${Date.now() - t0}ms`
+    );
+    return snap;
+  }
+
+  private async readSnapshot(boardId: number | null): Promise<BoardSnapshot> {
     if (!agileEnabled()) return this.statusBoard("disabled");
     let boards: BoardSummary[];
     try {

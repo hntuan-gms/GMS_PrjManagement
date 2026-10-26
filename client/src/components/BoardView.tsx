@@ -33,6 +33,7 @@ import { MultiSelect, type Option } from "./FilterBar";
 import type { QuickOptions } from "./QuickCreateOptions";
 import KanbanBoard from "./KanbanBoard";
 import SprintHeader from "./SprintHeader";
+import { readViewCache, viewCacheScope, writeViewCache } from "../viewCache";
 import { CompleteSprintModal, CreateBoardModal, SprintFormModal, SprintPlanModal } from "./SprintModals";
 
 interface Props {
@@ -49,6 +50,11 @@ interface Props {
    */
   incomingFilter: BoardFilter | null;
   onIncomingFilterTaken: () => void;
+  /**
+   * The workspace is still showing its saved copy of the tasks while the fresh one loads.
+   * Reading the board now would be answered twice — once for each copy — so it waits.
+   */
+  refreshing?: boolean;
 }
 
 /**
@@ -80,10 +86,14 @@ function readStoredBoard(project: string): number | null {
   }
 }
 
-export default function BoardView({ session, tasks, users, onOpenEdit, onTasksChanged, incomingFilter, onIncomingFilterTaken }: Props) {
+export default function BoardView({ session, tasks, users, onOpenEdit, onTasksChanged, incomingFilter, onIncomingFilterTaken, refreshing }: Props) {
   const projectKey = session.project?.key ?? "";
+  const cacheScope = viewCacheScope(session.site.cloudId, session.user.accountId, projectKey);
   const [boardId, setBoardId] = useState<number | null>(() => readStoredBoard(projectKey));
-  const [snapshot, setSnapshot] = useState<BoardSnapshot | null>(null);
+  // The last board this tab showed, so reopening it paints at once (viewCache.ts).
+  const [snapshot, setSnapshot] = useState<BoardSnapshot | null>(
+    () => readViewCache<BoardSnapshot>(cacheScope, "board", String(readStoredBoard(projectKey))) ?? null
+  );
   const [loadError, setLoadError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [view, setView] = useState<"board" | "backlog">("board");
@@ -121,6 +131,7 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
       .then((s) => {
         if (pending.current > 0 || startedAt !== mutationSeq.current) return;
         setSnapshot(s);
+        writeViewCache(cacheScope, "board", String(id), s);
         setLoadError(null);
       })
       .catch((e: Error) => setLoadError(e.message));
@@ -129,9 +140,10 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
   // Re-read when the board changes and whenever the workspace's tasks do — an
   // edit in the Gantt, the task modal or the assistant can move a card too.
   useEffect(() => {
+    if (refreshing) return;
     load(boardId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [boardId, tasks]);
+  }, [boardId, tasks, refreshing]);
 
   // "/" jumps to search, as in Jira and most issue trackers.
   useEffect(() => {

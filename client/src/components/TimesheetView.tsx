@@ -3,6 +3,7 @@ import { api, ApiError } from "../api";
 import { csvName, downloadCsv } from "../csv";
 import { localToday, roundHours } from "../taskForm";
 import type { Session, Task, Timesheet, TimesheetPerson, WorklogEntry } from "../types";
+import { readViewCache, viewCacheScope, writeViewCache } from "../viewCache";
 import NumberInput from "./NumberInput";
 
 /**
@@ -95,13 +96,17 @@ export default function TimesheetView({
   // rather than reset in the effect. A reload of the same range keeps showing
   // the old figures until the new ones land; a new range starts blank.
   const range = `${from}|${to}`;
+  const cacheScope = viewCacheScope(session.site.cloudId, session.user.accountId, session.project?.key ?? "");
   const requestKey = `${range}|${reloadKey}`;
   const [result, setResult] = useState<{ key: string; sheet?: Timesheet; error?: string } | null>(null);
   useEffect(() => {
     let alive = true;
     api
       .getTimesheet(from, to)
-      .then((sheet) => alive && setResult({ key: requestKey, sheet }))
+      .then((sheet) => {
+        writeViewCache(cacheScope, "timesheet", range, sheet);
+        if (alive) setResult({ key: requestKey, sheet });
+      })
       .catch(
         (e) =>
           alive &&
@@ -110,9 +115,11 @@ export default function TimesheetView({
     return () => {
       alive = false;
     };
-  }, [from, to, requestKey]);
+  }, [from, to, range, requestKey, cacheScope]);
   const loading = result?.key !== requestKey;
-  const sheet = result?.sheet && result.key.startsWith(`${range}|`) ? result.sheet : null;
+  // Until this range's answer lands, the last one seen for it (viewCache.ts) beats a blank page.
+  const sheet =
+    result?.sheet && result.key.startsWith(`${range}|`) ? result.sheet : (readViewCache<Timesheet>(cacheScope, "timesheet", range) ?? null);
   const error = result?.key === requestKey ? (result.error ?? null) : null;
 
   const days = useMemo(() => eachDay(from, to), [from, to]);
