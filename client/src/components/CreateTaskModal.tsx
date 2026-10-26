@@ -6,6 +6,7 @@ import { filesFromClipboard, hasPending, NO_ATTACHMENTS, uploadPending, type Pen
 import { HOURS_PER_DAY, localToday, roundHours } from "../taskForm";
 import AttachmentPicker from "./AttachmentPicker";
 import DurationHint from "./DurationHint";
+import LabelsInput from "./LabelsInput";
 import NumberInput from "./NumberInput";
 
 interface Props {
@@ -41,6 +42,12 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate, initi
   const [estimate, setEstimate] = useState<number | null>(null);
   const [estimateTouched, setEstimateTouched] = useState(false);
   const [assigneeAccountId, setAssigneeAccountId] = useState("");
+  // "" leaves the priority to the project's default, as Jira's own create dialog does.
+  const [priority, setPriority] = useState("");
+  const [labels, setLabels] = useState<string[]>([]);
+  // Both lists only decorate the form: a failure leaves it usable without them.
+  const [priorityOptions, setPriorityOptions] = useState<string[]>([]);
+  const [labelSuggestions, setLabelSuggestions] = useState<string[]>([]);
   const [attachments, setAttachments] = useState<PendingAttachments>(NO_ATTACHMENTS);
 
   const [saving, setSaving] = useState(false);
@@ -66,6 +73,21 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate, initi
       alive = false;
     };
   }, [wantSubtask]);
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .listPriorities()
+      .then((p) => alive && setPriorityOptions(p))
+      .catch(() => {});
+    api
+      .listLabels()
+      .then((l) => alive && setLabelSuggestions(l))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // Switch between interactive list and bulk textarea while preserving content
   function handleModeChange(nextMode: "list" | "bulk") {
@@ -143,6 +165,8 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate, initi
         durationDays: Math.max(1, Math.ceil(durationDays)),
         assigneeAccountId: assigneeAccountId || null,
         estimateHours: estimate && estimate > 0 ? estimate : null,
+        priority: priority || undefined,
+        labels: labels.length > 0 ? labels : undefined,
       });
 
       // Attachments need an issue key, so they go up once each issue exists —
@@ -414,6 +438,24 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate, initi
               </span>
             )}
           </label>
+        </div>
+
+        <div className="field-row">
+          <label className="field">
+            <span className="field-label-text">Độ ưu tiên</span>
+            <select value={priority} onChange={(e) => setPriority(e.target.value)}>
+              <option value="">— Mặc định của dự án —</option>
+              {priorityOptions.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="field field-wide">
+            <span className="field-label-text">Nhãn {taskCount > 1 ? "(áp dụng cho tất cả task)" : ""}</span>
+            <LabelsInput value={labels} onChange={setLabels} suggestions={labelSuggestions} />
+          </div>
         </div>
 
         <div className="field">

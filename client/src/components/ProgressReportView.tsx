@@ -226,6 +226,7 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
   const attention: Array<{ kind: Drill["kind"]; label: string; value: number; tone: "crit" | "serious" | "warn" | "neutral"; icon: string }> = [
     { kind: "overdue", label: "Quá hạn", value: m.counts.overdue, tone: "crit", icon: "!" },
     { kind: "slipped", label: "Trễ baseline", value: m.counts.slipped, tone: "serious", icon: "⏱" },
+    { kind: "dueSoon", label: "Sắp đến hạn (7 ngày)", value: m.counts.dueSoon ?? m.dueSoon.length, tone: "warn", icon: "⏳" },
     { kind: "notStarted", label: "Chưa bắt đầu", value: m.counts.notStarted, tone: "warn", icon: "▷" },
     { kind: "unassigned", label: "Chưa gán người", value: m.counts.unassigned, tone: "neutral", icon: "?" },
   ];

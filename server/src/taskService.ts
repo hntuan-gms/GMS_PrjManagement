@@ -336,35 +336,6 @@ export class TaskService {
     if (problem) throw badRequest(problem);
   }
 
-  /**
-   * Saves each task's current dates as its baseline (or clears it), for the given
-   * tasks or every task. One read and one batched write, and NOTHING is written to
-   * Jira — a baseline lives only in the overlay. The read is also the permission
-   * check: only issues this user can see are touched.
-   */
-  async setBaselines(ids: string[] | null, clear: boolean): Promise<{ updated: number; skipped: number }> {
-    const tasks = await this.listTasks();
-    const wanted = ids ? new Set(ids) : null;
-    const chosen = tasks.filter((t) => !wanted || wanted.has(t.id));
-    // Without both dates there is nothing to save; clearing needs neither.
-    const usable = chosen.filter((t) => clear || (t.startDate && t.dueDate));
-    await store.setOverlays(
-      this.ctx.cloudId,
-      usable.map((t) => ({
-        issueKey: t.id,
-        overlay: {
-          startDate: t.startDate,
-          durationDays: t.durationDays,
-          percentComplete: t.percentComplete,
-          predecessors: t.predecessors,
-          baselineStart: clear ? null : t.startDate,
-          baselineDue: clear ? null : t.dueDate,
-        },
-      }))
-    );
-    return { updated: usable.length, skipped: chosen.length - usable.length };
-  }
-
   /** What the issue's workflow allows from its current status — the edit modal's status list. */
   async listTransitions(
     id: string
@@ -890,6 +861,8 @@ export class TaskService {
               durationDays: input.durationDays,
               assigneeAccountId: input.assigneeAccountId ?? null,
               estimateHours: input.estimateHours ?? null,
+              priority: input.priority,
+              labels: input.labels,
             },
             warnings
           )

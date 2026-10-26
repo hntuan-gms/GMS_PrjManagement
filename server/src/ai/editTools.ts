@@ -376,7 +376,7 @@ const SET_VIEW_FILTER: FunctionDeclaration = {
       types: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Issue types (Bug, Task…)." },
       epics: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Epic keys or words from the Epic's title." },
       labels: { type: Type.ARRAY, items: { type: Type.STRING } },
-      priorities: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Shown on the board only." },
+      priorities: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Priorities as the user said them ('cao', 'High')." },
       text: { type: Type.STRING, description: "Words that must appear in the key, title, assignee or labels." },
       overdue: { type: Type.BOOLEAN },
       blocked: { type: Type.BOOLEAN, description: "Board only: cards blocked by unfinished work or flagged." },

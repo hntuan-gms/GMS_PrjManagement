@@ -25,6 +25,8 @@ export interface TaskFilter {
   versions: Set<string>;
   /** Sprint names (the sprint a task is in — see Task.sprint). */
   sprints: Set<string>;
+  /** Priority names; "none" stands for an issue with no priority. Same rule as the board's facet. */
+  priorities: Set<string>;
   onlyOverdue: boolean;
   /**
    * A JQL the user typed, which Jira — not this code — evaluates. Only the text lives
@@ -44,6 +46,7 @@ export const EMPTY_TASK_FILTER: TaskFilter = {
   components: new Set(),
   versions: new Set(),
   sprints: new Set(),
+  priorities: new Set(),
   onlyOverdue: false,
   jql: "",
 };
@@ -60,6 +63,7 @@ export function isTaskFiltering(f: TaskFilter): boolean {
     f.versions.size > 0 ||
     f.sprints.size > 0 ||
     !!f.jql.trim() ||
+    f.priorities.size > 0 ||
     f.onlyOverdue
   );
 }
@@ -76,6 +80,7 @@ export function facetCount(f: TaskFilter): number {
     (f.versions.size > 0 ? 1 : 0) +
     (f.sprints.size > 0 ? 1 : 0) +
     (f.jql.trim() ? 1 : 0) +
+    (f.priorities.size > 0 ? 1 : 0) +
     (f.onlyOverdue ? 1 : 0)
   );
 }
@@ -133,6 +138,7 @@ export function matchesTaskFilter(t: Task, f: TaskFilter, ctx: FilterContext): b
   if (f.versions.size > 0 && !t.fixVersions.some((v) => f.versions.has(v))) return false;
   if (f.sprints.size > 0 && !(t.sprint && f.sprints.has(t.sprint.name))) return false;
   if (f.jql.trim() && ctx.jqlKeys && !ctx.jqlKeys.has(t.id)) return false;
+  if (f.priorities.size > 0 && !f.priorities.has(t.priority ?? "none")) return false;
   if (f.onlyOverdue && !isOverdueTask(t, ctx.today)) return false;
   return true;
 }
@@ -156,6 +162,7 @@ interface Stored {
   components?: string[];
   versions?: string[];
   sprints?: string[];
+  priorities?: string[];
   onlyOverdue?: boolean;
   jql?: string;
 }
@@ -176,6 +183,7 @@ function load(key: string): TaskFilter {
       components: arr(s.components),
       versions: arr(s.versions),
       sprints: arr(s.sprints),
+      priorities: arr(s.priorities),
       onlyOverdue: s.onlyOverdue === true,
       jql: typeof s.jql === "string" ? s.jql : "",
     };
@@ -195,6 +203,7 @@ function save(key: string, f: TaskFilter): void {
       components: [...f.components],
       versions: [...f.versions],
       sprints: [...f.sprints],
+      priorities: [...f.priorities],
       onlyOverdue: f.onlyOverdue,
       jql: f.jql,
     };

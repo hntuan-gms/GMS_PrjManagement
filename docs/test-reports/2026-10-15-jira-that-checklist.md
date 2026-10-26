@@ -104,34 +104,54 @@ Test tự động đã chứng minh phần code của ta; mục này chứng min
 
 ---
 
-## C. Giai đoạn 2 (chi tiết task và Gantt) — thử trên Jira thật
+## C. Nhập kịch bản kiểm thử (KBKT .xlsx) — cần Jira thật
+
+Test tự động đã chứng minh: đọc file giống hệt `jira_sync.py` (cùng số test case, nhãn, tiêu đề, mô tả, ảnh — đối chiếu trên 5 file mẫu), logic đồng bộ trên Jira giả, và luồng hộp thoại trong trình duyệt (`e2e/kbkt-import.e2e.mjs`). Mục này chứng minh **Jira thật** nhận đúng. Nút **Nhập KBKT** ở thanh công cụ Gantt, cạnh "Xuất CSV". Dùng dự án thử có loại issue Story / Sub Testcase / Sub Bug (hoặc sửa trong "Cấu hình dự án").
+
+| # | Thao tác | Phải thấy trong Jira | Kết quả |
+|---|---|---|---|
+| C1 | Mở "Cấu hình dự án" | Danh sách loại issue / trạng thái / ưu tiên / kiểu liên kết là của dự án này; giá trị không có trong dự án được đánh dấu | |
+| C2 | Nhập một file `AI-xx_…xlsx`, chọn Epic, Xem trước | Không có gì đổi trong Jira (xem trước không ghi) | |
+| C3 | Áp dụng | Story mới dưới Epic; mỗi dòng test là một Sub Testcase dưới Story, đúng trạng thái (P→Passed, F→Failed, PE→Pending, trống→Not run); Sub Bug có ưu tiên theo Mức độ; ảnh trong sheet "Hình ảnh lỗi" được đính kèm đúng lỗi; test ↔ lỗi có liên kết Relates; hạn hoàn thành = ngày đã chọn; nhãn `kbkt-…`, `tc-…`, `bug-…`, `result-…` | |
+| C4 | Áp dụng lại đúng file đó | Xem trước báo "Không có gì cần ghi lên Jira"; không có issue trùng | |
+| C5 | Sửa một kết quả trong file (P → F), nhập lại | Chỉ test đó đổi trạng thái + nhãn result; lỗi tương ứng mở lại | |
+| C6 | File `AI-33_…` mà AI-33 là Story có sẵn trong dự án | Hộp thoại tự chọn "Story có sẵn" AI-33 (hiện tên); test case vào dưới AI-33; AI-33 không bị đổi tên, **không bị chuyển Epic** dù đang chọn Epic ở trên | |
+| C6b | File `AI-xx_…`, chọn "Story có sẵn" → tìm theo tên một Story, áp dụng | Hàng chục Sub Testcase / Sub Bug nằm dưới đúng Story đã chọn; không có Story mới nào được tạo | |
+| C6c | Workbook đã nhập vào Story riêng, nay chọn "Story có sẵn" khác rồi áp dụng | Các sub-task cũ **chuyển sang** Story mới chọn (Jira thật có cho đổi parent sub-task qua API không — ghi lại); có cảnh báo Story cũ không còn dùng | |
+| C7 | File của một workbook **đã đồng bộ bằng `jira_sync.py`** (dự án AI) | Xem trước: không có dòng "Tạo mới" nào — issue cũ được nhận ra theo nhãn | |
+| C8 | Đặt một trạng thái không có bước chuyển (ví dụ đổi "Đạt" sang trạng thái không với tới được) | Kết quả báo "không chuyển được …" thay vì im lặng; phần còn lại vẫn ghi | |
+| C9 | File lớn nhất có ảnh (~100 test case) | Áp dụng xong trong vòng 300 giây (giới hạn Cloud Run); nhật ký chạy dần | |
+| C10 | Bấm **Dừng** giữa chừng, rồi áp dụng lại | Phần đã ghi giữ nguyên; lần sau chỉ làm phần còn lại, không trùng | |
+| C11 | Tài khoản khách (không phải nhân viên) | Dùng được (không cần quyền AI); Jira từ chối nếu tài khoản không có quyền tạo issue, kèm thông báo rõ | |
+
+## D. Giai đoạn 2 (chi tiết task và Gantt) — thử trên Jira thật
 
 Test tự động đã chứng minh phần giao diện và logic của ta với máy chủ giả; mục này chứng minh **Jira nhận và trả đúng**. Dùng dự án thử.
 
 | # | Thao tác | Phải thấy | Kết quả |
 |---|---|---|---|
-| C1 | Mở một task, thêm 1 thành phần và 1 phiên bản, lưu | Components / Fix versions trong Jira đúng; bỏ đi cũng bỏ thật | |
-| C2 | Dự án chưa có thành phần/phiên bản nào | Ô chọn ghi "Dự án chưa có…", không lỗi | |
-| C3 | Cột Sprint trên WBS, lọc theo Sprint — **không bật JIRA_AGILE** | Có tên sprint đúng (đang chạy ưu tiên); site không có Jira Software thì cột trống, không lỗi | |
-| C4 | Đổi việc cha của một Story sang Epic khác | Parent trong Jira đổi; Story chuyển nhóm trên WBS sau khi lưu | |
-| C5 | Bỏ việc cha ("— Không có —") của một Story dưới Epic | Jira nhận (`parent: null`) hoặc báo lỗi dễ hiểu — **ghi lại kết quả**, đây là chỗ chưa chắc | |
-| C6 | Đổi loại Task → Story (cùng quy trình), rồi thử loại khác quy trình | Cái đầu được; cái sau Jira từ chối và lời báo hiện trong modal | |
-| C7 | Thử tạo vòng: đặt Epic A làm con của Story thuộc A (qua trợ lý: "chuyển GPM-1 vào GPM-5") | Bị chặn trước khi gọi Jira, thông báo "vòng lặp" | |
-| C8 | Task đang có người phụ trách → đổi sang Epic | Bị chặn, nói phải bỏ người phụ trách | |
-| C9 | Thêm issue link "blocks" từ A sang B | Trong Jira: A **blocks** B (B "is blocked by" A) — **kiểm tra chiều**, đây là chỗ dễ ngược | |
-| C10 | Thêm link với task thuộc **dự án khác**; gỡ link | Được; gỡ xong biến mất trong Jira | |
-| C11 | Link "blocks" có làm dời lịch không? | **Không** (khác với mục Phụ thuộc) | |
-| C12 | Bấm Theo dõi / bỏ theo dõi | Jira hiện bạn trong Watchers; tài khoản không có quyền xem danh sách thì chỉ thấy số lượng + ghi chú | |
-| C13 | JQL: `assignee = currentUser() AND status != Done ORDER BY created` | Lọc đúng; có câu "Jira trả N việc"; ORDER BY không gây lỗi | |
-| C14 | JQL sai cú pháp / tên trường sai | Lỗi của Jira hiện cạnh ô, biểu đồ không bị trống | |
-| C15 | JQL cố mở rộng phạm vi: `status = Done) OR (project = KHAC` | Chỉ còn việc của dự án đang mở | |
-| C16 | Lưu bộ lọc có "Của tôi", chia sẻ; đăng nhập tài khoản khác mở | Người kia thấy bộ lọc; "Của tôi" áp lên **chính họ**; họ không xoá/sửa được của bạn | |
-| C17 | Đặt baseline cho cả dự án, rồi kéo vài thanh | Dải baseline đứng yên, thanh dời; dải đỏ khi trễ; Báo cáo (% kế hoạch) đổi theo | |
-| C18 | Đặt/xoá baseline: Jira có bị ghi gì không? | **Không** có thay đổi nào trong History của issue | |
-| C19 | Gắn nhãn `milestone` cho một task; tạo Version có ngày phát hành | Hình thoi ở cuối thanh; đường dọc cắm đúng ngày phát hành ở cả chế độ Ngày/Tuần/Tháng | |
-| C20 | Kéo thanh có phụ thuộc (đẩy việc sau), rồi Hoàn tác / Ctrl+Z | Cả thanh kéo và việc bị đẩy về đúng chỗ cũ, **trong Jira** (đối chiếu Due date) | |
-| C21 | Hoàn tác khi đang gõ ô tìm kiếm | Không hoàn tác bản kế hoạch | |
-| C22 | Nhập ~40 dòng (dán từ Excel) gồm Epic → Story → Sub-task bằng cột "Việc cha" là số dòng | Đúng cây trong Jira; chia thành nhiều đợt vẫn đúng cha | |
-| C23 | Dòng có ngày sai, người trùng tên, việc cha lỗi | Bị chặn/báo đúng số dòng của bảng; các dòng còn lại vẫn tạo | |
-| C24 | Nhập 150 dòng | Không bị cắt giữa chừng (đợt 25 dòng/lần); thời gian chấp nhận được | |
-| C25 | Trợ lý: "thêm thành phần Backend cho GPM-5", "chuyển GPM-5 vào Epic GPM-2", "đổi GPM-5 thành Bug" | Làm đúng; tên sai thì liệt kê tên có sẵn | |
+| D1 | Mở một task, thêm 1 thành phần và 1 phiên bản, lưu | Components / Fix versions trong Jira đúng; bỏ đi cũng bỏ thật | |
+| D2 | Dự án chưa có thành phần/phiên bản nào | Ô chọn ghi "Dự án chưa có…", không lỗi | |
+| D3 | Cột Sprint trên WBS, lọc theo Sprint — **không bật JIRA_AGILE** | Có tên sprint đúng (đang chạy ưu tiên); site không có Jira Software thì cột trống, không lỗi | |
+| D4 | Đổi việc cha của một Story sang Epic khác | Parent trong Jira đổi; Story chuyển nhóm trên WBS sau khi lưu | |
+| D5 | Bỏ việc cha ("— Không có —") của một Story dưới Epic | Jira nhận (`parent: null`) hoặc báo lỗi dễ hiểu — **ghi lại kết quả**, đây là chỗ chưa chắc | |
+| D6 | Đổi loại Task → Story (cùng quy trình), rồi thử loại khác quy trình | Cái đầu được; cái sau Jira từ chối và lời báo hiện trong modal | |
+| D7 | Thử tạo vòng: đặt Epic A làm con của Story thuộc A (qua trợ lý: "chuyển GPM-1 vào GPM-5") | Bị chặn trước khi gọi Jira, thông báo "vòng lặp" | |
+| D8 | Task đang có người phụ trách → đổi sang Epic | Bị chặn, nói phải bỏ người phụ trách | |
+| D9 | Thêm issue link "blocks" từ A sang B | Trong Jira: A **blocks** B (B "is blocked by" A) — **kiểm tra chiều**, đây là chỗ dễ ngược | |
+| D10 | Thêm link với task thuộc **dự án khác**; gỡ link | Được; gỡ xong biến mất trong Jira | |
+| D11 | Link "blocks" có làm dời lịch không? | **Không** (khác với mục Phụ thuộc) | |
+| D12 | Bấm Theo dõi / bỏ theo dõi | Jira hiện bạn trong Watchers; tài khoản không có quyền xem danh sách thì chỉ thấy số lượng + ghi chú | |
+| D13 | JQL: `assignee = currentUser() AND status != Done ORDER BY created` | Lọc đúng; có câu "Jira trả N việc"; ORDER BY không gây lỗi | |
+| D14 | JQL sai cú pháp / tên trường sai | Lỗi của Jira hiện cạnh ô, biểu đồ không bị trống | |
+| D15 | JQL cố mở rộng phạm vi: `status = Done) OR (project = KHAC` | Chỉ còn việc của dự án đang mở | |
+| D16 | Lưu một bộ lọc có **Thành phần** (hoặc **JQL**) + "Của tôi", chia sẻ; đăng nhập tài khoản khác mở | Người kia thấy bộ lọc; mở ra có đúng thành phần/JQL (JQL được Jira chạy lại bằng quyền của họ); "Của tôi" áp lên **chính họ**; họ không xoá/sửa được của bạn | |
+| D17 | Chọn vài việc → ô "Baseline…" → Lưu baseline, rồi kéo vài thanh | Dải baseline đứng yên, thanh dời; dải đỏ khi trễ; Báo cáo (% kế hoạch) đổi theo | |
+| D18 | Đặt/xoá baseline: Jira có bị ghi gì không? | **Không** có thay đổi nào trong History của issue | |
+| D19 | Gắn nhãn `milestone` cho một task; tạo Version có ngày phát hành | Hình thoi ở cuối thanh; đường dọc cắm đúng ngày phát hành ở cả chế độ Ngày/Tuần/Tháng | |
+| D20 | Kéo thanh có phụ thuộc (đẩy việc sau), rồi Hoàn tác / Ctrl+Z | Cả thanh kéo và việc bị đẩy về đúng chỗ cũ, **trong Jira** (đối chiếu Due date) | |
+| D21 | Hoàn tác khi đang gõ ô tìm kiếm | Không hoàn tác bản kế hoạch | |
+| D22 | Nhập ~40 dòng (dán từ Excel) gồm Epic → Story → Sub-task bằng cột "Việc cha" là số dòng | Đúng cây trong Jira; chia thành nhiều đợt vẫn đúng cha | |
+| D23 | Dòng có ngày sai, người trùng tên, việc cha lỗi | Bị chặn/báo đúng số dòng của bảng; các dòng còn lại vẫn tạo | |
+| D24 | Nhập 150 dòng | Không bị cắt giữa chừng (đợt 25 dòng/lần); thời gian chấp nhận được | |
+| D25 | Trợ lý: "thêm thành phần Backend cho GPM-5", "chuyển GPM-5 vào Epic GPM-2", "đổi GPM-5 thành Bug" | Làm đúng; tên sai thì liệt kê tên có sẵn | |

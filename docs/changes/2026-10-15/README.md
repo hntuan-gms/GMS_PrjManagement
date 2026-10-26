@@ -89,7 +89,8 @@
 
 # Giai đoạn 2 — Chi tiết task và Gantt
 
-- **Phạm vi làm:** 2.1–2.11. **Chưa commit/deploy.** Migration mới: `009_saved_filter.sql`. Không có biến môi trường mới.
+- **Phạm vi làm:** 2.1–2.11. **Chưa deploy.** Không có migration mới (bộ lọc đã lưu dùng bảng `saved_filter` của nhánh kia, `010_saved_filter.sql`). Không có biến môi trường mới.
+- **Đã gộp với `origin/main`** (7 commit của người khác): hai nhánh cùng làm *bộ lọc đã lưu* và *baseline trên thanh*. Giữ bản của họ (đã deploy, có bảng thật) và đắp phần mình lên: bộ lọc đã lưu giờ chứa cả thành phần/phiên bản/sprint/JQL; baseline dùng `BaselineOverlay` + ô "Baseline…" trên thanh chọn, `TimelineMarkers` chỉ còn mốc và đường phát hành. Đã bỏ: `filterStore.ts`, `009_saved_filter.sql`, `BaselineMenu`, `POST /tasks/baseline`.
 - Dựa trên nền đã commit (`ca51c41`): giai đoạn 0 và 1 đã nằm trong lịch sử git.
 
 ## 1. Đã thay đổi gì
@@ -100,8 +101,8 @@
 | 2.2 | **Issue link của Jira** (blocks, relates…): xem, thêm, gỡ, hiện *cạnh* phụ thuộc chứ không lẫn vào, có ghi chú "không dời lịch". Route `/issue-links` (tên `/links` đã dành cho liên kết web) | `taskExtras.ts`, `TaskLinks.tsx` |
 | 2.3 | **Người theo dõi**: xem danh sách (nếu có quyền), theo dõi / bỏ theo dõi chính mình | `TaskWatchers.tsx` |
 | 2.4 | **Đổi việc cha và đổi loại** có kiểm tra trước khi gọi Jira (không vòng lặp, Sub-task không làm cha, Epic không có cha và không có người phụ trách) | `structure.ts` (server + client) |
-| 2.5 | **Baseline trên thanh** (dải mỏng dưới thanh, đỏ khi trễ) và đặt/xoá baseline từ giao diện, cho việc đã chọn hoặc cả dự án; chỉ lưu trong ứng dụng | `BaselineMenu`, `TimelineMarkers`, `setBaselines` |
-| 2.6 | **Bộ lọc đã lưu và chia sẻ** theo dự án; "Của tôi" lưu thành `@me` nên người mở thấy việc của *họ* | `filterStore.ts`, `SavedFilterMenu` |
+| 2.5 | **Baseline trên thanh** (dải mỏng dưới thanh, đỏ khi trễ) và đặt/xoá baseline cho việc đã chọn; chỉ lưu trong ứng dụng — phần này **là của nhánh kia**, mình chỉ dùng lại | `BaselineOverlay`, ô "Baseline…" |
+| 2.6 | **Bộ lọc đã lưu và chia sẻ** theo dự án (của nhánh kia); mình mở rộng để lưu thêm thành phần/phiên bản/sprint/JQL | `savedFilters.ts` (cả hai phía) |
 | 2.7 | **Lọc bằng JQL**: chuỗi đi thẳng sang Jira (không tự viết bộ phân tích), chạy bằng token của người dùng, kết quả cắt về đúng dự án | `taskExtras.jqlKeys` |
 | 2.8 | **Trường Sprint** trên task: cột, bộ lọc; đọc qua trường Sprint của API thường nên *không* cần `JIRA_AGILE` | `fieldDiscovery.ts`, `pickSprint` |
 | 2.9 | **Mốc và phiên bản phát hành trên trục thời gian**: hình thoi cho task nhãn `milestone`, đường dọc tại ngày phát hành | `TimelineMarkers`, `timelineGeometry.ts` |
@@ -129,14 +130,13 @@ Kèm theo: `TaskEditModal` giờ có `key` theo task (mở task khác từ chat 
 
 | Cách | Kết quả |
 |---|---|
-| `server`: `npm test` / `typecheck:test` / `npm run build` | 155 test đạt, sạch |
-| `client`: `npm test` / `typecheck:test` / `npm run lint` / `npm run build` | 89 test đạt; lint chỉ còn 2 cảnh báo có từ trước |
-| `cd e2e && npm test` | 5 file đạt: phase 1 (41 bước), nhấp đúp, Gantt nhỏ, trợ lý, **giai đoạn 2** (modal, bộ lọc, lưu bộ lọc, JQL, baseline, mốc/phát hành, kéo + hoàn tác bằng chuột thật, nhập) |
+| `server`: `npm test` / `typecheck:test` / `npm run build` | 195 test đạt, sạch |
+| `client`: `npm test` / `typecheck:test` / `npm run lint` / `npm run build` | 106 test đạt; lint chỉ còn 2 cảnh báo có từ trước |
+| `cd e2e && npm test` | 7 file đạt, gồm **giai đoạn 2** (modal, bộ lọc, lưu bộ lọc có thành phần/JQL, mốc/phát hành, kéo + hoàn tác bằng chuột thật, nhập) cùng KBKT và overlay của nhánh kia |
 
 ## 5. Chưa kiểm tra / còn tồn tại
 
-- **Chưa thử với Jira thật.** Chỗ chưa chắc nhất: (a) **chiều của issue link** (`inwardIssue`/`outwardIssue` — suy ra từ tài liệu, checklist C9 để kiểm tra); (b) gỡ việc cha bằng `parent: null` (C5); (c) đổi loại giữa hai quy trình khác nhau (C6); (d) vị trí đường phát hành ở chế độ Tháng.
-- **Chưa thử với Postgres thật**: migration 009 và các câu SQL của `filterStore` chỉ qua `tsc`.
+- **Chưa thử với Jira thật.** Chỗ chưa chắc nhất: (a) **chiều của issue link** (`inwardIssue`/`outwardIssue` — suy ra từ tài liệu, checklist D9 để kiểm tra); (b) gỡ việc cha bằng `parent: null` (D5); (c) đổi loại giữa hai quy trình khác nhau (D6); (d) vị trí đường phát hành ở chế độ Tháng.
 - **Không có .xlsx**; tối đa 200 dòng mỗi lần nhập.
 - **Bộ lọc trên tab Nguồn lực** dùng được JQL nhưng không có ô nhập JQL ở đó (chỉ áp bộ lọc đã đặt từ Gantt).
 - **Trợ lý chưa lọc được theo thành phần/phiên bản/sprint** bằng `set_view_filter` (`search_tasks` thì có).

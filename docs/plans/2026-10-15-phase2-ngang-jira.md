@@ -79,7 +79,7 @@ Lưu ý 2.4: đổi cha đụng tới `wbsParentId`, luật Epic, và cascade. P
 
 ---
 
-**Tiến độ giai đoạn 2 (2026-10-23):** 2.1–2.11 đã viết và kiểm tra bằng test đơn vị + e2e với máy chủ giả; **chưa chạy với Jira thật** ([checklist, phần C](../test-reports/2026-10-15-jira-that-checklist.md)). Chọn lựa khác kế hoạch: nhập từ Excel đọc **CSV và ô dán từ Excel, chưa đọc .xlsx**; mục 2.8 (trường Sprint) **không** cần `JIRA_AGILE` như kế hoạch dự đoán vì đọc qua trường Sprint của API thường; milestone = nhãn `milestone`. Chi tiết ở [`docs/changes/2026-10-15/`](../changes/2026-10-15/README.md), mục "Giai đoạn 2".
+**Tiến độ giai đoạn 2 (2026-10-23):** 2.1–2.11 đã viết và kiểm tra bằng test đơn vị + e2e với máy chủ giả; **chưa chạy với Jira thật** ([checklist, phần D](../test-reports/2026-10-15-jira-that-checklist.md)). Chọn lựa khác kế hoạch: nhập từ Excel đọc **CSV và ô dán từ Excel, chưa đọc .xlsx**; mục 2.8 (trường Sprint) **không** cần `JIRA_AGILE` như kế hoạch dự đoán vì đọc qua trường Sprint của API thường; milestone = nhãn `milestone`. Chi tiết ở [`docs/changes/2026-10-15/`](../changes/2026-10-15/README.md), mục "Giai đoạn 2".
 
 ## 5. Giai đoạn 3 — Bảng, Báo cáo, Nguồn lực
 

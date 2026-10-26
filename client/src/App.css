@@ -895,8 +895,8 @@ button.danger:hover:not(:disabled) {
 .gantt-toolbar {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
+  gap: 4px;
+  padding: 7px 16px;
   border-bottom: 1px solid var(--color-border);
   background: #ffffff;
   flex: none;
@@ -905,23 +905,104 @@ button.danger:hover:not(:disabled) {
 .gantt-toolbar button {
   border: 1px solid var(--color-border);
   background: #ffffff;
-  padding: 5px 12px;
+  color: var(--color-text-secondary);
+  padding: 4px 9px;
   border-radius: var(--radius-md);
   font-size: 12.5px;
   cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
 }
 
+.gantt-toolbar button:hover:not(:disabled) {
+  border-color: var(--color-border-hover);
+  color: var(--color-text-primary);
+}
+
+.gantt-toolbar button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.tbi {
+  margin-right: 4px;
+  vertical-align: -2px;
+}
+
+/* Generic "menu open" state for a plain dropdown trigger (Cột, Chưa có ngày) —
+   a quieter cue than the feature toggles below, since it just means "open", not
+   "on". The more specific rules further down (seg-group/toggle-pill/critical/
+   warning) win over this on the buttons that use them. */
 .gantt-toolbar button.active {
+  background: var(--color-bg);
+  border-color: var(--color-border-hover);
+  color: var(--color-text-primary);
+}
+
+/* View-mode switch (Ngày/Tuần/Tháng): one connected pill, not three loose
+   buttons — it picks a mode, it isn't a set of independent toggles. */
+.seg-group {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 2px;
+  background: var(--color-bg);
+  gap: 1px;
+}
+
+.seg-group button {
+  border: none;
+  background: transparent;
+  border-radius: calc(var(--radius-md) - 2px);
+  padding: 4px 9px;
+}
+
+.seg-group button:hover:not(:disabled) {
+  background: #ffffff;
+}
+
+.seg-group button.active {
   background: #0f172a;
   color: #ffffff;
-  border-color: #0f172a;
+}
+
+/* Display toggles (Đường găng/Phụ thuộc/Baseline): "on" reads as a feature
+   switched on, not as a selected mode, so it gets the same soft accent as an
+   applied filter chip rather than the segmented switch's solid fill. */
+.gantt-toolbar button.toggle-pill.active {
+  background: var(--color-primary-light);
+  border-color: var(--color-primary-border);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+/* Bug/critical-path keeps its own fixed red when on — worth spotting at a
+   glance, see ganttMapping.ts. Declared after .toggle-pill.active so it wins. */
+.critical-toggle.active {
+  background: var(--color-danger-light) !important;
+  border-color: var(--color-danger-border) !important;
+  color: var(--color-danger) !important;
+}
+
+/* "Chưa có ngày": a data-quality notice, not a plain action — amber like the
+   rest of the app's warning chips, so it reads as "needs attention" at a glance. */
+.warning-pill {
+  background: var(--color-warning-light) !important;
+  border-color: var(--color-warning-border) !important;
+  color: var(--color-warning) !important;
+}
+
+.warning-pill.active {
+  box-shadow: inset 0 0 0 1px var(--color-warning);
 }
 
 .gantt-toolbar-divider {
   width: 1px;
-  height: 20px;
+  height: 22px;
   background: var(--color-border);
-  margin: 0 4px;
+  margin: 0 5px;
+  flex: none;
 }
 
 .gantt-today-note {
@@ -929,7 +1010,7 @@ button.danger:hover:not(:disabled) {
   color: var(--color-text-muted);
 }
 
-/* --- JQL and saved filters (phase 2 / 2.6, 2.7) --- */
+/* --- JQL (phase 2 / 2.7) --- */
 .tf-jql {
   flex-basis: 100%;
   display: flex;
@@ -953,66 +1034,7 @@ button.danger:hover:not(:disabled) {
 .tf-empty.is-error {
   color: var(--color-danger);
 }
-.saved-filters {
-  min-width: 300px;
-}
-.saved-filter-row {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 0 6px;
-}
-.saved-filter-apply {
-  flex: 1;
-  text-align: left;
-  border: none;
-  background: none;
-  box-shadow: none;
-  padding: 6px;
-  cursor: pointer;
-  font: inherit;
-}
-.saved-filter-apply:hover {
-  color: var(--color-primary);
-}
-.saved-filter-apply small {
-  color: var(--color-text-muted);
-}
-.saved-filter-form {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.saved-filter-form label {
-  font-size: 12px;
-  color: var(--color-text-secondary);
-}
-.menu-action {
-  display: block;
-  width: 100%;
-  text-align: left;
-  border: none;
-  background: none;
-  box-shadow: none;
-  padding: 6px 12px;
-  font: inherit;
-  cursor: pointer;
-}
-.menu-action:hover:not(:disabled) {
-  background: var(--color-bg);
-}
-.menu-action:disabled {
-  color: var(--color-text-muted);
-  cursor: default;
-}
-
-/* --- baselines, milestones and releases on the timeline (2.5, 2.9) --- */
-.baseline-strip {
-  fill: #94a3b8;
-}
-.baseline-strip.is-slipped {
-  fill: #ef4444;
-}
+/* --- milestones and releases on the timeline (2.9) --- */
 .milestone-diamond {
   fill: #f59e0b;
   stroke: #b45309;
@@ -1129,6 +1151,9 @@ button.danger:hover:not(:disabled) {
   align-items: center;
   gap: 8px;
   margin-left: auto;
+  /* Shrinks before the toolbar overflows or wraps, so a new button does not push the row to two lines. */
+  flex: 0 1 200px;
+  min-width: 110px;
 }
 
 .gantt-search input {
@@ -1136,7 +1161,8 @@ button.danger:hover:not(:disabled) {
   border: 1.5px solid var(--color-border);
   border-radius: var(--radius-md);
   font-size: 12.5px;
-  width: 250px;
+  width: 100%;
+  min-width: 0;
   background: var(--color-surface);
   color: var(--color-text-primary);
   transition: all var(--transition-fast);
@@ -1193,6 +1219,17 @@ button.danger:hover:not(:disabled) {
 .gantt-divider.dragging {
   background: var(--color-primary);
   opacity: 0.45;
+}
+
+/* Baseline strips (BaselineOverlay.tsx), in the gap under each bar: faded grey,
+   faded red when the bar now finishes later than its baseline. */
+.baseline-bar {
+  fill: #7d8394;
+  fill-opacity: 0.45;
+}
+.baseline-bar.is-late {
+  fill: #d64545;
+  fill-opacity: 0.5;
 }
 
 /* Custom dependency overlay (DependencyOverlay.tsx), portaled into the chart's own
@@ -3393,7 +3430,8 @@ button.pr-legend-btn:hover:not(:disabled),
 .pr-tiles {
   margin-top: 14px;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  /* Five tiles: one row when there is room, otherwise they wrap evenly. */
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
   gap: 8px;
 }
 @media (max-width: 560px) {
@@ -6337,6 +6375,12 @@ button.att-remove:hover:not(:disabled) {
   font-weight: 600;
 }
 
+/* Same red as an overdue card's due chip on the board. */
+.wbs-overdue {
+  color: #a12a2a;
+  font-weight: 700;
+}
+
 /* Board: a status no Jira column maps */
 .bd-colhead.is-unmapped {
   border-style: dashed;
@@ -6728,6 +6772,9 @@ tr.is-selected .ts-person {
   flex: none;
 }
 .tf-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   border: 1px solid var(--color-border);
   background: #ffffff;
   padding: 4px 10px;
@@ -6735,6 +6782,8 @@ tr.is-selected .ts-person {
   font-size: 12px;
   cursor: pointer;
   color: var(--color-text-secondary);
+  white-space: nowrap;
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
 }
 .tf-btn:hover {
   border-color: var(--color-border-hover);
@@ -6745,6 +6794,27 @@ tr.is-selected .ts-person {
   border-color: var(--color-primary-border);
   color: var(--color-primary);
   font-weight: 600;
+}
+.fb-icon {
+  flex: none;
+}
+/* The value pickers (Người phụ trách/Trạng thái/Loại/Epic/Nhãn/Ưu tiên) get a
+   flatter, slightly tinted shape — a "select", not a toggle — so they read as
+   one visual family distinct from the two instant on/off chips before the
+   divider. */
+.tf-select > .tf-btn {
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+}
+.tf-select > .tf-btn:not(.is-on):hover {
+  background: #ffffff;
+}
+.tf-divider {
+  width: 1px;
+  height: 18px;
+  background: var(--color-border);
+  margin: 0 2px;
+  flex: none;
 }
 .tf-menu {
   max-height: 320px;
@@ -6769,6 +6839,79 @@ tr.is-selected .ts-person {
 }
 .tf-clear {
   margin-left: 2px;
+}
+
+/* --- saved filters (SavedFilterMenu.tsx), first item of .tf-bar --- */
+.sf-menu {
+  min-width: 380px;
+  max-height: 420px;
+}
+.sf-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px 3px 8px;
+  border-radius: var(--radius-sm);
+}
+.sf-item:hover,
+.sf-item.is-active {
+  background: #f1f5f9;
+}
+.sf-apply {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  padding: 3px 0;
+  text-align: left;
+  font-size: 13px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sf-item.is-active .sf-apply {
+  font-weight: 600;
+}
+.sf-actions {
+  display: flex;
+  gap: 2px;
+  flex: none;
+}
+.sf-actions .text-btn {
+  font-size: 12px;
+  padding: 2px 4px;
+}
+.sf-delete {
+  color: var(--color-danger, #c0392b);
+}
+.sf-owner {
+  flex: none;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+.sf-form {
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.sf-form input[type="text"] {
+  flex: 1 1 100%;
+  font-size: 13px;
+  padding: 5px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+.sf-share {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+}
+.sf-error {
+  padding: 6px 8px;
+  font-size: 12.5px;
+  color: var(--color-danger, #c0392b);
 }
 
 /* --- bulk actions in the Gantt selection bar --- */
@@ -7285,4 +7428,298 @@ tr.is-selected .ts-person {
 .td-from {
   text-decoration: line-through;
   color: var(--color-text-muted);
+}
+
+/* --- KBKT import (KbktImportModal) --------------------------------------- */
+.kb-modal {
+  width: min(860px, 94vw);
+}
+.kb-modal .notice {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+  display: block;
+}
+.kb-modal .notice-error {
+  border-color: var(--color-danger-border);
+}
+.kb-modal .notice-warn {
+  border-color: var(--color-warning-border);
+}
+.kb-modal .notice ul {
+  margin: 0;
+  padding-left: 18px;
+}
+.kb-notice-ok {
+  background: var(--color-success-light);
+  border-color: var(--color-success-border) !important;
+  color: #166534;
+}
+.kb-muted {
+  font-size: 12.5px;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+.kb-drop {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 18px;
+  border: 1.5px dashed var(--color-border-hover);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg);
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  transition: all var(--transition-fast);
+}
+.kb-drop-active {
+  border-color: var(--color-primary);
+  background: var(--color-primary-light);
+}
+.kb-params {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.kb-params .field {
+  min-width: 240px;
+}
+.kb-field-narrow {
+  flex: 0 0 190px !important;
+  min-width: 0 !important;
+}
+.kb-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+.kb-files {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.kb-file {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.kb-file-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+.kb-file-name {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 13.5px;
+}
+.kb-target {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+}
+.kb-target-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #334155;
+}
+.kb-picked {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-primary-border);
+  border-radius: var(--radius-md);
+  background: var(--color-primary-light);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.kb-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.kb-picker input {
+  padding: 6px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font: inherit;
+  font-size: 13px;
+}
+.kb-picker-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 200px;
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+.kb-picker-list button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  border-bottom: 1px solid #f1f5f9;
+  border-radius: 0;
+  background: transparent;
+  padding: 6px 10px;
+  font-size: 13px;
+  box-shadow: none;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.kb-picker-list button:hover:not(:disabled) {
+  background: var(--color-primary-light);
+}
+.kb-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.kb-chip {
+  font-size: 12px;
+  padding: 3px 9px;
+  border-radius: var(--radius-full);
+  background: #f1f5f9;
+  color: var(--color-text-secondary);
+}
+.kb-chip-create {
+  background: var(--color-success-light);
+  color: #166534;
+}
+.kb-chip-update,
+.kb-chip-move,
+.kb-chip-link,
+.kb-chip-attach {
+  background: var(--color-primary-light);
+  color: var(--color-primary-hover);
+}
+.kb-chip-warn,
+.kb-chip-no-move,
+.kb-chip-skip {
+  background: var(--color-warning-light);
+  color: #92400e;
+}
+.kb-chip-error {
+  background: var(--color-danger-light);
+  color: var(--color-danger-hover);
+}
+.kb-details summary {
+  cursor: pointer;
+  font-size: 12.5px;
+  color: var(--color-text-muted);
+}
+.kb-log {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  max-height: 260px;
+  overflow: auto;
+  font-size: 12px;
+  border-top: 1px solid var(--color-border);
+}
+.kb-log li {
+  display: flex;
+  gap: 8px;
+  padding: 3px 0;
+  border-bottom: 1px solid #f1f5f9;
+  overflow-wrap: anywhere;
+}
+.kb-log-action {
+  flex: 0 0 120px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+.kb-log-error .kb-log-action {
+  color: var(--color-danger);
+}
+.kb-log-warn .kb-log-action,
+.kb-log-no-move .kb-log-action,
+.kb-log-skip .kb-log-action {
+  color: var(--color-warning);
+}
+.kb-log-create .kb-log-action {
+  color: var(--color-success);
+}
+.kb-settings {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 10px 14px;
+}
+.kb-settings > summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+.kb-settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 10px;
+}
+.kb-settings-body h4 {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.kb-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+.kb-priority {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+.kb-priority-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.kb-priority-row input,
+.kb-priority-row select {
+  padding: 6px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font: inherit;
+  font-size: 13px;
+}
+.kb-inline-checks {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.kb-settings-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+@media (max-width: 640px) {
+  .kb-picked {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .kb-log-action {
+    flex-basis: 90px;
+  }
 }

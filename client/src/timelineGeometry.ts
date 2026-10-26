@@ -29,17 +29,6 @@ export function dayWidth(rect: BarRect, range: DateRange): number {
   return rect.width / (daysBetween(range.start, range.end) + 1);
 }
 
-/** The strip drawn under a bar for its baseline, in the chart's own pixels. */
-export function baselineStrip(rect: BarRect, range: DateRange, baseline: DateRange): { x: number; width: number; slipped: boolean } {
-  const px = dayWidth(rect, range);
-  return {
-    x: rect.x + daysBetween(range.start, baseline.start) * px,
-    width: (daysBetween(baseline.start, baseline.end) + 1) * px,
-    // Finishing after the committed date is what "behind the baseline" means.
-    slipped: range.end > baseline.end,
-  };
-}
-
 /** The x of the START of `date` (its left edge), from the bar whose own start is nearest to it. */
 export function dateX(refs: Array<{ rect: BarRect; range: DateRange }>, date: string): number | null {
   let best: { rect: BarRect; range: DateRange } | null = null;

@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { descendantsOf, parentOptions, typeBlockedReason } from "../src/structure";
-import { fromSavedSpec, hasContent, ME, toSavedSpec } from "../src/savedFilter";
+import { fromSavedSpec, ME, toSavedSpec } from "../src/savedFilters";
 import { EMPTY_TASK_FILTER, buildEpicIndex, filterTaskIds, isTaskFiltering, type TaskFilter } from "../src/taskFilter";
-import { baselineStrip, dateX, dayWidth, daysBetween, isMilestone } from "../src/timelineGeometry";
+import { dateX, dayWidth, daysBetween, isMilestone } from "../src/timelineGeometry";
 import { MAX_UNDO, makeEntry, pushEntry, undoSteps } from "../src/undo";
 import { task } from "./fixtures";
 
@@ -104,8 +104,8 @@ describe("saved filters (client side)", () => {
   });
 
   it("round-trips every facet", () => {
+    // The search box is never saved (it is a transient search), so it comes back empty.
     const original = f({
-      text: "api",
       statuses: new Set(["Done"]),
       types: new Set(["Bug"]),
       epics: new Set(["P-1"]),
@@ -120,9 +120,12 @@ describe("saved filters (client side)", () => {
     assert.ok(isTaskFiltering(back));
   });
 
-  it("an empty filter has no content to save", () => {
-    assert.equal(hasContent(toSavedSpec(EMPTY_TASK_FILTER, "me")), false);
-    assert.equal(hasContent(toSavedSpec(f({ jql: "x" }), "me")), true);
+  it("a filter saved before these facets existed opens with them empty", () => {
+    const old = { people: [], statuses: ["Done"], types: [], epics: [], labels: [], priorities: [], onlyOverdue: false } as never;
+    const opened = fromSavedSpec(old, "me");
+    assert.equal(opened.components.size + opened.versions.size + opened.sprints.size, 0);
+    assert.equal(opened.jql, "");
+    assert.deepEqual([...opened.statuses], ["Done"]);
   });
 });
 
@@ -165,12 +168,6 @@ describe("timeline geometry (2.5, 2.9)", () => {
 
   it("dayWidth is the bars own width over its days, both ends counted", () => {
     assert.equal(dayWidth(rect, range), 20);
-  });
-
-  it("a baseline strip sits relative to its bar, and says when the bar finishes later", () => {
-    assert.deepEqual(baselineStrip(rect, range, { start: "2026-10-03", end: "2026-10-05" }), { x: 60, width: 60, slipped: true });
-    assert.deepEqual(baselineStrip(rect, range, { start: "2026-10-05", end: "2026-10-07" }), { x: 100, width: 60, slipped: false });
-    assert.equal(baselineStrip(rect, range, { start: "2026-10-05", end: "2026-10-09" }).slipped, false);
   });
 
   it("a date is placed from the NEAREST bar, so uneven month days do not accumulate", () => {

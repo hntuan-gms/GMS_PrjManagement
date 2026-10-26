@@ -5,7 +5,6 @@ import { computeOptimisticCascade } from "../dependencyCascade";
 import { EMPTY_FILTER, type BoardFilter } from "../boardModel";
 import { EMPTY_TASK_FILTER, useTaskFilter } from "../taskFilter";
 import { toBoardFilter, toTaskFilter, type ViewFilterSpec } from "../viewFilter";
-import { toSavedSpec } from "../savedFilter";
 import { makeEntry, pushEntry, undoSteps, type UndoEntry } from "../undo";
 import { addDays, buildResourceLoad, defaultWindow, todayIso } from "../resourceAllocation";
 import type {
@@ -15,7 +14,6 @@ import type {
   Predecessor,
   ProjectVersion,
   ResourcePool,
-  SavedFilter,
   Session,
   Task,
   TaskUpdateInput,
@@ -28,6 +26,7 @@ import CreateTaskModal from "./CreateTaskModal";
 import GanttView from "./GanttView";
 import ImportModal from "./ImportModal";
 import PlanReviewModal from "./PlanReviewModal";
+import KbktImportModal from "./KbktImportModal";
 import ProgressReportView from "./ProgressReportView";
 import ResourceView from "./ResourceView";
 import TaskEditModal from "./TaskEditModal";
@@ -120,14 +119,11 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
     else setTaskFilter({ ...taskFilter, jql });
   }
 
-  /* ---- saved filters and releases: small lists, loaded once, failures quiet ---- */
-  const [savedFilters, setSavedFilters] = useState<SavedFilter[] | null>(null);
+  /* ---- releases: a small list, loaded once, failures quiet ---- */
   const [versions, setVersions] = useState<ProjectVersion[]>([]);
   useEffect(() => {
-    api.listSavedFilters().then(setSavedFilters).catch(() => setSavedFilters([]));
     api.listVersions().then(setVersions).catch(() => {});
   }, []);
-  const byName = (a: SavedFilter, b: SavedFilter) => a.name.localeCompare(b.name, "vi");
 
   /* ---- undo: dragging bars and the % handle, this session only ---- */
   const [undoStack, setUndoStack] = useState<UndoEntry[]>([]);
@@ -159,6 +155,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
   // The plan being reviewed, opened from the assistant's table card.
   const [reviewRunId, setReviewRunId] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+  const [importingKbkt, setImportingKbkt] = useState(false);
   // A single global counter, bumped once per mutating request (schedule change,
   // progress change, add-dependency, modal save). `taskVersion` records, per task
   // id, the seq of the most recent thing that touched it — whether that task was
@@ -310,25 +307,14 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
       if (e.key.toLowerCase() !== "z" || !(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
       const el = e.target as HTMLElement | null;
       if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable)) return;
-      if (editingTask || creating || reviewRunId || importing) return;
+      if (editingTask || creating || reviewRunId || importing || importingKbkt) return;
       if (view !== "gantt") return;
       e.preventDefault();
       void undoRef.current();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [editingTask, creating, reviewRunId, importing, view]);
-
-  async function handleSetBaselines(scope: "all" | "selected", clear: boolean) {
-    try {
-      const r = await api.setBaselines({ ...(scope === "selected" ? { ids: [...selectedIds] } : {}), clear });
-      await refreshTasks();
-      setSyncError(r.skipped > 0 ? `Bỏ qua ${r.skipped} công việc chưa có đủ ngày nên chưa lưu baseline được.` : null);
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 401) return;
-      setSyncError(e instanceof Error ? e.message : "Không lưu được baseline.");
-    }
-  }
+  }, [editingTask, creating, reviewRunId, importing, importingKbkt, view]);
 
   async function handleSync() {
     setSyncing(true);
@@ -497,6 +483,44 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
     const skipped = picked.filter((t) => !movable.includes(t)).map((t) => t.id);
     const starts = new Map(movable.map((t) => [t.id, t.startDate as string]));
     return runBulk("dời ngày", movable.map((t) => t.id), (id) => ({ startDate: addDays(starts.get(id)!, days) }), skipped);
+  }
+
+  /**
+   * Freezes the current schedule as the baseline (or clears it) — the same write
+   * as the assistant's `set_baseline`. Tasks synced from Jira start with none, so
+   * without this the Gantt's baseline strips would be empty for most projects.
+   * An Epic with children is skipped: its baseline is drawn as its children's
+   * span, like its bar.
+   */
+  function handleBulkBaseline(mode: "save" | "clear") {
+    const parentIds = new Set(tasks.map((t) => t.wbsParentId).filter(Boolean));
+    const picked = selectedTasks();
+    const rollup = (t: Task) => t.issueType.toLowerCase() === "epic" && parentIds.has(t.id);
+    if (mode === "clear") {
+      const target = picked.filter((t) => !rollup(t) && (t.baselineStart || t.baselineDue));
+      if (target.length === 0) {
+        setSyncError("Các công việc đã chọn chưa có baseline nào để xoá.");
+        return;
+      }
+      if (!window.confirm(`Xoá baseline của ${target.length} công việc? Không hoàn tác được.`)) return;
+      return runBulk("xoá baseline", target.map((t) => t.id), () => ({ baselineStart: null, baselineDue: null }));
+    }
+    const target = picked.filter((t) => t.startDate && !rollup(t));
+    const skipped = picked.filter((t) => !target.includes(t)).map((t) => t.id);
+    const overwrite = target.filter((t) => t.baselineStart || t.baselineDue).length;
+    if (
+      overwrite > 0 &&
+      !window.confirm(`${overwrite} công việc đã có baseline sẽ bị ghi đè bằng lịch hiện tại. Tiếp tục?`)
+    ) {
+      return;
+    }
+    const byId = new Map(target.map((t) => [t.id, t]));
+    return runBulk(
+      "lưu baseline",
+      target.map((t) => t.id),
+      (id) => ({ baselineStart: byId.get(id)!.startDate, baselineDue: byId.get(id)!.dueDate }),
+      skipped
+    );
   }
 
   /**
@@ -797,6 +821,21 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
               </option>
             ))}
           </select>
+          <select
+            className="selection-select"
+            value=""
+            disabled={deleting || bulkBusy !== null}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v === "save" || v === "clear") handleBulkBaseline(v);
+            }}
+            aria-label="Lưu hoặc xoá baseline của các công việc đã chọn"
+            title="Baseline là lịch đã chốt để so với lịch hiện tại trên Gantt"
+          >
+            <option value="">Baseline…</option>
+            <option value="save">Lưu baseline = lịch hiện tại</option>
+            <option value="clear">Xoá baseline</option>
+          </select>
           <span className="selection-shift">
             <button
               disabled={deleting || bulkBusy !== null}
@@ -855,27 +894,10 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
             onDeleteDependency={handleDeleteDependency}
             versions={versions}
             jqlKeys={jqlKeys}
-            advancedFilter={{
-              saved: savedFilters,
-              onSaveCurrent: async (name, shared) => {
-                const s = await api.saveFilter({ name, spec: toSavedSpec(taskFilter, session.user.accountId), shared });
-                setSavedFilters((prev) => [...(prev ?? []).filter((x) => x.id !== s.id), s].sort(byName));
-              },
-              onDeleteSaved: async (id) => {
-                await api.deleteSavedFilter(id);
-                setSavedFilters((prev) => (prev ?? []).filter((x) => x.id !== id));
-              },
-              onToggleShared: async (id, shared) => {
-                await api.setFilterShared(id, shared);
-                setSavedFilters((prev) => (prev ?? []).map((x) => (x.id === id ? { ...x, shared } : x)));
-              },
-              jql: jqlState,
-              onRunJql: runJql,
-              onClearJql: () => setTaskFilter({ ...taskFilter, jql: "" }),
-            }}
+            jql={{ state: jqlState, onRun: runJql, onClear: () => setTaskFilter({ ...taskFilter, jql: "" }) }}
             undo={{ label: undoing ? null : (undoStack.at(-1)?.label ?? null), onUndo: () => void undo() }}
-            onSetBaselines={handleSetBaselines}
             onOpenImport={() => setImporting(true)}
+            onImportKbkt={() => setImportingKbkt(true)}
           />
         ) : view === "timesheet" ? (
           <TimesheetView session={session} tasks={tasks} onOpenEdit={setEditingTask} onTasksChanged={refreshTasks} />
@@ -983,6 +1005,14 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
         />
       )}
 
+      {importingKbkt && session.project && (
+        <KbktImportModal
+          projectKey={session.project.key}
+          onClose={() => setImportingKbkt(false)}
+          onApplied={refreshTasks}
+        />
+      )}
+
       {creating && (
         <CreateTaskModal
           tasks={tasks}
@@ -990,23 +1020,15 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
           initialParentId={creating.parentId}
           onClose={() => setCreating(false)}
           onCreate={async (input): Promise<BulkTaskCreateResult> => {
-            if (input.summaries.length === 1) {
-              const single = await api.createTask({
-                summary: input.summaries[0],
-                description: input.description,
-                issueType: input.issueType,
-                wbsParentId: input.wbsParentId,
-                startDate: input.startDate,
-                durationDays: input.durationDays,
-                assigneeAccountId: input.assigneeAccountId,
-              });
-              await refreshTasks();
-              return { created: [single], errors: [] };
-            } else {
-              const res = await api.createTasksBulk(input);
-              if (res.created.length > 0) await refreshTasks();
-              return res;
-            }
+            // One path for one task or many: a field-by-field copy into createTask
+            // once silently dropped the estimate, and the bulk route also reports
+            // half-stuck fields as warnings.
+            const res = await api.createTasksBulk(input);
+            if (res.created.length > 0) await refreshTasks();
+            // A single task that failed outright reads as a form error, so what was
+            // typed stays in the form to be fixed and sent again.
+            if (input.summaries.length === 1 && res.errors.length === 1) throw new Error(res.errors[0].message);
+            return res;
           }}
         />
       )}

@@ -1,17 +1,20 @@
-import { buildEpicIndex, filterTaskIds, type TaskFilter } from "../taskFilter";
-import FilterBar, { type FilterAdvanced } from "./FilterBar";
-import BaselineMenu from "./BaselineMenu";
+import { buildEpicIndex, filterTaskIds, isOverdueTask, type TaskFilter } from "../taskFilter";
+import FilterBar, { type JqlControl } from "./FilterBar";
 import TimelineMarkers from "./TimelineMarkers";
 import { Gantt, ViewMode, type Task as GanttTaskT } from "gantt-task-react";
 import "gantt-task-react/dist/index.css";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { csvName, downloadCsv, type CsvCell } from "../csv";
 import { computeCriticalPath } from "../criticalPath";
+import { resolveBaselines } from "../baselineGeometry";
 import { orderByWbs, resolveRanges, toGanttTasks } from "../ganttMapping";
 import type { DependencyType, ProjectVersion, Task } from "../types";
 import { isMilestone } from "../timelineGeometry";
+import { overlayCsvCells, overlayCsvHeader } from "../wbsExport";
+import BaselineOverlay from "./BaselineOverlay";
 import DependencyOverlay from "./DependencyOverlay";
 import IssueTypeIcon from "./IssueTypeIcon";
+import SavedFilterMenu from "./SavedFilterMenu";
 
 // "Spotlight" colours used only while the critical-path toggle is on: critical
 // bars get an unambiguous red-orange, everything else is dimmed to grey so the
@@ -71,6 +74,74 @@ const VIEW_MODE_LABEL: Partial<Record<ViewMode, string>> = {
   [ViewMode.Week]: "Tuần",
   [ViewMode.Month]: "Tháng",
 };
+
+type ToolbarIconName = "critical" | "link" | "layers" | "download" | "upload" | "columns";
+
+/** Small outline glyphs for the toolbar — one per action, so a row of identical
+ * text pills doesn't have to be read word by word to tell toggles from one-shot
+ * actions apart. Inline rather than an icon package: ten paths isn't worth a
+ * dependency, and `IssueTypeIcon` already sets the precedent in this codebase. */
+function ToolbarIcon({ name }: { name: ToolbarIconName }) {
+  const PATHS: Record<ToolbarIconName, ReactNode> = {
+    critical: (
+      <>
+        <path d="M5 21V4" />
+        <path d="M5 4h13l-2.5 4L18 12H5" />
+      </>
+    ),
+    link: (
+      <>
+        <path d="M9 17H7a5 5 0 0 1 0-10h2" />
+        <path d="M15 7h2a5 5 0 1 1 0 10h-2" />
+        <path d="M8 12h8" />
+      </>
+    ),
+    layers: (
+      <>
+        <path d="M12 3 3 8l9 5 9-5-9-5Z" />
+        <path d="M3 16l9 5 9-5" />
+        <path d="M3 12l9 5 9-5" />
+      </>
+    ),
+    download: (
+      <>
+        <path d="M12 3v11" />
+        <path d="M7 10l5 5 5-5" />
+        <path d="M5 21h14" />
+      </>
+    ),
+    upload: (
+      <>
+        <path d="M12 21V10" />
+        <path d="M7 15l5-5 5 5" />
+        <path d="M5 3h14" />
+      </>
+    ),
+    columns: (
+      <>
+        <rect x="3" y="4" width="5" height="16" rx="1.2" />
+        <rect x="9.5" y="4" width="5" height="16" rx="1.2" />
+        <rect x="16" y="4" width="5" height="16" rx="1.2" />
+      </>
+    ),
+  };
+  return (
+    <svg
+      className="tbi"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {PATHS[name]}
+    </svg>
+  );
+}
 // A column narrower than this can't fit its own label; wider than this, zooming
 // in stops helping and just wastes horizontal space. Both modes' comfort bands
 // overlap on purpose — see pickScale — so the handoff between them has room to
@@ -129,7 +200,7 @@ interface ColumnDef {
   width: number;
   align?: "right";
   /** `range` is the bar's own span — an Epic's rolls up its children, so its columns must too. */
-  cell: (task: Task, range: { start: string; end: string } | undefined) => ReactNode;
+  cell: (task: Task, range: { start: string; end: string } | undefined, today: string) => ReactNode;
 }
 
 const dm = (iso: string | null | undefined) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(2, 4)}` : "—");
@@ -177,7 +248,22 @@ const COLUMNS: ColumnDef[] = [
   },
   { id: "assignee", label: "Phụ trách", long: "Người phụ trách", width: 110, cell: (t) => t.assigneeName ?? "—" },
   { id: "start", label: "Bắt đầu", long: "Ngày bắt đầu", width: 76, cell: (t, r) => dm(r?.start ?? t.startDate) },
-  { id: "due", label: "Kết thúc", long: "Ngày kết thúc", width: 76, cell: (t, r) => dm(r?.end ?? t.dueDate) },
+  {
+    id: "due",
+    label: "Kết thúc",
+    long: "Ngày kết thúc",
+    width: 76,
+    // Marked by the task's own due date — the same rule as the "Quá hạn" filter,
+    // so a red date and a filter hit always agree.
+    cell: (t, r, today) =>
+      isOverdueTask(t, today) ? (
+        <span className="wbs-overdue" title={`Quá hạn — hạn ${dm(t.dueDate)}, chưa xong`}>
+          {dm(r?.end ?? t.dueDate)}
+        </span>
+      ) : (
+        dm(r?.end ?? t.dueDate)
+      ),
+  },
   {
     id: "duration",
     label: "T.lượng",
@@ -263,6 +349,25 @@ function saveColumns(ids: ColumnId[]): void {
   }
 }
 
+// Per browser, like the columns: whether someone reads the plan against its baseline is a habit.
+const BASELINE_KEY = "gms.gantt.baseline";
+
+function loadShowBaseline(): boolean {
+  try {
+    return localStorage.getItem(BASELINE_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+
+function saveShowBaseline(on: boolean): void {
+  try {
+    localStorage.setItem(BASELINE_KEY, on ? "on" : "off");
+  } catch {
+    // Not remembered across reloads; still applies now.
+  }
+}
+
 interface Props {
   tasks: Task[];
   collapsed: Set<string>;
@@ -301,13 +406,13 @@ interface Props {
   versions: ProjectVersion[];
   /** Issue keys Jira returned for `filter.jql`; null until they arrive. */
   jqlKeys: Set<string> | null;
-  /** Named filters and the JQL box. */
-  advancedFilter: FilterAdvanced;
+  /** The JQL box. */
+  jql: JqlControl;
   /** What undo would take back (null = nothing to undo) and how to do it. */
   undo: { label: string | null; onUndo: () => void };
-  /** Save (or clear) baselines for the selected tasks or all of them. */
-  onSetBaselines: (scope: "all" | "selected", clear: boolean) => Promise<void>;
   onOpenImport: () => void;
+  /** Opens the KBKT test-case workbook import — beside "Xuất CSV": import next to export. */
+  onImportKbkt: () => void;
 }
 
 function toIso(d: Date): string {
@@ -340,36 +445,17 @@ export default function GanttView({
   onDeleteDependency,
   versions,
   jqlKeys,
-  advancedFilter,
+  jql,
   undo,
-  onSetBaselines,
   onOpenImport,
+  onImportKbkt,
 }: Props) {
   // The one zoom variable everything else derives from — see pickScale.
   const [pixelsPerDay, setPixelsPerDay] = useState(DEFAULT_PIXELS_PER_DAY[ViewMode.Week]);
   const { viewMode, columnWidth } = pickScale(pixelsPerDay);
   const [showCriticalPath, setShowCriticalPath] = useState(false);
   const [showDependencies, setShowDependencies] = useState(true);
-  // Off by default: every task is baselined when it is created, so a strip under every
-  // bar would be noise until someone is actually comparing against a plan.
-  const [showBaseline, setShowBaseline] = useState(() => {
-    try {
-      return localStorage.getItem("gms.gantt.baseline") === "1";
-    } catch {
-      return false;
-    }
-  });
-  const [baselineBusy, setBaselineBusy] = useState(false);
-  function toggleBaseline() {
-    setShowBaseline((v) => {
-      try {
-        localStorage.setItem("gms.gantt.baseline", v ? "0" : "1");
-      } catch {
-        // Not remembered; still applies now.
-      }
-      return !v;
-    });
-  }
+  const [showBaseline, setShowBaseline] = useState(loadShowBaseline);
   const query = filter.text;
   const setQuery = (text: string) => onFilterChange({ ...filter, text });
   // gantt-task-react scrolls to `viewDate` whenever its value changes. The
@@ -542,15 +628,8 @@ export default function GanttView({
   // Deliberately resolved from the FULL tree, before any search filtering: a parent's
   // rolled-up bar must span all of its children, not just the ones matching the query.
   const ranges = useMemo(() => resolveRanges(ordered), [ordered]);
-  // The same roll-up over the committed dates, so an Epic's baseline strip spans its
-  // children's baselines exactly as its bar spans their current dates.
-  const baselineRanges = useMemo(
-    () =>
-      resolveRanges(
-        ordered.map((o) => ({ ...o, task: { ...o.task, startDate: o.task.baselineStart, dueDate: o.task.baselineDue } }))
-      ),
-    [ordered]
-  );
+  // Same full-tree rule, so an Epic's baseline rolls up its children like its bar does.
+  const baselines = useMemo(() => resolveBaselines(ordered), [ordered]);
 
   const epicOf = useMemo(() => buildEpicIndex(tasks), [tasks]);
   const matchIds = useMemo(
@@ -677,11 +756,15 @@ export default function GanttView({
     // Matches only: the table keeps their ancestors for indentation, but a sheet of
     // "what the filter found" should not list parents the filter excluded.
     const list = ordered.filter((o) => !matchIds || matchIds.has(o.task.id));
-    const header = ["Mã", "Tên công việc", ...columns.map((c) => c.long)];
+    // The overlay block (dependencies, baseline, and % unless it is already a
+    // visible column) always follows: it is the data Jira's own export lacks.
+    const includePct = !columnIds.includes("pct");
+    const header = ["Mã", "Tên công việc", ...columns.map((c) => c.long), ...overlayCsvHeader(includePct)];
     const body = list.map((o) => [
       o.task.id,
       o.task.summary,
       ...columns.map((c) => csvValue(c.id, o.task, ranges.get(o.task.id))),
+      ...overlayCsvCells(o.task, ranges.get(o.task.id), baselines.get(o.task.id), includePct),
     ]);
     downloadCsv(csvName(`wbs-${tasks[0]?.id.split("-")[0] ?? "du-an"}`, today), [header, ...body]);
   }
@@ -811,7 +894,7 @@ export default function GanttView({
               className={`wbs-col wbs-col-extra wbs-cell-${c.id} ${c.align === "right" ? "is-right" : ""}`}
               style={{ width: c.width }}
             >
-              {c.cell(task, ranges.get(task.id))}
+              {c.cell(task, ranges.get(task.id), today)}
             </div>
           ))}
         </div>
@@ -822,51 +905,54 @@ export default function GanttView({
   return (
     <div className="gantt-wrap">
       <div className="gantt-toolbar">
-        {[ViewMode.Day, ViewMode.Week, ViewMode.Month].map((vm) => (
-          <button
-            key={vm}
-            className={viewMode === vm ? "active" : ""}
-            onClick={() => setPixelsPerDay(DEFAULT_PIXELS_PER_DAY[vm])}
-          >
-            {VIEW_MODE_LABEL[vm]}
-          </button>
-        ))}
+        <div className="seg-group" role="group" aria-label="Chia theo">
+          {[ViewMode.Day, ViewMode.Week, ViewMode.Month].map((vm) => (
+            <button
+              key={vm}
+              className={viewMode === vm ? "active" : ""}
+              onClick={() => setPixelsPerDay(DEFAULT_PIXELS_PER_DAY[vm])}
+            >
+              {VIEW_MODE_LABEL[vm]}
+            </button>
+          ))}
+        </div>
         <span className="gantt-toolbar-divider" aria-hidden="true" />
         <button
-          className={showCriticalPath ? "active critical-toggle" : "critical-toggle"}
+          className={showCriticalPath ? "active toggle-pill critical-toggle" : "toggle-pill critical-toggle"}
           onClick={() => setShowCriticalPath((v) => !v)}
           title="Chuỗi công việc quyết định thời gian hoàn thành dự án — trễ bất kỳ task nào trong chuỗi này sẽ làm trễ cả dự án"
         >
+          <ToolbarIcon name="critical" />
           Đường găng
         </button>
         <button
-          className={showDependencies ? "active" : ""}
+          className={showDependencies ? "active toggle-pill" : "toggle-pill"}
           onClick={() => setShowDependencies((v) => !v)}
           title="Ẩn/hiện mũi tên phụ thuộc giữa các task (FS/SS/FF/SF). Kéo từ đầu hoặc đuôi một task sang task khác để tạo phụ thuộc mới."
         >
+          <ToolbarIcon name="link" />
           Phụ thuộc
         </button>
-        <BaselineMenu
-          show={showBaseline}
-          onToggleShow={toggleBaseline}
-          selectedCount={selectedIds.size}
-          totalCount={tasks.length}
-          busy={baselineBusy}
-          onSet={(scope) => {
-            setBaselineBusy(true);
-            void onSetBaselines(scope, false).finally(() => setBaselineBusy(false));
+        <button
+          className={showBaseline ? "active toggle-pill" : "toggle-pill"}
+          onClick={() => {
+            setShowBaseline(!showBaseline);
+            saveShowBaseline(!showBaseline);
           }}
-          onClear={(scope) => {
-            setBaselineBusy(true);
-            void onSetBaselines(scope, true).finally(() => setBaselineBusy(false));
-          }}
-        />
+          title="Ẩn/hiện thanh baseline mờ dưới mỗi thanh để so lịch hiện tại với lịch đã chốt (đỏ = kết thúc muộn hơn baseline). Lưu baseline: chọn công việc rồi dùng ô Baseline… trên thanh chọn."
+        >
+          <ToolbarIcon name="layers" />
+          Baseline
+        </button>
+        <span className="gantt-toolbar-divider" aria-hidden="true" />
+        {/* Icon only: the toolbar has to stay one row at 1500px (e2e/phase3-overlay checks it). */}
         <button
           onClick={undo.onUndo}
           disabled={!undo.label}
-          title={undo.label ? `Hoàn tác: ${undo.label} (Ctrl+Z)` : "Chưa có thao tác kéo thả nào để hoàn tác trong phiên này"}
+          aria-label="Hoàn tác"
+          title={undo.label ? `Hoàn tác: ${undo.label} (Ctrl+Z)` : "Hoàn tác — chưa có thao tác kéo thả nào trong phiên này"}
         >
-          ↶ Hoàn tác
+          ↶
         </button>
         <button onClick={goToToday} title="Cuộn biểu đồ tới ngày hôm nay">
           Hôm nay
@@ -886,10 +972,11 @@ export default function GanttView({
         <button onClick={() => onSetCollapsed([])} disabled={collapsed.size === 0} title="Mở rộng mọi nhóm công việc">
           Mở rộng
         </button>
+        <span className="gantt-toolbar-divider" aria-hidden="true" />
         {unscheduled.length > 0 && (
           <div className="col-chooser" ref={unscheduledRef}>
             <button
-              className={unscheduledOpen ? "active" : ""}
+              className={unscheduledOpen ? "active warning-pill" : "warning-pill"}
               onClick={() => setUnscheduledOpen((v) => !v)}
               aria-expanded={unscheduledOpen}
               title="Công việc chưa có ngày bắt đầu nên không có thanh trên biểu đồ"
@@ -919,8 +1006,16 @@ export default function GanttView({
         <button onClick={onOpenImport} title="Nhập nhiều công việc từ file CSV hoặc dán từ Excel">
           Nhập…
         </button>
-        <button onClick={exportCsv} title="Tải bảng WBS (các cột đang hiện, theo bộ lọc) về file CSV mở được bằng Excel">
+        <button
+          onClick={exportCsv}
+          title="Tải bảng WBS (các cột đang hiện, theo bộ lọc) kèm % hoàn thành, phụ thuộc và baseline về file CSV mở được bằng Excel"
+        >
+          <ToolbarIcon name="download" />
           Xuất CSV
+        </button>
+        <button onClick={onImportKbkt} title="Tạo/cập nhật test case và lỗi trong Jira từ file kịch bản kiểm thử (KBKT) .xlsx">
+          <ToolbarIcon name="upload" />
+          Nhập KBKT
         </button>
         <div className="col-chooser" ref={chooserRef}>
           <button
@@ -929,6 +1024,7 @@ export default function GanttView({
             aria-expanded={chooserOpen}
             title="Chọn cột hiển thị trong bảng WBS"
           >
+            <ToolbarIcon name="columns" />
             Cột ({columns.length}) ▾
           </button>
           {chooserOpen && (
@@ -998,7 +1094,8 @@ export default function GanttView({
         myAccountId={myAccountId}
         matched={matchIds?.size}
         total={tasks.length}
-        advanced={advancedFilter}
+        leading={<SavedFilterMenu filter={filter} onApply={onFilterChange} myAccountId={myAccountId} />}
+        jql={jql}
       />
       <div className="gantt-body" ref={bodyRef}>
         {rows.length === 0 ? (
@@ -1061,9 +1158,7 @@ export default function GanttView({
                 bodyEl={bodyEl}
                 rows={rowTasks}
                 ranges={ranges}
-                baselineRanges={baselineRanges}
                 versions={versions}
-                showBaseline={showBaseline}
                 showReleases
                 measureKey={measureKey}
               />
@@ -1076,6 +1171,16 @@ export default function GanttView({
                 onEditDependency={onEditDependency}
                 onDeleteDependency={onDeleteDependency}
               />
+              {showBaseline && (
+                <BaselineOverlay
+                  bodyEl={bodyEl}
+                  rows={rowTasks}
+                  ranges={ranges}
+                  baselines={baselines}
+                  measureKey={measureKey}
+                  pxPerDay={columnWidth / DAYS_PER_COLUMN[viewMode]}
+                />
+              )}
             </>
           )
         )}

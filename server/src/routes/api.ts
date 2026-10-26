@@ -4,11 +4,12 @@ import { resourcesRouter } from "./resources.js";
 import { progressRouter } from "./progress.js";
 import { boardRouter } from "./board.js";
 import { timesheetRouter } from "./timesheet.js";
+import { kbktRouter } from "./kbkt.js";
+import { filtersRouter } from "./filters.js";
 import { requireAuth, requireProject, requireStaff } from "../auth/middleware.js";
 import { badRequest } from "../errors.js";
 import { TaskActivity } from "../taskActivity.js";
 import { TaskExtras } from "../taskExtras.js";
-import { filtersRouter } from "./filters.js";
 import type { BulkTaskCreateInput, ImportRow, TaskCreateInput, TaskUpdateInput } from "../types.js";
 
 export const apiRouter = Router();
@@ -27,12 +28,14 @@ apiRouter.use("/resources", resourcesRouter);
 apiRouter.use("/progress", progressRouter);
 apiRouter.use("/board", boardRouter);
 apiRouter.use("/timesheet", timesheetRouter);
+apiRouter.use("/kbkt", kbktRouter);
 apiRouter.use("/filters", filtersRouter);
 
 // Jira's own default attachment limit is 10 MB; this only has to sit above it
 // and below Cloud Run's 32 MB request cap, so Jira's message is the one people see.
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const LINK_URL = /^https?:\/\/\S+$/i;
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 // GET /meta used to live here, returning the same SessionMeta as
 // /api/auth/me. Nothing ever fetched it, and having two copies of that object is
@@ -189,26 +192,6 @@ apiRouter.post("/tasks/jql", requireProject, async (req, res, next) => {
   }
 });
 
-/** Baselines for the given tasks (or all of them) — overlay only, nothing is written to Jira. */
-apiRouter.post("/tasks/baseline", requireProject, async (req, res, next) => {
-  try {
-    const b = (req.body ?? {}) as { ids?: unknown; clear?: unknown };
-    const service = req.auth!.taskService!;
-    let ids: string[] | null = null;
-    if (b.ids !== undefined && b.ids !== null) {
-      if (!Array.isArray(b.ids) || b.ids.some((x) => typeof x !== "string")) {
-        next(badRequest("Danh sách công việc không hợp lệ."));
-        return;
-      }
-      ids = b.ids as string[];
-      ids.forEach((id) => service.assertOwnKey(id));
-    }
-    res.json(await service.setBaselines(ids, b.clear === true));
-  } catch (err) {
-    next(err);
-  }
-});
-
 apiRouter.post("/tasks/import", requireProject, async (req, res, next) => {
   try {
     res.status(201).json(await req.auth!.taskService!.importTasks((req.body as { rows?: ImportRow[] } | undefined)?.rows ?? []));
@@ -258,6 +241,15 @@ apiRouter.patch("/tasks/:id", requireProject, async (req, res, next) => {
     if (input.issueType !== undefined && (typeof input.issueType !== "string" || !input.issueType.trim())) {
       next(badRequest("Loại công việc không hợp lệ."));
       return;
+    }
+    // Written straight into a DATE column; a malformed value would surface as a
+    // Postgres error (500) instead of saying what was wrong.
+    for (const field of ["baselineStart", "baselineDue"] as const) {
+      const v = input[field];
+      if (v !== undefined && v !== null && (typeof v !== "string" || !ISO_DATE.test(v))) {
+        next(badRequest("Ngày baseline phải có dạng YYYY-MM-DD."));
+        return;
+      }
     }
 
     // Cross-project predecessors can't be enforced: the cascade only loads issues

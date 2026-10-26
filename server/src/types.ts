@@ -135,7 +135,6 @@ export interface TaskCreateInput {
   labels?: string[];
   components?: string[];
   fixVersions?: string[];
-  priority?: string;
   issueType: IssueTypeName;
   description?: string | null;
   wbsParentId?: string | null;
@@ -144,6 +143,8 @@ export interface TaskCreateInput {
   durationDays?: number;
   assigneeAccountId?: string | null;
   estimateHours?: number | null;
+  /** A priority name from GET /priorities; omitted = the project's default. */
+  priority?: string;
 }
 
 /** One shared set of fields, applied to N summaries — mirrors Jira's own "create several issues" bulk dialog. */
@@ -156,6 +157,8 @@ export interface BulkTaskCreateInput {
   durationDays?: number;
   assigneeAccountId?: string | null;
   estimateHours?: number | null;
+  priority?: string;
+  labels?: string[];
 }
 
 /** One line of an imported sheet. Everything but the title is optional and given as a person would type it. */

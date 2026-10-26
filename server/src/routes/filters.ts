@@ -1,61 +1,77 @@
 import { Router } from "express";
 import { requireProject } from "../auth/middleware.js";
-import { badRequest, notFound } from "../errors.js";
-import * as filters from "../filterStore.js";
-
-export const filtersRouter = Router();
+import { notFound } from "../errors.js";
+import { validateFilterInput, type SavedFilterSpec } from "../savedFilters.js";
+import { createFilter, deleteFilter, listFilters, updateFilter, type SavedFilter } from "../savedFilterStore.js";
 
 /**
- * Saved Gantt filters (migration 009): a person's own, plus everyone's shared ones in
- * this project. Mounted under requireAuth like the rest of /api; requireProject is
- * what ties every read and write to the session's site AND project.
+ * Saved filters for the Gantt and resource tab. Anyone who can open the project
+ * may save their own and see the ones others shared; only the creator can change
+ * or delete one. Nothing here touches Jira except resolving creators' names.
  */
+export const filtersRouter = Router();
+
 filtersRouter.use(requireProject);
 
-filtersRouter.get("/", async (req, res, next) => {
-  try {
-    const { cloudId, projectKey, accountId } = req.auth!.session;
-    res.json(await filters.listFilters(cloudId, projectKey!, accountId));
-  } catch (err) {
-    next(err);
-  }
-});
+const missing = () => notFound("Không tìm thấy bộ lọc, hoặc bạn không phải người tạo bộ lọc này.");
 
-filtersRouter.post("/", async (req, res, next) => {
+filtersRouter.get("/", async (req, res, next) => {
+  const { session, taskService } = req.auth!;
   try {
-    const { cloudId, projectKey, accountId, displayName } = req.auth!.session;
-    const body = (req.body ?? {}) as { name?: unknown; spec?: unknown; shared?: unknown };
-    res.status(201).json(
-      await filters.saveFilter({ cloudId, projectKey: projectKey!, accountId, displayName }, { name: body.name, spec: body.spec, shared: body.shared })
+    const filters = await listFilters(session.cloudId, session.projectKey!, session.accountId);
+    // Names come from Jira on each load, never stored: the table keeps only
+    // account ids, the same as every other table here. A failed lookup costs
+    // the creator's name on a shared filter, not the list.
+    let names = new Map<string, string>();
+    if (filters.some((f) => !f.mine)) {
+      try {
+        names = new Map((await taskService!.listUsers()).map((u) => [u.accountId, u.displayName]));
+      } catch {
+        // Shown as "người khác" on the client.
+      }
+    }
+    res.json(
+      filters.map((f: SavedFilter) => ({
+        ...f,
+        ownerName: f.mine ? session.displayName : names.get(f.createdBy) ?? null,
+      }))
     );
   } catch (err) {
     next(err);
   }
 });
 
-filtersRouter.patch("/:id", async (req, res, next) => {
+filtersRouter.post("/", async (req, res, next) => {
+  const { session } = req.auth!;
   try {
-    const { cloudId, projectKey, accountId } = req.auth!.session;
-    const shared = (req.body as { shared?: unknown } | undefined)?.shared;
-    if (typeof shared !== "boolean") {
-      next(badRequest("Cần chỉ rõ chia sẻ hay không."));
+    const input = validateFilterInput(req.body, false) as { name: string; shared: boolean; spec: SavedFilterSpec };
+    const created = await createFilter(session.cloudId, session.projectKey!, session.accountId, input);
+    res.status(201).json({ ...created, ownerName: session.displayName });
+  } catch (err) {
+    next(err);
+  }
+});
+
+filtersRouter.patch("/:id", async (req, res, next) => {
+  const { session } = req.auth!;
+  try {
+    const input = validateFilterInput(req.body, true);
+    const updated = await updateFilter(session.cloudId, session.projectKey!, session.accountId, req.params.id, input);
+    if (!updated) {
+      next(missing());
       return;
     }
-    if (!(await filters.setShared(cloudId, projectKey!, accountId, req.params.id, shared))) {
-      next(notFound("Không tìm thấy bộ lọc này, hoặc đây không phải bộ lọc của bạn."));
-      return;
-    }
-    res.status(204).end();
+    res.json({ ...updated, ownerName: session.displayName });
   } catch (err) {
     next(err);
   }
 });
 
 filtersRouter.delete("/:id", async (req, res, next) => {
+  const { session } = req.auth!;
   try {
-    const { cloudId, projectKey, accountId } = req.auth!.session;
-    if (!(await filters.deleteFilter(cloudId, projectKey!, accountId, req.params.id))) {
-      next(notFound("Không tìm thấy bộ lọc này, hoặc đây không phải bộ lọc của bạn."));
+    if (!(await deleteFilter(session.cloudId, session.projectKey!, session.accountId, req.params.id))) {
+      next(missing());
       return;
     }
     res.status(204).end();

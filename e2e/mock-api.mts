@@ -3,6 +3,14 @@
 // the REAL computeProgress, so the report page is exercised end to end.
 import express from "express";
 import { computeProgress } from "../server/src/progress.ts";
+import { parseWorkbook } from "../server/src/kbkt/parse.ts";
+import { DEFAULT_SETTINGS, validateSettings } from "../server/src/kbkt/settings.ts";
+import { AppError } from "../server/src/errors.ts";
+import { validateFilterInput } from "../server/src/savedFilters.ts";
+import { KbktSync, type LogLine } from "../server/src/kbkt/sync.ts";
+import { XlsxFormatError } from "../server/src/kbkt/xlsx.ts";
+import { FakeJira } from "../server/test/kbktFakeJira.ts";
+import { sampleWorkbook } from "../server/test/kbktFixture.ts";
 
 // The LOCAL date, like the client's todayIso(): UTC is a day behind in Vietnam until 07:00, and a test that
 // counts "before today" must not flip with the hour it happens to run.
@@ -35,6 +43,8 @@ let tasks: any[] = [
   { id: "DEMO-8", summary: "Kiểm thử tích hợp", issueType: "Task", wbsParentId: "DEMO-2", assigneeAccountId: "binh", startDate: day(8), dueDate: day(14), labels: ["milestone"] },
   { id: "DEMO-9", summary: "Công việc chưa có ngày", issueType: "Task", assigneeAccountId: "me", startDate: null, dueDate: null },
 ].map((t: any) => ({ ...base, baselineStart: t.startDate, baselineDue: t.dueDate, ...t, assigneeName: nameOf(t.assigneeAccountId ?? null) }));
+// Scripts share this process; one that moves dates puts the seed back afterwards.
+const SEED = structuredClone(tasks);
 
 let comments: Record<string, any[]> = {
   "DEMO-3": [
@@ -48,7 +58,7 @@ let chatAborts = 0;
 const app = express();
 app.use(express.json());
 app.use((req, _res, next) => {
-  if (req.method !== "GET" && !req.path.startsWith("/api/__")) log.push({ m: req.method, p: req.path, b: req.body });
+  if (req.method !== "GET" && !req.path.startsWith("/api/__")) log.push({ m: req.method, p: req.path, b: req.body, q: req.query });
   next();
 });
 
@@ -58,13 +68,14 @@ app.post("/api/__restore", (_q, r) => {
   tasks = structuredClone(pristine.tasks);
   comments = structuredClone(pristine.comments);
   issueLinks = [{ id: "L1", a: "DEMO-3", b: "DEMO-5", type: "Blocks" }];
-  savedFilters = savedFilters.filter((f) => !f.mine);
+  savedFilters = savedFilters.filter((f) => f.createdBy !== "me");
   watching = false;
   log.length = 0;
   r.json({});
 });
 app.get("/api/__log", (_q, r) => r.json({ log, chatAborts }));
 app.post("/api/__reset", (_q, r) => { log.length = 0; chatAborts = 0; r.json({}); });
+app.post("/api/__tasks/reset", (_q, r) => { tasks = structuredClone(SEED); r.json({}); });
 
 app.get("/api/auth/me", (_q, r) => r.json({
   user: users[0], site: { cloudId: "c1", url: "https://example.atlassian.net", name: "Example" },
@@ -108,7 +119,7 @@ app.patch("/api/tasks/:id", (req, res) => {
     if (b.parentKey === t.id) return res.status(400).json({ error: "Một công việc không thể làm cha của chính nó." });
     t.wbsParentId = b.parentKey;
   }
-  for (const k of ["summary", "description", "startDate", "priority", "labels", "components", "fixVersions", "percentComplete", "estimateHours", "durationDays"]) if (b[k] !== undefined) t[k] = b[k];
+  for (const k of ["summary", "description", "startDate", "priority", "labels", "components", "fixVersions", "percentComplete", "estimateHours", "durationDays", "baselineStart", "baselineDue", "predecessors"]) if (b[k] !== undefined) t[k] = b[k];
   if (b.startDate !== undefined && b.startDate) t.dueDate = day(Math.round((Date.parse(b.startDate) - Date.parse(TODAY)) / 86400000) + (t.durationDays ?? 1) - 1);
   res.json({ ...t, cascaded: [] });
 });
@@ -121,7 +132,7 @@ app.post("/api/tasks", (req, res) => {
 app.post("/api/tasks/bulk", (req, res) => {
   const b = req.body; const created: any[] = [];
   for (const s of b.summaries) {
-    const t = { ...base, baselineStart: b.startDate ?? null, baselineDue: null, id: `DEMO-${10 + tasks.length}`, summary: s, issueType: b.issueType, wbsParentId: b.wbsParentId ?? null, assigneeAccountId: b.assigneeAccountId ?? null, assigneeName: nameOf(b.assigneeAccountId ?? null), startDate: b.startDate ?? null, dueDate: null };
+    const t = { ...base, baselineStart: b.startDate ?? null, baselineDue: null, id: `DEMO-${10 + tasks.length}`, summary: s, issueType: b.issueType, wbsParentId: b.wbsParentId ?? null, assigneeAccountId: b.assigneeAccountId ?? null, assigneeName: nameOf(b.assigneeAccountId ?? null), startDate: b.startDate ?? null, dueDate: null, priority: b.priority ?? base.priority, labels: b.labels ?? [], estimateHours: b.estimateHours ?? null };
     tasks.push(t); created.push(t);
   }
   res.status(201).json({ created, errors: [] });
@@ -208,18 +219,6 @@ app.post("/api/tasks/jql", (req, res) => {
   res.json({ keys, truncated: false });
 });
 
-app.post("/api/tasks/baseline", (req, res) => {
-  const { ids, clear } = req.body ?? {};
-  const chosen = tasks.filter((t) => !ids || ids.includes(t.id));
-  let skipped = 0;
-  for (const t of chosen) {
-    if (clear) { t.baselineStart = null; t.baselineDue = null; }
-    else if (t.startDate && t.dueDate) { t.baselineStart = t.startDate; t.baselineDue = t.dueDate; }
-    else skipped++;
-  }
-  res.json({ updated: chosen.length - skipped, skipped });
-});
-
 app.post("/api/tasks/import", (req, res) => {
   const rows: any[] = req.body.rows ?? [];
   const created: any[] = []; const errors: any[] = []; const rowKeys: Record<number, string> = {};
@@ -235,22 +234,6 @@ app.post("/api/tasks/import", (req, res) => {
   });
   res.status(201).json({ created, errors, warnings: [], rowKeys });
 });
-
-let savedFilters: any[] = [
-  { id: "f1", name: "Việc của Anh", shared: true, mine: false, ownerName: "Nguyễn Anh", updatedAt: new Date().toISOString(),
-    spec: { text: "", people: ["anh"], statuses: [], types: [], epics: [], labels: [], components: [], versions: [], sprints: [], onlyOverdue: false, jql: "" } },
-];
-let filterSeq = 1;
-app.get("/api/filters", (_q, r) => r.json(savedFilters));
-app.post("/api/filters", (req, res) => {
-  const { name, spec, shared } = req.body;
-  const existing = savedFilters.find((f) => f.mine && f.name.toLowerCase() === String(name).toLowerCase());
-  const f = { id: existing?.id ?? `f${++filterSeq + 1}`, name, shared: shared !== false, mine: true, ownerName: "Tuấn Test", updatedAt: new Date().toISOString(), spec };
-  savedFilters = [...savedFilters.filter((x) => x.id !== f.id), f];
-  res.status(201).json(f);
-});
-app.patch("/api/filters/:id", (req, res) => { const f = savedFilters.find((x) => x.id === req.params.id && x.mine); if (!f) return res.status(404).json({ error: "Không tìm thấy bộ lọc này, hoặc đây không phải bộ lọc của bạn." }); f.shared = !!req.body.shared; res.status(204).end(); });
-app.delete("/api/filters/:id", (req, res) => { const n = savedFilters.length; savedFilters = savedFilters.filter((x) => !(x.id === req.params.id && x.mine)); res.status(n === savedFilters.length ? 404 : 204).end(); });
 
 // --- board: a Scrum board with one active sprint ---------------------------
 const boardIssues = () => tasks.filter((t) => t.issueType !== "Epic").map((t, i) => ({
@@ -327,6 +310,115 @@ app.post("/api/ai/chat", (req, res) => {
     send("text", { text: slowWords[i++] });
   }, 400);
   res.on("close", () => { if (!res.writableFinished) { chatAborts++; clearInterval(iv); } });
+});
+
+// KBKT import: the REAL parser and sync engine against an in-memory Jira, so the
+// dialog is driven end to end — upload, preview, streamed apply, re-sync.
+// DEMO-50 is a Story that already exists, for "Story có sẵn".
+const newKbktJira = () => {
+  const jira = new FakeJira("DEMO");
+  jira.issues.set("DEMO-50", {
+    key: "DEMO-50",
+    fields: { summary: "UC đăng nhập hệ thống", issuetype: { name: "Story", hierarchyLevel: 0 }, status: { name: "In Progress" }, labels: [], parent: { key: "DEMO-1" }, issuelinks: [], attachment: [] },
+  });
+  return jira;
+};
+let kbktJira = newKbktJira();
+let kbktSettings = structuredClone(DEFAULT_SETTINGS);
+app.post("/api/__kbkt/reset", (_q, r) => { kbktJira = newKbktJira(); kbktSettings = structuredClone(DEFAULT_SETTINGS); r.json({}); });
+app.get("/api/__kbkt/issues", (_q, r) => r.json([...kbktJira.issues.values()].map((i) => ({ key: i.key, summary: i.fields.summary, parent: i.fields.parent?.key ?? null, labels: i.fields.labels }))));
+// Story-level issues by key or title words, like the real route (minus JQL).
+app.get("/api/kbkt/stories", (req, res) => {
+  const q = String(req.query.q ?? "").trim().toLowerCase();
+  const key = /^(?:demo-)?(\d+)$/.exec(q);
+  res.json([...kbktJira.issues.values()]
+    .filter((i) => i.fields.issuetype?.name === "Story")
+    .filter((i) => (key ? i.key === `DEMO-${key[1]}` : !q || String(i.fields.summary).toLowerCase().includes(q)))
+    .map((i) => ({ key: i.key, summary: i.fields.summary, type: i.fields.issuetype.name, status: i.fields.status?.name ?? "" })));
+});
+app.get("/api/__kbkt/sample", (_q, r) => r.type("application/octet-stream").send(Buffer.from(sampleWorkbook())));
+app.get("/api/kbkt/options", (_q, r) => r.json({
+  issueTypes: [{ name: "Epic", subtask: false }, { name: "Story", subtask: false }, { name: "Sub Testcase", subtask: true }, { name: "Sub-Bug", subtask: true }],
+  statuses: { "Sub Testcase": ["Not run", "Passed", "Failed", "Pending"], "Sub-Bug": ["To Do", "In Progress", "Done"] },
+  priorities: ["Highest", "High", "Medium", "Low", "Lowest"],
+  linkTypes: ["Blocks", "Relates"],
+  epics: [{ key: "DEMO-1", summary: "Đợt 1" }],
+}));
+app.get("/api/kbkt/settings", (_q, r) => r.json(kbktSettings));
+app.put("/api/kbkt/settings", (req, res) => { kbktSettings = validateSettings(req.body); res.json(kbktSettings); });
+const kbktRun = (req: express.Request) => {
+  const q = req.query as Record<string, string | undefined>;
+  return {
+    fileName: decodeURIComponent(String(req.get("x-file-name") ?? "x.xlsx")),
+    wb: parseWorkbook(req.body),
+    options: {
+      epicRef: q.epic ?? null,
+      storyKey: q.story === undefined ? undefined : q.story === "new" ? null : q.story,
+      dueDate: q.dueDate ?? null,
+      force: q.force === "1",
+    },
+  };
+};
+const kbktRaw = express.raw({ type: () => true, limit: "20mb" });
+app.post("/api/kbkt/preview", kbktRaw, async (req, res) => {
+  try {
+    const { fileName, wb, options } = kbktRun(req);
+    const lines: LogLine[] = [];
+    const result = await new KbktSync(kbktJira as any, "DEMO", kbktSettings, (l) => lines.push(l)).run(wb, fileName, { ...options, apply: false });
+    res.json({ fileName, version: Number(/_v(\d+)\.xlsx$/i.exec(fileName)?.[1] ?? 0), cases: wb.cases.length, bugs: wb.bugs.size, ...result, log: lines });
+  } catch (e) {
+    res.status(e instanceof XlsxFormatError ? 400 : 500).json({ error: (e as Error).message });
+  }
+});
+app.post("/api/kbkt/apply", kbktRaw, async (req, res) => {
+  let run: ReturnType<typeof kbktRun>;
+  try {
+    run = kbktRun(req);
+  } catch (e) {
+    return res.status(400).json({ error: (e as Error).message });
+  }
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.flushHeaders();
+  const send = (e: string, d: unknown) => res.write(`event: ${e}\ndata: ${JSON.stringify(d)}\n\n`);
+  const result = await new KbktSync(kbktJira as any, "DEMO", kbktSettings, (l) => send("log", l)).run(run.wb, run.fileName, { ...run.options, apply: true });
+  send("done", { fileName: run.fileName, ...result });
+  res.end();
+});
+
+// Saved filters: the REAL validator, an in-memory table, and the signed-in user
+// is always "me". One filter shared by someone else, to show the shared section.
+let filterSeq = 0;
+const newFilter = (createdBy: string, input: any) => ({
+  id: `00000000-0000-4000-8000-${String(++filterSeq).padStart(12, "0")}`,
+  createdBy, name: input.name, shared: input.shared, spec: input.spec, updatedAt: new Date().toISOString(),
+});
+let savedFilters: any[] = [
+  newFilter("anh", validateFilterInput({ name: "Việc gấp của nhóm", shared: true, spec: { labels: ["urgent"] } }, false)),
+];
+const viewOf = (f: any) => ({ ...f, mine: f.createdBy === "me", ownerName: nameOf(f.createdBy) });
+const filterError = (res: express.Response, e: unknown) =>
+  res.status(e instanceof AppError ? e.status : 500).json({ error: (e as Error).message });
+app.get("/api/filters", (_q, r) => r.json(savedFilters.filter((f) => f.createdBy === "me" || f.shared).map(viewOf)));
+app.post("/api/filters", (req, res) => {
+  try {
+    const f = newFilter("me", validateFilterInput(req.body, false));
+    savedFilters.push(f);
+    res.status(201).json(viewOf(f));
+  } catch (e) { filterError(res, e); }
+});
+app.patch("/api/filters/:id", (req, res) => {
+  try {
+    const f = savedFilters.find((x) => x.id === req.params.id && x.createdBy === "me");
+    if (!f) return res.status(404).json({ error: "Không tìm thấy bộ lọc, hoặc bạn không phải người tạo bộ lọc này." });
+    Object.assign(f, validateFilterInput(req.body, true), { updatedAt: new Date().toISOString() });
+    res.json(viewOf(f));
+  } catch (e) { filterError(res, e); }
+});
+app.delete("/api/filters/:id", (req, res) => {
+  const before = savedFilters.length;
+  savedFilters = savedFilters.filter((x) => !(x.id === req.params.id && x.createdBy === "me"));
+  if (savedFilters.length === before) return res.status(404).json({ error: "Không tìm thấy bộ lọc." });
+  res.status(204).end();
 });
 
 const port = Number(process.env.MOCK_PORT ?? 4000);

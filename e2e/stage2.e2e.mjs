@@ -1,5 +1,5 @@
 // Phase 2 / stage 2: task detail (components, versions, parent, type, issue links,
-// watchers), the new filters (components, versions, sprints, JQL, saved), baselines,
+// watchers), the new filters (components, versions, sprints, JQL, and saved ones holding them),
 // milestones and releases on the timeline, undo, and import. Behaviour of the client
 // against the stand-in API — what Jira does with these writes is the checklist's job.
 import assert from "node:assert/strict";
@@ -14,7 +14,7 @@ const dialogs = [];
 page.on("pageerror", (e) => problems.push("pageerror: " + e.message));
 // A refused request logs a line of its own; the 400s here are the point of two steps (a bad link, a bad JQL).
 page.on("console", (m) => m.type() === "error" && !m.text().includes("400 (Bad Request)") && problems.push("console: " + m.text()));
-// The project-wide baseline asks first; this run answers yes and keeps the prompt for the assertion.
+// Anything that asks first (a confirm) is answered yes; the prompts are kept for assertions.
 page.on("dialog", async (d) => {
   dialogs.push(d.message());
   await d.accept();
@@ -149,35 +149,60 @@ await step("cột Sprint, Thành phần, Phiên bản chọn được và có d�
 });
 
 console.log("\n== Bộ lọc đã lưu và JQL ==");
-await step("bộ lọc chia sẻ của đồng nghiệp áp được", async () => {
-  await page.locator(".tf-btn", { hasText: "Bộ lọc đã lưu" }).click();
-  const item = page.locator(".saved-filter-apply", { hasText: "Việc của Anh" });
-  assert((await item.textContent()).includes("Nguyễn Anh"));
-  await item.click();
-  await page.waitForFunction(() => document.querySelector(".tf-count")?.textContent.includes("2/9"));
-});
-await step("lưu bộ lọc hiện tại dưới một tên, mặc định chia sẻ; tài khoản mình được lưu thành @me", async () => {
-  await clearFilter();
-  await page.locator(".tf-bar .tf-btn", { hasText: "Của tôi" }).click();
+// The menu itself (sharing, @me, rename, delete) is phase3-overlay's; this stage only adds
+// components, versions, sprints and JQL to what a saved filter holds.
+const openSavedMenu = async () => {
+  if (!(await page.locator(".sf-menu").count())) await page.locator(".gantt-wrap .sf-select > .tf-btn").click();
+  await page.locator(".sf-menu").waitFor();
+};
+async function saveCurrentAs(name) {
   await reset();
-  await page.locator(".tf-btn", { hasText: "Bộ lọc đã lưu" }).click();
-  await page.locator(".saved-filter-form, .col-chooser-foot .text-btn").first().waitFor();
-  await page.locator(".col-chooser-foot .text-btn", { hasText: "Lưu bộ lọc hiện tại" }).click();
-  await page.fill(".saved-filter-form input[maxlength]", "Việc của tôi");
-  await page.locator(".saved-filter-form button.primary").click();
-  await page.locator(".saved-filter-apply", { hasText: "Việc của tôi" }).waitFor();
-  const post = (await log()).find((l) => l.m === "POST" && l.p === "/api/filters");
-  assert.equal(post.b.shared, true);
-  assert.deepEqual(post.b.spec.people, ["@me"]);
-});
-await step("xoá bộ lọc của mình", async () => {
-  await page.locator(".saved-filter-row", { hasText: "Việc của tôi" }).locator("button[aria-label^='Xoá']").click();
-  await page.waitForFunction(() => !document.querySelector(".saved-filters")?.textContent.includes("Việc của tôi"));
+  await openSavedMenu();
+  await page.fill('.sf-form input[type="text"]', name);
+  await page.locator(".sf-form .text-btn", { hasText: "Lưu bộ lọc hiện tại" }).click();
+  await page.waitForFunction(async () => (await (await fetch("/api/__log")).json()).log.some((l) => l.m === "POST" && l.p === "/api/filters"));
+  return (await log()).find((l) => l.m === "POST" && l.p === "/api/filters");
+}
+async function deleteSaved(name) {
+  await openSavedMenu();
+  await page.locator(".sf-item", { hasText: name }).locator(".sf-delete").click();
+  await page.waitForFunction((n) => ![...document.querySelectorAll(".sf-apply")].some((b) => b.textContent === n), name);
+  await page.keyboard.press("Escape");
+}
+await step("lưu bộ lọc có thành phần → gửi đúng, áp lại thì khôi phục", async () => {
+  await pick("Thành phần", "UI");
+  await page.waitForFunction(() => document.querySelector(".tf-count")?.textContent.includes("1/9"));
+  const post = await saveCurrentAs("Giao diện");
+  assert.deepEqual(post.b.spec.components, ["UI"]);
+  assert.equal(post.b.spec.jql, "");
   await page.keyboard.press("Escape");
   await clearFilter();
+  await openSavedMenu();
+  await page.locator(".sf-apply", { hasText: "Giao diện" }).click();
+  await page.waitForFunction(() => document.querySelector(".tf-count")?.textContent.includes("1/9"));
+  await deleteSaved("Giao diện");
+  await clearFilter();
+});
+await step("lưu bộ lọc chỉ có JQL → áp lại thì ô JQL có chữ và Jira được hỏi lại", async () => {
+  if (!(await page.locator(".tf-jql").count())) await page.locator(".tf-bar .tf-btn", { hasText: "JQL" }).click();
+  await page.fill(".tf-jql input", "assignee = anh");
+  await page.locator(".tf-jql button[type=submit]").click();
+  await page.waitForFunction(() => document.querySelector(".tf-count")?.textContent.includes("2/9"));
+  const post = await saveCurrentAs("Của Anh (JQL)");
+  assert.equal(post.b.spec.jql, "assignee = anh");
+  await page.keyboard.press("Escape");
+  await page.locator(".tf-jql button", { hasText: "Bỏ JQL" }).click();
+  await page.waitForFunction(() => !document.querySelector(".tf-clear"));
+  await openSavedMenu();
+  await page.locator(".sf-apply", { hasText: "Của Anh (JQL)" }).click();
+  await page.waitForFunction(() => document.querySelector(".tf-count")?.textContent.includes("2/9"));
+  assert.equal(await page.inputValue(".tf-jql input"), "assignee = anh");
+  await deleteSaved("Của Anh (JQL)");
+  await page.locator(".tf-jql button", { hasText: "Bỏ JQL" }).click();
+  await page.waitForFunction(() => !document.querySelector(".tf-clear"));
 });
 await step("JQL: Jira trả khoá, màn hình lọc đúng và nói trả bao nhiêu", async () => {
-  await page.locator(".tf-bar .tf-btn", { hasText: "JQL" }).click();
+  if (!(await page.locator(".tf-jql").count())) await page.locator(".tf-bar .tf-btn", { hasText: "JQL" }).click();
   await page.fill(".tf-jql input", "assignee = anh");
   await page.locator(".tf-jql button[type=submit]").click();
   await page.waitForFunction(() => document.querySelector(".tf-jql-note")?.textContent.includes("Jira trả 2 việc"));
@@ -197,7 +222,7 @@ await step("bỏ JQL gỡ hẳn bộ lọc", async () => {
   await page.waitForFunction(() => !document.querySelector(".tf-clear"));
 });
 
-console.log("\n== Baseline, mốc, phiên bản phát hành ==");
+console.log("\n== Mốc, phiên bản phát hành ==");
 await step("mốc (nhãn milestone) có hình thoi trên biểu đồ và ◆ ở bảng", async () => {
   await page.waitForSelector(".milestone-diamond");
   assert.equal(await page.locator(".milestone-diamond").count(), 1);
@@ -208,36 +233,6 @@ await step("phiên bản có ngày phát hành vẽ thành đường dọc, có 
   const titles = await page.$$eval(".release-line title", (t) => t.map((x) => x.textContent));
   assert(titles.some((t) => t.includes("1.0") && t.includes("phát hành")), titles.join(" | "));
 });
-await step("Baseline: bật hiển thị thì mỗi thanh có một dải bên dưới", async () => {
-  assert.equal(await page.locator(".baseline-strip").count(), 0, "mặc định tắt");
-  await page.locator(".gantt-toolbar button", { hasText: /^Baseline/ }).click();
-  await page.locator(".col-chooser-item", { hasText: "Hiện baseline" }).locator("input").check();
-  await page.keyboard.press("Escape");
-  await page.waitForSelector(".baseline-strip");
-  assert(await page.locator(".baseline-strip").count() >= 8);
-});
-await step("lưu baseline cho việc đã chọn → chỉ gửi đúng mã đó, không hỏi lại", async () => {
-  await reset();
-  dialogs.length = 0;
-  await page.locator(".wbs-row", { hasText: "DEMO-5" }).locator(".wbs-col-name").click();
-  await page.locator(".gantt-toolbar button", { hasText: /^Baseline/ }).click();
-  await page.locator(".menu-action", { hasText: "Cho 1 việc đã chọn" }).first().click();
-  await page.waitForFunction(async () => (await (await fetch("/api/__log")).json()).log.some((l) => l.p === "/api/tasks/baseline"));
-  const post = (await log()).find((l) => l.p === "/api/tasks/baseline");
-  assert.deepEqual(post.b, { ids: ["DEMO-5"], clear: false });
-  assert.equal(dialogs.length, 0, "một lựa chọn vừa chọn thì không cần hỏi");
-});
-await step("lưu baseline cho cả dự án phải hỏi xác nhận trước", async () => {
-  await reset();
-  await page.locator(".gantt-toolbar button", { hasText: /^Baseline/ }).click();
-  await page.locator(".menu-action", { hasText: "Cho cả dự án" }).click();
-  await page.waitForFunction(async () => (await (await fetch("/api/__log")).json()).log.some((l) => l.p === "/api/tasks/baseline"));
-  assert(dialogs.some((d) => d.includes("ghi đè")), dialogs.join("|"));
-  const post = (await log()).find((l) => l.p === "/api/tasks/baseline");
-  assert.deepEqual(post.b, { clear: false });
-  await page.keyboard.press("Escape");
-});
-
 console.log("\n== Hoàn tác thao tác kéo ==");
 /** Drag the bar of the given row horizontally by dx pixels, with real mouse events. */
 async function dragBar(key, dx) {
@@ -253,7 +248,7 @@ async function dragBar(key, dx) {
 }
 const patchesFor = async (key) => (await log()).filter((l) => l.m === "PATCH" && l.p === `/api/tasks/${key}`);
 await step("chưa kéo gì thì nút Hoàn tác bị khoá", async () => {
-  assert.equal(await page.locator(".gantt-toolbar button", { hasText: "Hoàn tác" }).isDisabled(), true);
+  assert.equal(await page.locator(".gantt-toolbar button[aria-label='Hoàn tác']").isDisabled(), true);
 });
 await step("kéo thanh DEMO-7 → lưu; Hoàn tác trả đúng ngày cũ", async () => {
   await reset();
@@ -262,7 +257,7 @@ await step("kéo thanh DEMO-7 → lưu; Hoàn tác trả đúng ngày cũ", asyn
   await page.waitForFunction(async () => (await (await fetch("/api/__log")).json()).log.some((l) => l.m === "PATCH" && l.p === "/api/tasks/DEMO-7"));
   const moved = (await patchesFor("DEMO-7"))[0].b.startDate;
   assert.notEqual(moved, original, "thanh không dời được");
-  const undo = page.locator(".gantt-toolbar button", { hasText: "Hoàn tác" });
+  const undo = page.locator(".gantt-toolbar button[aria-label='Hoàn tác']");
   await page.waitForFunction(() => !document.querySelector(".gantt-toolbar button[title^='Hoàn tác']")?.disabled);
   assert((await undo.getAttribute("title")).includes("dời DEMO-7"));
   await undo.click();

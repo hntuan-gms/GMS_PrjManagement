@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { sanitizeSpec, cleanName } from "../src/filterStore.js";
+import { validateSpec } from "../src/savedFilters.js";
 import { JiraApiError } from "../src/jiraClient.js";
 import { scopeJql, TaskExtras, toLinkViews } from "../src/taskExtras.js";
 import { isRealDate, MAX_IMPORT_ROWS, pickSprint, TaskService } from "../src/taskService.js";
@@ -150,33 +150,31 @@ describe("TaskExtras", () => {
   });
 });
 
-describe("sanitizeSpec / cleanName (2.6)", () => {
-  const base = { text: "", people: [], statuses: [], types: [], epics: [], labels: [], components: [], versions: [], sprints: [], onlyOverdue: false, jql: "" };
-
-  it("keeps what a filter holds and drops the rest", () => {
-    const s = sanitizeSpec({ ...base, people: ["@me", "abc", "abc"], onlyOverdue: true, evil: "<script>" });
-    assert.deepEqual(s.people, ["@me", "abc"]);
-    assert.equal(s.onlyOverdue, true);
+describe("saved filter spec: components, versions, sprints, JQL (2.1, 2.7, 2.8)", () => {
+  it("keeps the new facets and drops unknown keys", () => {
+    const s = validateSpec({ components: ["Backend", "Backend"], versions: ["1.0"], sprints: ["Sprint 7"], jql: "  status = Done ", evil: "<script>" });
+    assert.deepEqual(s.components, ["Backend"]);
+    assert.deepEqual(s.versions, ["1.0"]);
+    assert.deepEqual(s.sprints, ["Sprint 7"]);
+    assert.equal(s.jql, "status = Done");
     assert.ok(!("evil" in s));
   });
 
-  it("an empty filter is not worth saving", () => {
-    assert.throws(() => sanitizeSpec(base), /Chưa có điều kiện/);
-    assert.doesNotThrow(() => sanitizeSpec({ ...base, jql: "status = Done" }));
+  it("a JQL alone is something worth saving; nothing at all is not", () => {
+    assert.doesNotThrow(() => validateSpec({ jql: "status = Done" }));
+    assert.throws(() => validateSpec({ jql: "   " }), /trống/);
   });
 
   it("refuses the wrong shape instead of storing it", () => {
-    assert.throws(() => sanitizeSpec({ ...base, people: "abc" }), /danh sách chuỗi/);
-    assert.throws(() => sanitizeSpec({ ...base, labels: [1] }), /danh sách chuỗi/);
-    assert.throws(() => sanitizeSpec(null), /không hợp lệ/);
-    assert.throws(() => sanitizeSpec({ ...base, jql: "x".repeat(2001) }), /quá dài/);
+    assert.throws(() => validateSpec({ components: "Backend" }), /danh sách chuỗi/);
+    assert.throws(() => validateSpec({ jql: 5 }), /chuỗi/);
+    assert.throws(() => validateSpec({ jql: "x".repeat(2001) }), /quá dài/);
   });
 
-  it("names are trimmed, collapsed and capped", () => {
-    assert.equal(cleanName("  Việc   quá   hạn "), "Việc quá hạn");
-    assert.equal(cleanName("x".repeat(200)).length, 80);
-    assert.throws(() => cleanName("   "), /đặt tên/);
-    assert.throws(() => cleanName(undefined), /đặt tên/);
+  it("a filter saved before these facets existed still reads as empty ones", () => {
+    const s = validateSpec({ labels: ["urgent"] });
+    assert.deepEqual([s.components, s.versions, s.sprints], [[], [], []]);
+    assert.equal(s.jql, "");
   });
 });
 

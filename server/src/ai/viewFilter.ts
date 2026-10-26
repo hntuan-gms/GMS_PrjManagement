@@ -1,5 +1,5 @@
 import type { JiraUser, Task } from "../types.js";
-import { fold, resolvePerson } from "./toolUtils.js";
+import { fold, resolvePerson, resolvePriority } from "./toolUtils.js";
 
 /**
  * "Lọc việc quá hạn của Minh" as a sentence → the same filter the Gantt, the
@@ -23,7 +23,7 @@ export interface ViewFilterSpec {
   /** Epic keys. */
   epics: string[];
   labels: string[];
-  /** Board only: priority names. */
+  /** Priority names as this site spells them; "none" stands for no priority. */
   priorities: string[];
   onlyOverdue: boolean;
   /** Board only: cards blocked by unfinished predecessors, or flagged. */
@@ -146,6 +146,18 @@ function resolveEpics(names: string[], tasks: Task[]): Resolved<string[]> {
   return { value: unique(out) };
 }
 
+/** Spoken priorities ("cao", "khẩn cấp") → the names the project's tasks actually carry. */
+function resolvePriorities(names: string[], tasks: Task[]): string[] {
+  const known = unique(tasks.map((t) => t.priority).filter((p): p is string => !!p));
+  // Like a label, an unknown one is kept as said: it matches nothing, and the count says so.
+  return unique(
+    names.map((n) => {
+      const hit = resolvePriority(known, n);
+      return "name" in hit ? hit.name : n;
+    })
+  );
+}
+
 function resolveLabels(names: string[], tasks: Task[]): string[] {
   const known = unique(tasks.flatMap((t) => t.labels));
   // Jira labels have no spaces; an unknown one is kept as typed (it matches nothing, and says so).
@@ -173,8 +185,7 @@ function epicIndex(tasks: Task[]): Map<string, string | null> {
 
 /**
  * How many tasks pass. A mirror of `matchesTaskFilter` in client/src/taskFilter.ts
- * for the facets a spec carries (priorities and blocked are board-only and ignored
- * here) — it exists so the assistant can say "có 7 việc" without a browser round
+ * for the facets a spec carries ("blocked" is board-only and ignored here) — it exists so the assistant can say "có 7 việc" without a browser round
  * trip. Change the rule in one, change it in both.
  */
 export function countMatching(tasks: Task[], spec: ViewFilterSpec, today: string): number {
@@ -187,6 +198,7 @@ export function countMatching(tasks: Task[], spec: ViewFilterSpec, today: string
     if (spec.types.length > 0 && !spec.types.includes(t.issueType)) return false;
     if (spec.epics.length > 0 && !spec.epics.includes(epicOf.get(t.id) ?? "none")) return false;
     if (spec.labels.length > 0 && !t.labels.some((l) => spec.labels.includes(l))) return false;
+    if (spec.priorities.length > 0 && !spec.priorities.includes(t.priority ?? "none")) return false;
     if (spec.onlyOverdue && !(t.statusCategory !== "done" && !!t.dueDate && t.dueDate < today)) return false;
     return true;
   }).length;
@@ -234,7 +246,7 @@ export function resolveViewFilter(
     types: types.value,
     epics: epics.value,
     labels: resolveLabels(strings(args.labels), ctx.tasks),
-    priorities: strings(args.priorities ?? args.priority),
+    priorities: resolvePriorities(strings(args.priorities ?? args.priority), ctx.tasks),
     onlyOverdue: args.overdue === true,
     onlyBlocked: args.blocked === true,
   };

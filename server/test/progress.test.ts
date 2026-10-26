@@ -94,3 +94,16 @@ describe("computeProgress: percentages", () => {
     assert.equal(m.plannedPct, 100);
   });
 });
+
+describe("computeProgress: due soon", () => {
+  it("counts every open task due in the next 7 days, past the list's cap of 25", () => {
+    const soon = Array.from({ length: 30 }, (_, i) =>
+      task({ id: `S-${i + 1}`, summary: `soon ${i + 1}`, startDate: "2026-10-10", dueDate: "2026-10-18" })
+    );
+    const later = task({ id: "S-99", summary: "later", startDate: "2026-10-10", dueDate: "2026-10-30" });
+    const done = task({ id: "S-98", summary: "done", dueDate: "2026-10-16", statusCategory: "done", statusName: "Done" });
+    const m = computeProgress([...soon, later, done], TODAY);
+    assert.equal(m.counts.dueSoon, 30);
+    assert.equal(m.dueSoon.length, 25);
+  });
+});

@@ -197,33 +197,6 @@ export interface Watchers {
   listed: boolean;
 }
 
-/** The toolbar's filter in a storable shape — see savedFilter.ts. */
-export interface SavedFilterSpec {
-  text: string;
-  /** Account ids, or "@me" for whoever opens it. */
-  people: string[];
-  statuses: string[];
-  types: string[];
-  epics: string[];
-  labels: string[];
-  components: string[];
-  versions: string[];
-  sprints: string[];
-  onlyOverdue: boolean;
-  jql: string;
-}
-
-export interface SavedFilter {
-  id: string;
-  name: string;
-  shared: boolean;
-  /** Saved by the signed-in user: the only ones they can delete or un-share. */
-  mine: boolean;
-  ownerName: string;
-  spec: SavedFilterSpec;
-  updatedAt: string;
-}
-
 /** One line of an imported sheet — see csvImport.ts. */
 export interface ImportRow {
   summary: string;
@@ -260,6 +233,8 @@ export interface TaskCreateInput {
   durationDays?: number;
   assigneeAccountId?: string | null;
   estimateHours?: number | null;
+  /** A priority name from GET /priorities; omitted = the project's default. */
+  priority?: string;
 }
 
 /** One shared set of fields, applied to N summaries — mirrors Jira's own "create several issues" bulk dialog. */
@@ -272,6 +247,8 @@ export interface BulkTaskCreateInput {
   durationDays?: number;
   assigneeAccountId?: string | null;
   estimateHours?: number | null;
+  priority?: string;
+  labels?: string[];
 }
 
 export interface BulkTaskCreateResult {
@@ -486,6 +463,8 @@ export interface ProgressMetrics {
     todo: number;
     overdue: number;
     slipped: number;
+    /** Absent from reports saved before it existed. */
+    dueSoon?: number;
     notStarted: number;
     unassigned: number;
     undated: number;
@@ -781,5 +760,108 @@ export interface ChatSessionSummary {
   title: string;
   messageCount: number;
   createdAt: string;
+  updatedAt: string;
+}
+
+/* ----------------------------------------------------------------------------
+ * KBKT import — test-case workbooks into Jira (server/src/kbkt, routes/kbkt.ts)
+ * ------------------------------------------------------------------------- */
+
+export type KbktKind = "story" | "test" | "bug";
+
+/** Per-project; what jira_sync_config.json used to hard-code. */
+export interface KbktSettings {
+  issueTypes: { story: string; test: string; bug: string };
+  status: { pass: string; fail: string; pending: string; notrun: string; bugOpen: string; bugClosed: string };
+  /** Severity in "Danh sách lỗi" → priority name. */
+  priority: Record<string, string>;
+  linkType: string;
+  dueDateOn: KbktKind[];
+}
+
+export interface KbktOptions {
+  issueTypes: Array<{ name: string; subtask: boolean }>;
+  /** Issue type name → the statuses its workflow has. */
+  statuses: Record<string, string[]>;
+  priorities: string[];
+  linkTypes: string[];
+  epics: Array<{ key: string; summary: string }>;
+}
+
+export type KbktAction = "INFO" | "WARN" | "ERROR" | "SKIP" | "CREATE" | "UPDATE" | "MOVE" | "NO-MOVE" | "LINK" | "ATTACH";
+
+export interface KbktLogLine {
+  action: KbktAction;
+  message: string;
+}
+
+export interface KbktResult {
+  fileName: string;
+  code: string;
+  title: string;
+  /** "new:…" in a preview when the Story would be created. null = the run stopped on an error. */
+  storyKey: string | null;
+  stats: Partial<Record<KbktAction, number>>;
+  noTransition: Array<{ from: string; to: string; count: number }>;
+}
+
+export interface KbktPreview extends KbktResult {
+  version: number;
+  cases: number;
+  bugs: number;
+  log: KbktLogLine[];
+}
+
+/** An issue that can hold the test cases (Story level), from the picker's search. */
+export interface KbktStory {
+  key: string;
+  summary: string;
+  type: string;
+  status: string;
+}
+
+export interface KbktRunParams {
+  epic?: string;
+  story?: string;
+  dueDate?: string;
+  force?: boolean;
+}
+
+export type KbktStreamEvent =
+  | ({ type: "log" } & KbktLogLine)
+  | ({ type: "done" } & KbktResult)
+  | { type: "error"; message: string; code?: string };
+
+/**
+ * A named filter over the Gantt / resource tab (server/src/savedFilters.ts holds
+ * the same spec). "@me" in `people` stands for whoever applies it, so a shared
+ * "Của tôi" filter shows each person their own work.
+ */
+export interface SavedFilterSpec {
+  people: string[];
+  statuses: string[];
+  types: string[];
+  epics: string[];
+  labels: string[];
+  priorities: string[];
+  components: string[];
+  versions: string[];
+  sprints: string[];
+  /** A JQL Jira evaluates when it is applied; "" = none. */
+  jql: string;
+  onlyOverdue: boolean;
+}
+
+export interface SavedFilter {
+  id: string;
+  name: string;
+  /** false = only its creator sees it; true = everyone who can open the project. */
+  shared: boolean;
+  spec: SavedFilterSpec;
+  createdBy: string;
+  /** The signed-in user created it — the only one who may change or delete it. */
+  mine: boolean;
+  /** From Jira's member list; null when that lookup failed. */
+  ownerName: string | null;
   updatedAt: string;
 }
