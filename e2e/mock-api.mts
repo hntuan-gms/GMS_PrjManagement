@@ -73,6 +73,7 @@ app.post("/api/__restore", (_q, r) => {
   listDelayMs = 0;
   sessionProject = "DEMO";
   tasksSeen = [];
+  attachmentsOf5 = seedFiles();
   log.length = 0;
   r.json({});
 });
@@ -173,7 +174,26 @@ app.get("/api/tasks/:id/transitions", (_q, r) => r.json([
   { id: "31", name: "Done", toStatusName: "Done", toCategory: "done", fields: [ROOT_CAUSE] },
   { id: "41", name: "Reject", toStatusName: "Rejected", toCategory: "done", fields: [] },
 ]));
-app.get("/api/tasks/:id/attachments", (_q, r) => r.json({ files: [], links: [] }));
+// DEMO-5 carries a picture and a PDF, so the detail window's preview, download and delete have something to act on.
+const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAUAAAADICAIAAAAWZq/8AAACYUlEQVR4nO3TQQ0AIBDAMMygDPlnAg98yJImFbDP1j4DRK3vBcAzA0OYgSHMwBBmYAgzMIQZGMIMDGEGhjADQ5iBIczAEGZgCDMwhBkYwgwMYQaGMANDmIEhzMAQZmAIMzCEGRjCDAxhBoYwA0OYgSHMwBBmYAgzMIQZGMIMDGEGhjADQ5iBIczAEGZgCDMwhBkYwgwMYQaGMANDmIEhzMAQZmAIMzCEGRjCDAxhBoYwA0OYgSHMwBBmYAgzMIQZGMIMDGEGhjADQ5iBIczAEGZgCDMwhBkYwgwMYQaGMANDmIEhzMAQZmAIMzCEGRjCDAxhBoYwA0OYgSHMwBBmYAgzMIQZGMIMDGEGhjADQ5iBIczAEGZgCDMwhBkYwgwMYQaGMANDmIEhzMAQZmAIMzCEGRjCDAxhBoYwA0OYgSHMwBBmYAgzMIQZGMIMDGEGhjADQ5iBIczAEGZgCDMwhBkYwgwMYQaGMANDmIEhzMAQZmAIMzCEGRjCDAxhBoYwA0OYgSHMwBBmYAgzMIQZGMIMDGEGhjADQ5iBIczAEGZgCDMwhBkYwgwMYQaGMANDmIEhzMAQZmAIMzCEGRjCDAxhBoYwA0OYgSHMwBBmYAgzMIQZGMIMDGEGhjADQ5iBIczAEGZgCDMwhBkYwgwMYQaGMANDmIEhzMAQZmAIMzCEGRjCDAxhBoYwA0OYgSHMwBBmYAgzMIQZGMIMDGEGhjADQ5iBIczAEGZgCDMwhBkYwgwMYQaGMANDmIEhzMAQZmAIMzCEGRjCDAxhBoYwA0OYgSHMwBBmYAgzMIQZGKbrAulcYzcBCI6PAAAAAElFTkSuQmCC", "base64");
+const seedFiles = () => [
+  { id: "501", filename: "man-hinh-dang-nhap.png", size: PNG.length, mimeType: "image/png", created: "2026-10-20T08:00:00.000+0700", author: "Nguyễn Anh" },
+  { id: "502", filename: "dac-ta.pdf", size: 2048, mimeType: "application/pdf", created: "2026-10-21T08:00:00.000+0700", author: "Nguyễn Anh" },
+];
+let attachmentsOf5 = seedFiles();
+app.get("/api/tasks/:id/attachments", (req, r) => r.json({ files: req.params.id === "DEMO-5" ? attachmentsOf5 : [], links: [] }));
+app.get("/api/tasks/:id/attachments/:attId/content", (req, r) => {
+  const f = req.params.id === "DEMO-5" ? attachmentsOf5.find((x) => x.id === req.params.attId) : undefined;
+  if (!f) return r.status(404).json({ error: "Không tìm thấy tệp đính kèm trên công việc này." });
+  r.setHeader("Content-Type", req.query.inline === "1" && f.mimeType === "image/png" ? "image/png" : "application/octet-stream");
+  r.send(f.mimeType === "image/png" ? PNG : Buffer.from("%PDF-1.4 stand-in"));
+});
+app.delete("/api/tasks/:id/attachments/:attId", (req, r) => {
+  const before = attachmentsOf5.length;
+  attachmentsOf5 = attachmentsOf5.filter((x) => x.id !== req.params.attId);
+  if (attachmentsOf5.length === before) return r.status(404).json({ error: "Không tìm thấy tệp đính kèm trên công việc này." });
+  r.status(204).end();
+});
 
 app.patch("/api/tasks/:id", (req, res) => {
   const t = tasks.find((x) => x.id === req.params.id);

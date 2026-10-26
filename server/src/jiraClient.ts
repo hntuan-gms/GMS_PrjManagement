@@ -534,6 +534,22 @@ export class JiraClient {
     });
   }
 
+  /**
+   * The bytes of one attachment. Jira answers with a redirect to its media service, whose URL
+   * carries its own short-lived token — fetch drops the bearer header on that cross-origin hop,
+   * which is what we want. Not JSON, so it cannot go through `request`.
+   */
+  async getAttachmentContent(id: string): Promise<Buffer> {
+    const url = `${JIRA_API_BASE}/ex/jira/${this.opts.cloudId}/rest/api/3/attachment/content/${encodeURIComponent(id)}`;
+    let res = await fetch(url, { headers: { Authorization: `Bearer ${await this.opts.getAccessToken()}` } });
+    if (res.status === 401 && this.opts.onUnauthorized) {
+      const refreshed = await this.opts.onUnauthorized();
+      if (refreshed) res = await fetch(url, { headers: { Authorization: `Bearer ${refreshed}` } });
+    }
+    if (!res.ok) throw new JiraApiError(res.status, await res.text().catch(() => ""));
+    return Buffer.from(await res.arrayBuffer());
+  }
+
   async deleteAttachment(id: string): Promise<void> {
     await this.request(`/rest/api/3/attachment/${encodeURIComponent(id)}`, { method: "DELETE" });
   }

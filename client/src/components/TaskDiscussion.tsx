@@ -159,6 +159,7 @@ function CommentBox({
       <textarea
         ref={areaRef}
         rows={3}
+        spellCheck={false}
         autoFocus={autoFocus}
         value={text}
         placeholder="Viết bình luận… gõ @ để nhắc tên một người (Ctrl+Enter để gửi)"
@@ -227,7 +228,8 @@ function CommentBox({
             Huỷ
           </button>
         )}
-        <button type="button" className="primary" onClick={submit} disabled={busy || !text.trim()}>
+        {/* Tonal, not solid: the one solid button in the window is "Lưu & đồng bộ Jira" below it. */}
+        <button type="button" className="primary tonal" onClick={submit} disabled={busy || !text.trim()}>
           {busy ? "Đang gửi..." : submitLabel}
         </button>
       </div>
@@ -308,11 +310,11 @@ export default function TaskDiscussion({ taskId, members, myAccountId }: Props) 
 
       {tab === "comments" ? (
         <>
-          <CommentBox members={members} submitLabel="Gửi bình luận" onSubmit={add} />
           {commentsError && <div className="td-error">{commentsError}</div>}
           {actionError && <div className="td-error">{actionError}</div>}
           {!comments && !commentsError && <div className="td-muted">Đang tải bình luận…</div>}
           {comments && comments.length === 0 && <div className="td-muted">Chưa có bình luận nào.</div>}
+          <CommentBox members={members} submitLabel="Gửi bình luận" onSubmit={add} />
           <ul className="td-list">
             {(comments ?? []).map((c) => (
               <li key={c.id} className="td-comment">

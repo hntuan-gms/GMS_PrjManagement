@@ -76,12 +76,12 @@ await step("việc cha chỉ gồm việc hợp lệ: không có chính nó và 
   assert(!opts.includes("DEMO-5"), "không được tự làm cha của mình");
 });
 await step("issue link của Jira hiện cạnh phụ thuộc, có chiều đúng và ghi chú không dời lịch", async () => {
-  const text = await page.textContent(".modal .field:has(> span:text-is('Liên kết Jira (issue links)'))");
+  const text = await page.locator(".modal .td-section", { has: page.locator(".td-section-title", { hasText: "Liên kết Jira" }) }).textContent();
   assert(text.includes("is blocked by") && text.includes("DEMO-3"), text);
   assert(text.includes("không dời lịch"));
 });
 await step("thêm liên kết 'relates to' DEMO-7, rồi gỡ", async () => {
-  const box = page.locator(".modal .field:has(> span:text-is('Liên kết Jira (issue links)'))");
+  const box = page.locator(".modal .td-section", { has: page.locator(".td-section-title", { hasText: "Liên kết Jira" }) });
   await box.locator("select").selectOption({ label: "relates to" });
   await box.locator("input").fill("DEMO-7");
   await box.locator("button", { hasText: "+ Liên kết" }).click();
@@ -92,7 +92,7 @@ await step("thêm liên kết 'relates to' DEMO-7, rồi gỡ", async () => {
   await page.waitForFunction(() => !document.querySelector(".modal ul.pred-list")?.textContent.includes("DEMO-7"));
 });
 await step("một mã không có thì Jira từ chối và lỗi hiện ngay tại chỗ", async () => {
-  const box = page.locator(".modal .field:has(> span:text-is('Liên kết Jira (issue links)'))");
+  const box = page.locator(".modal .td-section", { has: page.locator(".td-section-title", { hasText: "Liên kết Jira" }) });
   await box.locator("input").fill("DEMO-999");
   await box.locator("button", { hasText: "+ Liên kết" }).click();
   await box.locator(".field-note.is-error").waitFor();

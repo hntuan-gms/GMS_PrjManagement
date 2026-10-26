@@ -7837,36 +7837,64 @@ button.tf-chip-x:hover:not(:disabled) {
   border-bottom-color: var(--color-primary);
   font-weight: 600;
 }
+/* The comment box is one field: the text area and its send button share a single border and focus ring,
+   instead of a bare rectangle with a button floating under it. */
 .td-box {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--control-radius);
+  background: var(--control-bg);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.td-box:hover:not(:focus-within) {
+  border-color: var(--control-border-hover);
+}
+.td-box:focus-within {
+  border-color: var(--control-border-focus);
+  box-shadow: var(--control-ring);
 }
 .td-box textarea {
   width: 100%;
-  resize: vertical;
+  min-height: 72px;
+  max-height: 40vh;
+  border: 0;
+  border-radius: var(--control-radius) var(--control-radius) 0 0;
+  background: transparent;
+  resize: none;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--control-font-size-form);
+  line-height: 1.5;
+  scrollbar-width: thin;
+}
+.td-box textarea:focus,
+.td-box textarea:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+.td-box > .td-error {
+  margin: 0 12px 4px;
 }
 .td-box-actions {
   display: flex;
   justify-content: flex-end;
   gap: 6px;
+  padding: 4px 8px 8px;
 }
 .td-suggest {
   position: absolute;
   left: 8px;
   top: 64px;
-  z-index: 50;
+  z-index: var(--z-popover);
   margin: 0;
-  padding: 4px;
+  padding: var(--menu-padding);
   list-style: none;
   min-width: 200px;
-  background: #fff;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-lg);
+  background: var(--menu-bg);
+  border: 1px solid var(--menu-border);
+  border-radius: var(--menu-radius);
+  box-shadow: var(--menu-shadow);
 }
 .td-suggest button {
   display: block;
@@ -7883,7 +7911,7 @@ button.tf-chip-x:hover:not(:disabled) {
 }
 .td-suggest button.is-active,
 .td-suggest button:hover {
-  background: var(--color-primary-light);
+  background: var(--menu-item-hover);
 }
 .td-list {
   list-style: none;
@@ -8506,7 +8534,7 @@ button.selection-trigger {
   box-shadow: var(--control-ring);
 }
 .td-main .field textarea {
-  min-height: 110px;
+  min-height: 96px;
   resize: vertical;
   line-height: 1.5;
 }
@@ -8709,4 +8737,376 @@ button.selection-trigger {
 }
 .suggest-item.is-active {
   background: var(--menu-item-hover);
+}
+
+/* ==========================================================================
+   Task detail window — second pass
+   ========================================================================== */
+/* The title wraps onto as many lines as it needs (TaskEditModal sets its height from its text). */
+textarea.td-title {
+  display: block;
+  /* A flex child that may shrink collapses to a sliver in a column that scrolls. */
+  flex: none;
+  width: calc(100% + 20px);
+  resize: none;
+  overflow: hidden;
+  line-height: 1.3;
+  font-family: inherit;
+}
+
+/* Where the browser can size a text area to its text, it does: no tall empty rectangle with a grip. */
+@supports (field-sizing: content) {
+  .field textarea,
+  .td-main .field textarea {
+    field-sizing: content;
+    resize: none;
+    max-height: 45vh;
+  }
+  .td-box textarea {
+    field-sizing: content;
+  }
+}
+
+/* Both columns scroll on their own; their bars are thin so the divider between them is not a heavy line. */
+.td-main,
+.td-side {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-strong) transparent;
+}
+
+.td-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* --- attachments: a quiet row; its icons show when it is hovered or focused --- */
+.att-existing .att-row {
+  border-color: transparent;
+  background: transparent;
+  padding: 2px 4px;
+}
+.att-existing .att-row:hover,
+.att-existing .att-row:focus-within {
+  background: var(--color-ghost-hover);
+}
+.att-open {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1;
+  min-width: 0;
+  height: auto;
+  padding: 2px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--color-text-primary);
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+.att-open:hover:not(:disabled) {
+  background: transparent;
+  color: var(--color-primary);
+}
+.att-open:disabled {
+  cursor: progress;
+}
+.att-thumb {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  object-fit: cover;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+}
+.att-thumb-btn {
+  display: inline-flex;
+  flex: none;
+  height: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  border-radius: 4px;
+  cursor: zoom-in;
+}
+.att-actions {
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+.att-row:hover .att-actions,
+.att-row:focus-within .att-actions {
+  opacity: 1;
+}
+@media (hover: none) {
+  .att-actions {
+    opacity: 1;
+  }
+}
+button.att-act {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+button.att-act:hover:not(:disabled) {
+  background: var(--color-border);
+  color: var(--color-text-primary);
+}
+button.att-act.is-danger:hover:not(:disabled) {
+  background: var(--color-danger-light);
+  color: var(--color-danger);
+}
+button.att-add-link {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--color-primary);
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+}
+button.att-add-link:hover:not(:disabled) {
+  background: var(--color-primary-light);
+}
+
+/* --- the picture, at a readable size --- */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-dialog) + 5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-5);
+  background: rgba(15, 23, 42, 0.72);
+  backdrop-filter: blur(3px);
+}
+.lightbox:focus {
+  outline: none;
+}
+.lightbox-figure {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  max-width: min(960px, 100%);
+  max-height: 100%;
+}
+.lightbox-figure img {
+  display: block;
+  max-width: 100%;
+  max-height: calc(100vh - 140px);
+  margin: 0 auto;
+  object-fit: contain;
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-modal);
+}
+.lightbox-figure figcaption {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: #ffffff;
+  font-size: var(--font-size-md);
+}
+.lightbox-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+button.lightbox-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow: none;
+  color: #ffffff;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+button.lightbox-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+}
+button.lightbox-btn:focus-visible {
+  outline: 2px solid #ffffff;
+}
+
+/* --- effort: the logged hours on one line, the form behind a button --- */
+.td-spent-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.td-spent-row .time-spent {
+  min-height: 0;
+  padding-top: 0;
+}
+button.td-logtoggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  height: 28px;
+  padding: 0 10px;
+  font-size: var(--font-size-sm);
+}
+.td-logform {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+}
+
+/* --- classification: the name on the left, its value on the right, one line per fact --- */
+.td-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.td-group .field.td-row {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  align-items: center;
+  gap: 4px 10px;
+}
+.td-row > span:first-child {
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+.td-row > small,
+.td-row > .field-note {
+  grid-column: 1 / -1;
+}
+.td-value-text {
+  font-size: var(--font-size-md);
+  color: var(--color-text-primary);
+}
+.td-value-text.muted,
+.td-value-text .muted {
+  color: var(--color-text-muted);
+  font-style: normal;
+}
+
+.td-row select {
+  min-width: 0;
+}
+/* A value that needs the whole width (a parent's key and title) goes under its name, not beside it. */
+.td-group .field.td-row.is-wide {
+  grid-template-columns: minmax(0, 1fr);
+}
+/* Chips of what is set, with the picker as a quiet link after them, not a second box inside the first. */
+.name-picker select {
+  width: auto;
+  max-width: 100%;
+  height: 24px;
+  padding-inline: 6px;
+  border-color: transparent;
+  background-color: transparent;
+  color: var(--color-primary);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+.name-picker select:hover:not(:disabled) {
+  background-color: var(--color-primary-light);
+  border-color: transparent;
+}
+.name-picker select::picker-icon {
+  background-color: var(--color-primary);
+}
+
+/* The comments card has its own tabs as its heading, so it needs no folding header. */
+.td-card .td-section-body {
+  padding: 12px 14px 14px;
+}
+/* A computed value: reads as a result, not as a box to type in. */
+.td-calc {
+  display: inline-flex;
+  align-items: center;
+  align-self: start;
+  justify-self: start;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  background: var(--color-ghost-hover);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-md);
+  font-variant-numeric: tabular-nums;
+}
+/* Tonal: a send button that does not compete with the window's one solid action. */
+button.primary.tonal {
+  background: var(--color-primary-light);
+  border-color: var(--color-primary-border);
+  color: var(--color-primary);
+  box-shadow: none;
+}
+button.primary.tonal:hover:not(:disabled) {
+  background: var(--blue-100);
+  border-color: var(--color-primary);
+  color: var(--color-primary-hover);
+}
+button.primary.tonal:disabled {
+  background: var(--color-bg);
+  border-color: var(--color-border);
+  color: var(--color-text-muted);
+  opacity: 1;
+}
+/* The watchers' button and names share the value column and wrap together. */
+.td-row .watchers {
+  gap: 8px;
+}
+.td-row .watchers button {
+  height: 28px;
+}
+
+/* Estimate on the left, logged time and its button on the right, each on one line. */
+.td-pair.is-effort {
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+}
+.td-spent-row {
+  flex-wrap: nowrap;
+}
+.td-spent-row .time-spent {
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+.td-row .watchers {
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+.td-row .watchers .muted {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

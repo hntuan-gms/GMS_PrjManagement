@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { api } from "../api";
 import { isAssignableType } from "../types";
 import type { DependencyType, JiraUser, Predecessor, Task, TaskAttachments, TaskTransition, TaskUpdateInput, TransitionField } from "../types";
 import { filesFromClipboard, hasPending, NO_ATTACHMENTS, uploadPending, type PendingAttachments } from "../attachments";
 import AttachmentPicker from "./AttachmentPicker";
+import TaskAttachmentList from "./TaskAttachmentList";
 import NumberInput from "./NumberInput";
 import { HOURS_PER_DAY, localToday, roundHours } from "../taskForm";
 import DurationHint from "./DurationHint";
@@ -46,7 +47,7 @@ function Section({ title, hint, children }: { title: string; hint?: ReactNode; c
       <summary>
         <Icon name="chevronRight" size={14} className="td-section-caret" />
         <span className="td-section-title">{title}</span>
-        {hint !== undefined && hint !== 0 && <span className="td-section-hint">{hint}</span>}
+        {hint !== undefined && <span className="td-section-hint">{hint}</span>}
       </summary>
       <div className="td-section-body">{children}</div>
     </details>
@@ -125,8 +126,21 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
   const [logComment, setLogComment] = useState("");
   const [logging, setLogging] = useState(false);
   const [logNote, setLogNote] = useState<{ ok: boolean; text: string } | null>(null);
+  // The quick-log form is folded away until "+ Ghi giờ" is pressed.
+  const [logOpen, setLogOpen] = useState(false);
+  const [linkCount, setLinkCount] = useState<number | null>(null);
+  const titleRef = useRef<HTMLTextAreaElement>(null);
 
   const dialogRef = useRef<HTMLDivElement>(null);
+
+  // The title wraps onto as many lines as it needs instead of being cut off at the box's edge.
+  useLayoutEffect(() => {
+    const el = titleRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    // scrollHeight leaves the border out, and the box is border-box.
+    el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`;
+  }, [summary]);
 
   // Focus moves into the window when it opens and back to where it was when it closes.
   useEffect(() => {
@@ -321,6 +335,7 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
       setLogNote({ ok: true, text: `Đã ghi ${entry.hours}h ngày ${logDate.split("-").reverse().join("/")}.` });
       setLogHours(null);
       setLogComment("");
+      setLogOpen(false);
       onWorkLogged();
     } catch (e) {
       setLogNote({ ok: false, text: e instanceof Error ? e.message : "Không ghi được giờ." });
@@ -407,10 +422,17 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
 
         <div className="td-body">
           <div className="td-main">
-            <input
+            {/* A Jira summary is one line of text: Enter does not start a second, a pasted break becomes a space. */}
+            <textarea
+              ref={titleRef}
               className="td-title"
+              rows={1}
+              spellCheck={false}
               value={summary}
-              onChange={(e) => setSummary(e.target.value)}
+              onChange={(e) => setSummary(e.target.value.replace(/\s*[\r\n]+\s*/g, " "))}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.ctrlKey && !e.metaKey) e.preventDefault();
+              }}
               aria-label="Tên công việc"
               placeholder="Tên công việc"
             />
@@ -419,6 +441,7 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
               <span>Mô tả</span>
               <textarea
                 rows={5}
+                spellCheck={false}
                 value={description}
                 disabled={!descriptionLoaded}
                 placeholder={descriptionLoaded ? "Thêm mô tả…" : descriptionError ? "Không tải được mô tả — chưa sửa được ở đây." : "Đang tải mô tả…"}
@@ -429,30 +452,15 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
               />
             </label>
 
-            <Section
-              title="Đính kèm"
-              hint={existing && existing.files.length + existing.links.length > 0 ? existing.files.length + existing.links.length : undefined}
-            >
-              <div className="field">
-                <span className="sr-only">Đính kèm &amp; liên kết</span>
-                {existing && (existing.files.length > 0 || existing.links.length > 0) && (
-                  <ul className="att-existing">
-                    {existing.files.map((f) => (
-                      <li key={f.id}>
-                        <span className="att-ext">{f.filename.split(".").pop()?.slice(0, 4)}</span>
-                        <span className="att-name" title={f.filename}>{f.filename}</span>
-                        <span className="att-size">{f.author ?? ""}</span>
-                      </li>
-                    ))}
-                    {existing.links.map((l) => (
-                      <li key={l.id}>
-                        <Icon name="external" size={13} className="att-link-icon" />
-                        <a className="att-name" href={l.url} target="_blank" rel="noreferrer" title={l.url}>
-                          {l.title}
-                        </a>
-                      </li>
-                    ))}
-                  </ul>
+            <Section title="Đính kèm" hint={existing ? existing.files.length + existing.links.length : undefined}>
+              <div className="td-stack">
+                {existing && (
+                  <TaskAttachmentList
+                    taskId={task.id}
+                    files={existing.files}
+                    links={existing.links}
+                    onRemoved={(fileId) => setExisting({ ...existing, files: existing.files.filter((f) => f.id !== fileId) })}
+                  />
                 )}
                 <AttachmentPicker
                   value={pending}
@@ -463,19 +471,19 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
             </Section>
 
             <Section title="Phụ thuộc lịch" hint={predecessors.length}>
-              <div className="field">
-                <span>Phụ thuộc (predecessors)</span>
-                <ul className="pred-list">
-                  {predecessors.map((p) => (
-                    <li key={p.taskId}>
-                      <b>{p.taskId}</b> · {p.type} · lag {p.lagDays}d
-                      <button className="link-btn" onClick={() => setPredecessors(predecessors.filter((x) => x.taskId !== p.taskId))}>
-                        gỡ
-                      </button>
-                    </li>
-                  ))}
-                  {predecessors.length === 0 && <li className="muted">Không có</li>}
-                </ul>
+              <div className="td-stack">
+                {predecessors.length > 0 && (
+                  <ul className="pred-list">
+                    {predecessors.map((p) => (
+                      <li key={p.taskId}>
+                        <b>{p.taskId}</b> · {p.type} · lag {p.lagDays}d
+                        <button className="link-btn" onClick={() => setPredecessors(predecessors.filter((x) => x.taskId !== p.taskId))}>
+                          gỡ
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
                 <div className="pred-add">
                   <select value={newPredId} onChange={(e) => setNewPredId(e.target.value)} aria-label="Việc phải xong trước">
                     <option value="">Chọn task...</option>
@@ -498,19 +506,22 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
               </div>
             </Section>
 
-            <Section title="Liên kết Jira">
-              <TaskLinks task={task} allTasks={allTasks} />
+            <Section title="Liên kết Jira" hint={linkCount ?? undefined}>
+              <TaskLinks task={task} allTasks={allTasks} onCount={setLinkCount} />
             </Section>
 
-            <Section title="Bình luận & lịch sử">
-              <TaskDiscussion taskId={task.id} members={users} myAccountId={myAccountId} />
-            </Section>
+            {/* Its own tabs (Bình luận / Lịch sử) are the heading, so no folding header repeats them. */}
+            <section className="td-section td-card" aria-label="Bình luận và lịch sử thay đổi">
+              <div className="td-section-body">
+                <TaskDiscussion taskId={task.id} members={users} myAccountId={myAccountId} />
+              </div>
+            </section>
           </div>
 
           <aside className="td-side" aria-label="Chi tiết công việc">
             <Group title="Trạng thái">
               <div className="field">
-                <label className="td-label" htmlFor="td-status">
+                <label className="sr-only" htmlFor="td-status">
                   Chuyển trạng thái
                 </label>
                 <select
@@ -582,10 +593,11 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
                 </label>
               </div>
               <DurationHint days={durationDays} />
-              <label className="field">
-                <span>Ngày kết thúc (tính từ trên)</span>
-                <input type="date" readOnly value={startDate ? addDays(startDate, calendarDays - 1) : task.dueDate ?? ""} />
-              </label>
+              {/* Worked out from the two above, so it reads as a result, not as a box to type in. */}
+              <div className="field td-row">
+                <span title="Tính từ ngày bắt đầu và thời lượng">Kết thúc</span>
+                <output className="td-calc">{fmtDate(startDate ? addDays(startDate, calendarDays - 1) : task.dueDate ?? "")}</output>
+              </div>
               <label className="field">
                 <span>
                   % Hoàn thành <b className="td-pct">{percentComplete}%</b>
@@ -595,121 +607,134 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
             </Group>
 
             <Group title="Công sức">
-              <label className="field">
-                <span>Ước lượng ban đầu (giờ)</span>
-                <NumberInput
-                  value={estimate}
-                  min={0.01}
-                  max={10000}
-                  allowEmpty
-                  placeholder="VD: 12"
-                  onChange={(n) => {
-                    setEstimate(n);
-                    setEstimateTouched(true);
-                  }}
-                />
-              </label>
-              <div className="field">
-                <span>Đã ghi</span>
-                <div className={`time-spent ${overEstimate ? "is-over" : ""}`}>
-                  <b>{roundHours(spent)}h</b>
-                  {estimate ? <span> / {estimate}h ước lượng</span> : null}
-                  {overEstimate ? <span className="time-over">vượt {roundHours(spent - estimate!)}h</span> : null}
-                </div>
-                {estimate ? (
-                  <div className={`td-bar ${overEstimate ? "is-over" : ""}`} role="img" aria-label={`Đã dùng ${spentPct}% ước lượng`}>
-                    <span style={{ width: `${spentPct}%` }} />
-                  </div>
-                ) : null}
-              </div>
-              <div className="field">
-                <span>Ghi giờ nhanh — ghi lên Jira dưới tên bạn</span>
-                <div className="log-inline">
-                  <NumberInput value={logHours} min={0.02} max={24} allowEmpty placeholder="Số giờ" className="log-hours" onChange={setLogHours} />
-                  <input type="date" className="log-date" value={logDate} onChange={(e) => setLogDate(e.target.value)} aria-label="Ngày ghi giờ" />
-                  <input
-                    className="log-comment"
-                    value={logComment}
-                    onChange={(e) => setLogComment(e.target.value)}
-                    placeholder="Đã làm gì (không bắt buộc)"
-                    aria-label="Nội dung công việc đã làm"
+              <div className="td-pair is-effort">
+                <label className="field">
+                  <span title="Ước lượng ban đầu (giờ)">Ước lượng (giờ)</span>
+                  <NumberInput
+                    value={estimate}
+                    min={0.01}
+                    max={10000}
+                    allowEmpty
+                    placeholder="VD: 12"
+                    onChange={(n) => {
+                      setEstimate(n);
+                      setEstimateTouched(true);
+                    }}
                   />
-                  <button type="button" onClick={handleLogWork} disabled={logging || !logHours}>
-                    {logging ? "Đang ghi..." : "Ghi giờ"}
-                  </button>
+                </label>
+                <div className="field">
+                  <span>Đã ghi</span>
+                  <div className="td-spent-row">
+                    <div className={`time-spent ${overEstimate ? "is-over" : ""}`}>
+                      <b>{roundHours(spent)}h</b>
+                      {estimate ? <span> / {estimate}h</span> : null}
+                    </div>
+                    <button type="button" className="td-logtoggle" onClick={() => setLogOpen((o) => !o)} aria-expanded={logOpen} aria-controls="td-logform">
+                      <Icon name="plus" size={13} />
+                      Ghi giờ
+                    </button>
+                  </div>
                 </div>
-                {logNote && (
-                  <span className={logNote.ok ? "log-note" : "log-note is-error"} role="status">
-                    {logNote.text}
-                  </span>
-                )}
               </div>
+              {estimate ? (
+                <div className={`td-bar ${overEstimate ? "is-over" : ""}`} role="img" aria-label={`Đã dùng ${spentPct}% ước lượng`}>
+                  <span style={{ width: `${spentPct}%` }} />
+                </div>
+              ) : null}
+              {overEstimate ? <span className="time-over">vượt ước lượng {roundHours(spent - estimate!)}h</span> : null}
+              {logOpen && (
+                <div className="td-logform" id="td-logform">
+                  <small className="field-hint">Ghi lên Jira dưới tên bạn.</small>
+                  <div className="log-inline">
+                    <NumberInput value={logHours} min={0.02} max={24} allowEmpty placeholder="Số giờ" className="log-hours" onChange={setLogHours} />
+                    <input type="date" className="log-date" value={logDate} onChange={(e) => setLogDate(e.target.value)} aria-label="Ngày ghi giờ" />
+                    <input
+                      className="log-comment"
+                      value={logComment}
+                      onChange={(e) => setLogComment(e.target.value)}
+                      placeholder="Đã làm gì (không bắt buộc)"
+                      aria-label="Nội dung công việc đã làm"
+                    />
+                    <button type="button" className="primary" onClick={handleLogWork} disabled={logging || !logHours}>
+                      {logging ? "Đang ghi..." : "Ghi giờ"}
+                    </button>
+                  </div>
+                </div>
+              )}
+              {logNote && (
+                <span className={logNote.ok ? "log-note" : "log-note is-error"} role="status">
+                  {logNote.text}
+                </span>
+              )}
             </Group>
 
             <Group title="Phân loại">
-              <label className="field">
-                <span>Độ ưu tiên</span>
-                <select value={priority} onChange={(e) => setPriority(e.target.value)}>
-                  {priority === "" && <option value="">— Không rõ —</option>}
-                  {/* The task's own priority stays selectable even if the site list
-                      failed to load or no longer defines it. */}
-                  {priority !== "" && !priorityOptions.includes(priority) && <option value={priority}>{priority}</option>}
-                  {priorityOptions.map((p) => (
-                    <option key={p} value={p}>
-                      {p}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <div className="field field-wide">
-                <span>Nhãn</span>
-                <LabelsInput value={labels} onChange={setLabels} suggestions={labelSuggestions} />
-              </div>
-              <label className="field">
-                <span>Loại công việc</span>
-                <select value={issueType} onChange={(e) => setIssueType(e.target.value)}>
-                  {!typeOptions.some((t) => t.name === issueType) && <option value={issueType}>{issueType}</option>}
-                  {typeOptions.map((t) => {
-                    const why = typeBlockedReason(allTasks, task, t);
-                    return (
-                      <option key={t.name} value={t.name} disabled={!!why}>
-                        {t.name}
-                        {why ? ` (${why})` : ""}
+              {/* Label and value on one line: seven short facts fit without a second scrollbar. */}
+              <div className="td-grid">
+                <label className="field td-row">
+                  <span>Độ ưu tiên</span>
+                  <select value={priority} onChange={(e) => setPriority(e.target.value)}>
+                    {priority === "" && <option value="">— Không rõ —</option>}
+                    {/* The task's own priority stays selectable even if the site list
+                        failed to load or no longer defines it. */}
+                    {priority !== "" && !priorityOptions.includes(priority) && <option value={priority}>{priority}</option>}
+                    {priorityOptions.map((p) => (
+                      <option key={p} value={p}>
+                        {p}
                       </option>
-                    );
-                  })}
-                </select>
-                {issueType !== task.issueType && (
-                  <small className="field-note">Jira chỉ đổi được khi quy trình và màn hình của hai loại tương thích.</small>
-                )}
-              </label>
-              <label className="field">
-                <span>Việc cha</span>
-                <select value={effectiveParent} disabled={isEpicType} onChange={(e) => setParentKey(e.target.value)}>
-                  <option value="">{subtaskPicked ? "— Chọn việc cha —" : "— Không có —"}</option>
-                  {/* The current parent stays selectable even if it is not a valid choice any more. */}
-                  {effectiveParent && !parents.some((p) => p.id === effectiveParent) && <option value={effectiveParent}>{effectiveParent}</option>}
-                  {parents.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.id} · {p.summary.slice(0, 40)}
-                    </option>
-                  ))}
-                </select>
-                {isEpicType && <small className="field-note">Epic không có việc cha.</small>}
-              </label>
-              <div className="field">
-                <span>Sprint</span>
-                <span className="field-note">
-                  {task.sprint ? `${task.sprint.name}${task.sprint.state === "active" ? " (đang chạy)" : task.sprint.state === "closed" ? " (đã đóng)" : ""}` : "Chưa vào sprint"}
-                </span>
-              </div>
-              <div className="field field-wide">
-                <span>Thành phần (components)</span>
-                <NamePicker value={components} options={componentOptions} onChange={setComponents} placeholder="+ Thêm thành phần…" emptyHint="Dự án chưa có thành phần nào." />
-              </div>
-              <div className="field field-wide">
-                <span>Phiên bản sửa lỗi / phát hành (fix versions)</span>
-                <NamePicker value={fixVersions} options={versionOptions} onChange={setFixVersions} placeholder="+ Thêm phiên bản…" emptyHint="Dự án chưa có phiên bản nào." />
+                    ))}
+                  </select>
+                </label>
+                <div className="field td-row">
+                  <span>Nhãn</span>
+                  <LabelsInput value={labels} onChange={setLabels} suggestions={labelSuggestions} />
+                </div>
+                <label className="field td-row">
+                  <span>Loại công việc</span>
+                  <select value={issueType} onChange={(e) => setIssueType(e.target.value)}>
+                    {!typeOptions.some((t) => t.name === issueType) && <option value={issueType}>{issueType}</option>}
+                    {typeOptions.map((t) => {
+                      const why = typeBlockedReason(allTasks, task, t);
+                      return (
+                        <option key={t.name} value={t.name} disabled={!!why}>
+                          {t.name}
+                          {why ? ` (${why})` : ""}
+                        </option>
+                      );
+                    })}
+                  </select>
+                  {issueType !== task.issueType && (
+                    <small className="field-note">Jira chỉ đổi được khi quy trình và màn hình của hai loại tương thích.</small>
+                  )}
+                </label>
+                <label className="field td-row is-wide">
+                  <span>Việc cha</span>
+                  <select value={effectiveParent} disabled={isEpicType} onChange={(e) => setParentKey(e.target.value)}>
+                    <option value="">{subtaskPicked ? "— Chọn việc cha —" : "— Không có —"}</option>
+                    {/* The current parent stays selectable even if it is not a valid choice any more. */}
+                    {effectiveParent && !parents.some((p) => p.id === effectiveParent) && <option value={effectiveParent}>{effectiveParent}</option>}
+                    {parents.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.id} · {p.summary.slice(0, 40)}
+                      </option>
+                    ))}
+                  </select>
+                  {isEpicType && <small className="field-note">Epic không có việc cha.</small>}
+                </label>
+                <div className="field td-row">
+                  <span>Sprint</span>
+                  <span className="td-value-text">
+                    {task.sprint ? `${task.sprint.name}${task.sprint.state === "active" ? " (đang chạy)" : task.sprint.state === "closed" ? " (đã đóng)" : ""}` : <em className="muted">Chưa vào sprint</em>}
+                  </span>
+                </div>
+                <div className="field td-row">
+                  <span title="Thành phần (components)">Thành phần</span>
+                  <NamePicker value={components} options={componentOptions} onChange={setComponents} placeholder="+ Thêm thành phần…" emptyHint="Dự án chưa có thành phần nào." />
+                </div>
+                <div className="field td-row">
+                  <span title="Phiên bản sửa lỗi / phát hành (fix versions)">Phiên bản</span>
+                  <NamePicker value={fixVersions} options={versionOptions} onChange={setFixVersions} placeholder="+ Thêm phiên bản…" emptyHint="Dự án chưa có phiên bản nào." />
+                </div>
               </div>
             </Group>
           </aside>
@@ -745,6 +770,11 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
       </div>
     </div>
   );
+}
+
+/** yyyy-mm-dd → dd/mm/yyyy; anything else (empty, not yet set) reads as a dash. */
+function fmtDate(iso: string): string {
+  return /^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso.split("-").reverse().join("/") : "—";
 }
 
 function addDays(iso: string, days: number): string {

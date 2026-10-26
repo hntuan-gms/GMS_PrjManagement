@@ -16,6 +16,8 @@ interface Props {
  */
 export default function NamePicker({ value, options, onChange, placeholder, emptyHint }: Props) {
   const left = options.filter((o) => !value.includes(o));
+  // Nothing set and nothing to choose from: a quiet line, not a box that looks fillable but is not.
+  if (options.length === 0 && value.length === 0) return <span className="td-value-text muted">{emptyHint ?? "Dự án chưa định nghĩa mục nào."}</span>;
   return (
     <div className="labels-input name-picker">
       {value.map((v) => (
@@ -26,25 +28,21 @@ export default function NamePicker({ value, options, onChange, placeholder, empt
           </button>
         </span>
       ))}
-      {options.length === 0 && value.length === 0 ? (
-        <span className="muted">{emptyHint ?? "Dự án chưa định nghĩa mục nào."}</span>
-      ) : (
-        left.length > 0 && (
-          <select
-            value=""
-            onChange={(e) => {
-              if (e.target.value) onChange([...value, e.target.value]);
-            }}
-            aria-label={placeholder}
-          >
-            <option value="">{placeholder}</option>
-            {left.map((o) => (
-              <option key={o} value={o}>
-                {o}
-              </option>
-            ))}
-          </select>
-        )
+      {left.length > 0 && (
+        <select
+          value=""
+          onChange={(e) => {
+            if (e.target.value) onChange([...value, e.target.value]);
+          }}
+          aria-label={placeholder}
+        >
+          <option value="">{placeholder}</option>
+          {left.map((o) => (
+            <option key={o} value={o}>
+              {o}
+            </option>
+          ))}
+        </select>
       )}
     </div>
   );

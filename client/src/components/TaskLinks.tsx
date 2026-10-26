@@ -7,6 +7,8 @@ interface Props {
   task: Task;
   /** The project's tasks, only to offer their keys while typing. */
   allTasks: Task[];
+  /** The number of links once known, for the count in the section's header. */
+  onCount?: (n: number | null) => void;
 }
 
 /** Every way to say a link: each type has two texts, one per end ("blocks" / "is blocked by"). */
@@ -30,13 +32,17 @@ const waysOf = (types: LinkType[]): Way[] =>
  * and no lag, and does not move a bar, so listing it among the dependencies would
  * promise scheduling it does not do; the note says where to schedule instead.
  */
-export default function TaskLinks({ task, allTasks }: Props) {
+export default function TaskLinks({ task, allTasks, onCount }: Props) {
   const [links, setLinks] = useState<IssueLink[] | null>(null);
   const [types, setTypes] = useState<LinkType[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [way, setWay] = useState("");
   const [otherKey, setOtherKey] = useState("");
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    onCount?.(links === null ? null : links.length);
+  }, [links, onCount]);
 
   useEffect(() => {
     let alive = true;
@@ -89,12 +95,11 @@ export default function TaskLinks({ task, allTasks }: Props) {
   }
 
   return (
-    <div className="field">
-      <span>Liên kết Jira (issue links)</span>
+    <div className="td-stack">
+      {links === null && <span className="muted">Đang tải…</span>}
+      {links && links.length > 0 && (
       <ul className="pred-list">
-        {links === null && <li className="muted">Đang tải…</li>}
-        {links?.length === 0 && <li className="muted">Không có</li>}
-        {links?.map((l) => (
+        {links.map((l) => (
           <li key={l.id}>
             <i>{l.label}</i>{" "}
             <a href={urlOf(l.key)} target="_blank" rel="noreferrer">
@@ -108,6 +113,7 @@ export default function TaskLinks({ task, allTasks }: Props) {
           </li>
         ))}
       </ul>
+      )}
       {ways.length > 0 && (
         <div className="pred-add">
           <select value={way || ways[0].value} onChange={(e) => setWay(e.target.value)} aria-label="Kiểu liên kết">
@@ -135,7 +141,7 @@ export default function TaskLinks({ task, allTasks }: Props) {
         </div>
       )}
       <small className="field-note">
-        Chỉ để tham khảo — liên kết Jira không dời lịch. Muốn việc này chờ việc kia, dùng “Phụ thuộc” bên dưới.
+        Chỉ để tham khảo — liên kết Jira không dời lịch. Muốn việc này chờ việc kia, dùng “Phụ thuộc lịch” bên trên.
       </small>
       {error && <small className="field-note is-error">{error}</small>}
     </div>

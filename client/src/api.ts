@@ -203,6 +203,25 @@ export async function* kbktApply(file: File, params: KbktRunParams, signal: Abor
   yield* readSse<KbktStreamEvent>(res);
 }
 
+/** One attachment's bytes, as a Blob — fetched here (not an <img src>) so the call carries the tab's project. */
+async function fetchAttachment(id: string, attId: string, inline: boolean): Promise<Blob> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/tasks/${encodeURIComponent(id)}/attachments/${encodeURIComponent(attId)}/content${inline ? "?inline=1" : ""}`, {
+      credentials: "include",
+      headers: projectHeaders(),
+    });
+  } catch {
+    throw new NetworkError("Không kết nối được tới máy chủ.");
+  }
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: res.statusText }));
+    if (res.status === 401 && unauthorizedHandler) unauthorizedHandler();
+    throw new ApiError(res.status, body.error ?? `Request failed: ${res.status}`, body.code, body.details);
+  }
+  return res.blob();
+}
+
 export const api = {
   getSession: () => request<Session>("/auth/me"),
   listProjects: () => request<ProjectSummary[]>("/auth/projects"),
@@ -263,6 +282,9 @@ export const api = {
     request<{ description: string | null }>(`/tasks/${encodeURIComponent(id)}/description`),
   getTaskAttachments: (id: string) =>
     request<TaskAttachments>(`/tasks/${encodeURIComponent(id)}/attachments`),
+  getAttachmentBlob: (id: string, attId: string, inline: boolean) => fetchAttachment(id, attId, inline),
+  deleteAttachment: (id: string, attId: string) =>
+    request<void>(`/tasks/${encodeURIComponent(id)}/attachments/${encodeURIComponent(attId)}`, { method: "DELETE" }),
   // The file goes up as the raw body, its name in a header — see routes/api.ts.
   uploadAttachment: (id: string, file: File) =>
     request<Array<{ id: string; filename: string; size: number }>>(`/tasks/${encodeURIComponent(id)}/attachments`, {

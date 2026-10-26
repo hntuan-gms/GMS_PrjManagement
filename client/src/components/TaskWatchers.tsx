@@ -38,14 +38,17 @@ export default function TaskWatchers({ taskId }: { taskId: string }) {
   }
 
   return (
-    <div className="field">
+    <div className="field td-row">
       <span>Người theo dõi</span>
       <div className="watchers">
         <button type="button" className={w?.isWatching ? "is-on" : ""} onClick={toggle} disabled={!w || busy} aria-pressed={!!w?.isWatching}>
           {w?.isWatching ? "✓ Đang theo dõi" : "Theo dõi"}
         </button>
         {w && (
-          <span className="muted">
+          <span
+            className="muted"
+            title={w.listed ? w.watchers.map((x) => x.displayName).join(", ") : undefined}
+          >
             {w.count} người{w.listed ? (w.watchers.length > 0 ? ": " + w.watchers.map((x) => x.displayName).join(", ") : "") : " (Jira không cho xem danh sách)"}
           </span>
         )}

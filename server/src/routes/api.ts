@@ -7,7 +7,7 @@ import { timesheetRouter } from "./timesheet.js";
 import { kbktRouter } from "./kbkt.js";
 import { filtersRouter } from "./filters.js";
 import { requireAuth, requireProject, requireStaff } from "../auth/middleware.js";
-import { badRequest } from "../errors.js";
+import { badRequest, notFound } from "../errors.js";
 import { TaskActivity } from "../taskActivity.js";
 import { TaskExtras } from "../taskExtras.js";
 import type { BulkTaskCreateInput, ImportRow, TaskCreateInput, TaskUpdateInput } from "../types.js";
@@ -381,6 +381,52 @@ apiRouter.get("/tasks/:id/attachments", requireProject, async (req, res, next) =
         .filter((l) => l.object?.url)
         .map((l) => ({ id: String(l.id), url: l.object!.url!, title: l.object?.title || l.object!.url! })),
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Raster images are the only thing shown inline; Jira's SVG would run script on our origin. */
+const INLINE_IMAGE = /^image\/(png|jpe?g|gif|webp)$/i;
+const MAX_PREVIEW_BYTES = 30 * 1024 * 1024;
+
+/** The attachment, only if it belongs to this issue — an id alone would reach any issue on the site. */
+async function ownAttachment(req: express.Request) {
+  req.auth!.taskService!.assertOwnKey(req.params.id);
+  const attId = String(req.params.attId);
+  if (!/^\d{1,12}$/.test(attId)) throw notFound("Không tìm thấy tệp đính kèm.");
+  const file = (await req.auth!.jira.getAttachments(req.params.id)).find((f) => String(f.id) === attId);
+  if (!file) throw notFound("Không tìm thấy tệp đính kèm trên công việc này.");
+  return file;
+}
+
+/**
+ * A file's bytes, for the detail window's preview and download. Proxied because Jira's own
+ * content URL needs a Jira browser session, not our token. Shown inline only for raster images
+ * (`?inline=1`); everything else is a download, sandboxed and never sniffed.
+ */
+apiRouter.get("/tasks/:id/attachments/:attId/content", requireProject, async (req, res, next) => {
+  try {
+    const file = await ownAttachment(req);
+    if (file.size > MAX_PREVIEW_BYTES) throw badRequest("Tệp quá lớn để mở ở đây — hãy mở trên Jira.");
+    const data = await req.auth!.jira.getAttachmentContent(String(file.id));
+    const inline = req.query.inline === "1" && INLINE_IMAGE.test(file.mimeType);
+    res.setHeader("Content-Type", inline ? file.mimeType : "application/octet-stream");
+    res.setHeader("Content-Disposition", `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(file.filename)}`);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Content-Security-Policy", "sandbox; default-src 'none'");
+    res.setHeader("Cache-Control", "private, max-age=300");
+    res.send(data);
+  } catch (err) {
+    next(err);
+  }
+});
+
+apiRouter.delete("/tasks/:id/attachments/:attId", requireProject, async (req, res, next) => {
+  try {
+    const file = await ownAttachment(req);
+    await req.auth!.jira.deleteAttachment(String(file.id));
+    res.status(204).end();
   } catch (err) {
     next(err);
   }
