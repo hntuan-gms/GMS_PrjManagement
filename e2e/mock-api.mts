@@ -357,15 +357,27 @@ const boardIssues = () => tasks.filter((t) => t.issueType !== "Epic").map((t, i)
   epicSummary: t.wbsParentId === "DEMO-1" ? "Giai đoạn 1" : t.wbsParentId === "DEMO-2" ? "Giai đoạn 2" : null,
   parentKey: t.wbsParentId, flagged: false, labels: t.labels, dueDate: t.dueDate, resolutionDate: null, updated: null, blockedBy: [],
 }));
-app.get("/api/board", (_q, r) => r.json({
-  mode: "agile", fallback: null, boards: [{ id: 1, name: "Bảng DEMO", type: "scrum" }], board: { id: 1, name: "Bảng DEMO", type: "scrum" },
-  columns: [{ name: "To Do", statusIds: ["1"], min: null, max: null }, { name: "In Progress", statusIds: ["2"], min: null, max: null }, { name: "Done", statusIds: ["3"], min: null, max: null }],
-  statuses: [{ id: "1", name: "To Do", category: "new" }, { id: "2", name: "In Progress", category: "indeterminate" }, { id: "3", name: "Done", category: "done" }],
-  estimation: { fieldId: "customfield_1", name: "Story Points", unit: "points" },
-  sprints: [{ id: 7, name: "Sprint 7", state: "active", goal: "Chốt phần khảo sát", startDate: day(-5), endDate: day(9), completeDate: null }],
-  velocity: [], throughput: [], issues: boardIssues(), truncated: false,
-}));
+// Two boards, as a project often has: the Scrum one (default) and a Kanban one whose first and
+// last-but-one columns are empty (board-kanban.e2e.mjs folds them, switches to it from the Backlog).
+const BOARDS = [{ id: 1, name: "Bảng DEMO", type: "scrum" }, { id: 2, name: "Bảng Kanban DEMO", type: "kanban" }];
+const STATUSES = [{ id: "0", name: "Backlog", category: "new" }, { id: "1", name: "To Do", category: "new" }, { id: "2", name: "In Progress", category: "indeterminate" }, { id: "3", name: "Done", category: "done" }];
+app.get("/api/board", (q, r) => {
+  const kanban = Number(q.query.boardId) === 2;
+  const col = (name: string, ids: string[]) => ({ name, statusIds: ids, min: null, max: null });
+  r.json({
+    mode: "agile", fallback: null, boards: BOARDS, board: kanban ? BOARDS[1] : BOARDS[0],
+    columns: kanban
+      ? [col("Backlog", ["0"]), col("To Do", ["1"]), col("In Progress", ["2"]), col("Selected for development", ["4"]), col("Done", ["3"])]
+      : [col("To Do", ["1"]), col("In Progress", ["2"]), col("Done", ["3"])],
+    statuses: kanban ? [...STATUSES, { id: "4", name: "Selected for development", category: "new" }] : STATUSES.slice(1),
+    estimation: { fieldId: "customfield_1", name: "Story Points", unit: "points" },
+    sprints: kanban ? [] : [{ id: 7, name: "Sprint 7", state: "active", goal: "Chốt phần khảo sát", startDate: day(-5), endDate: day(9), completeDate: null }],
+    velocity: [], throughput: [], issues: boardIssues().map((i) => (kanban ? { ...i, sprintId: null } : i)), truncated: false,
+  });
+});
 app.post("/api/board/sprints/:id/issues", (_q, r) => r.status(204).end());
+app.post("/api/board/issues/:key/move", (_q, r) => r.json({ statusId: null }));
+app.get("/api/board/issues/:key/transitions", (_q, r) => r.json([]));
 
 // --- ai chat: an SSE stream that notices when the client goes away ----------
 app.get("/api/ai/chat/sessions", (_q, r) => r.json([]));

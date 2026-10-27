@@ -1,5 +1,7 @@
 import { useState, type DragEvent, type MouseEvent } from "react";
-import { localDate, priorityTone, shortDate, totalWeight, typeClass, velocityAverage, weightOf } from "../boardModel";
+import { canonicalIssueType, localDate, shortDate, totalWeight, velocityAverage, weightOf } from "../boardModel";
+import IssueTypeIcon from "./IssueTypeIcon";
+import PriorityMark from "./PriorityMark";
 import AssigneePicker, { type Member } from "./AssigneePicker";
 import QuickCreateOptions, { type QuickOptions } from "./QuickCreateOptions";
 import type { BoardIssue, BoardSnapshot, EstimateSuggestion, Sprint } from "../types";
@@ -284,7 +286,7 @@ export default function BacklogView(props: Props) {
                         onClick={(e) => select(e, issue.key)}
                         onDoubleClick={() => props.onOpen(issue.key)}
                       >
-                        <span className={`bd-type bd-type-${typeClass(issue.issueType)}`} title={issue.issueType} />
+                        <IssueTypeIcon type={canonicalIssueType(issue.issueType)} label={issue.issueType} size={14} />
                         <button
                           className={`bl-key ${issue.statusCategory === "done" ? "is-done" : ""}`}
                           onClick={(e) => {
@@ -309,11 +311,7 @@ export default function BacklogView(props: Props) {
                           </span>
                         )}
                         <span className={`bl-status bl-status-${issue.statusCategory}`}>{issue.statusName}</span>
-                        {priorityTone(issue.priority) && (
-                          <span className={`bd-prio bd-prio-${priorityTone(issue.priority)}`} title={`Ưu tiên: ${issue.priority}`}>
-                            {priorityTone(issue.priority) === "high" ? "▲" : priorityTone(issue.priority) === "low" ? "▼" : "■"}
-                          </span>
-                        )}
+                        <PriorityMark priority={issue.priority} />
                         <AssigneePicker
                           issueType={issue.issueType}
                           accountId={issue.assigneeAccountId}

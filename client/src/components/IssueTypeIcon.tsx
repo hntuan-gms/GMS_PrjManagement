@@ -45,11 +45,11 @@ const CONFIG: Record<IssueTypeName, { fill: string; path: string }> = {
  */
 const UNKNOWN = { fill: "#6b778c", path: "M4.2 4.4h7.6v1.7H4.2zm0 3h7.6v1.7H4.2zm0 3h4.8v1.7H4.2z" };
 
-export default function IssueTypeIcon({ type }: { type: string }) {
+export default function IssueTypeIcon({ type, label, size = 16 }: { type: string; label?: string; size?: number }) {
   const cfg = CONFIG[type as IssueTypeName] ?? UNKNOWN;
   return (
-    <svg className="issue-icon" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-      <title>{type}</title>
+    <svg className="issue-icon" width={size} height={size} viewBox="0 0 16 16" aria-hidden="true">
+      <title>{label ?? type}</title>
       <rect width="16" height="16" rx="3.5" fill={cfg.fill} />
       <path d={cfg.path} fill="#fff" />
     </svg>

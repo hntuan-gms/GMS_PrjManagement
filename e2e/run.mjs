@@ -81,7 +81,9 @@ try {
   await waitFor(`${urls.E2E_API}/api/auth/me`, "mock API");
   await waitFor(urls.E2E_APP, "client");
 
-  const files = fs.readdirSync(here).filter((f) => f.endsWith(".e2e.mjs")).sort();
+  // E2E_ONLY=board-kanban runs just the files whose name contains that text.
+  const only = process.env.E2E_ONLY;
+  const files = fs.readdirSync(here).filter((f) => f.endsWith(".e2e.mjs") && (!only || f.includes(only))).sort();
   for (const file of files) {
     console.log(`\n##### ${file}`);
     const code = await new Promise((resolve) => {

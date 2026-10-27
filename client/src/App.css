@@ -4854,9 +4854,98 @@ button.ai-link:hover:not(:disabled) {
   box-shadow: var(--shadow-sm);
 }
 .bd-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 12.5px;
   color: var(--color-primary);
   text-decoration: none;
+}
+/* The board switcher: the current board's name, opening the list of boards and "Tạo board mới". */
+button.bd-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--control-h);
+  max-width: 320px;
+  padding: 0 10px;
+  border: 1px solid var(--color-border-hover);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: none;
+  color: var(--color-text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+button.bd-switcher:hover:not(:disabled),
+button.bd-switcher.is-open {
+  background: var(--color-ghost-hover);
+  border-color: var(--color-border-hover);
+  box-shadow: none;
+}
+.bd-switcher > .icon {
+  flex: none;
+  color: var(--color-text-secondary);
+}
+.bd-switcher-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bd-switch-menu {
+  min-width: 280px;
+}
+.bd-switch-item .bd-switch-check {
+  flex: none;
+  width: 16px;
+  display: inline-flex;
+}
+.bd-switch-item .bd-switch-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The ⓘ beside the kind badge. */
+button.bd-info {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: transparent;
+  box-shadow: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+button.bd-info:hover:not(:disabled),
+button.bd-info.is-open {
+  background: var(--color-ghost-hover);
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--color-primary);
+}
+.bd-info-menu {
+  width: 280px;
+  min-width: 0;
+}
+.bd-info-body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 8px;
+  font-size: 12.5px;
+  color: var(--color-text-secondary);
+}
+.bd-info-body p {
+  margin: 0;
+  line-height: 1.45;
 }
 .bd-link:hover {
   text-decoration: underline;
@@ -4970,12 +5059,13 @@ button.bd-person.is-on {
   overflow: auto;
   padding-bottom: 80px; /* room for the chat pill */
 }
+/* KanbanBoard sets the template: a folded (empty) column is a 40px strip, the rest share the width. */
 .bd-colheads,
 .bd-cols {
   display: grid;
-  grid-template-columns: repeat(var(--bd-cols), minmax(250px, 1fr));
+  grid-template-columns: var(--bd-template);
   gap: 10px;
-  min-width: calc(var(--bd-cols) * 260px);
+  min-width: var(--bd-minw);
 }
 .bd-colheads {
   position: sticky;
@@ -5103,8 +5193,8 @@ button.bd-lanehead:hover:not(:disabled) {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 7px;
-  padding: 10px 11px 9px;
+  gap: 4px;
+  padding: 7px 9px 6px;
   border-radius: var(--radius-md);
   background: var(--color-surface);
   border: 1px solid transparent;
@@ -5133,17 +5223,37 @@ button.bd-lanehead:hover:not(:disabled) {
 }
 .bd-card-summary {
   font-size: 13px;
-  line-height: 1.4;
+  line-height: 1.35;
   color: var(--color-text-primary);
   display: -webkit-box;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.bd-card-alerts {
+/* One line for the Epic and the warnings: the Epic truncates first, a warning keeps its words. */
+.bd-card-meta {
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
   gap: 4px;
+  min-width: 0;
+}
+.bd-card-meta .bd-epic {
+  align-self: auto;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.bd-card-meta .bd-alert {
+  flex: none;
+}
+.bd-card-meta .bd-alert-blocked {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+.bd-alert-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .bd-alert {
   display: inline-flex;
@@ -5185,26 +5295,8 @@ button.bd-lanehead:hover:not(:disabled) {
   align-items: center;
   gap: 6px;
 }
-.bd-type {
-  width: 14px;
-  height: 14px;
+.bd-card-foot .issue-icon {
   flex: none;
-  border-radius: 3px;
-  background: #4f8ae8;
-}
-.bd-type-bug {
-  background: #e5493a;
-  border-radius: 50%;
-}
-.bd-type-story {
-  background: #63ba3c;
-}
-.bd-type-epic {
-  background: #904ee2;
-}
-.bd-type-subtask {
-  background: #7ab4f5;
-  transform: scale(0.8);
 }
 .bd-key {
   font-size: 11.5px;
@@ -5264,6 +5356,97 @@ button.bd-add:hover:not(:disabled) {
   background: rgba(15, 23, 42, 0.05);
   box-shadow: none;
   color: var(--color-text-primary);
+}
+/* The add button is in every column but only shows while you are in it (hover or keyboard
+   focus), so an empty board is not a row of identical "+ Tạo việc". Touch has no hover. */
+.bd-col .bd-add {
+  opacity: 0;
+  transition: opacity var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
+}
+.bd-col:hover .bd-add,
+.bd-col:focus-within .bd-add,
+.bd-col.is-hover .bd-add,
+.bd-col .bd-add:focus-visible {
+  opacity: 1;
+}
+@media (hover: none) {
+  .bd-col .bd-add {
+    opacity: 1;
+  }
+}
+
+/* --- folded (empty) columns --- */
+.bd-colhead.is-folded {
+  justify-content: center;
+  padding: 8px 0;
+}
+.bd-col.is-folded {
+  min-height: 180px; /* room for the vertical name */
+  padding: 0;
+  align-items: stretch;
+}
+button.bd-fold-label {
+  flex: 1;
+  min-height: 0;
+  padding: 10px 0;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  box-shadow: none;
+  writing-mode: vertical-rl;
+  justify-content: flex-start;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+button.bd-fold-label:hover:not(:disabled) {
+  background: rgba(15, 23, 42, 0.05);
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--color-text-primary);
+}
+button.bd-col-toggle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  box-shadow: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--transition-fast), background var(--transition-fast);
+}
+.bd-colhead:hover .bd-col-toggle,
+button.bd-col-toggle:focus-visible,
+.bd-colhead.is-folded .bd-col-toggle {
+  opacity: 1;
+}
+.bd-colhead.is-folded .bd-col-toggle {
+  margin-left: 0;
+}
+button.bd-col-toggle:hover:not(:disabled) {
+  background: rgba(15, 23, 42, 0.08);
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--color-text-primary);
+}
+@media (hover: none) {
+  button.bd-col-toggle {
+    opacity: 1;
+  }
 }
 .bd-quick textarea {
   width: 100%;
@@ -7579,8 +7762,9 @@ button.tf-chip-x:hover:not(:disabled) {
   border-color: var(--color-primary);
 }
 .bd-prio {
-  font-size: 10px;
-  line-height: 1;
+  display: inline-flex;
+  flex: none;
+  line-height: 0;
 }
 .bd-prio-high {
   color: var(--color-danger);
@@ -8353,6 +8537,13 @@ button.tf-chip-x:hover:not(:disabled) {
   background: var(--color-primary-light);
   border-color: var(--color-primary-border);
 }
+/* The chips for what is filtering sit on their own full-width line under the row. */
+.bd-filters > .tf-active {
+  flex: 1 0 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
 /* Buttons that share a row with those fields: same height and corners, not full pills. */
 .bd-chipbtn,
 .rv-controls .rv-preset {
@@ -8361,6 +8552,11 @@ button.tf-chip-x:hover:not(:disabled) {
   border-color: var(--color-border-hover);
   border-radius: var(--radius-md);
   font-size: 12.5px;
+}
+.bd-chipbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 .bd-chipbtn.is-on {
   border-color: var(--color-primary-border);

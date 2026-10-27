@@ -9,6 +9,7 @@ import {
   priorityRank,
   rankTarget,
   reorder,
+  summarize,
   tzOffsetMinutes,
   unitLabel,
   type BoardFilter,
@@ -29,7 +30,9 @@ import type {
   TaskCreateInput,
 } from "../types";
 import BacklogView, { type SectionId } from "./BacklogView";
-import { MultiSelect, type Option } from "./FilterBar";
+import { FacetAccordion, type Option } from "./FilterBar";
+import { Icon } from "./Icons";
+import Popover from "./Popover";
 import type { QuickOptions } from "./QuickCreateOptions";
 import KanbanBoard from "./KanbanBoard";
 import SprintHeader from "./SprintHeader";
@@ -96,7 +99,10 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
   );
   const [loadError, setLoadError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [view, setView] = useState<"board" | "backlog">("board");
+  // The tab the Scrum segmented control last chose. Not what is shown: a Kanban board has
+  // no such control, so `view` below is only ever "board" there (see the comment on it).
+  const [scrumView, setView] = useState<"board" | "backlog">("board");
+  const [openFacet, setOpenFacet] = useState<string | null>(null);
   const [filter, setFilter] = useState<BoardFilter>(incomingFilter ?? EMPTY_FILTER);
   useEffect(() => {
     if (!incomingFilter) return;
@@ -161,6 +167,8 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
     setBoardId(id);
     setSnapshot(null);
     setSuggestions(new Map());
+    // A sprint id belongs to the board it came from.
+    setActiveSprintId(null);
     try {
       localStorage.setItem(storageKey(projectKey), String(id));
     } catch {
@@ -203,6 +211,10 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
 
   const agile = snapshot?.mode === "agile";
   const scrum = agile && snapshot?.board?.type === "scrum";
+  // Only a Scrum board has a Backlog tab. Leaving the state alone when switching to a Kanban
+  // board used to strand it on "backlog": neither the board nor the backlog branch below
+  // rendered, and the tab showed a blank page until a reload reset it.
+  const view = scrum ? scrumView : "board";
   const unit = snapshot ? unitLabel(snapshot) : "việc";
   const activeSprints = snapshot?.sprints.filter((s) => s.state === "active") ?? [];
   const activeSprint = activeSprints.find((s) => s.id === activeSprintId) ?? activeSprints[0] ?? null;
@@ -358,7 +370,7 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
     );
   }
 
-  async function quickCreate(summary: string, to: SectionId, opts: QuickOptions) {
+  async function quickCreate(summary: string, to: SectionId, opts: QuickOptions, column?: BoardColumn) {
     await mutate(
       null,
       async () => {
@@ -369,6 +381,16 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
           ...(opts.assigneeAccountId ? { assigneeAccountId: opts.assigneeAccountId } : {}),
         });
         if (to !== "backlog") await api.moveToSprint(to, [task.id]);
+        // Created from a column other than the first: a new issue always starts in its
+        // workflow's first status, so carry it to the column the user asked for. The issue
+        // already exists, so a workflow that has no such transition is a notice, not a failure.
+        if (column && column.name !== snapshot?.columns[0]?.name) {
+          try {
+            await api.moveCard(task.id, { toStatusIds: column.statusIds });
+          } catch (e) {
+            setNotice(`Đã tạo ${task.id} nhưng không chuyển được sang cột "${column.name}": ${e instanceof Error ? e.message : "lỗi không rõ"}`);
+          }
+        }
       },
       { failure: "Không tạo được công việc", touchesTasks: true }
     );
@@ -472,6 +494,29 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
   }
 
   const boardUrl = snapshot.board ? `${session.site.url}/secure/RapidBoard.jspa?rapidView=${snapshot.board.id}` : null;
+  // A project with only Kanban boards has no sprints to offer (see the ⓘ beside the kind badge).
+  const kanbanOnly = agile && !snapshot.boards.some((b) => b.type === "scrum");
+
+  // The value pickers behind the "Bộ lọc" panel. The board's columns already are statuses, so
+  // that facet is left out there — and offered again on the Backlog, which has no columns, or
+  // while a status filter is on (the assistant can set one) so it can still be seen and cleared.
+  const facets: { key: "types" | "statuses" | "epics" | "labels" | "priorities"; label: string; options: Option[]; selected: Set<string> }[] = [
+    { key: "types", label: "Loại", options: filterOptions.types, selected: filter.types },
+    ...(view === "backlog" || filter.statuses.size > 0
+      ? [{ key: "statuses" as const, label: "Trạng thái", options: filterOptions.statuses, selected: filter.statuses }]
+      : []),
+    { key: "epics", label: "Epic", options: filterOptions.epics, selected: filter.epics },
+    { key: "labels", label: "Nhãn", options: filterOptions.labels, selected: filter.labels },
+    { key: "priorities", label: "Ưu tiên", options: filterOptions.priorities, selected: filter.priorities },
+  ];
+  const facetsActive = facets.filter((f) => f.selected.size > 0).length;
+  const chips = facets
+    .filter((f) => f.selected.size > 0)
+    .map((f) => {
+      const labels = [...f.selected].map((v) => f.options.find((o) => o.value === v)?.label ?? v);
+      return { key: f.key, name: f.label, text: `${f.label}: ${summarize(labels)}`, full: `${f.label}: ${labels.join(", ")}` };
+    });
+
   const lastThroughput = snapshot.throughput.at(-1)?.count ?? 0;
   const avgThroughput = snapshot.throughput.length
     ? Math.round((snapshot.throughput.reduce((s, w) => s + w.count, 0) / snapshot.throughput.length) * 10) / 10
@@ -481,18 +526,95 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
     <div className="bd-view">
       <div className="bd-top">
         <div className="bd-top-left">
-          {snapshot.boards.length > 1 ? (
-            <select className="bd-select" value={snapshot.board?.id ?? ""} onChange={(e) => chooseBoard(Number(e.target.value))}>
-              {snapshot.boards.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.name} · {b.type === "scrum" ? "Scrum" : "Kanban"}
-                </option>
-              ))}
-            </select>
+          {agile ? (
+            // One control for "which board" and "another board": it replaces the plain select
+            // and the separate "+ Bảng" button that sat beside it.
+            <Popover
+              className="bd-switcher"
+              role="menu"
+              menuLabel="Chọn board"
+              menuClassName="bd-switch-menu"
+              title="Chuyển board hoặc tạo board mới"
+              label={
+                <>
+                  <Icon name="columns" size={14} />
+                  <span className="bd-switcher-name">{snapshot.board?.name ?? `Bảng ${projectKey}`}</span>
+                </>
+              }
+            >
+              {({ close }) => (
+                <>
+                  <div className="menu-heading">Board của dự án</div>
+                  {snapshot.boards.map((b) => {
+                    const current = b.id === snapshot.board?.id;
+                    return (
+                      <button
+                        key={b.id}
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={current}
+                        className="menu-item bd-switch-item"
+                        onClick={() => {
+                          close();
+                          if (!current) chooseBoard(b.id);
+                        }}
+                      >
+                        <span className="bd-switch-check">{current && <Icon name="check" size={14} />}</span>
+                        <span className="bd-switch-name">{b.name}</span>
+                        <span className={`bd-kind bd-kind-${b.type === "scrum" ? "scrum" : "kanban"}`}>{b.type === "scrum" ? "Scrum" : "Kanban"}</span>
+                      </button>
+                    );
+                  })}
+                  <div className="menu-sep" role="separator" />
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="menu-item"
+                    onClick={() => {
+                      close();
+                      setModal({ kind: "createBoard", type: "scrum" });
+                    }}
+                  >
+                    <Icon name="plus" size={14} />
+                    Tạo board mới…
+                  </button>
+                </>
+              )}
+            </Popover>
           ) : (
             <b className="bd-boardname">{snapshot.board?.name ?? `Bảng ${projectKey}`}</b>
           )}
           <span className={`bd-kind bd-kind-${scrum ? "scrum" : "kanban"}`}>{scrum ? "Scrum" : agile ? "Kanban" : "Theo trạng thái"}</span>
+          {/* Kanban-only project: sprints need a Scrum board, and saying so beats leaving the
+              user to wonder where the Sprint tab went — but it is an explanation, not a
+              permanent banner taking a row of the board's height. */}
+          {kanbanOnly && (
+            <Popover
+              className="bd-info"
+              caret={false}
+              menuLabel="Về board Kanban"
+              menuClassName="bd-info-menu"
+              ariaLabel="Vì sao board này không có Sprint?"
+              title="Vì sao board này không có Sprint?"
+              label={<Icon name="info" size={14} />}
+            >
+              {({ close }) => (
+                <div className="bd-info-body">
+                  <p>Board này là Kanban nên không có Sprint — Jira chỉ gắn sprint với board Scrum.</p>
+                  <button
+                    type="button"
+                    className="text-btn"
+                    onClick={() => {
+                      close();
+                      setModal({ kind: "createBoard", type: "scrum" });
+                    }}
+                  >
+                    Tạo board Scrum cho dự án
+                  </button>
+                </div>
+              )}
+            </Popover>
+          )}
           {scrum && (
             <div className="bd-seg" role="tablist">
               <button className={view === "board" ? "is-active" : ""} onClick={() => setView("board")} role="tab" aria-selected={view === "board"}>
@@ -503,7 +625,7 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
               </button>
             </div>
           )}
-          {agile || snapshot.fallback?.reason === "no_board" ? (
+          {!agile && snapshot.fallback?.reason === "no_board" ? (
             <button className="bl-icon" onClick={() => setModal({ kind: "createBoard", type: "scrum" })} title="Tạo board mới">
               + Bảng
             </button>
@@ -522,10 +644,13 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
               Hoàn thành: <b>{lastThroughput}</b> tuần này · TB {avgThroughput}/tuần
             </span>
           )}
-          <button onClick={() => load(snapshot.board?.id ?? boardId)} title="Tải lại từ Jira">⟳</button>
+          {/* No refresh button of its own: the header's "Đồng bộ từ Jira" reloads the tasks,
+              and this board re-reads whenever they change. A second ↻ here read as a
+              different action and left people unsure which one to press. */}
           {boardUrl && (
             <a className="bd-link" href={boardUrl} target="_blank" rel="noreferrer">
-              Mở trên Jira ↗
+              Mở trên Jira
+              <Icon name="external" size={12} />
             </a>
           )}
         </div>
@@ -539,16 +664,6 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
               Tạo board Scrum
             </button>
           )}
-        </div>
-      )}
-      {/* Kanban-only project: sprints need a Scrum board, and saying so beats
-          leaving the user to wonder where the Sprint tab went. */}
-      {agile && !snapshot.boards.some((b) => b.type === "scrum") && (
-        <div className="bd-fallback">
-          ℹ Board này là Kanban nên không có Sprint — Jira chỉ gắn sprint với board Scrum.
-          <button className="text-btn" onClick={() => setModal({ kind: "createBoard", type: "scrum" })}>
-            Tạo board Scrum cho dự án
-          </button>
         </div>
       )}
       {snapshot.truncated && <div className="bd-fallback">Board có quá nhiều việc — chỉ hiển thị 800 việc đầu theo thứ hạng.</div>}
@@ -600,21 +715,34 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
           Của tôi
         </button>
         <button className={`bd-chipbtn ${filter.onlyBlocked ? "is-on" : ""}`} onClick={() => setFilter({ ...filter, onlyBlocked: !filter.onlyBlocked })}>
-          ⛔ Bị chặn
+          <Icon name="lock" size={13} />
+          Bị chặn
         </button>
         <button className={`bd-chipbtn ${filter.onlyOverdue ? "is-on" : ""}`} onClick={() => setFilter({ ...filter, onlyOverdue: !filter.onlyOverdue })}>
           Quá hạn
         </button>
-        <MultiSelect label="Loại" options={filterOptions.types} selected={filter.types} onChange={(types) => setFilter({ ...filter, types })} />
-        <MultiSelect label="Trạng thái" options={filterOptions.statuses} selected={filter.statuses} onChange={(statuses) => setFilter({ ...filter, statuses })} />
-        <MultiSelect label="Epic" options={filterOptions.epics} selected={filter.epics} onChange={(epics) => setFilter({ ...filter, epics })} />
-        <MultiSelect label="Nhãn" options={filterOptions.labels} selected={filter.labels} onChange={(labels) => setFilter({ ...filter, labels })} />
-        <MultiSelect label="Ưu tiên" options={filterOptions.priorities} selected={filter.priorities} onChange={(priorities) => setFilter({ ...filter, priorities })} />
-        {isFiltering(filter) && (
-          <button className="link-btn" onClick={() => setFilter(EMPTY_FILTER)}>
-            Xoá lọc
-          </button>
-        )}
+        <Popover
+          className="tf-btn tf-add"
+          caret={false}
+          active={facetsActive > 0}
+          menuLabel="Bộ lọc"
+          menuClassName="tf-menu tf-filter-menu"
+          title="Lọc theo loại, Epic, nhãn, ưu tiên…"
+          label={
+            <>
+              <Icon name="plus" size={14} />
+              Bộ lọc
+              {facetsActive > 0 && <span className="tf-badge">{facetsActive}</span>}
+            </>
+          }
+        >
+          <FacetAccordion
+            facets={facets}
+            openKey={openFacet}
+            onOpenChange={setOpenFacet}
+            onChange={(key, next) => setFilter({ ...filter, [key]: next })}
+          />
+        </Popover>
         <span className="bd-spacer" />
         {view === "board" && (
           <label className="bd-lanepick">
@@ -625,6 +753,30 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
               <option value="epic">Epic</option>
             </select>
           </label>
+        )}
+        {/* Only present while something is filtering, so an idle board spends no row on it. */}
+        {isFiltering(filter) && (
+          <div className="tf-active">
+            {chips.map((c) => (
+              <span key={c.key} className="tf-chip" title={c.full}>
+                <span className="tf-chip-label">{c.text}</span>
+                <button
+                  type="button"
+                  className="tf-chip-x"
+                  aria-label={`Bỏ lọc ${c.name}`}
+                  onClick={() => setFilter({ ...filter, [c.key]: new Set<string>() })}
+                >
+                  <Icon name="x" size={12} />
+                </button>
+              </span>
+            ))}
+            <span className="tf-count" role="status" aria-atomic="true">
+              {shown.length}/{scoped.length} thẻ
+            </span>
+            <button type="button" className="text-btn tf-clear" onClick={() => setFilter(EMPTY_FILTER)}>
+              Xoá lọc
+            </button>
+          </div>
         )}
       </div>
 
@@ -662,13 +814,15 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
           </div>
         ) : (
           <KanbanBoard
+            // Folded columns are remembered per board, so a board switch starts from its own.
+            key={snapshot.board?.id ?? "status"}
             snapshot={snapshot}
             issues={shown}
             swimlane={swimlane}
             today={today}
             onMove={moveCard}
             onOpen={open}
-            onQuickCreate={(summary, opts) => quickCreate(summary, scrum && activeSprint ? activeSprint.id : "backlog", opts)}
+            onQuickCreate={(summary, opts, column) => quickCreate(summary, scrum && activeSprint ? activeSprint.id : "backlog", opts, column)}
             members={members}
             createTypes={createTypes}
             onAssign={assignIssue}

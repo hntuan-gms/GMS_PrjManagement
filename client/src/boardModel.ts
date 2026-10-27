@@ -1,4 +1,4 @@
-import type { BoardIssue, BoardSnapshot, Sprint } from "./types";
+import type { BoardIssue, BoardSnapshot, IssueTypeName, Sprint } from "./types";
 
 /**
  * Pure helpers for the Bảng tab: dates, weights, filters, lanes, burndown.
@@ -124,7 +124,12 @@ export function isFiltering(f: BoardFilter): boolean {
   );
 }
 
-const PRIORITY_ORDER = ["highest", "high", "medium", "low", "lowest"];
+/** "A, B" for one or two values, "A, B +3" past that; the whole list goes in the title. */
+export function summarize(labels: string[]): string {
+  return labels.length <= 2 ? labels.join(", ") : `${labels.slice(0, 2).join(", ")} +${labels.length - 2}`;
+}
+
+const PRIORITY_ORDER =["highest", "high", "medium", "low", "lowest"];
 
 /** Jira's stock priorities, highest first; a site's own names sort after them. */
 export function priorityRank(name: string | null): number {
@@ -263,6 +268,22 @@ export function typeClass(issueType: string): string {
   if (t.includes("epic")) return "epic";
   if (t.includes("sub")) return "subtask";
   return "task";
+}
+
+/** `typeClass` as the name IssueTypeIcon draws, so a renamed or localised type ("Lỗi") still gets its glyph. */
+export function canonicalIssueType(issueType: string): IssueTypeName {
+  switch (typeClass(issueType)) {
+    case "bug":
+      return "Bug";
+    case "story":
+      return "Story";
+    case "epic":
+      return "Epic";
+    case "subtask":
+      return "Sub-task";
+    default:
+      return "Task";
+  }
 }
 
 export function initials(name: string | null): string {

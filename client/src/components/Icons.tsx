@@ -30,7 +30,12 @@ export type IconName =
   | "switch"
   | "external"
   | "trash"
-  | "subtask";
+  | "subtask"
+  | "info"
+  | "chevronUp"
+  | "equals"
+  | "collapseColumn"
+  | "clock";
 
 /** One outline family (24 grid, 2px stroke) so the header and toolbar read as a set.
  * Inline rather than an icon package: a few dozen paths isn't worth a dependency, and
@@ -209,6 +214,32 @@ const PATHS: Record<IconName, ReactNode> = {
   switch: (
     <>
       <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />
+    </>
+  ),
+  info: (
+    <>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 16v-5" />
+      <path d="M12 8v.01" />
+    </>
+  ),
+  chevronUp: <path d="M6 15l6-6 6 6" />,
+  equals: (
+    <>
+      <path d="M5 9h14" />
+      <path d="M5 15h14" />
+    </>
+  ),
+  collapseColumn: (
+    <>
+      <path d="M11 17l-5-5 5-5" />
+      <path d="M18 17l-5-5 5-5" />
+    </>
+  ),
+  clock: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3 2" />
     </>
   ),
 };

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { priorityRank } from "../boardModel";
+import { priorityRank, summarize } from "../boardModel";
 import { EMPTY_TASK_FILTER, facetCount, isTaskFiltering, type TaskFilter } from "../taskFilter";
 import type { Task } from "../types";
 import { Icon } from "./Icons";
@@ -154,10 +154,66 @@ export function MultiSelect({
   );
 }
 
-/** "A, B" for one or two values, "A, B +3" past that; the whole list goes in the title. */
-function summarize(labels: string[]): string {
-  return labels.length <= 2 ? labels.join(", ") : `${labels.slice(0, 2).join(", ")} +${labels.length - 2}`;
+/**
+ * The body of a "Bộ lọc" panel: one collapsible section per facet, each a checklist.
+ * Shared by the Gantt's filter bar and the board's so the two panels cannot drift; the
+ * open section is controlled by the caller so it survives the panel being closed.
+ */
+export function FacetAccordion({
+  facets,
+  openKey,
+  onOpenChange,
+  onChange,
+}: {
+  facets: { key: string; label: string; options: Option[]; selected: Set<string> }[];
+  openKey: string | null;
+  onOpenChange: (key: string | null) => void;
+  onChange: (key: string, next: Set<string>) => void;
+}) {
+  return (
+    <>
+      {facets.map(({ key, label, options, selected }) => {
+        const expanded = openKey === key;
+        return (
+          <div key={key} className={`tf-facet${expanded ? " is-open" : ""}`}>
+            <button
+              type="button"
+              className="tf-facet-head"
+              aria-expanded={expanded}
+              onClick={() => onOpenChange(expanded ? null : key)}
+            >
+              <span className="tf-facet-name">{label}</span>
+              {selected.size > 0 && <span className="tf-badge">{selected.size}</span>}
+              <Icon name="chevronDown" size={12} className="caret" />
+            </button>
+            {expanded && (
+              <div className="tf-facet-body">
+                {options.length === 0 ? (
+                  <div className="tf-empty">Chưa có giá trị nào.</div>
+                ) : (
+                  options.map((o) => (
+                    <label key={o.value} className="col-chooser-item">
+                      <input type="checkbox" checked={selected.has(o.value)} onChange={() => onChange(key, toggled(selected, o.value))} />
+                      <span className="tf-item-label" title={o.label}>
+                        {o.label}
+                      </span>
+                    </label>
+                  ))
+                )}
+                {selected.size > 0 && (
+                  <button type="button" className="text-btn tf-facet-reset" onClick={() => onChange(key, new Set())}>
+                    Bỏ chọn
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </>
+  );
 }
+
 
 /**
  * One row of controls over a task list, and — only while something is filtering — a
@@ -394,50 +450,12 @@ export default function FilterBar({
                 </>
               }
             >
-              {shown.map((f) => {
-                const expanded = openFacet === f;
-                const selected = filter[f];
-                const list = options[f];
-                return (
-                  <div key={f} className={`tf-facet${expanded ? " is-open" : ""}`}>
-                    <button
-                      type="button"
-                      className="tf-facet-head"
-                      aria-expanded={expanded}
-                      onClick={() => setOpenFacet(expanded ? null : f)}
-                    >
-                      <span className="tf-facet-name">{FACET_LABEL[f]}</span>
-                      {selected.size > 0 && <span className="tf-badge">{selected.size}</span>}
-                      <Icon name="chevronDown" size={12} className="caret" />
-                    </button>
-                    {expanded && (
-                      <div className="tf-facet-body">
-                        {list.length === 0 ? (
-                          <div className="tf-empty">Chưa có giá trị nào.</div>
-                        ) : (
-                          list.map((o) => (
-                            <label key={o.value} className="col-chooser-item">
-                              <input
-                                type="checkbox"
-                                checked={selected.has(o.value)}
-                                onChange={() => onChange({ ...filter, [f]: toggled(selected, o.value) })}
-                              />
-                              <span className="tf-item-label" title={o.label}>
-                                {o.label}
-                              </span>
-                            </label>
-                          ))
-                        )}
-                        {selected.size > 0 && (
-                          <button type="button" className="text-btn tf-facet-reset" onClick={() => onChange({ ...filter, [f]: new Set() })}>
-                            Bỏ chọn
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+              <FacetAccordion
+                facets={shown.map((f) => ({ key: f, label: FACET_LABEL[f], options: options[f], selected: filter[f] }))}
+                openKey={openFacet}
+                onOpenChange={(k) => setOpenFacet(k as SetFacet | null)}
+                onChange={(k, next) => onChange({ ...filter, [k]: next })}
+              />
             </Popover>
           )}
         </div>

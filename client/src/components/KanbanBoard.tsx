@@ -1,7 +1,10 @@
 import { useRef, useState, type DragEvent } from "react";
 import { api } from "../api";
-import { idleDays, initials, isOverdue, lanesOf, priorityTone, shortDate, totalWeight, typeClass, type Swimlane } from "../boardModel";
+import { canonicalIssueType, idleDays, initials, isOverdue, lanesOf, shortDate, totalWeight, type Swimlane } from "../boardModel";
 import AssigneePicker, { type Member } from "./AssigneePicker";
+import { Icon } from "./Icons";
+import IssueTypeIcon from "./IssueTypeIcon";
+import PriorityMark from "./PriorityMark";
 import QuickCreateOptions, { type QuickOptions } from "./QuickCreateOptions";
 import type { BoardColumn, BoardIssue, BoardSnapshot } from "../types";
 
@@ -13,7 +16,8 @@ interface Props {
   today: string;
   onMove: (key: string, column: BoardColumn, beforeKey: string | null, laneAccountId: string | null | undefined) => void;
   onOpen: (key: string) => void;
-  onQuickCreate?: (summary: string, opts: QuickOptions) => Promise<void>;
+  /** `column` is where the new card should land, not just the board's first column. */
+  onQuickCreate?: (summary: string, opts: QuickOptions, column: BoardColumn) => Promise<void>;
   members: Member[];
   /** Issue types offered by quick create. */
   createTypes: string[];
@@ -45,18 +49,56 @@ interface Hint {
   beforeKey: string | null;
 }
 
+/** Columns the user folded away, per board: a column's name is the only stable handle Jira gives it. */
+const collapsedKey = (snapshot: BoardSnapshot) => `gms.board.collapsedColumns.${snapshot.board?.id ?? "status"}`;
+
+function readCollapsed(snapshot: BoardSnapshot): Set<string> {
+  try {
+    const raw = localStorage.getItem(collapsedKey(snapshot));
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+const COLLAPSED_WIDTH = 40;
+const COLUMN_MIN_WIDTH = 250;
+const COLUMN_GAP = 10;
+
 export default function KanbanBoard({ snapshot, issues, swimlane, today, onMove, onOpen, onQuickCreate, members, createTypes, onAssign }: Props) {
   const [drag, setDrag] = useState<DragState | null>(null);
   const [hint, setHint] = useState<Hint | null>(null);
-  const [creating, setCreating] = useState(false);
+  /** Index of the column whose quick-create box is open — one at a time. */
+  const [creating, setCreating] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
   const [quickOpts, setQuickOpts] = useState<QuickOptions>({ issueType: createTypes[0] ?? "Task", assigneeAccountId: null });
   const [collapsedLanes, setCollapsedLanes] = useState<Set<string>>(new Set());
+  const [folded, setFolded] = useState<Set<string>>(() => readCollapsed(snapshot));
   const transitionCache = useRef(new Map<string, Set<string>>());
 
   const columns = snapshot.columns;
   const columnOf = (issue: BoardIssue) => columns.findIndex((c) => c.statusIds.includes(issue.statusId));
   const lanes = lanesOf(issues, swimlane);
+  const counts = columns.map((_, ci) => issues.filter((i) => columnOf(i) === ci).length);
+  // Only an empty column folds: a card that lands in one (a drop, a move made elsewhere)
+  // must never be hidden behind a strip, so it simply unfolds while it holds anything.
+  const isFolded = (ci: number) => folded.has(columns[ci].name) && counts[ci] === 0;
+
+  function setFold(name: string, on: boolean) {
+    setFolded((prev) => {
+      if (prev.has(name) === on) return prev;
+      const next = new Set(prev);
+      if (on) next.add(name);
+      else next.delete(name);
+      try {
+        localStorage.setItem(collapsedKey(snapshot), JSON.stringify([...next]));
+      } catch {
+        // Private mode: the fold just isn't remembered.
+      }
+      return next;
+    });
+  }
 
   function startDrag(e: DragEvent, issue: BoardIssue) {
     e.dataTransfer.effectAllowed = "move";
@@ -107,27 +149,54 @@ export default function KanbanBoard({ snapshot, issues, swimlane, today, onMove,
     const key = drag.key;
     const beforeKey = hint.beforeKey === key ? null : hint.beforeKey;
     endDrag();
+    setFold(columns[column].name, false);
     onMove(key, columns[column], beforeKey, laneAccountId);
   }
 
   async function submitDraft() {
     const summary = draft.trim();
-    if (!summary || !onQuickCreate) return;
+    if (!summary || !onQuickCreate || creating === null) return;
+    const column = columns[creating];
     setDraft("");
-    await onQuickCreate(summary, quickOpts);
+    await onQuickCreate(summary, quickOpts, column);
   }
 
   if (columns.length === 0) {
     return <div className="bd-empty">Board chưa có cột nào được cấu hình trạng thái.</div>;
   }
 
+  // A folded column is a 40px strip and the rest share what is left, so the grid is
+  // described per column rather than as `repeat(n, …)`.
+  const foldedCount = columns.filter((_, ci) => isFolded(ci)).length;
+  const openCount = columns.length - foldedCount;
+  const template = columns.map((_, ci) => (isFolded(ci) ? `${COLLAPSED_WIDTH}px` : `minmax(${COLUMN_MIN_WIDTH}px, 1fr)`)).join(" ");
+  const minWidth = openCount * (COLUMN_MIN_WIDTH + COLUMN_GAP) + foldedCount * (COLLAPSED_WIDTH + COLUMN_GAP);
+
   return (
-    <div className="bd-board" style={{ ["--bd-cols" as string]: columns.length }}>
+    <div
+      className="bd-board"
+      style={{ ["--bd-template" as string]: template, ["--bd-minw" as string]: `${minWidth}px` }}
+    >
       <div className="bd-colheads">
         {columns.map((c, ci) => {
-          const inCol = issues.filter((i) => columnOf(i) === ci);
-          const over = c.max !== null && inCol.length > c.max;
-          const under = c.min !== null && inCol.length < c.min;
+          const inCol = counts[ci];
+          const over = c.max !== null && inCol > c.max;
+          const under = c.min !== null && inCol < c.min;
+          if (isFolded(ci)) {
+            return (
+              <div key={c.name} className="bd-colhead is-folded">
+                <button
+                  type="button"
+                  className="bd-col-toggle"
+                  aria-label={`Mở rộng cột ${c.name}`}
+                  title={`Mở rộng cột ${c.name}`}
+                  onClick={() => setFold(c.name, false)}
+                >
+                  <Icon name="chevronRight" size={14} />
+                </button>
+              </div>
+            );
+          }
           return (
             <div
               key={c.name}
@@ -143,15 +212,29 @@ export default function KanbanBoard({ snapshot, issues, swimlane, today, onMove,
                 {c.unmapped && <span className="bd-unmapped-tag">chưa gắn cột</span>}
               </span>
               <span className="bd-colcount" title={c.max !== null ? `Giới hạn WIP: tối đa ${c.max}` : undefined}>
-                {inCol.length}
+                {inCol}
                 {c.max !== null && <span className="bd-wip">/{c.max}</span>}
               </span>
-              {snapshot.estimation && inCol.length > 0 && (
+              {snapshot.estimation && inCol > 0 && (
                 <span className="bd-colweight" title="Tổng ước lượng">
-                  {totalWeight(inCol, snapshot)}
+                  {totalWeight(
+                    issues.filter((i) => columnOf(i) === ci),
+                    snapshot
+                  )}
                 </span>
               )}
               {over && <span className="bd-wip-flag">Vượt giới hạn</span>}
+              {inCol === 0 && (
+                <button
+                  type="button"
+                  className="bd-col-toggle"
+                  aria-label={`Thu gọn cột ${c.name}`}
+                  title="Thu gọn cột trống"
+                  onClick={() => setFold(c.name, true)}
+                >
+                  <Icon name="collapseColumn" size={14} />
+                </button>
+              )}
             </div>
           );
         })}
@@ -185,6 +268,21 @@ export default function KanbanBoard({ snapshot, issues, swimlane, today, onMove,
                   const list = lane.issues.filter((i) => columnOf(i) === ci);
                   const allowed = canDrop(c);
                   const isHint = hint && hint.column === ci && hint.lane === lane.id;
+                  if (isFolded(ci)) {
+                    // Still a drop target — it unfolds as soon as the card lands.
+                    return (
+                      <div
+                        key={c.name}
+                        className={`bd-col is-folded ${drag ? (allowed ? "is-droppable" : "is-blocked") : ""} ${isHint ? "is-hover" : ""}`}
+                        onDragOver={(e) => overColumn(e, ci, lane.id)}
+                        onDrop={(e) => drop(e, ci, lane.accountId)}
+                      >
+                        <button type="button" className="bd-fold-label" title={`Mở rộng cột ${c.name}`} onClick={() => setFold(c.name, false)}>
+                          {c.name}
+                        </button>
+                      </div>
+                    );
+                  }
                   return (
                     <div
                       key={c.name}
@@ -213,13 +311,13 @@ export default function KanbanBoard({ snapshot, issues, swimlane, today, onMove,
                       {drag && !allowed && drag.allowed && (
                         <div className="bd-col-note">Quy trình không cho chuyển tới đây</div>
                       )}
-                      {ci === 0 && lane === lanes[0] && onQuickCreate && (
-                        creating ? (
+                      {lane === lanes[0] && onQuickCreate && !c.unmapped && (
+                        creating === ci ? (
                           <div
                             className="bd-quick"
                             // Focus moving to the pickers below is not leaving the form.
                             onBlur={(e) => {
-                              if (!e.currentTarget.contains(e.relatedTarget as Node | null) && !draft.trim()) setCreating(false);
+                              if (!e.currentTarget.contains(e.relatedTarget as Node | null) && !draft.trim()) setCreating(null);
                             }}
                           >
                             <textarea
@@ -234,7 +332,7 @@ export default function KanbanBoard({ snapshot, issues, swimlane, today, onMove,
                                 }
                                 if (e.key === "Escape") {
                                   e.stopPropagation();
-                                  setCreating(false);
+                                  setCreating(null);
                                   setDraft("");
                                 }
                               }}
@@ -242,7 +340,7 @@ export default function KanbanBoard({ snapshot, issues, swimlane, today, onMove,
                             <QuickCreateOptions types={createTypes} members={members} value={quickOpts} onChange={setQuickOpts} />
                           </div>
                         ) : (
-                          <button className="bd-add" onClick={() => setCreating(true)}>
+                          <button className="bd-add" onClick={() => setCreating(ci)}>
                             + Tạo việc
                           </button>
                         )
@@ -298,24 +396,37 @@ function Card({
       title={issue.summary}
     >
       <div className="bd-card-summary">{issue.summary}</div>
-      {(blocked || issue.flagged || idle >= 3) && (
-        <div className="bd-card-alerts">
-          {blocked && (
-            <span className="bd-alert bd-alert-blocked" title="Việc đi trước chưa xong (theo phụ thuộc trên Gantt)">
-              ⛔ Chờ {issue.blockedBy.join(", ")}
+      {/* One line for everything that qualifies the card: the Epic gives way (it truncates)
+          so the warnings keep their words and the card stays a row shorter. */}
+      {(issue.epicSummary || blocked || issue.flagged || idle >= 3) && (
+        <div className="bd-card-meta">
+          {issue.epicSummary && (
+            <span className="bd-epic" title={`${issue.epicKey ?? "Epic"} · ${issue.epicSummary}`}>
+              {issue.epicSummary}
             </span>
           )}
-          {issue.flagged && <span className="bd-alert bd-alert-flag">⚑ Gắn cờ</span>}
-          {idle >= 3 && <span className="bd-alert bd-alert-idle">⏸ {idle} ngày chưa cập nhật</span>}
+          {blocked && (
+            <span className="bd-alert bd-alert-blocked" title={`Việc đi trước chưa xong (theo phụ thuộc trên Gantt): ${issue.blockedBy.join(", ")}`}>
+              <Icon name="lock" size={11} />
+              <span className="bd-alert-text">Chờ {issue.blockedBy.join(", ")}</span>
+            </span>
+          )}
+          {issue.flagged && (
+            <span className="bd-alert bd-alert-flag" title="Đã gắn cờ trên Jira">
+              <Icon name="critical" size={11} />
+              Gắn cờ
+            </span>
+          )}
+          {idle >= 3 && (
+            <span className="bd-alert bd-alert-idle" title={`${idle} ngày làm việc chưa có cập nhật nào`}>
+              <Icon name="clock" size={11} />
+              {idle} ngày
+            </span>
+          )}
         </div>
       )}
-      {issue.epicSummary && (
-        <span className="bd-epic" title={issue.epicKey ?? ""}>
-          {issue.epicSummary}
-        </span>
-      )}
       <div className="bd-card-foot">
-        <span className={`bd-type bd-type-${typeClass(issue.issueType)}`} title={issue.issueType} />
+        <IssueTypeIcon type={canonicalIssueType(issue.issueType)} label={issue.issueType} size={14} />
         <span className={`bd-key ${issue.statusCategory === "done" ? "is-done" : ""}`}>{issue.key}</span>
         {issue.dueDate && (
           <span className={`bd-due ${overdue ? "is-overdue" : ""}`} title={overdue ? "Quá hạn" : "Hạn"}>
@@ -323,11 +434,7 @@ function Card({
           </span>
         )}
         <span className="bd-spacer" />
-        {priorityTone(issue.priority) && (
-          <span className={`bd-prio bd-prio-${priorityTone(issue.priority)}`} title={`Ưu tiên: ${issue.priority}`}>
-            {priorityTone(issue.priority) === "high" ? "▲" : priorityTone(issue.priority) === "low" ? "▼" : "■"}
-          </span>
-        )}
+        <PriorityMark priority={issue.priority} />
         {snapshot.estimation && (
           <span className={`bd-est ${issue.estimate === null ? "is-empty" : ""}`} title={snapshot.estimation.name}>
             {issue.estimate ?? "–"}

@@ -271,9 +271,12 @@ await step("đổi người ngay trên thẻ → PATCH", async () => {
   await page.waitForFunction(async () => (await (await fetch("/api/__log")).json()).log.some((l) => l.m === "PATCH"));
   assert.equal((await patches())[0].b.assigneeAccountId, "chi");
 });
-await step("có thêm bộ lọc Loại / Trạng thái / Epic / Ưu tiên", async () => {
-  const t = await page.$$eval(".bd-filters .tf-btn", (b) => b.map((x) => x.textContent.replace(/[▾\s]+$/, "").trim()));
-  for (const k of ["Loại", "Trạng thái", "Epic", "Nhãn", "Ưu tiên"]) assert.ok(t.some((x) => x.startsWith(k)), k + " thiếu: " + t);
+await step("panel Bộ lọc có Loại / Epic / Nhãn / Ưu tiên, và không có Trạng thái (cột đã là trạng thái)", async () => {
+  await page.locator(".bd-filters .tf-add").click();
+  const t = await page.$$eval(".bd-filters .tf-facet-name", (b) => b.map((x) => x.textContent.trim()));
+  for (const k of ["Loại", "Epic", "Nhãn", "Ưu tiên"]) assert.ok(t.includes(k), k + " thiếu: " + t);
+  assert.ok(!t.includes("Trạng thái"), "Trạng thái không nên có trên bảng: " + t);
+  await page.keyboard.press("Escape");
 });
 await step("lọc ra rỗng → thông báo + nút Xoá lọc", async () => {
   await page.fill(".bd-search", "zzzz-khong-co");
