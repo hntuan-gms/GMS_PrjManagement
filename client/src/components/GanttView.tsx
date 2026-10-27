@@ -519,7 +519,8 @@ export default function GanttView({
 }: Props) {
   // The one zoom variable everything else derives from — see pickScale.
   const [pixelsPerDay, setPixelsPerDay] = useState(DEFAULT_PIXELS_PER_DAY[ViewMode.Week]);
-  const { viewMode, columnWidth } = pickScale(pixelsPerDay);
+  const scale = pickScale(pixelsPerDay);
+  const { viewMode } = scale;
   const [showCriticalPath, setShowCriticalPath] = useState(false);
   const [showDependencies, setShowDependencies] = useState(true);
   const [showBaseline, setShowBaseline] = useState(loadShowBaseline);
@@ -627,7 +628,7 @@ export default function GanttView({
     // only ever a little room to thin out before the handoff does the rest.
     // Thinned by skipping every Nth label instead of shrinking text, so what
     // remains stays legible rather than tiny.
-    const skipEvery = columnWidth < MIN_COLUMN_WIDTH + 8 ? 2 : 1;
+    const skipEvery = scale.columnWidth < MIN_COLUMN_WIDTH + 8 ? 2 : 1;
 
     function simplify() {
       // Not scoped to a specific <svg>: gantt-task-react renders the calendar
@@ -654,7 +655,7 @@ export default function GanttView({
     const observer = new MutationObserver(simplify);
     observer.observe(bodyEl, { subtree: true, childList: true, characterData: true });
     return () => observer.disconnect();
-  }, [bodyEl, viewMode, columnWidth]);
+  }, [bodyEl, viewMode, scale.columnWidth]);
 
   function startDrag(e: React.MouseEvent) {
     e.preventDefault();
@@ -840,6 +841,25 @@ export default function GanttView({
       styles: criticalIds.has(t.id) ? CRITICAL_STYLES : DIMMED_STYLES,
     }));
   }, [rows, ranges, showCriticalPath, criticalIds]);
+
+  // Month view's axis is short: gantt-task-react ends it at the start of the year after the
+  // last task's end, so a project inside one year draws a handful of columns and leaves the
+  // rest of the window blank. Those few columns are widened to fill the chart pane instead
+  // (the same count the library makes — seedDates, with its default of one step before).
+  const columnWidth = useMemo(() => {
+    if (viewMode !== ViewMode.Month || allGanttTasks.length === 0) return scale.columnWidth;
+    let min = allGanttTasks[0].start;
+    let max = allGanttTasks[0].end;
+    for (const t of allGanttTasks) {
+      if (t.start < min) min = t.start;
+      if (t.end > max) max = t.end;
+    }
+    const first = min.getFullYear() * 12 + min.getMonth() - 1;
+    const columns = (max.getFullYear() + 1) * 12 - first + 1;
+    // Room for the page's vertical scrollbar beside the chart.
+    const available = bodySize.width - listWidth - 24;
+    return Math.max(scale.columnWidth, Math.floor(available / columns));
+  }, [viewMode, allGanttTasks, scale.columnWidth, bodySize.width, listWidth]);
 
   /* ---- a big list is drawn a window at a time (ganttWindow.ts) ---- */
   const windowed = isWindowed(rows.length);
