@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { api } from "../api";
 import type { PersonLoad } from "../resourceAllocation";
 import type { ResourceAbsence, ResourceProfile, Task } from "../types";
+import SkillsInput from "./SkillsInput";
 
 interface Props {
   person: PersonLoad;
@@ -17,6 +18,10 @@ interface Props {
   onProfileSaved: (profile: ResourceProfile) => void;
   onAbsenceAdded: (absence: ResourceAbsence) => void;
   onAbsenceRemoved: (id: string) => void;
+  /** An edited leave period replaces the stored one. */
+  onAbsenceUpdated: (absence: ResourceAbsence) => void;
+  /** Skills already recorded for anyone on the team, offered as completions. */
+  skillSuggestions: string[];
   /** Dragging a row out of this panel is how work is taken off this person. */
   onDragTask: (task: Task) => void;
   droppable: boolean;
@@ -55,6 +60,8 @@ export default function ResourcePersonPanel({
   onProfileSaved,
   onAbsenceAdded,
   onAbsenceRemoved,
+  onAbsenceUpdated,
+  skillSuggestions,
   onDragTask,
   droppable,
   isDropTarget,
@@ -68,6 +75,10 @@ export default function ResourcePersonPanel({
   const [absFrom, setAbsFrom] = useState("");
   const [absTo, setAbsTo] = useState("");
   const [absReason, setAbsReason] = useState("");
+  // The leave period being changed; null = the form adds a new one.
+  const [editingAbs, setEditingAbs] = useState<string | null>(null);
+  const [skills, setSkills] = useState<string[]>(person.profile?.skills ?? []);
+  const [notes, setNotes] = useState(person.profile?.notes ?? "");
 
   const dateIndex = useMemo(() => new Map(dates.map((d, i) => [d, i])), [dates]);
   const conflictIds = useMemo(
@@ -128,6 +139,8 @@ export default function ResourcePersonPanel({
         displayName: person.displayName,
         role: role.trim(),
         capacityHoursPerDay: hours,
+        skills,
+        notes: notes.trim(),
       });
       onProfileSaved(saved);
     } catch (err) {
@@ -145,11 +158,12 @@ export default function ResourcePersonPanel({
     setSaving(true);
     setError(null);
     try {
-      const saved = await api.addAbsence(person.accountId, absFrom, absTo, absReason.trim() || null);
-      onAbsenceAdded(saved);
-      setAbsFrom("");
-      setAbsTo("");
-      setAbsReason("");
+      if (editingAbs) {
+        onAbsenceUpdated(await api.updateAbsence(editingAbs, { from: absFrom, to: absTo, reason: absReason.trim() || null }));
+      } else {
+        onAbsenceAdded(await api.addAbsence(person.accountId, absFrom, absTo, absReason.trim() || null));
+      }
+      resetAbsenceForm();
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -157,9 +171,24 @@ export default function ResourcePersonPanel({
     }
   }
 
+  function resetAbsenceForm() {
+    setEditingAbs(null);
+    setAbsFrom("");
+    setAbsTo("");
+    setAbsReason("");
+  }
+
+  function editAbsence(a: ResourceAbsence) {
+    setEditingAbs(a.id);
+    setAbsFrom(a.from);
+    setAbsTo(a.to);
+    setAbsReason(a.reason ?? "");
+  }
+
   async function removeAbsence(id: string) {
     try {
       await api.deleteAbsence(id);
+      if (editingAbs === id) resetAbsenceForm();
       onAbsenceRemoved(id);
     } catch (err) {
       setError((err as Error).message);
@@ -252,8 +281,24 @@ export default function ResourcePersonPanel({
           />
         </label>
         <button onClick={addAbsence} disabled={saving}>
-          Thêm kỳ nghỉ
+          {editingAbs ? "Lưu kỳ nghỉ" : "Thêm kỳ nghỉ"}
         </button>
+        {editingAbs && (
+          <button className="text-btn" onClick={resetAbsenceForm}>
+            Huỷ sửa
+          </button>
+        )}
+      </div>
+      <div className="rv-panel-form rv-panel-skills">
+        <label className="rv-skills-field">
+          Kỹ năng
+          <SkillsInput value={skills} onChange={setSkills} suggestions={skillSuggestions} />
+        </label>
+        <label className="rv-notes-field">
+          Ghi chú
+          <textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="VD: chỉ làm buổi sáng thứ 6" />
+        </label>
+        <span className="rv-hint">Bấm “Lưu” ở trên để lưu cả kỹ năng và ghi chú.</span>
       </div>
 
       {error && <div className="rv-notice rv-notice-error">{error}</div>}
@@ -261,9 +306,12 @@ export default function ResourcePersonPanel({
       {person.absences.length > 0 && (
         <div className="rv-absences">
           {person.absences.map((a) => (
-            <span key={a.id} className="rv-abs-chip">
+            <span key={a.id} className={`rv-abs-chip ${editingAbs === a.id ? "is-editing" : ""}`}>
               {shortDate(a.from)} – {shortDate(a.to)}
               {a.reason ? ` · ${a.reason}` : ""}
+              <button onClick={() => editAbsence(a)} aria-label="Sửa kỳ nghỉ" title="Sửa">
+                ✎
+              </button>
               <button onClick={() => removeAbsence(a.id)} aria-label="Xoá kỳ nghỉ">
                 ✕
               </button>

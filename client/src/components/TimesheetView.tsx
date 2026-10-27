@@ -83,7 +83,7 @@ export default function TimesheetView({
   const [anchor, setAnchor] = useState(today);
   const { from, to } = rangeOf(mode, anchor);
   const [selection, setSelection] = useState<Selection>(null);
-  const [logFor, setLogFor] = useState<{ date: string; issueKey?: string } | null>(null);
+  const [logFor, setLogFor] = useState<{ date: string; issueKey?: string; editing?: WorklogEntry } | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const me = session.user.accountId;
   // "" = everyone, "me" = only the signed-in user, otherwise an account id.
@@ -422,6 +422,16 @@ export default function TimesheetView({
                         {e.comment && <span className="ts-entry-comment" title={e.comment}>“{e.comment}”</span>}
                         <b className="ts-entry-h">{e.hours}h</b>
                         {e.mine && (
+                          <button
+                            className="ts-entry-edit"
+                            onClick={() => setLogFor({ date: e.date, issueKey: e.issueKey, editing: e })}
+                            aria-label="Sửa giờ đã ghi"
+                            title="Sửa"
+                          >
+                            ✎
+                          </button>
+                        )}
+                        {e.mine && (
                           <button className="att-remove" onClick={() => setConfirmDelete(e)} aria-label="Xoá giờ đã ghi" title="Xoá">
                             ✕
                           </button>
@@ -458,6 +468,7 @@ export default function TimesheetView({
           tasks={tasks}
           me={me}
           initialDate={logFor.date}
+          editing={logFor.editing}
           onClose={() => setLogFor(null)}
           onLogged={() => {
             setReloadKey((k) => k + 1);
@@ -473,12 +484,15 @@ function LogWorkModal({
   tasks,
   me,
   initialDate,
+  editing,
   onClose,
   onLogged,
 }: {
   tasks: Task[];
   me: string;
   initialDate: string;
+  /** Set when changing an entry that already exists: the issue is then fixed, only day, hours and note move. */
+  editing?: WorklogEntry;
   onClose: () => void;
   onLogged: () => void;
 }) {
@@ -488,10 +502,10 @@ function LogWorkModal({
     const rank = (t: Task) => (t.assigneeAccountId === me ? 0 : 1) + (t.statusCategory === "done" ? 2 : 0);
     return [...open].sort((a, b) => rank(a) - rank(b) || a.id.localeCompare(b.id, undefined, { numeric: true }));
   }, [tasks, me]);
-  const [issueKey, setIssueKey] = useState(options[0]?.id ?? "");
+  const [issueKey, setIssueKey] = useState(editing?.issueKey ?? options[0]?.id ?? "");
   const [date, setDate] = useState(initialDate);
-  const [hours, setHours] = useState<number | null>(null);
-  const [comment, setComment] = useState("");
+  const [hours, setHours] = useState<number | null>(editing?.hours ?? null);
+  const [comment, setComment] = useState(editing?.comment ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -500,7 +514,16 @@ function LogWorkModal({
     setSaving(true);
     setError(null);
     try {
-      await api.logWork({ issueKey, date, hours, comment: comment || null });
+      if (editing) {
+        // Only what changed goes out: a same-day edit must not re-stamp the start time.
+        await api.updateWorklog(editing.issueKey, editing.id, {
+          ...(date !== editing.date ? { date } : {}),
+          ...(hours !== editing.hours ? { hours } : {}),
+          ...(comment.trim() !== (editing.comment ?? "") ? { comment: comment.trim() || null } : {}),
+        });
+      } else {
+        await api.logWork({ issueKey, date, hours, comment: comment || null });
+      }
       onLogged();
       onClose();
     } catch (e) {
@@ -513,12 +536,17 @@ function LogWorkModal({
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal bd-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <span className="modal-id">Ghi giờ làm việc</span>
+          <span className="modal-id">{editing ? `Sửa giờ đã ghi · ${editing.issueKey}` : "Ghi giờ làm việc"}</span>
           <button className="modal-close" onClick={onClose}>✕</button>
         </div>
         <label className="field">
           <span>Công việc</span>
-          <select value={issueKey} onChange={(e) => setIssueKey(e.target.value)}>
+          <select value={issueKey} onChange={(e) => setIssueKey(e.target.value)} disabled={!!editing}>
+            {editing && !options.some((t) => t.id === editing.issueKey) && (
+              <option value={editing.issueKey}>
+                {editing.issueKey} · {editing.summary.slice(0, 60)}
+              </option>
+            )}
             {options.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.assigneeAccountId === me ? "★ " : ""}
@@ -548,7 +576,7 @@ function LogWorkModal({
           <span className="bd-spacer" />
           <button onClick={onClose}>Huỷ</button>
           <button className="primary" onClick={submit} disabled={saving || !hours || !issueKey}>
-            {saving ? "Đang ghi..." : "Ghi giờ"}
+            {saving ? "Đang ghi..." : editing ? "Lưu thay đổi" : "Ghi giờ"}
           </button>
         </div>
       </div>

@@ -65,6 +65,7 @@ export interface BoardIssue {
   parentKey: string | null;
   flagged: boolean;
   labels: string[];
+  fixVersions: string[];
   dueDate: string | null;
   resolutionDate: string | null;
   updated: string | null;
@@ -80,6 +81,21 @@ export interface VelocityPoint {
   /** Estimate completed inside the sprint's own window. */
   completed: number;
   completedCount: number;
+}
+
+/** One of the board's own saved quick filters (Board settings → Quick filters). */
+export interface QuickFilter {
+  id: number;
+  name: string;
+  description: string | null;
+}
+
+/** A project release, for the backlog's Phiên bản panel. */
+export interface BoardVersion {
+  id: string;
+  name: string;
+  released: boolean;
+  releaseDate: string | null;
 }
 
 export interface BoardFallback {
@@ -98,6 +114,10 @@ export interface BoardSnapshot {
   estimation: { fieldId: string; name: string; unit: "points" | "hours" } | null;
   /** Active and future sprints, in the board's order. */
   sprints: Sprint[];
+  /** The board's own quick filters; applied through GET /board/quickfilters/keys. */
+  quickFilters: QuickFilter[];
+  /** The project's unarchived versions, unreleased first. */
+  versions: BoardVersion[];
   /** Last closed sprints, oldest first. */
   velocity: VelocityPoint[];
   /** Kanban throughput: issues finished per week over the last six weeks, oldest first. */

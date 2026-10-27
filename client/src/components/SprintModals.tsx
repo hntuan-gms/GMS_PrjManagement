@@ -1,6 +1,7 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { addDaysLocal, localDate, toJiraDateTime, totalWeight } from "../boardModel";
+import { addDaysLocal, capacityRows, localDate, toJiraDateTime, totalWeight } from "../boardModel";
 import type { BoardIssue, BoardSnapshot, Sprint, SprintPlanProposal } from "../types";
+import CapacityTable from "./CapacityTable";
 
 /**
  * The three sprint dialogs. Each asks only what Jira's own dialog asks, with
@@ -327,6 +328,8 @@ export function SprintPlanModal({
   const selectedIssues = [...picked].map((k) => byKey.get(k)).filter((i): i is BoardIssue => !!i);
   // Keyed by issue, so a pick that is already in the sprint isn't counted twice.
   const weight = totalWeight([...new Map([...existing, ...selectedIssues].map((i) => [i.key, i])).values()], snapshot);
+  // Existing plus the ticked picks, so the capacity table follows the checkboxes.
+  const chosenForCapacity = [...new Map([...existing, ...selectedIssues].map((i) => [i.key, i])).values()];
   const budget = proposal?.totals.budget ?? null;
   const over = budget !== null && weight > budget * 1.1;
 
@@ -409,6 +412,18 @@ export function SprintPlanModal({
                 </div>
               )}
             </div>
+
+            {proposal.team.length > 0 && (
+              <details className="bd-plan-capacity">
+                <summary>Năng lực nhóm trong sprint này</summary>
+                <CapacityTable
+                  rows={capacityRows(proposal.team, chosenForCapacity, snapshot)}
+                  window={proposal.window}
+                  unit={unit}
+                  inHours={snapshot.estimation?.unit === "hours"}
+                />
+              </details>
+            )}
 
             {proposal.warnings.length > 0 && (
               <ul className="bd-plan-warnings">

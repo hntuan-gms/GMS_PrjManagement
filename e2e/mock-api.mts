@@ -70,6 +70,8 @@ app.post("/api/__restore", (_q, r) => {
   issueLinks = [{ id: "L1", a: "DEMO-3", b: "DEMO-5", type: "Blocks" }];
   savedFilters = savedFilters.filter((f) => f.createdBy !== "me");
   watching = false;
+  profiles = [];
+  absences = [];
   listDelayMs = 0;
   sessionProject = "DEMO";
   tasksSeen = [];
@@ -270,15 +272,61 @@ app.get("/api/tasks/:id/activity", (_q, res) => res.json([
   { id: "h1", authorName: "Tuấn Test", authorAccountId: "me", created: new Date(Date.now() - 86400000).toISOString(), changes: [{ field: "assignee", from: null, to: "Nguyễn Anh" }] },
 ]));
 
+// --- phase 2 / stage 3: a resource pool that remembers (skills, edited leave) --------------------
+let profiles: any[] = [];
+let absences: any[] = [];
 app.get("/api/resources", (_q, r) => r.json({
   users, memberSource: "project-roles", memberFallback: null, memberSkippedGroups: 0, memberRoles: ["Developers"],
-  memberTruncated: false, profiles: [], absences: [], defaultCapacityHours: 8,
+  memberTruncated: false, profiles, absences, defaultCapacityHours: 8,
 }));
+app.put("/api/resources/:accountId", (req, res) => {
+  const b = req.body ?? {};
+  const cur = profiles.find((p) => p.accountId === req.params.accountId) ?? { accountId: req.params.accountId, role: null, skills: [], capacityHoursPerDay: 8, costPerDay: null, notes: null };
+  if (typeof b.role === "string") cur.role = b.role.trim() || null;
+  if (Array.isArray(b.skills)) cur.skills = b.skills;
+  if (typeof b.notes === "string") cur.notes = b.notes.trim() || null;
+  if (b.capacityHoursPerDay != null) cur.capacityHoursPerDay = Number(b.capacityHoursPerDay);
+  profiles = [...profiles.filter((p) => p.accountId !== cur.accountId), cur];
+  res.json(cur);
+});
+app.post("/api/resources/:accountId/absences", (req, res) => {
+  const a = { id: `ab${absences.length + 1}`, accountId: req.params.accountId, from: req.body.from, to: req.body.to, reason: req.body.reason ?? null };
+  absences = [...absences, a];
+  res.status(201).json(a);
+});
+app.delete("/api/resources/absences/:id", (req, res) => { absences = absences.filter((a) => a.id !== req.params.id); res.status(204).end(); });
+app.patch("/api/resources/absences/:id", (req, res) => {
+  const a = absences.find((x) => x.id === req.params.id);
+  if (!a) return res.status(404).json({ error: "Không tìm thấy kỳ nghỉ này." });
+  const b = req.body ?? {};
+  if ((b.to ?? a.to) < (b.from ?? a.from)) return res.status(400).json({ error: "Ngày kết thúc phải sau hoặc bằng ngày bắt đầu." });
+  Object.assign(a, { from: b.from ?? a.from, to: b.to ?? a.to, reason: b.reason === undefined ? a.reason : b.reason });
+  res.json(a);
+});
 
 app.get("/api/progress", (req, res) => {
   const q = req.query as Record<string, string>;
   const scope = { assignee: q.assignee || undefined, epic: q.epic || undefined, types: q.type ? q.type.split(",") : [] };
-  res.json({ metrics: computeProgress(tasks, q.asOf || TODAY, scope), latest: null, history: [] });
+  const snap = (n: number, actual: number, planned: number) => ({ date: day(n), actualPct: actual, plannedPct: planned, spi: 0.9, health: "at_risk", total: 10, done: 3, inProgress: 2, overdue: 1 });
+  res.json({ metrics: computeProgress(tasks, q.asOf || TODAY, scope), latest: null, history: [], trend: [snap(-14, 10, 20), snap(-7, 22, 30), snap(0, 30, 41)] });
+});
+app.get("/api/progress/flow", (req, res) => {
+  const days = Number(req.query.days) || 60;
+  const dates = Array.from({ length: 10 }, (_, i) => day(-9 + i));
+  res.json({
+    from: dates[0], to: dates[9], days, issueCount: 12, truncated: false,
+    cfd: { dates, series: [
+      { statusId: "1", name: "To Do", category: "new", counts: dates.map((_, i) => 8 - Math.floor(i / 3)) },
+      { statusId: "2", name: "In Progress", category: "indeterminate", counts: dates.map((_, i) => 2 + Math.floor(i / 4)) },
+      { statusId: "3", name: "Done", category: "done", counts: dates.map((_, i) => Math.floor(i / 2)) },
+    ] },
+    created: { bucket: days <= 30 ? "day" : "week", buckets: [{ start: day(-14), created: 5, resolved: 2 }, { start: day(-7), created: 3, resolved: 4 }, { start: day(0), created: 1, resolved: 1 }] },
+    control: {
+      points: [{ key: "DEMO-3", date: day(-5), leadDays: 8, cycleDays: 4 }, { key: "DEMO-4", date: day(-2), leadDays: 6, cycleDays: null }, { key: "DEMO-5", date: day(-1), leadDays: 12, cycleDays: 9 }],
+      lead: { count: 3, mean: 8.7, p50: 8, p85: 12, p95: 12 }, cycle: { count: 2, mean: 6.5, p50: 4, p85: 9, p95: 9 },
+      leadRolling: [8, 7, 8.7], cycleRolling: [4, null, 6.5],
+    },
+  });
 });
 
 app.get("/api/timesheet", (req, res) => {
@@ -293,6 +341,10 @@ app.get("/api/timesheet", (req, res) => {
   });
 });
 app.delete("/api/timesheet/worklogs/:k/:id", (_q, r) => r.status(204).end());
+app.put("/api/timesheet/worklogs/:k/:id", (req, res) => {
+  const b = req.body ?? {};
+  res.json({ id: req.params.id, issueKey: req.params.k, summary: "Phân tích yêu cầu", issueType: "Story", authorAccountId: "me", authorName: "Tuấn Test", date: b.date ?? TODAY, hours: b.hours ?? 4, comment: b.comment === undefined ? "họp" : b.comment, mine: true });
+});
 
 // --- phase 2 / stage 2: components, versions, links, watchers, JQL, baselines, import, saved filters ---
 app.get("/api/components", (_q, r) => r.json([{ id: "1", name: "Backend" }, { id: "2", name: "UI" }]));
@@ -355,8 +407,19 @@ const boardIssues = () => tasks.filter((t) => t.issueType !== "Epic").map((t, i)
   statusName: t.statusName, statusCategory: t.statusCategory, assigneeAccountId: t.assigneeAccountId, assigneeName: t.assigneeName,
   priority: t.priority, estimate: 3, sprintId: i < 6 ? 7 : null, epicKey: t.wbsParentId?.startsWith("DEMO-") && ["DEMO-1", "DEMO-2"].includes(t.wbsParentId) ? t.wbsParentId : null,
   epicSummary: t.wbsParentId === "DEMO-1" ? "Giai đoạn 1" : t.wbsParentId === "DEMO-2" ? "Giai đoạn 2" : null,
-  parentKey: t.wbsParentId, flagged: false, labels: t.labels, dueDate: t.dueDate, resolutionDate: null, updated: null, blockedBy: [],
+  parentKey: t.wbsParentId, flagged: false, labels: t.labels, fixVersions: i % 3 === 0 ? ["1.0"] : [], dueDate: t.dueDate, resolutionDate: null, updated: null, blockedBy: [],
 }));
+// Two sub-tasks under the first work item, one finished — the parent card lists them (stage 3.3).
+const subtaskIssues = () => {
+  const parent = tasks.find((t) => t.issueType !== "Epic");
+  if (!parent) return [];
+  const sub = (key: string, done: boolean) => ({
+    key, summary: `Việc con ${key}`, issueType: "Sub-task", subtask: true, statusId: done ? "3" : "1", statusName: done ? "Done" : "To Do",
+    statusCategory: done ? "done" : "new", assigneeAccountId: null, assigneeName: null, priority: null, estimate: null, sprintId: 7,
+    epicKey: null, epicSummary: null, parentKey: parent.id, flagged: false, labels: [], fixVersions: [], dueDate: null, resolutionDate: null, updated: null, blockedBy: [],
+  });
+  return [sub("DEMO-901", true), sub("DEMO-902", false)];
+};
 // Two boards, as a project often has: the Scrum one (default) and a Kanban one whose first and
 // last-but-one columns are empty (board-kanban.e2e.mjs folds them, switches to it from the Backlog).
 const BOARDS = [{ id: 1, name: "Bảng DEMO", type: "scrum" }, { id: 2, name: "Bảng Kanban DEMO", type: "kanban" }];
@@ -371,10 +434,39 @@ app.get("/api/board", (q, r) => {
       : [col("To Do", ["1"]), col("In Progress", ["2"]), col("Done", ["3"])],
     statuses: kanban ? [...STATUSES, { id: "4", name: "Selected for development", category: "new" }] : STATUSES.slice(1),
     estimation: { fieldId: "customfield_1", name: "Story Points", unit: "points" },
-    sprints: kanban ? [] : [{ id: 7, name: "Sprint 7", state: "active", goal: "Chốt phần khảo sát", startDate: day(-5), endDate: day(9), completeDate: null }],
-    velocity: [], throughput: [], issues: boardIssues().map((i) => (kanban ? { ...i, sprintId: null } : i)), truncated: false,
+    sprints: kanban ? [] : [{ id: 7, name: "Sprint 7", state: "active", goal: "Chốt phần khảo sát", startDate: day(-5), endDate: day(9), completeDate: null },
+      { id: 8, name: "Sprint 8", state: "future", goal: null, startDate: null, endDate: null, completeDate: null }],
+    quickFilters: kanban ? [] : [{ id: 11, name: "Việc của tôi", description: "assignee = currentUser()" }, { id: 12, name: "Chỉ lỗi", description: null }],
+    versions: [{ id: "1", name: "1.0", released: false, releaseDate: day(10) }, { id: "2", name: "2.0", released: false, releaseDate: null }],
+    velocity: kanban ? [] : [
+      { sprintId: 4, name: "Sprint 4", startDate: day(-40), completeDate: day(-27), completed: 18, completedCount: 6 },
+      { sprintId: 5, name: "Sprint 5", startDate: day(-26), completeDate: day(-13), completed: 24, completedCount: 8 },
+      { sprintId: 6, name: "Sprint 6", startDate: day(-12), completeDate: day(-6), completed: 21, completedCount: 7 },
+    ],
+    throughput: [], issues: [...boardIssues(), ...subtaskIssues()].map((i) => (kanban ? { ...i, sprintId: null } : i)), truncated: false,
   });
 });
+app.get("/api/board/quickfilters/keys", (req, res) => {
+  const ids = String(req.query.ids ?? "").split(",");
+  const keys = tasks.filter((t) => (ids.includes("11") ? t.assigneeAccountId === "me" : true) && (ids.includes("12") ? t.issueType === "Bug" : true)).map((t) => t.id);
+  res.json({ keys });
+});
+app.put("/api/board/issues/:key/flag", (_q, r) => r.status(204).end());
+app.delete("/api/board/sprints/:id", (_q, r) => r.json({ moved: 2 }));
+app.get("/api/board/sprints/:id/capacity", (_q, r) => r.json({
+  window: { start: day(-5), end: day(9), lengthDays: 15 },
+  team: users.map((u, i) => ({ accountId: u.accountId, name: u.displayName, days: i === 3 ? 0 : 10, hoursPerDay: 8, capacityHours: i === 3 ? 0 : 80 })),
+}));
+app.get("/api/board/sprints/:id/report", (_q, r) => r.json({
+  sprint: { id: 7, name: "Sprint 7", state: "active", goal: null, startDate: day(-5), endDate: day(9), completeDate: null },
+  start: day(-5), end: day(9),
+  committed: [{ key: "DEMO-3", summary: "Phân tích yêu cầu", issueType: "Story", statusName: "Done", statusCategory: "done", weight: 5, origin: "committed" }],
+  added: [{ key: "DEMO-5", summary: "Thiết kế", issueType: "Task", statusName: "To Do", statusCategory: "new", weight: 3, origin: "added" }],
+  completed: [{ key: "DEMO-3", summary: "Phân tích yêu cầu", issueType: "Story", statusName: "Done", statusCategory: "done", weight: 5, origin: "committed" }],
+  notCompleted: [{ key: "DEMO-5", summary: "Thiết kế", issueType: "Task", statusName: "To Do", statusCategory: "new", weight: 3, origin: "added" }],
+  churned: [], totals: { committed: 5, added: 3, completed: 5, notCompleted: 3 },
+  burnup: Array.from({ length: 6 }, (_, i) => ({ date: day(-5 + i), scope: i < 3 ? 5 : 8, completed: i < 2 ? 0 : 5 })),
+}));
 app.post("/api/board/sprints/:id/issues", (_q, r) => r.status(204).end());
 app.post("/api/board/issues/:key/move", (_q, r) => r.json({ statusId: null }));
 app.get("/api/board/issues/:key/transitions", (_q, r) => r.json([]));

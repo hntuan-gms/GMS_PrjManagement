@@ -1,6 +1,7 @@
 import { useRef, useState, type DragEvent } from "react";
 import { api } from "../api";
 import { canonicalIssueType, idleDays, initials, isOverdue, lanesOf, shortDate, totalWeight, type Swimlane } from "../boardModel";
+import { cardAccent, subtaskProgress, type CardOptions } from "../cardOptions";
 import AssigneePicker, { type Member } from "./AssigneePicker";
 import { Icon } from "./Icons";
 import IssueTypeIcon from "./IssueTypeIcon";
@@ -22,6 +23,11 @@ interface Props {
   /** Issue types offered by quick create. */
   createTypes: string[];
   onAssign: (key: string, accountId: string | null) => void;
+  /** What a card shows and how it is tinted (the toolbar's "Thẻ" panel). */
+  options: CardOptions;
+  /** Sub-tasks by parent key, from the whole board — a card lists its own even when they are filtered out. */
+  subtasks: Map<string, BoardIssue[]>;
+  onFlag: (key: string, flagged: boolean) => void;
 }
 
 /**
@@ -66,7 +72,7 @@ const COLLAPSED_WIDTH = 40;
 const COLUMN_MIN_WIDTH = 250;
 const COLUMN_GAP = 10;
 
-export default function KanbanBoard({ snapshot, issues, swimlane, today, onMove, onOpen, onQuickCreate, members, createTypes, onAssign }: Props) {
+export default function KanbanBoard({ snapshot, issues, swimlane, today, onMove, onOpen, onQuickCreate, members, createTypes, onAssign, options, subtasks, onFlag }: Props) {
   const [drag, setDrag] = useState<DragState | null>(null);
   const [hint, setHint] = useState<Hint | null>(null);
   /** Index of the column whose quick-create box is open — one at a time. */
@@ -299,6 +305,10 @@ export default function KanbanBoard({ snapshot, issues, swimlane, today, onMove,
                             today={today}
                             dragging={drag?.key === issue.key}
                             members={members}
+                            options={options}
+                            subs={subtasks.get(issue.key) ?? []}
+                            onOpenKey={onOpen}
+                            onFlag={() => onFlag(issue.key, !issue.flagged)}
                             onAssign={(accountId) => onAssign(issue.key, accountId)}
                             onOpen={() => onOpen(issue.key)}
                             onDragStart={(e) => startDrag(e, issue)}
@@ -363,6 +373,10 @@ function Card({
   today,
   dragging,
   members,
+  options,
+  subs,
+  onOpenKey,
+  onFlag,
   onAssign,
   onOpen,
   onDragStart,
@@ -370,6 +384,10 @@ function Card({
   onDragOver,
 }: {
   members: Member[];
+  options: CardOptions;
+  subs: BoardIssue[];
+  onOpenKey: (key: string) => void;
+  onFlag: () => void;
   onAssign: (accountId: string | null) => void;
   issue: BoardIssue;
   snapshot: BoardSnapshot;
@@ -383,9 +401,14 @@ function Card({
   const overdue = isOverdue(issue, today);
   const idle = issue.statusCategory === "indeterminate" ? idleDays(issue, today) : 0;
   const blocked = issue.blockedBy.length > 0;
+  const show = options.fields;
+  const accent = cardAccent(issue, options.colorBy);
+  const [subsOpen, setSubsOpen] = useState(false);
+  const progress = subtaskProgress(subs);
   return (
     <div
-      className={`bd-card ${dragging ? "is-dragging" : ""} ${blocked ? "is-blocked" : ""} ${issue.flagged ? "is-flagged" : ""} ${issue.statusCategory === "done" ? "is-done" : ""}`}
+      style={accent ? ({ ["--card-accent" as string]: accent } as React.CSSProperties) : undefined}
+      className={`bd-card ${accent ? "has-accent" : ""} ${dragging ? "is-dragging" : ""} ${blocked ? "is-blocked" : ""} ${issue.flagged ? "is-flagged" : ""} ${issue.statusCategory === "done" ? "is-done" : ""}`}
       draggable
       tabIndex={0}
       onDragStart={onDragStart}
@@ -395,12 +418,26 @@ function Card({
       onKeyDown={(e) => e.key === "Enter" && onOpen()}
       title={issue.summary}
     >
+      <button
+        type="button"
+        className={`bd-card-flag ${issue.flagged ? "is-on" : ""}`}
+        aria-pressed={issue.flagged}
+        aria-label={issue.flagged ? `Bỏ cờ ${issue.key}` : `Gắn cờ ${issue.key}`}
+        title={issue.flagged ? "Bỏ cờ" : "Gắn cờ — báo việc này đang vướng"}
+        onClick={(e) => {
+          e.stopPropagation();
+          onFlag();
+        }}
+        onKeyDown={(e) => e.stopPropagation()}
+      >
+        <Icon name="critical" size={12} />
+      </button>
       <div className="bd-card-summary">{issue.summary}</div>
       {/* One line for everything that qualifies the card: the Epic gives way (it truncates)
           so the warnings keep their words and the card stays a row shorter. */}
-      {(issue.epicSummary || blocked || issue.flagged || idle >= 3) && (
+      {(show.epic && issue.epicSummary) || blocked || issue.flagged || idle >= 3 ? (
         <div className="bd-card-meta">
-          {issue.epicSummary && (
+          {show.epic && issue.epicSummary && (
             <span className="bd-epic" title={`${issue.epicKey ?? "Epic"} · ${issue.epicSummary}`}>
               {issue.epicSummary}
             </span>
@@ -424,29 +461,82 @@ function Card({
             </span>
           )}
         </div>
+      ) : null}
+      {((show.labels && issue.labels.length > 0) || (show.versions && issue.fixVersions.length > 0)) && (
+        <div className="bd-card-tags">
+          {show.labels && issue.labels.map((l) => <span key={`l-${l}`} className="bd-tag">{l}</span>)}
+          {show.versions && issue.fixVersions.map((v) => <span key={`v-${v}`} className="bd-tag bd-tag-version" title="Phiên bản">{v}</span>)}
+        </div>
+      )}
+      {show.subtasks && subs.length > 0 && (
+        <div className="bd-subtasks">
+          <button
+            type="button"
+            className="bd-subtasks-toggle"
+            aria-expanded={subsOpen}
+            onClick={(e) => {
+              e.stopPropagation();
+              setSubsOpen((v) => !v);
+            }}
+            onKeyDown={(e) => e.stopPropagation()}
+            title="Sub-task của việc này"
+          >
+            <span className={`bd-chevron ${subsOpen ? "is-open" : ""}`} aria-hidden="true" />
+            <span>
+              {progress.done}/{progress.total} sub-task
+            </span>
+            <span className="bd-subtasks-bar" aria-hidden="true">
+              <span style={{ width: `${(progress.done / progress.total) * 100}%` }} />
+            </span>
+          </button>
+          {subsOpen && (
+            <ul className="bd-subtasks-list">
+              {subs.map((c) => (
+                <li key={c.key} className={c.statusCategory === "done" ? "is-done" : ""}>
+                  <button
+                    type="button"
+                    className="bd-subtask"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onOpenKey(c.key);
+                    }}
+                    onKeyDown={(e) => e.stopPropagation()}
+                    title={c.summary}
+                  >
+                    <span className="bd-key">{c.key}</span>
+                    <span className="bd-subtask-summary">{c.summary}</span>
+                  </button>
+                  <span className={`bl-status bl-status-${c.statusCategory}`}>{c.statusName}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       )}
       <div className="bd-card-foot">
-        <IssueTypeIcon type={canonicalIssueType(issue.issueType)} label={issue.issueType} size={14} />
-        <span className={`bd-key ${issue.statusCategory === "done" ? "is-done" : ""}`}>{issue.key}</span>
-        {issue.dueDate && (
+        {show.type && <IssueTypeIcon type={canonicalIssueType(issue.issueType)} label={issue.issueType} size={14} />}
+        {show.key && <span className={`bd-key ${issue.statusCategory === "done" ? "is-done" : ""}`}>{issue.key}</span>}
+        {show.due && issue.dueDate && (
           <span className={`bd-due ${overdue ? "is-overdue" : ""}`} title={overdue ? "Quá hạn" : "Hạn"}>
             {shortDate(issue.dueDate)}
           </span>
         )}
         <span className="bd-spacer" />
-        <PriorityMark priority={issue.priority} />
-        {snapshot.estimation && (
+        {show.priority && <PriorityMark priority={issue.priority} />}
+        {show.estimate && snapshot.estimation && (
           <span className={`bd-est ${issue.estimate === null ? "is-empty" : ""}`} title={snapshot.estimation.name}>
             {issue.estimate ?? "–"}
           </span>
         )}
-        <AssigneePicker
-          issueType={issue.issueType}
-          accountId={issue.assigneeAccountId}
-          name={issue.assigneeName}
-          members={members}
-          onAssign={onAssign}
-        />
+        {show.assignee && (
+          <AssigneePicker
+            issueType={issue.issueType}
+            accountId={issue.assigneeAccountId}
+            name={issue.assigneeName}
+            members={members}
+            onAssign={onAssign}
+          />
+        )}
       </div>
     </div>
   );

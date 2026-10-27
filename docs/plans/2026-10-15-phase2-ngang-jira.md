@@ -112,6 +112,8 @@ Lưu ý 2.4: đổi cha đụng tới `wbsParentId`, luật Epic, và cascade. P
 
 ---
 
+**Tiến độ giai đoạn 3 (2026-10-27):** 3.1–3.15 đã viết và kiểm tra bằng test đơn vị + e2e với máy chủ giả; **chưa chạy với Jira thật** ([checklist, phần E](../test-reports/2026-10-15-jira-that-checklist.md)). Khác kế hoạch: xoá sprint nằm sau công tắc `JIRA_AGILE_DELETE` (scope riêng); sprint report dựng từ changelog (không có API cam kết); snapshot xu hướng ghi khi có người mở trang, chưa dùng Cloud Scheduler. Chi tiết ở [`docs/changes/2026-10-15/`](../changes/2026-10-15/README.md), mục "Giai đoạn 3".
+
 ## 6. Giai đoạn 4 — Chung
 
 | # | Việc | Cỡ |

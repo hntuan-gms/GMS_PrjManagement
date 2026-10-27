@@ -44,7 +44,7 @@ await step("từ Backlog của board Scrum đổi sang Kanban: bảng hiện ra,
 await step("không còn nút ⟳ riêng; có 'Mở trên Jira'", async () => {
   const right = await page.textContent(".bd-top-right");
   assert.ok(!right.includes("⟳"), right);
-  assert.equal(await page.locator(".bd-top-right button").count(), 0);
+  assert.equal(await page.locator(".bd-top-right button:not(.bd-cardbtn)").count(), 0);
   assert.ok(right.includes("Mở trên Jira"));
 });
 await step("đổi lại Scrum rồi về Kanban vẫn hiện (không kẹt ở trạng thái cũ)", async () => {
@@ -59,10 +59,10 @@ await step("đổi lại Scrum rồi về Kanban vẫn hiện (không kẹt ở 
 });
 
 console.log("\n== Bộ lọc ==");
-await step("không có facet Trạng thái trên board; có Loại/Epic/Nhãn/Ưu tiên", async () => {
+await step("không có facet Trạng thái trên board; có Loại/Epic/Nhãn/Ưu tiên/Phiên bản", async () => {
   await page.locator(".bd-filters .tf-add").click();
   const names = await page.$$eval(".bd-filters .tf-facet-name", (b) => b.map((x) => x.textContent.trim()));
-  assert.deepEqual(names, ["Loại", "Epic", "Nhãn", "Ưu tiên"]);
+  assert.deepEqual(names, ["Loại", "Epic", "Nhãn", "Ưu tiên", "Phiên bản"]);
   await page.keyboard.press("Escape");
 });
 await step("chọn một giá trị → chip, đếm thẻ, gỡ chip thì hết lọc", async () => {
@@ -133,7 +133,8 @@ await step("thẻ dùng icon loại và icon ưu tiên (SVG), không còn ô/ký
   assert.ok(!/[▲▼■]/.test(text), text);
 });
 await step("mỗi thẻ cao tối đa ~100px (tiêu đề 2 dòng + 1 hàng phụ + chân)", async () => {
-  const heights = await page.$$eval(".bd-card", (c) => c.map((x) => x.getBoundingClientRect().height));
+  // A parent with sub-tasks carries one more line (its progress), so it is measured on its own.
+  const heights = await page.$$eval(".bd-card:not(:has(.bd-subtasks))", (c) => c.map((x) => x.getBoundingClientRect().height));
   assert.ok(Math.max(...heights) <= 104, "thẻ cao nhất " + Math.max(...heights));
 });
 

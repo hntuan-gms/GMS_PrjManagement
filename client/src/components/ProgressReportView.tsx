@@ -5,9 +5,12 @@ import { todayIso } from "../resourceAllocation";
 import { csvName, downloadCsv } from "../csv";
 import { isAssignableType, type Health, type ProgressOverview, type ProgressReport, type ProgressScope, type Task } from "../types";
 import { readViewCache, writeViewCache } from "../viewCache";
+import { buildReportLink } from "../deepLink";
+import AgileReports from "./AgileReports";
 import AiBrief from "./AiBrief";
 import { MultiSelect } from "./FilterBar";
 import ProgressTrendChart from "./ProgressTrendChart";
+import ReportCompare from "./ReportCompare";
 import { PeopleBars, PhaseBars, ProgressGauge, ScheduleTimeline, StatusDonut, type WorkState } from "./progressCharts";
 import { useDialogs } from "./dialogContext";
 
@@ -23,6 +26,8 @@ interface Props {
   onOpenEdit: (task: Task) => void;
   /** Site + account + project, to key the last answer shown (viewCache.ts). */
   cacheScope: string;
+  /** For the shareable link to a report. */
+  projectKey: string;
   /** The workspace is still on its saved copy of the tasks; asking now would be answered twice. */
   refreshing?: boolean;
 }
@@ -86,7 +91,7 @@ function signed(n: number): string {
   return v > 0 ? `+${v}` : `${v}`;
 }
 
-export default function ProgressReportView({ tasks, focusReportId, canGenerate, onOpenEdit, cacheScope, refreshing }: Props) {
+export default function ProgressReportView({ tasks, focusReportId, canGenerate, onOpenEdit, cacheScope, projectKey, refreshing }: Props) {
   const dialogs = useDialogs();
   // The last figures this tab showed for today's unscoped view, so reopening it paints at once.
   const [overview, setOverview] = useState<ProgressOverview | null>(
@@ -107,6 +112,8 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
   const [epic, setEpic] = useState("");
   const [types, setTypes] = useState<Set<string>>(new Set());
   const [reloadTick, setReloadTick] = useState(0);
+  const [comparing, setComparing] = useState(false);
+  const [linkNote, setLinkNote] = useState<string | null>(null);
   const scope = useMemo<ProgressScope>(
     () => ({ assignee: assignee || undefined, epic: epic || undefined, types: [...types] }),
     [assignee, epic, types]
@@ -177,6 +184,19 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
     } catch (e) {
       setGenError(e instanceof Error ? e.message : "Không xoá được báo cáo.");
     }
+  }
+
+  /** A link that opens this report for anyone who can browse the project (see deepLink.ts). */
+  async function copyLink(id: string) {
+    const link = buildReportLink(window.location.origin, projectKey, id);
+    try {
+      await navigator.clipboard.writeText(link);
+      setLinkNote("Đã sao chép liên kết. Người nhận cần có quyền xem dự án này trên Jira.");
+    } catch {
+      // No clipboard permission (or an insecure context): show it so it can still be copied by hand.
+      await dialogs.prompt({ title: "Liên kết tới báo cáo này", initial: link });
+    }
+    window.setTimeout(() => setLinkNote(null), 6000);
   }
 
   async function openReport(id: string) {
@@ -268,6 +288,21 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
               Tính trực tiếp từ Jira · {fmtDate(m.asOf)} · {m.counts.total} công việc
             </span>
           </div>
+          <div className="pr-header-tools">
+            {overview.history.length >= 2 && (
+              <button onClick={() => setComparing(true)} title="Đặt hai báo cáo AI cạnh nhau để xem điều gì đã đổi">
+                So sánh báo cáo
+              </button>
+            )}
+            {report && (
+              <button onClick={() => void copyLink(report.id)} title="Sao chép liên kết mở thẳng báo cáo AI đang xem">
+                Sao chép liên kết
+              </button>
+            )}
+            <button onClick={() => window.print()} title="In trang này hoặc lưu thành PDF (chọn “Lưu thành PDF” ở hộp thoại in)">
+              In / Lưu PDF
+            </button>
+          </div>
           <button
             className={`pr-status pr-status-${m.health}`}
             onClick={() => setShowReasons((v) => !v)}
@@ -280,6 +315,11 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
             <span className="pr-status-why">{showReasons ? "Ẩn lý do" : "Vì sao?"}</span>
           </button>
         </header>
+        {linkNote && (
+          <div className="rv-notice" role="status">
+            {linkNote}
+          </div>
+        )}
 
         <div className="pr-filters">
           <label className="pr-filter">
@@ -451,6 +491,23 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
 
         <section className="pr-card">
           <div className="pr-card-head">
+            <h3>Xu hướng theo ngày</h3>
+            <span className="pr-muted">toàn dự án · số đo, không cần báo cáo AI</span>
+          </div>
+          {(overview.trend?.length ?? 0) >= 2 ? (
+            <ProgressTrendChart
+              unit="ngày"
+              points={overview.trend!.map((p) => ({ asOf: p.date, actualPct: p.actualPct, plannedPct: p.plannedPct }))}
+            />
+          ) : (
+            <p className="pr-muted">
+              Mỗi ngày có người mở trang này, số đo của dự án được lưu lại một lần. Cần ít nhất 2 ngày để vẽ xu hướng — các ngày trước khi tính năng này có thì không có số.
+            </p>
+          )}
+        </section>
+
+        <section className="pr-card">
+          <div className="pr-card-head">
             <h3>Xu hướng qua các lần phân tích</h3>
           </div>
           {overview.history.length >= 2 ? (
@@ -481,6 +538,12 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
             </div>
           )}
         </section>
+
+        <AgileReports
+          cacheScope={cacheScope}
+          projectKey={projectKey}
+          issueLink={(key) => issueLink(key)}
+        />
       </div>
 
       <AiBrief
@@ -496,6 +559,8 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
         issueLink={issueLink}
         onShowKeys={(keys, label) => setDrill({ kind: "keys", keys, label })}
       />
+
+      {comparing && <ReportCompare history={overview.history} currentId={report?.id ?? null} onClose={() => setComparing(false)} />}
 
       {drill && (
         <TaskDrawer

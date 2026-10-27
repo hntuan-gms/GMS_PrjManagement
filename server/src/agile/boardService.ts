@@ -1,7 +1,9 @@
-import { agileEnabled } from "../auth/config.js";
+import { agileDeleteEnabled, agileEnabled } from "../auth/config.js";
+import { getFlaggedFieldId } from "../fieldDiscovery.js";
 import { badRequest } from "../errors.js";
 import { JiraApiError, type JiraClient } from "../jiraClient.js";
 import * as store from "../store.js";
+import { buildSprintReport, type SprintReport } from "./sprintReport.js";
 import type {
   BoardColumn,
   BoardFallback,
@@ -9,6 +11,8 @@ import type {
   BoardSnapshot,
   BoardStatus,
   BoardSummary,
+  BoardVersion,
+  QuickFilter,
   Sprint,
   StatusCategory,
   VelocityPoint,
@@ -161,21 +165,16 @@ export class BoardService {
       this.blockedByMap(),
     ]);
 
-    const fieldId = config.estimation?.field?.fieldId ?? null;
-    const unit: "points" | "hours" = fieldId && /^time(original)?estimate$/.test(fieldId) ? "hours" : "points";
-    const estimation =
-      config.estimation?.type === "field" && fieldId
-        ? { fieldId, name: config.estimation.field?.displayName ?? fieldId, unit }
-        : null;
+    const estimation = estimationFromConfig(config);
 
     const fields = [
       "summary", "status", "issuetype", "assignee", "priority", "parent", "duedate",
-      "labels", "resolutiondate", "updated", "sprint", "closedSprints", "flagged",
+      "labels", "fixVersions", "resolutiondate", "updated", "sprint", "closedSprints", "flagged",
       ...(estimation ? [estimation.fieldId] : []),
     ];
     const hasSprints = board.type === "scrum";
 
-    const [rawIssues, openSprints, closedSprints, recentDone] = await Promise.all([
+    const [rawIssues, openSprints, closedSprints, recentDone, quickFilters, versions] = await Promise.all([
       this.jira.getBoardIssues(board.id, BOARD_JQL, fields, ISSUE_LIMIT + 1),
       hasSprints ? this.jira.listSprints(board.id, "active,future") : Promise.resolve([]),
       hasSprints ? this.jira.listSprints(board.id, "closed") : Promise.resolve([]),
@@ -185,6 +184,10 @@ export class BoardService {
         ["resolutiondate", "closedSprints", "sprint", ...(estimation ? [estimation.fieldId] : [])],
         500
       ),
+      // Neither is worth failing the board over: without them the filter menu and the
+      // Phiên bản panel are simply empty.
+      this.jira.getBoardQuickFilters(board.id).then((list) => list.map(toQuickFilter)).catch(() => [] as QuickFilter[]),
+      this.projectVersions(),
     ]);
 
     // Statuses the board shows that the project list didn't carry (a board can
@@ -237,11 +240,34 @@ export class BoardService {
       statuses: [...statusMap.values()],
       estimation,
       sprints,
+      quickFilters,
+      versions,
       velocity,
       throughput: computeThroughput(recentDone),
       issues,
       truncated: rawIssues.length > ISSUE_LIMIT,
     };
+  }
+
+  private async projectVersions(): Promise<BoardVersion[]> {
+    try {
+      const raw = await this.jira.getProjectVersions(this.ctx.projectKey);
+      return raw
+        .filter((v: any) => !v.archived)
+        .map((v: any) => ({
+          id: String(v.id),
+          name: String(v.name),
+          released: !!v.released,
+          releaseDate: v.releaseDate ?? null,
+        }))
+        // What is still to ship first; within each group by date, undated last.
+        .sort(
+          (a: BoardVersion, b: BoardVersion) =>
+            Number(a.released) - Number(b.released) || (a.releaseDate ?? "9999").localeCompare(b.releaseDate ?? "9999")
+        );
+    } catch {
+      return [];
+    }
   }
 
   /**
@@ -253,7 +279,7 @@ export class BoardService {
     const [statusMap, predecessors] = await Promise.all([this.projectStatuses(), this.blockedByMap()]);
     const fields = [
       "summary", "status", "issuetype", "assignee", "priority", "parent", "duedate",
-      "labels", "resolutiondate", "updated",
+      "labels", "fixVersions", "resolutiondate", "updated",
     ];
     const base = `project = "${this.ctx.projectKey}" AND (statusCategory != Done OR resolutiondate >= -14d)`;
     let raw: any[];
@@ -277,6 +303,8 @@ export class BoardService {
       statuses,
       estimation: null,
       sprints: [],
+      quickFilters: [],
+      versions: [],
       velocity: [],
       throughput: computeThroughput(raw.filter((r) => r.fields?.resolutiondate)),
       issues: this.toIssues(raw.slice(0, ISSUE_LIMIT), null, predecessors),
@@ -318,6 +346,7 @@ export class BoardService {
         parentKey: parent?.key ?? null,
         flagged: !!f.flagged,
         labels: Array.isArray(f.labels) ? f.labels : [],
+        fixVersions: Array.isArray(f.fixVersions) ? f.fixVersions.map((v: any) => String(v.name)) : [],
         dueDate: f.duedate ?? null,
         resolutionDate: f.resolutiondate ?? null,
         updated: f.updated ?? null,
@@ -370,6 +399,73 @@ export class BoardService {
       if (out.length >= 45) break;
     }
     return out;
+  }
+
+  /**
+   * The sprint report and burnup, rebuilt from each issue's changelog (see sprintReport.ts). Needs
+   * only the ordinary read scope: it searches `sprint = X` on the platform API rather than the
+   * agile one, since the agile API has no changelog.
+   */
+  async sprintReport(sprintId: number, tz: number, today: string): Promise<SprintReport> {
+    const sprint = await this.assertSprint(sprintId);
+    const config = await this.jira.getBoardConfiguration(sprint.originBoardId);
+    const estimation = estimationFromConfig(config);
+    const fields = ["summary", "issuetype", "status", "created", "resolutiondate", ...(estimation ? [estimation.fieldId] : [])];
+    const raw = await this.jira.searchIssues(`sprint = ${sprintId}`, fields, 600, { expand: "changelog" });
+    const issues = raw.map((r) => {
+      const f = r.fields ?? {};
+      const v = estimation ? f[estimation.fieldId] : null;
+      return {
+        key: String(r.key),
+        summary: String(f.summary ?? r.key),
+        issueType: String(f.issuetype?.name ?? "Task"),
+        subtask: !!f.issuetype?.subtask,
+        statusName: String(f.status?.name ?? ""),
+        statusCategory: category(f.status?.statusCategory?.key),
+        created: String(f.created ?? ""),
+        resolutionDate: f.resolutiondate ?? null,
+        estimate: typeof v === "number" ? (estimation!.unit === "hours" ? Math.round((v / 3600) * 10) / 10 : v) : null,
+        histories: Array.isArray(r.changelog?.histories) ? r.changelog.histories : [],
+      };
+    });
+    return buildSprintReport({ sprint, issues, estimated: !!estimation, tz, today });
+  }
+
+  /**
+   * Which cards one or more of the board's quick filters let through. Jira's own board ANDs the
+   * filters you tick, so the JQLs are combined that way and the board endpoint runs them (it adds
+   * the board's own filter itself). The ids are checked against this board's list first: a quick
+   * filter's JQL is stored by whoever configured the board, and only those may be run from here.
+   */
+  async quickFilterKeys(boardId: number, ids: number[]): Promise<string[]> {
+    await this.assertBoard(boardId);
+    const all = await this.jira.getBoardQuickFilters(boardId);
+    const chosen = ids.map((id) => all.find((q) => q.id === id)).filter((q): q is NonNullable<typeof q> => !!q);
+    if (chosen.length === 0) return [];
+    const jql = chosen.map((q) => `(${q.jql})`).join(" AND ");
+    const raw = await this.jira.getBoardIssues(boardId, jql, ["summary"], ISSUE_LIMIT);
+    const own = new RegExp(`^${this.ctx.projectKey}-\\d+$`);
+    return raw.map((r) => String(r.key)).filter((k) => own.test(k));
+  }
+
+  /**
+   * Flag or unflag a card — Jira's "Add flag". Written through the site's "Flagged" checkbox field
+   * (discovered, never a hard-coded id); setting it needs the field on the edit screen on some
+   * sites, which a refusal then says in Jira's own words.
+   */
+  async setFlag(key: string, flagged: boolean): Promise<void> {
+    const [issueKey] = this.assertProjectKeys([key]);
+    const fieldId = await getFlaggedFieldId(this.jira, this.ctx.cloudId);
+    if (!fieldId) throw badRequest("Site Jira này không có trường “Flagged”, nên không gắn cờ được từ đây.");
+    let option = "Impediment";
+    try {
+      const meta = await this.jira.getEditMeta(issueKey);
+      const allowed = (meta[fieldId] as any)?.allowedValues;
+      if (Array.isArray(allowed) && allowed[0]?.value) option = String(allowed[0].value);
+    } catch {
+      // The edit screen may not list it; "Impediment" is Jira's own value for the flag.
+    }
+    await this.jira.updateIssueFields(issueKey, { [fieldId]: flagged ? [{ value: option }] : [] });
   }
 
   /* -------------------------------------------------------------- guards */
@@ -569,6 +665,34 @@ export class BoardService {
     return { moved: keys.length, target };
   }
 
+  /**
+   * Delete a sprint that has not started. Its open issues go back to the backlog *first*, by an
+   * explicit move, rather than relying on what Jira's delete does with them — the same stance
+   * completeSprint takes. A running sprint is completed, not deleted, and a closed one is history
+   * the velocity chart still reads.
+   */
+  async deleteSprint(sprintId: number): Promise<{ moved: number }> {
+    if (!agileDeleteEnabled()) {
+      throw badRequest(
+        "Xoá sprint cần quyền riêng của Jira Software mà ứng dụng chưa được cấp (JIRA_AGILE_DELETE). Quản trị viên bật quyền “delete:sprint” rồi đặt biến này; trong lúc chờ, xoá sprint trực tiếp trên Jira."
+      );
+    }
+    const sprint = await this.assertSprint(sprintId);
+    if (sprint.state !== "future") throw badRequest("Chỉ xoá được sprint chưa bắt đầu. Sprint đang chạy thì hoàn thành, không xoá.");
+    const inside = await this.jira.getBoardIssues(sprint.originBoardId, `sprint = ${sprintId}`, ["issuetype"], 2000);
+    const keys = inside.filter((i) => !i.fields?.issuetype?.subtask).map((i) => String(i.key));
+    if (keys.length > 0) await this.moveToBacklog(keys);
+    try {
+      await this.jira.deleteSprint(sprintId);
+    } catch (err) {
+      if (isScopeRefusal(err)) {
+        throw badRequest("Phiên đăng nhập hiện tại chưa có quyền xoá sprint. Đăng xuất rồi đăng nhập lại để cấp quyền.");
+      }
+      throw err;
+    }
+    return { moved: keys.length };
+  }
+
   async setEstimate(key: string, boardId: number, value: number | null, unit: "points" | "hours"): Promise<void> {
     this.assertProjectKeys([key]);
     await this.assertBoard(boardId);
@@ -582,6 +706,21 @@ export class BoardService {
 }
 
 /* ------------------------------------------------------------------ helpers */
+
+/** The board's estimation field, when it estimates in one; time fields are in hours, anything else in points. */
+function estimationFromConfig(config: {
+  estimation?: { type?: string; field?: { fieldId?: string; displayName?: string } };
+}): BoardSnapshot["estimation"] {
+  const fieldId = config.estimation?.field?.fieldId ?? null;
+  const unit: "points" | "hours" = fieldId && /^time(original)?estimate$/.test(fieldId) ? "hours" : "points";
+  return config.estimation?.type === "field" && fieldId
+    ? { fieldId, name: config.estimation.field?.displayName ?? fieldId, unit }
+    : null;
+}
+
+function toQuickFilter(raw: { id: number; name: string; description?: string }): QuickFilter {
+  return { id: Number(raw.id), name: String(raw.name), description: raw.description ? String(raw.description) : null };
+}
 
 function toSprint(raw: any): Sprint {
   const state = raw?.state === "active" || raw?.state === "closed" ? raw.state : "future";

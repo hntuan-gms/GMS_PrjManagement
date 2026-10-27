@@ -1,4 +1,4 @@
-import type { BoardIssue, BoardSnapshot, IssueTypeName, Sprint } from "./types";
+import type { BoardIssue, BoardSnapshot, IssueTypeName, Sprint, SprintCapacityPerson } from "./types";
 
 /**
  * Pure helpers for the Bảng tab: dates, weights, filters, lanes, burndown.
@@ -81,6 +81,144 @@ export function nextSprintName(snapshot: BoardSnapshot, projectKey: string): str
   return `${prefix}${max + 1}`;
 }
 
+/* ---------------------------------------------------------------- capacity */
+
+export interface CapacityRow {
+  accountId: string | null;
+  name: string;
+  days: number;
+  hoursPerDay: number;
+  capacityHours: number;
+  count: number;
+  /** In the board's estimation unit (points, hours, or 1 per issue). */
+  weight: number;
+  /** Estimate hours assigned — known only when the board estimates in hours. */
+  assignedHours: number | null;
+  /** capacity − assigned hours; null when the estimate is not in hours, since points do not convert. */
+  remainingHours: number | null;
+  /**
+   * away: has work but no working day · over: more hours than capacity · tight: under 15% left ·
+   * free: nothing assigned · ok: otherwise. The unassigned row is always "ok".
+   */
+  status: "away" | "over" | "tight" | "free" | "ok";
+}
+
+/**
+ * What each person has in a sprint against what they can give it. Hours can only be compared with
+ * an estimate that is itself in hours; on a points board capacity and assigned weight sit side by
+ * side without a subtraction, because there is no honest rate to convert one to the other.
+ */
+export function capacityRows(team: SprintCapacityPerson[], issues: BoardIssue[], snapshot: BoardSnapshot): CapacityRow[] {
+  const inHours = snapshot.estimation?.unit === "hours";
+  const mine = (accountId: string | null) => issues.filter((i) => (i.assigneeAccountId ?? null) === accountId);
+  const rows: CapacityRow[] = team.map((m) => {
+    const list = mine(m.accountId);
+    const weight = totalWeight(list, snapshot);
+    const assignedHours = inHours ? weight : null;
+    const remainingHours = assignedHours === null ? null : Math.round((m.capacityHours - assignedHours) * 10) / 10;
+    let status: CapacityRow["status"] = "ok";
+    if (list.length === 0) status = "free";
+    else if (m.days === 0) status = "away";
+    else if (remainingHours !== null && remainingHours < 0) status = "over";
+    else if (remainingHours !== null && remainingHours <= m.capacityHours * 0.15) status = "tight";
+    return { accountId: m.accountId, name: m.name, days: m.days, hoursPerDay: m.hoursPerDay, capacityHours: m.capacityHours, count: list.length, weight, assignedHours, remainingHours, status };
+  });
+  // Most committed first, so the people who need attention are on top and the free ones last.
+  rows.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "vi"));
+  const orphans = issues.filter((i) => !i.assigneeAccountId || !team.some((m) => m.accountId === i.assigneeAccountId));
+  if (orphans.length > 0) {
+    rows.push({
+      accountId: null,
+      name: "Chưa gán / ngoài danh sách",
+      days: 0,
+      hoursPerDay: 0,
+      capacityHours: 0,
+      count: orphans.length,
+      weight: totalWeight(orphans, snapshot),
+      assignedHours: inHours ? totalWeight(orphans, snapshot) : null,
+      remainingHours: null,
+      status: "ok",
+    });
+  }
+  return rows;
+}
+
+/* ----------------------------------------------------------------- rollups */
+
+export interface RollupRow {
+  /** The facet value: an Epic key (or "none"), or a version name. */
+  key: string;
+  label: string;
+  total: number;
+  done: number;
+  /** Estimate (or 1 per issue) of everything, and of what is not done yet. */
+  weight: number;
+  openWeight: number;
+  /** Versions: the release date and whether it shipped. */
+  releaseDate?: string | null;
+  released?: boolean;
+}
+
+function rollup(key: string, label: string, list: BoardIssue[], snapshot: BoardSnapshot): RollupRow {
+  const open = list.filter((i) => i.statusCategory !== "done");
+  return {
+    key,
+    label,
+    total: list.length,
+    done: list.length - open.length,
+    weight: totalWeight(list, snapshot),
+    openWeight: totalWeight(open, snapshot),
+  };
+}
+
+/**
+ * One row per Epic that has work on the board, plus the work under none — how far each Epic is,
+ * which is the question the backlog's Epic panel answers. Sub-tasks and Epics themselves are not
+ * counted (a sub-task is part of its parent's effort, not a second item).
+ */
+export function epicRollup(issues: BoardIssue[], snapshot: BoardSnapshot): RollupRow[] {
+  const work = issues.filter((i) => !i.subtask && i.issueType.toLowerCase() !== "epic");
+  const groups = new Map<string, { label: string; list: BoardIssue[] }>();
+  for (const i of work) {
+    const key = i.epicKey ?? "none";
+    const g = groups.get(key) ?? { label: i.epicKey ? i.epicSummary ?? i.epicKey : "Không thuộc Epic", list: [] };
+    g.list.push(i);
+    groups.set(key, g);
+  }
+  return [...groups]
+    .map(([key, g]) => rollup(key, g.label, g.list, snapshot))
+    // Unfinished Epics first, the "none" bucket last, then by name.
+    .sort(
+      (a, b) =>
+        Number(a.key === "none") - Number(b.key === "none") ||
+        Number(a.done === a.total) - Number(b.done === b.total) ||
+        a.label.localeCompare(b.label, "vi")
+    );
+}
+
+/**
+ * One row per project version, in the order the project lists them (unreleased first), plus any
+ * version only an issue carries. A version with nothing on the board still shows, with 0 — an
+ * empty release is information too.
+ */
+export function versionRollup(
+  issues: BoardIssue[],
+  versions: Array<{ name: string; released: boolean; releaseDate: string | null }>,
+  snapshot: BoardSnapshot
+): RollupRow[] {
+  const work = issues.filter((i) => !i.subtask);
+  const names = [...versions.map((v) => v.name)];
+  for (const i of work) for (const v of i.fixVersions) if (!names.includes(v)) names.push(v);
+  return names.map((name) => {
+    const meta = versions.find((v) => v.name === name);
+    return {
+      ...rollup(name, name, work.filter((i) => i.fixVersions.includes(name)), snapshot),
+      releaseDate: meta?.releaseDate ?? null,
+      released: meta?.released ?? false,
+    };
+  });
+}
+
 /* ----------------------------------------------------------------- filters */
 
 export interface BoardFilter {
@@ -96,6 +234,10 @@ export interface BoardFilter {
   epics: Set<string>;
   labels: Set<string>;
   priorities: Set<string>;
+  /** Fix version names (the backlog's Phiên bản panel). */
+  versions: Set<string>;
+  /** Ids of the board's own quick filters that are switched on; ANDed, as on Jira's board. */
+  quick: Set<string>;
 }
 
 export const EMPTY_FILTER: BoardFilter = {
@@ -108,6 +250,8 @@ export const EMPTY_FILTER: BoardFilter = {
   epics: new Set(),
   labels: new Set(),
   priorities: new Set(),
+  versions: new Set(),
+  quick: new Set(),
 };
 
 export function isFiltering(f: BoardFilter): boolean {
@@ -120,7 +264,9 @@ export function isFiltering(f: BoardFilter): boolean {
     f.statuses.size > 0 ||
     f.epics.size > 0 ||
     f.labels.size > 0 ||
-    f.priorities.size > 0
+    f.priorities.size > 0 ||
+    f.versions.size > 0 ||
+    f.quick.size > 0
   );
 }
 
@@ -149,7 +295,12 @@ export function isOverdue(issue: BoardIssue, today: string): boolean {
   return issue.statusCategory !== "done" && !!issue.dueDate && issue.dueDate < today;
 }
 
-export function matchesFilter(issue: BoardIssue, f: BoardFilter, today: string): boolean {
+/**
+ * `quickKeys` is what Jira said the switched-on quick filters let through. It is null until that
+ * answer arrives, or if Jira refused the filter's JQL — then it restricts nothing, so a broken
+ * quick filter never blanks the board (the same stance the Gantt's JQL box takes).
+ */
+export function matchesFilter(issue: BoardIssue, f: BoardFilter, today: string, quickKeys: Set<string> | null = null): boolean {
   const q = f.text.trim().toLowerCase();
   if (q && !`${issue.key} ${issue.summary} ${issue.epicSummary ?? ""} ${issue.labels.join(" ")}`.toLowerCase().includes(q)) {
     return false;
@@ -160,6 +311,8 @@ export function matchesFilter(issue: BoardIssue, f: BoardFilter, today: string):
   if (f.epics.size > 0 && !f.epics.has(issue.epicKey ?? "none")) return false;
   if (f.labels.size > 0 && !issue.labels.some((l) => f.labels.has(l))) return false;
   if (f.priorities.size > 0 && !f.priorities.has(issue.priority ?? "none")) return false;
+  if (f.versions.size > 0 && !issue.fixVersions.some((v) => f.versions.has(v))) return false;
+  if (f.quick.size > 0 && quickKeys && !quickKeys.has(issue.key)) return false;
   if (f.onlyBlocked && issue.blockedBy.length === 0 && !issue.flagged) return false;
   if (f.onlyOverdue && !isOverdue(issue, today)) return false;
   return true;

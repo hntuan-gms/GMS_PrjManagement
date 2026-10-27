@@ -3,7 +3,9 @@ import { requireProject, requireStaff } from "../auth/middleware.js";
 import { notFound } from "../errors.js";
 import { createProgressReport } from "../ai/progressReport.js";
 import { deleteReport, getReport, latestReport, reportHistory } from "../ai/reportStore.js";
+import { FlowService } from "../flowReports.js";
 import { computeProgress, type ProgressScope } from "../progress.js";
+import { isSnapshotWorthy, listSnapshots, recordSnapshot } from "../progressSnapshotStore.js";
 
 export const progressRouter = Router();
 
@@ -49,6 +51,8 @@ progressRouter.get("/", requireProject, async (req, res, next) => {
   const { session, taskService } = req.auth!;
   try {
     const asOf = asOfFrom(req.query.asOf);
+    const scope = scopeFrom(req.query);
+    const scoped = !!(scope.assignee || scope.epic || (scope.types && scope.types.length > 0));
     const [tasks, latest, history] = await Promise.all([
       // No descriptions: nothing in computeProgress reads them, and they are the heaviest field of the search.
       taskService!.listTasks({ description: false }),
@@ -57,7 +61,16 @@ progressRouter.get("/", requireProject, async (req, res, next) => {
     ]);
     // The scope narrows the live dashboard only. Saved reports are written over
     // the whole project and stay that way.
-    res.json({ metrics: computeProgress(tasks, asOf, scopeFrom(req.query)), latest, history });
+    const metrics = computeProgress(tasks, asOf, scope);
+    // The measured trend: today's whole-project figures are kept as a row, so the trend chart
+    // needs no AI report. A failure here must never cost the page its live numbers.
+    if (isSnapshotWorthy(asOf, scoped)) {
+      await recordSnapshot(session.cloudId, session.projectKey!, metrics).catch((e) =>
+        console.warn("[progress] could not record the daily snapshot:", e)
+      );
+    }
+    const trend = await listSnapshots(session.cloudId, session.projectKey!).catch(() => []);
+    res.json({ metrics, latest, history, trend });
   } catch (err) {
     next(err);
   }
@@ -120,6 +133,27 @@ progressRouter.get("/reports/:id", requireProject, async (req, res, next) => {
       return;
     }
     res.json(report);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Cumulative flow, control chart and created-vs-resolved over the last 30/60/90 days. Open to
+ * every project member like the rest of the live report: it costs no model call, only a bounded
+ * Jira read (see flowReports.ts).
+ */
+progressRouter.get("/flow", requireProject, async (req, res, next) => {
+  const { jira, session } = req.auth!;
+  try {
+    const tz = Number(req.query.tz);
+    const offset = Number.isFinite(tz) && Math.abs(tz) <= 14 * 60 ? tz : 0;
+    const service = new FlowService(jira, {
+      cloudId: session.cloudId,
+      projectKey: session.projectKey!,
+      accountId: session.accountId,
+    });
+    res.json(await service.read(Number(req.query.days) || 60, offset, asOfFrom(req.query.today)));
   } catch (err) {
     next(err);
   }

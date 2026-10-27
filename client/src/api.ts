@@ -23,6 +23,9 @@ import type {
   ProgressReport,
   ReportPoint,
   ResourceAbsence,
+  SprintCapacity,
+  SprintReport,
+  FlowReport,
   ResourcePool,
   ResourceProfile,
   UsageStats,
@@ -312,6 +315,12 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ ...input, tzOffsetMinutes: -new Date().getTimezoneOffset() }),
     }),
+  /** Only what is passed changes; `comment: null` clears the note. */
+  updateWorklog: (issueKey: string, id: string, patch: { date?: string; hours?: number; comment?: string | null }) =>
+    request<WorklogEntry>(`/timesheet/worklogs/${encodeURIComponent(issueKey)}/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify({ ...patch, tzOffsetMinutes: -new Date().getTimezoneOffset() }),
+    }),
   deleteWorklog: (issueKey: string, id: string) =>
     request<void>(`/timesheet/worklogs/${encodeURIComponent(issueKey)}/${encodeURIComponent(id)}`, {
       method: "DELETE",
@@ -325,6 +334,8 @@ export const api = {
     if (scope?.types && scope.types.length > 0) q.set("type", scope.types.join(","));
     return request<ProgressOverview>(`/progress?${q}`);
   },
+  getFlow: (days: 30 | 60 | 90, today: string) =>
+    request<FlowReport>(`/progress/flow?days=${days}&today=${today}&tz=${-new Date().getTimezoneOffset()}`),
   deleteProgressReport: (id: string) =>
     request<{ history: ReportPoint[] }>(`/progress/reports/${encodeURIComponent(id)}`, { method: "DELETE" }),
   generateProgressReport: (asOf: string) =>
@@ -353,6 +364,11 @@ export const api = {
     request<ResourceAbsence>(`/resources/${encodeURIComponent(accountId)}/absences`, {
       method: "POST",
       body: JSON.stringify({ from, to, reason }),
+    }),
+  updateAbsence: (id: string, patch: { from?: string; to?: string; reason?: string | null }) =>
+    request<ResourceAbsence>(`/resources/absences/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
     }),
   deleteAbsence: (id: string) =>
     request<void>(`/resources/absences/${encodeURIComponent(id)}`, { method: "DELETE" }),
@@ -438,6 +454,18 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ boardId, value, unit }),
     }),
+
+  getQuickFilterKeys: (boardId: number, ids: number[]) =>
+    request<{ keys: string[] }>(`/board/quickfilters/keys?boardId=${boardId}&ids=${ids.join(",")}`),
+  setFlag: (key: string, flagged: boolean) =>
+    request<void>(`/board/issues/${encodeURIComponent(key)}/flag`, { method: "PUT", body: JSON.stringify({ flagged }) }),
+  deleteSprint: (id: number) => request<{ moved: number }>(`/board/sprints/${id}`, { method: "DELETE" }),
+  getSprintReport: (sprintId: number, clock: { today: string; tzOffsetMinutes: number }) =>
+    request<SprintReport>(`/board/sprints/${sprintId}/report?today=${clock.today}&tz=${clock.tzOffsetMinutes}`),
+  getSprintCapacity: (boardId: number, sprintId: number, clock: { today: string; tzOffsetMinutes: number }) =>
+    request<SprintCapacity>(
+      `/board/sprints/${sprintId}/capacity?boardId=${boardId}&today=${clock.today}&tz=${clock.tzOffsetMinutes}`
+    ),
 
   // Board AI — proposals only; applying goes through the calls above.
   planSprint: (boardId: number, sprintId: number, clock: { today: string; tzOffsetMinutes: number }) =>

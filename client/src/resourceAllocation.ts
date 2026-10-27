@@ -408,6 +408,17 @@ export interface WeekCell {
  * week's real utilisation rather than an average of averages.
  */
 export function aggregateWeeks(days: DayLoad[]): WeekCell[] {
+  // Break on Monday so the columns line up with how people talk about weeks,
+  // not on every 7th day from an arbitrary window start.
+  return aggregateBy(days, (day) => weekdayOf(day.date) === 1);
+}
+
+/** Same collapse by calendar month, for windows too long to read even by week. */
+export function aggregateMonths(days: DayLoad[]): WeekCell[] {
+  return aggregateBy(days, (day, prev) => day.date.slice(0, 7) !== prev.date.slice(0, 7));
+}
+
+function aggregateBy(days: DayLoad[], startsNew: (day: DayLoad, prev: DayLoad) => boolean): WeekCell[] {
   const weeks: WeekCell[] = [];
   let current: DayLoad[] = [];
 
@@ -435,11 +446,50 @@ export function aggregateWeeks(days: DayLoad[]): WeekCell[] {
   };
 
   for (const day of days) {
-    // Break on Monday so the columns line up with how people talk about weeks,
-    // not on every 7th day from an arbitrary window start.
-    if (current.length > 0 && weekdayOf(day.date) === 1) flush();
+    if (current.length > 0 && startsNew(day, current[current.length - 1])) flush();
     current.push(day);
   }
   flush();
   return weeks;
+}
+
+/* ---------------------------------------------------------------- windows */
+
+export type Granularity = "day" | "week" | "month";
+
+/** Above these many days a column per day (week) stops being readable. */
+const WEEK_THRESHOLD_DAYS = 45;
+const MONTH_THRESHOLD_DAYS = 200;
+
+/** What the heatmap shows when the user has not picked: day ≤ 45 days, week ≤ 200, month beyond. */
+export function autoGranularity(from: string, to: string): Granularity {
+  const span = diffDays(from, to);
+  return span > MONTH_THRESHOLD_DAYS ? "month" : span > WEEK_THRESHOLD_DAYS ? "week" : "day";
+}
+
+/** The calendar month containing `iso`, first to last day. */
+export function monthWindow(iso: string): { from: string; to: string } {
+  const y = Number(iso.slice(0, 4));
+  const m = Number(iso.slice(5, 7));
+  return { from: toIso(Date.UTC(y, m - 1, 1)), to: toIso(Date.UTC(y, m, 0)) };
+}
+
+const isWholeMonths = (w: { from: string; to: string }) =>
+  w.from.slice(8) === "01" && monthWindow(w.to).to === w.to;
+
+/**
+ * The window one step earlier or later. A window that is exactly whole calendar months moves by
+ * that many months (so "tháng 10" → "tháng 11", never "1/11 → 30/11 shifted 30 days"); any other
+ * moves by its own length, which keeps consecutive windows adjacent without overlap.
+ */
+export function shiftWindow(w: { from: string; to: string }, dir: -1 | 1): { from: string; to: string } {
+  if (isWholeMonths(w)) {
+    const months =
+      (Number(w.to.slice(0, 4)) - Number(w.from.slice(0, 4))) * 12 + Number(w.to.slice(5, 7)) - Number(w.from.slice(5, 7)) + 1;
+    const first = Date.UTC(Number(w.from.slice(0, 4)), Number(w.from.slice(5, 7)) - 1 + dir * months, 1);
+    const from = toIso(first);
+    return { from, to: monthWindow(toIso(Date.UTC(new Date(first).getUTCFullYear(), new Date(first).getUTCMonth() + months - 1, 1))).to };
+  }
+  const length = diffDays(w.from, w.to) + 1;
+  return { from: addDays(w.from, dir * length), to: addDays(w.to, dir * length) };
 }

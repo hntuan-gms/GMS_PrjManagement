@@ -110,6 +110,9 @@ export interface SprintPlanProposal {
   };
   /** Computed checks the reviewer should see before applying. */
   warnings: string[];
+  /** The window the plan was made for and each person's capacity in it — what the modal's capacity table shows. */
+  window: { start: string; end: string; lengthDays: number };
+  team: Availability[];
   model: string;
   usage: AiUsage;
 }
@@ -248,6 +251,8 @@ export async function planSprint(input: {
     risks: list(r.risks).map(str).filter(Boolean).slice(0, 3),
     totals: { weight, count: chosen.length, budget: velocity.average, unit: velocity.unit, unestimated },
     warnings,
+    window: input.window,
+    team: input.team,
     model,
     usage,
   };

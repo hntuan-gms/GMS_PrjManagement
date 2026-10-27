@@ -1,12 +1,16 @@
 import { useMemo, useState, type ReactNode } from "react";
 import {
+  aggregateMonths,
   aggregateWeeks,
+  autoGranularity,
   BAND_LABEL,
   buildResourceLoad,
   defaultWindow,
-  diffDays,
+  monthWindow,
+  shiftWindow,
   addDays,
   todayIso,
+  type Granularity,
   type LoadBand,
   type PersonLoad,
 } from "../resourceAllocation";
@@ -16,6 +20,7 @@ import { buildEpicIndex, isTaskFiltering, matchesTaskFilter, type TaskFilter } f
 import FilterBar from "./FilterBar";
 import SavedFilterMenu from "./SavedFilterMenu";
 import ResourcePersonPanel from "./ResourcePersonPanel";
+import SkillMatrixView from "./SkillMatrixView";
 
 interface Props {
   tasks: Task[];
@@ -50,8 +55,12 @@ interface DragState {
 /** Sentinel for the "remove from whoever holds it" drop zone. */
 const UNASSIGNED_ZONE = "__unassigned__";
 
-/** Above this many days the heatmap switches to week columns — see aggregateWeeks. */
-const WEEK_THRESHOLD = 45;
+const GRANULARITIES: Array<{ value: Granularity | "auto"; label: string }> = [
+  { value: "auto", label: "Tự động" },
+  { value: "day", label: "Ngày" },
+  { value: "week", label: "Tuần" },
+  { value: "month", label: "Tháng" },
+];
 
 const PRESETS: Array<{ label: string; days: number | null }> = [
   { label: "4 tuần", days: 28 },
@@ -101,6 +110,9 @@ export default function ResourceView({
   const [query, setQuery] = useState("");
   const [range, setRange] = useState<{ from: string; to: string } | null>(null);
   const [showAllUnassigned, setShowAllUnassigned] = useState(false);
+  // The heatmap (load over time) or the skills matrix (who can do what): two views of the same people.
+  const [mode, setMode] = useState<"load" | "skills">("load");
+  const [granularityChoice, setGranularityChoice] = useState<Granularity | "auto">("auto");
 
   const today = useMemo(() => todayIso(), []);
 
@@ -134,7 +146,7 @@ export default function ResourceView({
     [filteredTasks, users, pool, span, onlyBusy]
   );
 
-  const byWeek = diffDays(span.from, span.to) > WEEK_THRESHOLD;
+  const granularity: Granularity = granularityChoice === "auto" ? autoGranularity(span.from, span.to) : granularityChoice;
 
   const visiblePeople = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -166,6 +178,16 @@ export default function ResourceView({
     downloadCsv(csvName("nguon-luc", today), [header, ...rows]);
   }
 
+  // One step earlier or later: a whole calendar month moves by month, anything else by its own length.
+  function shiftRange(dir: -1 | 1) {
+    setRange(shiftWindow(span, dir));
+  }
+
+  const skillSuggestions = useMemo(
+    () => [...new Set((pool?.profiles ?? []).flatMap((p) => p.skills))].sort((a, b) => a.localeCompare(b, "vi")),
+    [pool]
+  );
+
   function applyPreset(days: number | null) {
     if (days === null) {
       setRange(defaultWindow(tasks, today, 3650));
@@ -182,6 +204,11 @@ export default function ResourceView({
     if (!pool) return;
     const others = pool.profiles.filter((p) => p.accountId !== profile.accountId);
     onPoolChange({ ...pool, profiles: [...others, profile] });
+  }
+
+  function replaceAbsence(absence: ResourceAbsence) {
+    if (!pool) return;
+    onPoolChange({ ...pool, absences: pool.absences.map((a) => (a.id === absence.id ? absence : a)) });
   }
 
   function addAbsence(absence: ResourceAbsence) {
@@ -227,13 +254,42 @@ export default function ResourceView({
         // the same saved view when you switch back.
         leading={<SavedFilterMenu filter={filter} onApply={onFilterChange} myAccountId={myAccountId} />}
       />
-      {filtering && (
+      <div className="segmented-control rv-modes" role="tablist" aria-label="Kiểu xem nguồn lực">
+        <button
+          role="tab"
+          aria-selected={mode === "load"}
+          className={`segmented-btn ${mode === "load" ? "active" : ""}`}
+          onClick={() => setMode("load")}
+        >
+          Mức tải
+        </button>
+        <button
+          role="tab"
+          aria-selected={mode === "skills"}
+          className={`segmented-btn ${mode === "skills" ? "active" : ""}`}
+          onClick={() => setMode("skills")}
+        >
+          Kỹ năng
+        </button>
+      </div>
+      {mode === "skills" && (
+        <SkillMatrixView users={users} profiles={pool?.profiles ?? []} onProfileSaved={upsertProfile} />
+      )}
+      {mode === "load" && filtering && (
         <div className="rv-notice">
           Đang lọc: mức tải bên dưới chỉ tính các công việc khớp bộ lọc, không phải toàn bộ khối lượng của mỗi người.
         </div>
       )}
+      {mode === "load" && (
+        <>
       <div className="rv-controls">
         <div className="rv-range">
+          <button className="rv-preset rv-step" onClick={() => shiftRange(-1)} aria-label="Kỳ trước" title="Kỳ trước">
+            ‹
+          </button>
+          <button className="rv-preset rv-step" onClick={() => shiftRange(1)} aria-label="Kỳ sau" title="Kỳ sau">
+            ›
+          </button>
           <label>
             Từ
             <input
@@ -254,6 +310,9 @@ export default function ResourceView({
               }
             />
           </label>
+          <button className="rv-preset" onClick={() => setRange(monthWindow(today))}>
+            Tháng này
+          </button>
           {PRESETS.map((p) => (
             <button key={p.label} className="rv-preset" onClick={() => applyPreset(p.days)}>
               {p.label}
@@ -267,6 +326,19 @@ export default function ResourceView({
         </div>
 
         <div className="rv-control-right">
+          <select
+            className="rv-granularity"
+            value={granularityChoice}
+            onChange={(e) => setGranularityChoice(e.target.value as Granularity | "auto")}
+            aria-label="Mỗi cột là"
+            title="Mỗi cột của bản đồ nhiệt là một ngày, tuần hay tháng"
+          >
+            {GRANULARITIES.map((g) => (
+              <option key={g.value} value={g.value}>
+                {g.value === "auto" ? `Cột: tự động (${{ day: "ngày", week: "tuần", month: "tháng" }[granularity]})` : `Cột: ${g.label.toLowerCase()}`}
+              </option>
+            ))}
+          </select>
           <input
             type="search"
             className="rv-search"
@@ -341,13 +413,13 @@ export default function ResourceView({
         </div>
       ) : (
         <div className="rv-heatmap-scroll">
-          <div className={`rv-grid ${byWeek ? "rv-grid-week" : "rv-grid-day"}`}>
-            <HeatmapHeader dates={load.dates} byWeek={byWeek} today={today} />
+          <div className={`rv-grid ${granularity === "day" ? "rv-grid-day" : "rv-grid-week"}`}>
+            <HeatmapHeader dates={load.dates} granularity={granularity} today={today} />
             {visiblePeople.map((person) => (
               <PersonRow
                 key={person.accountId}
                 person={person}
-                byWeek={byWeek}
+                granularity={granularity}
                 today={today}
                 selected={person.accountId === selectedId}
                 onSelect={() =>
@@ -443,12 +515,16 @@ export default function ResourceView({
           onProfileSaved={upsertProfile}
           onAbsenceAdded={addAbsence}
           onAbsenceRemoved={removeAbsence}
+          onAbsenceUpdated={replaceAbsence}
+          skillSuggestions={skillSuggestions}
           onDragTask={beginDrag}
           droppable={canDropOn(selected.accountId)}
           isDropTarget={dropTarget === selected.accountId}
           onDragOverPanel={() => setDropTarget(selected.accountId)}
           onDropOnPanel={() => dropOn(selected.accountId)}
         />
+      )}
+        </>
       )}
     </div>
   );
@@ -563,18 +639,19 @@ function Stat({
  */
 function HeatmapHeader({
   dates,
-  byWeek,
+  granularity,
   today,
 }: {
   dates: string[];
-  byWeek: boolean;
+  granularity: Granularity;
   today: string;
 }) {
-  const columns = byWeek ? weekStarts(dates) : dates;
+  const columns = granularity === "week" ? weekStarts(dates) : granularity === "month" ? monthStarts(dates) : dates;
 
   const months: Array<{ label: string; span: number }> = [];
   for (const iso of columns) {
-    const label = `Thg ${Number(iso.slice(5, 7))}/${iso.slice(0, 4)}`;
+    // By month the columns are months themselves, so the band above them is the year.
+    const label = granularity === "month" ? `Năm ${iso.slice(0, 4)}` : `Thg ${Number(iso.slice(5, 7))}/${iso.slice(0, 4)}`;
     const last = months[months.length - 1];
     if (last && last.label === label) last.span += 1;
     else months.push({ label, span: 1 });
@@ -598,12 +675,16 @@ function HeatmapHeader({
             className={`rv-cell rv-head-cell ${iso === today ? "is-today" : ""}`}
             title={iso}
           >
-            {byWeek ? shortDate(iso) : iso.slice(8, 10)}
+            {granularity === "week" ? shortDate(iso) : granularity === "month" ? `Thg ${Number(iso.slice(5, 7))}` : iso.slice(8, 10)}
           </div>
         ))}
       </div>
     </>
   );
+}
+
+function monthStarts(dates: string[]): string[] {
+  return dates.filter((d, i) => i === 0 || d.slice(0, 7) !== dates[i - 1].slice(0, 7));
 }
 
 function weekStarts(dates: string[]): string[] {
@@ -616,7 +697,7 @@ function weekStarts(dates: string[]): string[] {
 
 function PersonRow({
   person,
-  byWeek,
+  granularity,
   today,
   selected,
   onSelect,
@@ -626,7 +707,7 @@ function PersonRow({
   onDrop,
 }: {
   person: PersonLoad;
-  byWeek: boolean;
+  granularity: Granularity;
   today: string;
   selected: boolean;
   onSelect: () => void;
@@ -635,8 +716,8 @@ function PersonRow({
   onDragOver: () => void;
   onDrop: () => void;
 }) {
-  const cells = byWeek
-    ? aggregateWeeks(person.days).map((w) => ({
+  const cells = granularity !== "day"
+    ? (granularity === "month" ? aggregateMonths(person.days) : aggregateWeeks(person.days)).map((w) => ({
         key: w.start,
         band: w.band,
         ratio: w.ratio,
@@ -703,7 +784,7 @@ function PersonRow({
             c.taskIds.length > 0 ? `\n${[...new Set(c.taskIds)].join(", ")}` : ""
           }`}
         >
-          {byWeek && c.capacity > 0 ? pct(c.ratio) : ""}
+          {granularity !== "day" && c.capacity > 0 ? pct(c.ratio) : ""}
         </div>
       ))}
     </div>

@@ -155,3 +155,31 @@ Test tự động đã chứng minh phần giao diện và logic của ta với 
 | D23 | Dòng có ngày sai, người trùng tên, việc cha lỗi | Bị chặn/báo đúng số dòng của bảng; các dòng còn lại vẫn tạo | |
 | D24 | Nhập 150 dòng | Không bị cắt giữa chừng (đợt 25 dòng/lần); thời gian chấp nhận được | |
 | D25 | Trợ lý: "thêm thành phần Backend cho GPM-5", "chuyển GPM-5 vào Epic GPM-2", "đổi GPM-5 thành Bug" | Làm đúng; tên sai thì liệt kê tên có sẵn | |
+
+## E. Giai đoạn 3 (Bảng, Báo cáo, Nguồn lực) — thử trên Jira thật
+
+Cần `JIRA_AGILE=on` cho các mục Bảng. Dùng dự án thử có board Scrum, ít nhất một sprint đã hoàn thành.
+
+| # | Thao tác | Phải thấy | Kết quả |
+|---|---|---|---|
+| E1 | Bảng: bật một quick filter của board (Board settings → Quick filters) | Nút cùng tên hiện trên thanh lọc; bật lên thì thẻ lọc **giống Jira**; bật hai cái = giao (AND) | |
+| E2 | Quick filter có JQL sai/hàm Jira từ chối | Có dòng "Jira không chạy được bộ lọc nhanh", bảng **không** bị trống | |
+| E3 | Gắn cờ một thẻ từ nút cờ trên thẻ; bỏ cờ | Jira hiện cờ (Impediment) / bỏ cờ thật; site không có trường "Flagged" thì báo rõ. **Chỗ chưa chắc**: ghi lại nếu Jira đòi trường nằm trên màn hình sửa | |
+| E4 | Bảng → "Thẻ": tắt/bật trường, màu theo ưu tiên/Epic/người, tải lại trang | Giữ lựa chọn theo từng board; thẻ bị chặn vẫn viền đỏ dù có màu | |
+| E5 | Thẻ Story có sub-task | Hiện "x/y sub-task", mở ra thấy từng sub-task và trạng thái; "Gộp sub-task" ẩn thẻ riêng | |
+| E6 | Backlog: panel Epic và Phiên bản | Số xong/tổng khớp Jira; bấm một dòng lọc backlog; phiên bản chưa phát hành lên trước | |
+| E7 | Backlog: chọn nhiều việc → Gán cho…, Đổi trạng thái…, Gắn cờ | Từng việc ghi lên Jira; việc bị workflow chặn được liệt kê; trạng thái cần RootCause mở hộp nhập | |
+| E8 | Backlog: bấm nhãn trạng thái của một dòng | Chỉ liệt kê trạng thái workflow cho phép | |
+| E9 | Xoá sprint chưa chạy (sau khi bật `JIRA_AGILE_DELETE` **và** scope `delete:sprint:jira-software` trên cả hai app) | Việc trong sprint về backlog, sprint biến mất. **Chưa bật scope**: nút báo "cần quyền riêng", đăng nhập vẫn bình thường. Phiên cũ chưa có scope: báo đăng nhập lại | |
+| E10 | "Năng lực" ở sprint chưa chạy / đang chạy | Ngày làm = ngày làm việc trong cửa sổ trừ ngày nghỉ; board tính bằng giờ thì có "Còn lại", bằng điểm thì không | |
+| E11 | Kế hoạch AI → "Năng lực nhóm" | Bảng đổi theo ô tích chọn | |
+| E12 | Báo cáo → Agile → Vận tốc | Cột khớp biểu đồ Velocity của Jira (phần *hoàn thành*; Jira còn có *cam kết*) | |
+| E13 | Sprint & burnup của sprint đã đóng, có việc thêm giữa kỳ | "Cam kết/Thêm giữa kỳ/Hoàn thành" gần khớp Sprint Report của Jira; bậc scope tăng đúng ngày thêm. **Ghi lại chênh lệch** (điểm hiện tại so với điểm lúc đó, việc bị gỡ) | |
+| E14 | Luồng công việc / Thời gian xử lý / Tạo và xong (30, 60, 90 ngày) | Thời gian chấp nhận được (vài giây); dự án >1000 việc có cảnh báo cắt; số tạo/xong khớp `created`/`resolved` trong JQL; lần mở lại trong 10 phút nhanh (bộ nhớ đệm) | |
+| E15 | Mở Báo cáo bằng tài khoản **khách** | Thấy "Xu hướng theo ngày" sau vài ngày, không cần báo cáo AI; cần chờ ≥2 ngày mới vẽ | |
+| E16 | So sánh hai báo cáo AI; Sao chép liên kết rồi dán vào tab ẩn danh/đăng nhập tài khoản khác | Đổi gì hiện đúng; liên kết mở thẳng đúng báo cáo **sau khi đăng nhập**; tài khoản không thấy dự án thì có thông báo, không lộ nội dung | |
+| E17 | In / Lưu PDF ở trang Báo cáo | Không có thanh công cụ/chat; biểu đồ còn màu; không bị cắt ngang thẻ | |
+| E18 | Nguồn lực → Kỹ năng: thêm cột, bấm ô; nhờ trợ lý gợi ý người cho một việc | Hồ sơ lưu; kế hoạch AI dùng kỹ năng khi gợi ý người | |
+| E19 | Sửa kỳ nghỉ (đổi ngày/lý do) | Heatmap đổi ngay; không sinh kỳ nghỉ thứ hai | |
+| E20 | Heatmap: kỳ trước/sau, "Tháng này", cột theo tháng | Cửa sổ dời đúng (tháng nguyên → tháng nguyên) | |
+| E21 | Chấm công: sửa giờ của mình (đổi giờ; đổi ngày; xoá ghi chú) | Worklog trong Jira đổi; đổi giờ không đổi giờ-trong-ngày; xoá ghi chú được hay Jira báo lỗi — **ghi lại**; giờ của người khác không có nút sửa | |

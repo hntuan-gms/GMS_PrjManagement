@@ -624,10 +624,78 @@ export interface ProgressScope {
   types?: string[];
 }
 
+/** One day's measured, whole-project figures (server/src/progressSnapshotStore.ts) — no AI report behind it. */
+export interface SnapshotPoint {
+  date: string;
+  actualPct: number;
+  plannedPct: number;
+  spi: number | null;
+  health: Health;
+  total: number;
+  done: number;
+  inProgress: number;
+  overdue: number;
+}
+
 export interface ProgressOverview {
   metrics: ProgressMetrics;
   latest: ProgressReport | null;
   history: ReportPoint[];
+  /** Daily snapshots, oldest first. Absent from a response cached before they existed. */
+  trend?: SnapshotPoint[];
+}
+
+/* Flow charts and the sprint report — mirror server/src/flowReports.ts and agile/sprintReport.ts. */
+
+export interface FlowReport {
+  from: string;
+  to: string;
+  days: number;
+  issueCount: number;
+  truncated: boolean;
+  cfd: {
+    dates: string[];
+    series: Array<{ statusId: string; name: string; category: StatusCategory; counts: number[] }>;
+  };
+  created: { bucket: "day" | "week"; buckets: Array<{ start: string; created: number; resolved: number }> };
+  control: {
+    points: Array<{ key: string; date: string; leadDays: number; cycleDays: number | null }>;
+    lead: ControlStats | null;
+    cycle: ControlStats | null;
+    leadRolling: number[];
+    cycleRolling: Array<number | null>;
+  };
+}
+
+export interface ControlStats {
+  count: number;
+  mean: number;
+  p50: number;
+  p85: number;
+  p95: number;
+}
+
+export interface SprintReportLine {
+  key: string;
+  summary: string;
+  issueType: string;
+  statusName: string;
+  statusCategory: StatusCategory;
+  weight: number;
+  origin: "committed" | "added";
+}
+
+export interface SprintReport {
+  sprint: Sprint;
+  start: string | null;
+  end: string | null;
+  committed: SprintReportLine[];
+  added: SprintReportLine[];
+  completed: SprintReportLine[];
+  notCompleted: SprintReportLine[];
+  churned: string[];
+  totals: { committed: number; added: number; completed: number; notCompleted: number };
+  burnup: Array<{ date: string; scope: number; completed: number }>;
 }
 
 /* ----------------------------------------------------------------------------
@@ -685,10 +753,25 @@ export interface BoardIssue {
   parentKey: string | null;
   flagged: boolean;
   labels: string[];
+  fixVersions: string[];
   dueDate: string | null;
   resolutionDate: string | null;
   updated: string | null;
   blockedBy: string[];
+}
+
+/** One of the board's own quick filters; the keys it matches are fetched when it is switched on. */
+export interface QuickFilter {
+  id: number;
+  name: string;
+  description: string | null;
+}
+
+export interface BoardVersion {
+  id: string;
+  name: string;
+  released: boolean;
+  releaseDate: string | null;
 }
 
 export interface VelocityPoint {
@@ -709,6 +792,8 @@ export interface BoardSnapshot {
   statuses: BoardStatus[];
   estimation: { fieldId: string; name: string; unit: "points" | "hours" } | null;
   sprints: Sprint[];
+  quickFilters: QuickFilter[];
+  versions: BoardVersion[];
   velocity: VelocityPoint[];
   throughput: Array<{ weekStart: string; count: number }>;
   issues: BoardIssue[];
@@ -721,6 +806,20 @@ export interface AiUsage {
   thoughtTokens: number | null;
 }
 
+/** One person's capacity in a sprint's window: working days minus leave, times hours a day. */
+export interface SprintCapacityPerson {
+  accountId: string;
+  name: string;
+  days: number;
+  hoursPerDay: number;
+  capacityHours: number;
+}
+
+export interface SprintCapacity {
+  window: { start: string; end: string; lengthDays: number };
+  team: SprintCapacityPerson[];
+}
+
 export interface SprintPlanProposal {
   goal: string;
   rationale: string;
@@ -729,6 +828,8 @@ export interface SprintPlanProposal {
   risks: string[];
   totals: { weight: number; count: number; budget: number | null; unit: string; unestimated: number };
   warnings: string[];
+  window: SprintCapacity["window"];
+  team: SprintCapacityPerson[];
   model: string;
   usage: AiUsage;
 }

@@ -1,9 +1,18 @@
 import { useMemo, useRef, useState } from "react";
-import type { ReportPoint } from "../types";
+/** The minimum a point needs: a day and the two figures. A saved report also carries an id that opens it. */
+export interface TrendPoint {
+  asOf: string;
+  actualPct: number;
+  plannedPct: number;
+  id?: string;
+}
 
 interface Props {
-  points: ReportPoint[];
-  onSelect: (id: string) => void;
+  points: TrendPoint[];
+  /** Clicking a point that has an id opens that report; without it the chart is read-only. */
+  onSelect?: (id: string) => void;
+  /** What the points are, for the screen-reader label ("báo cáo", "ngày"). */
+  unit?: string;
 }
 
 /**
@@ -35,7 +44,7 @@ function shortDate(iso: string): string {
   return `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
 }
 
-export default function ProgressTrendChart({ points, onSelect }: Props) {
+export default function ProgressTrendChart({ points, onSelect, unit = "báo cáo" }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [hover, setHover] = useState<number | null>(null);
 
@@ -104,10 +113,13 @@ export default function ProgressTrendChart({ points, onSelect }: Props) {
           ref={svgRef}
           viewBox={`0 0 ${W} ${H}`}
           role="img"
-          aria-label={`Xu hướng tiến độ qua ${points.length} báo cáo: gần nhất thực tế ${last.actualPct}%, kế hoạch ${last.plannedPct}%`}
+          aria-label={`Xu hướng tiến độ qua ${points.length} ${unit}: gần nhất thực tế ${last.actualPct}%, kế hoạch ${last.plannedPct}%`}
           onPointerMove={(e) => setHover(nearestIndex(e.clientX))}
           onPointerLeave={() => setHover(null)}
-          onClick={(e) => onSelect(points[nearestIndex(e.clientX)].id)}
+          onClick={(e) => {
+            const id = points[nearestIndex(e.clientX)].id;
+            if (id && onSelect) onSelect(id);
+          }}
         >
           {[0, 25, 50, 75, 100].map((tick) => (
             <g key={tick}>
@@ -179,7 +191,7 @@ export default function ProgressTrendChart({ points, onSelect }: Props) {
               <i className="pr-key pr-key-planned" />
               <b>{hovered.plannedPct}%</b> <span>Kế hoạch</span>
             </div>
-            <div className="pr-tooltip-hint">Bấm để xem báo cáo này</div>
+            {hovered.id && onSelect && <div className="pr-tooltip-hint">Bấm để xem báo cáo này</div>}
           </div>
         )}
       </div>

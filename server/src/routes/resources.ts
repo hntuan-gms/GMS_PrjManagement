@@ -159,6 +159,27 @@ resourcesRouter.post("/:accountId/absences", requireProject, async (req, res, ne
   }
 });
 
+/** Change a leave period's dates or note — only the fields sent move. */
+resourcesRouter.patch("/absences/:id", requireProject, async (req, res, next) => {
+  const body = (req.body ?? {}) as { from?: unknown; to?: unknown; reason?: unknown };
+  const patch: { from?: string; to?: string; reason?: string | null } = {};
+  for (const key of ["from", "to"] as const) {
+    if (body[key] === undefined) continue;
+    if (typeof body[key] !== "string" || !ISO_DATE.test(body[key] as string)) {
+      next(badRequest("Ngày nghỉ phải ở dạng YYYY-MM-DD."));
+      return;
+    }
+    patch[key] = body[key] as string;
+  }
+  if (typeof body.reason === "string") patch.reason = body.reason.trim() || null;
+  else if (body.reason === null) patch.reason = null;
+  try {
+    res.json(await resources.updateAbsence(req.auth!.session.cloudId, req.params.id, patch));
+  } catch (err) {
+    next(err);
+  }
+});
+
 resourcesRouter.delete("/absences/:id", requireProject, async (req, res, next) => {
   try {
     await resources.deleteAbsence(req.auth!.session.cloudId, req.params.id);

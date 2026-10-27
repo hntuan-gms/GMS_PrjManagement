@@ -4,7 +4,7 @@ import { availability, plannedWindow, sprintFacts, velocityStats } from "../agil
 import { estimateIssues, planSprint, sprintInsight } from "../ai/sprintAi.js";
 import { badRequest } from "../errors.js";
 import * as resources from "../resourceStore.js";
-import { boardServiceFor } from "./board.js";
+import { boardServiceFor, clock } from "./board.js";
 
 /**
  * AI on the board — mounted at /api/ai/board, so requireStaff (on the /ai mount)
@@ -18,15 +18,6 @@ import { boardServiceFor } from "./board.js";
 export const boardAiRouter = Router();
 
 boardAiRouter.use(requireProject);
-
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-
-/** The browser's local date and UTC offset — sprint days are calendar days where the team is. */
-function clock(body: any): { today: string; offset: number } {
-  const today = typeof body?.today === "string" && ISO_DATE.test(body.today) ? body.today : new Date().toISOString().slice(0, 10);
-  const offset = Number(body?.tzOffsetMinutes);
-  return { today, offset: Number.isFinite(offset) && Math.abs(offset) <= 14 * 60 ? offset : 0 };
-}
 
 async function agileSnapshot(req: any, boardId: number) {
   const service = boardServiceFor(req);

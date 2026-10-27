@@ -9,6 +9,11 @@ import { TransitionFieldsForm } from "./TransitionFields";
 interface Props {
   tasks: Task[];
   disabled?: boolean;
+  /** The trigger; the default is the selection bar's "Đổi trạng thái…". A backlog row passes its status chip. */
+  label?: React.ReactNode;
+  className?: string;
+  placement?: "top" | "bottom";
+  title?: string;
   /** Run the move for exactly these tasks, with whatever the workflow asked for. */
   onApply: (statusName: string, ids: string[], values: Record<string, string>) => void;
 }
@@ -28,16 +33,16 @@ interface Target {
  * each with how many of them can take it, and a status that needs a box filled (RootCause)
  * asks for it before anything is sent.
  */
-export default function BulkStatusMenu({ tasks, disabled, onApply }: Props) {
+export default function BulkStatusMenu({ tasks, disabled, onApply, label, className, placement, title }: Props) {
   return (
     <Popover
-      className="selection-trigger"
-      placement="top"
+      className={className ?? "selection-trigger"}
+      placement={placement ?? "top"}
       menuLabel="Đổi trạng thái"
       menuClassName="bulk-status-menu"
       disabled={disabled}
-      title="Đổi trạng thái các công việc đã chọn theo quy trình của Jira"
-      label="Đổi trạng thái…"
+      title={title ?? "Đổi trạng thái các công việc đã chọn theo quy trình của Jira"}
+      label={label ?? "Đổi trạng thái…"}
     >
       {({ close }) => (
         <BulkStatusPanel

@@ -50,6 +50,22 @@ timesheetRouter.post("/worklogs", async (req, res, next) => {
   }
 });
 
+timesheetRouter.put("/worklogs/:issueKey/:id", async (req, res, next) => {
+  try {
+    const b = req.body ?? {};
+    res.json(
+      await serviceFor(req).update(req.params.issueKey, req.params.id, {
+        date: typeof b.date === "string" ? b.date : undefined,
+        hours: b.hours === undefined ? undefined : Number(b.hours),
+        comment: typeof b.comment === "string" ? b.comment : b.comment === null ? "" : undefined,
+        tz: tzOf(b.tzOffsetMinutes),
+      })
+    );
+  } catch (err) {
+    next(err);
+  }
+});
+
 timesheetRouter.delete("/worklogs/:issueKey/:id", async (req, res, next) => {
   try {
     await serviceFor(req).remove(req.params.issueKey, req.params.id);

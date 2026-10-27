@@ -141,3 +141,47 @@ Kèm theo: `TaskEditModal` giờ có `key` theo task (mở task khác từ chat 
 - **Bộ lọc trên tab Nguồn lực** dùng được JQL nhưng không có ô nhập JQL ở đó (chỉ áp bộ lọc đã đặt từ Gantt).
 - **Trợ lý chưa lọc được theo thành phần/phiên bản/sprint** bằng `set_view_filter` (`search_tasks` thì có).
 - **Hoàn tác không cứu được** việc đã bị người khác sửa trong lúc đó: nó ghi đè về giá trị cũ.
+
+---
+
+# Giai đoạn 3 — Bảng, Báo cáo, Nguồn lực
+
+- **Phạm vi làm:** 3.1–3.15. **Chưa commit/deploy.** Một migration mới: `011_progress_snapshot.sql`. Một biến môi trường mới, tuỳ chọn: `JIRA_AGILE_DELETE` (đã thêm vào `deploy.yml` và `.env.example`).
+- Kiểm tra: server 242 test, client 166 test, `typecheck:test`, build và lint sạch (2 cảnh báo có từ trước), e2e 14 file đạt (mới: `stage3.e2e.mjs`). **Chưa thử với Jira thật** — checklist mục E.
+
+## 1. Đã thay đổi gì
+
+| Mục | Thay đổi | File chính |
+|---|---|---|
+| 3.1 | **Quick filter của board** hiện thành nút trên thanh lọc; bật thì Jira chạy JQL (nhiều cái = AND như Jira), ta lọc theo mã trả về. JQL lỗi thì không lọc gì và có dòng báo | `boardService.quickFilterKeys`, `BoardView` |
+| 3.2 | **Thẻ**: chọn trường hiện (loại, mã, ưu tiên, ước lượng, hạn, người, Epic, nhãn, phiên bản, sub-task), **màu thẻ** theo ưu tiên/loại/Epic/người, **gắn cờ** bằng trường "Flagged" tìm theo site. Lưu theo board trên trình duyệt | `cardOptions.ts`, `KanbanBoard`, `boardService.setFlag`, `fieldDiscovery.getFlaggedFieldId` |
+| 3.3 | **Sub-task trên thẻ cha**: "x/y sub-task" + danh sách; tuỳ chọn gộp (ẩn thẻ riêng khi cha đang hiện) | `cardOptions.ts`, `KanbanBoard` |
+| 3.4 | **Panel Epic / Phiên bản** ở Backlog (tiến độ, bấm để lọc); **hàng loạt** (gán, đổi trạng thái theo workflow, gắn/bỏ cờ); đổi trạng thái từng dòng; `fixVersions` trên thẻ và snapshot | `BacklogPanels`, `BacklogView`, `boardModel.epicRollup/versionRollup` |
+| 3.5 | **Xoá sprint** chưa chạy (việc về backlog trước, xoá sau) | `boardService.deleteSprint` |
+| 3.6 | **Biểu đồ vận tốc** | `AgileCharts.VelocityChart` |
+| 3.7 | **Sprint report + burnup** dựng lại từ changelog trường Sprint | `agile/sprintReport.ts` |
+| 3.8 | **Luồng công việc (CFD), thời gian xử lý (control chart: cycle/lead, P50/85/95), tạo-vs-xong** từ một lần search `expand=changelog` (≤90 ngày, ≤1000 việc, cache 10 phút) | `flowMetrics.ts`, `flowReports.ts` |
+| 3.9 | **Xu hướng theo ngày không cần báo cáo AI**: bảng `progress_snapshot`, ghi khi có người mở trang (cập nhật tối đa mỗi 3 giờ, chỉ khi xem toàn dự án và ngày hợp lý) | `progressSnapshotStore.ts`, migration 011 |
+| 3.10 | **So sánh hai báo cáo AI**, **liên kết chia sẻ** (`/?project=KEY&report=ID`, sống qua đăng nhập), **In / Lưu PDF** | `reportCompare.ts`, `deepLink.ts`, `ReportCompare`, `@media print` |
+| 3.11 | **Ma trận kỹ năng** (bấm ô bật/tắt) + ô nhập kỹ năng và ghi chú trong hồ sơ người | `skillMatrix.ts`, `SkillMatrixView` |
+| 3.12 | **Sửa kỳ nghỉ** (PATCH) | `resourceStore.updateAbsence` |
+| 3.13 | Heatmap: **cột theo tháng**, chọn Ngày/Tuần/Tháng, **kỳ trước/sau**, "Tháng này" | `resourceAllocation.ts` |
+| 3.14 | **Sửa worklog** của chính mình (chỉ gửi phần đổi) | `timesheet.update`, `TimesheetView` |
+| 3.15 | **Năng lực còn lại** từng người: nút "Năng lực" ở sprint trong Backlog và trong dialog lập kế hoạch AI | `CapacityTable`, `boardModel.capacityRows` |
+
+## 2. Quyết định đáng biết
+
+- **Xoá sprint cần scope riêng** (`delete:sprint:jira-software`) và nằm sau công tắc `JIRA_AGILE_DELETE`: thiếu một scope trên app Atlassian là cả `/authorize` hỏng với mọi người. Chưa bật thì nút nói rõ thay vì làm hỏng đăng nhập.
+- **Sprint report không lấy được "cam kết" chuẩn của Jira** (không có API công khai) nên dựng lại từ changelog; điểm là điểm *hiện tại*, và việc bị gỡ khỏi sprint rồi không quay lại thì không còn được tìm thấy. Trang nói rõ hai giới hạn này.
+- **Không có tiến trình nền** nên ảnh chụp xu hướng ghi lúc có người mở trang; chưa làm Cloud Scheduler. Các ngày trước khi có tính năng này không có số.
+- **Quick filter chỉ đọc**; tạo/sửa quick filter vẫn ở Jira.
+- **Cờ ghi qua trường "Flagged"** vì API agile chỉ *đọc* cờ.
+- **Panel Backlog đếm theo cả board, không theo bộ lọc**, để còn chọn được Epic kế tiếp.
+- **Thanh chọn của Backlog vẫn chỉ hiện khi chọn ≥2 việc** (hiện ở 1 việc sẽ làm bảng dịch giữa hai cú nhấp của nhấp đúp — cùng lỗi đã gặp ở WBS).
+- **Thay đổi test cũ**: `board-kanban.e2e.mjs` nay chấp nhận nút "Thẻ" ở góc phải, facet "Phiên bản", và đo chiều cao thẻ không tính thẻ cha có sub-task.
+
+## 3. Chưa làm / còn tồn tại
+
+- **Chưa thử Jira thật** (checklist E). Chỗ chưa chắc nhất: gắn cờ (E3), scope xoá sprint (E9), `expand=changelog` trên `/search/jql` có kèm changelog đủ không (E13–E14), xoá ghi chú worklog (E21).
+- Chưa có Cloud Scheduler cho snapshot; chưa có test e2e cho so sánh báo cáo và liên kết (chỉ test đơn vị).
+- Control chart/CFD chỉ đọc tối đa 100 thay đổi gần nhất của mỗi việc (giới hạn của Jira).

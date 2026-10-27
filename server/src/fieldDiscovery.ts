@@ -100,6 +100,28 @@ export async function getSprintFieldId(jira: JiraClient, cloudId: string): Promi
   return value;
 }
 
+const flaggedCache = new Map<string, { value: string | null; expiresAt: number }>();
+
+/**
+ * The checkbox field behind Jira's "Add flag" (named "Flagged"; an issue is flagged when it holds the
+ * "Impediment" option). Null when the site has none. The agile API *reports* `flagged` on an issue
+ * but offers no way to set it, so a flag is written through this ordinary field.
+ */
+export async function getFlaggedFieldId(jira: JiraClient, cloudId: string): Promise<string | null> {
+  const hit = flaggedCache.get(cloudId);
+  if (hit && hit.expiresAt > Date.now()) return hit.value;
+  let value: string | null = null;
+  try {
+    const fields = await fieldsOf(jira, cloudId);
+    value = fields.find((f) => f.custom && f.name?.toLowerCase() === "flagged")?.id ?? null;
+  } catch (err) {
+    console.warn(`[fieldDiscovery] could not resolve Flagged field for ${cloudId}:`, err);
+    return null;
+  }
+  flaggedCache.set(cloudId, { value, expiresAt: Date.now() + TTL_MS });
+  return value;
+}
+
 /** Optional escape hatch for a site whose field is named something else. */
 export function startDateFieldOverride(): string | null {
   return process.env.JIRA_START_DATE_FIELD_ID?.trim() || null;

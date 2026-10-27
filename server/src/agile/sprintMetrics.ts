@@ -159,6 +159,8 @@ export interface Availability {
   /** Working days in the window minus declared absences. */
   days: number;
   hoursPerDay: number;
+  /** days × hoursPerDay — what this person can give the window. */
+  capacityHours: number;
 }
 
 /** Who can work how much in [from, to] — the resource tab's capacity and absences, applied to a sprint. */
@@ -175,7 +177,14 @@ export function availability(
     const profile = profiles.find((p) => p.accountId === m.accountId);
     const away = absences.filter((a) => a.accountId === m.accountId);
     const free = days.filter((d) => !away.some((a) => d >= a.from && d <= a.to)).length;
-    return { accountId: m.accountId, name: m.displayName, days: free, hoursPerDay: profile?.capacityHoursPerDay ?? defaultHours };
+    const hoursPerDay = profile?.capacityHoursPerDay ?? defaultHours;
+    return {
+      accountId: m.accountId,
+      name: m.displayName,
+      days: free,
+      hoursPerDay,
+      capacityHours: Math.round(free * hoursPerDay * 10) / 10,
+    };
   });
 }
 

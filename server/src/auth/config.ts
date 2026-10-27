@@ -102,9 +102,22 @@ export function agileEnabled(): boolean {
   return /^(on|true|1|yes)$/i.test(process.env.JIRA_AGILE?.trim() ?? "");
 }
 
+/**
+ * Deleting a sprint is its own granular scope. It is behind a second switch rather than folded into
+ * AGILE_SCOPES because a scope the Atlassian app lacks fails /authorize for *everyone*: enable it on
+ * both apps in the developer console first, then set JIRA_AGILE_DELETE=on. Until then the delete
+ * action says so instead of the whole login breaking.
+ */
+export const AGILE_DELETE_SCOPES = ["delete:sprint:jira-software"];
+
+export function agileDeleteEnabled(): boolean {
+  return agileEnabled() && /^(on|true|1|yes)$/i.test(process.env.JIRA_AGILE_DELETE?.trim() ?? "");
+}
+
 /** Everything /authorize asks for. A function, not a constant, so it reads JIRA_AGILE after dotenv. */
 export function requestedScopes(): string[] {
-  return agileEnabled() ? [...BASE_SCOPES, ...AGILE_SCOPES] : BASE_SCOPES;
+  if (!agileEnabled()) return BASE_SCOPES;
+  return [...BASE_SCOPES, ...AGILE_SCOPES, ...(agileDeleteEnabled() ? AGILE_DELETE_SCOPES : [])];
 }
 
 export const AUTHORIZE_URL = "https://auth.atlassian.com/authorize";

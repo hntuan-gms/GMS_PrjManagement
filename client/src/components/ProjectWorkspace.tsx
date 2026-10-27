@@ -45,13 +45,16 @@ interface Props {
   session: Session;
   onSwitchProject: () => void;
   onLogout: () => void;
+  /** A saved report to open on arrival, from a shared link. */
+  initialReportId?: string | null;
+  onInitialReportShown?: () => void;
 }
 
 const OVERLAY_WARNING =
   "Phụ thuộc, baseline và % hoàn thành được lưu tạm trên máy chủ và sẽ mất khi ứng dụng " +
   "được cập nhật. Ngày bắt đầu và ngày kết thúc vẫn được đồng bộ với Jira.";
 
-export default function ProjectWorkspace({ session, onSwitchProject, onLogout }: Props) {
+export default function ProjectWorkspace({ session, onSwitchProject, onLogout, initialReportId = null, onInitialReportShown }: Props) {
   const dialogs = useDialogs();
   // What this browser saw last time, shown at once while the fresh copy loads (tasksCache.ts).
   // Read once, on the first render; the workspace is keyed by project so it never goes stale.
@@ -83,7 +86,8 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
     `gms.taskFilter.${session.site.cloudId}.${session.project?.key ?? ""}`
   );
 
-  const [view, setView] = useState<WorkspaceView>("gantt");
+  // Opened from a link to a saved report (deepLink.ts): start on the Báo cáo tab, on that report.
+  const [view, setView] = useState<WorkspaceView>(initialReportId ? "report" : "gantt");
   // A filter the assistant set while the board was not showing. The board's own
   // filter is local to it and starts empty on every visit, so it is handed over
   // through here and taken once (BoardView's onIncomingFilterTaken).
@@ -153,7 +157,12 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
     setView(ev.view ?? (view === "gantt" || view === "board" || view === "resource" ? view : "gantt"));
   }
   // The report the Báo cáo tab should open on — set by a report card in the chat.
-  const [focusReportId, setFocusReportId] = useState<string | null>(null);
+  const [focusReportId, setFocusReportId] = useState<string | null>(initialReportId);
+  useEffect(() => {
+    if (initialReportId) onInitialReportShown?.();
+    // Once, on arrival: the link has done its job and must not reopen the report on a later remount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Multi-select, file-list style. `selectedIds` is the real selection;
@@ -986,6 +995,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout }:
           />
         ) : (
           <ProgressReportView
+            projectKey={session.project?.key ?? ""}
             tasks={tasks}
             focusReportId={focusReportId}
             canGenerate={session.staff}

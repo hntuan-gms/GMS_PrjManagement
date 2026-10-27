@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { api } from "../api";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ApiError, api } from "../api";
 import {
   EMPTY_FILTER,
   initials,
@@ -16,6 +16,17 @@ import {
   type Swimlane,
 } from "../boardModel";
 import { todayIso } from "../resourceAllocation";
+import {
+  CARD_FIELDS,
+  COLOR_SCHEMES,
+  isCustomized,
+  readCardOptions,
+  subtasksByParent,
+  withoutMergedSubtasks,
+  writeCardOptions,
+  type CardOptions,
+} from "../cardOptions";
+import { neededFieldsFrom } from "../transitionFields";
 import type {
   BoardColumn,
   BoardIssue,
@@ -28,6 +39,7 @@ import type {
   SprintPlanProposal,
   Task,
   TaskCreateInput,
+  TransitionField,
 } from "../types";
 import BacklogView, { type SectionId } from "./BacklogView";
 import { FacetAccordion, type Option } from "./FilterBar";
@@ -38,6 +50,8 @@ import KanbanBoard from "./KanbanBoard";
 import SprintHeader from "./SprintHeader";
 import { readViewCache, viewCacheScope, writeViewCache } from "../viewCache";
 import { CompleteSprintModal, CreateBoardModal, SprintFormModal, SprintPlanModal } from "./SprintModals";
+import { TransitionFieldsDialog } from "./TransitionFields";
+import { useDialogs } from "./dialogContext";
 
 interface Props {
   session: Session;
@@ -122,6 +136,52 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
   const [estimating, setEstimating] = useState(false);
   const [busy, setBusy] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
+  const dialogs = useDialogs();
+
+  // What a card shows and how it is tinted, remembered per board in this browser.
+  const cardScope = String(snapshot?.board?.id ?? "status");
+  const [cardOptions, setCardOptionsState] = useState<CardOptions>(() => readCardOptions(cardScope));
+  useEffect(() => {
+    setCardOptionsState(readCardOptions(cardScope));
+  }, [cardScope]);
+  function setCardOptions(next: CardOptions) {
+    setCardOptionsState(next);
+    writeCardOptions(cardScope, next);
+  }
+
+  // The cards the board's switched-on quick filters let through. Jira evaluates the JQL, so the
+  // answer arrives after the toggle; until then (and if Jira refuses the JQL) nothing is narrowed.
+  const quickIds = useMemo(() => [...filter.quick].sort().join(","), [filter.quick]);
+  const [quickResult, setQuickResult] = useState<{ ids: string; keys: Set<string> } | null>(null);
+  const [quickError, setQuickError] = useState<string | null>(null);
+  const boardIdNow = snapshot?.board?.id ?? null;
+  useEffect(() => {
+    if (!quickIds || boardIdNow === null) {
+      setQuickResult(null);
+      setQuickError(null);
+      return;
+    }
+    let alive = true;
+    api
+      .getQuickFilterKeys(boardIdNow, quickIds.split(",").map(Number))
+      .then((r) => {
+        if (!alive) return;
+        setQuickResult({ ids: quickIds, keys: new Set(r.keys) });
+        setQuickError(null);
+      })
+      .catch((e: Error) => {
+        if (!alive) return;
+        setQuickResult(null);
+        setQuickError(e.message);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [quickIds, boardIdNow, tasks]);
+  const quickKeys = quickResult?.ids === quickIds ? quickResult.keys : null;
+
+  // A status change that needs a box filled in (RootCause on the way to Done) asks for it once.
+  const [statusNeeds, setStatusNeeds] = useState<{ statusName: string; keys: string[]; fields: TransitionField[]; reason?: string } | null>(null);
 
   const today = useMemo(() => todayIso(), []);
   const clock = () => ({ today: todayIso(), tzOffsetMinutes: tzOffsetMinutes() });
@@ -225,11 +285,14 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
     if (scrum) return activeSprint ? snapshot.issues.filter((i) => i.sprintId === activeSprint.id) : [];
     return snapshot.issues;
   }, [snapshot, scrum, activeSprint]);
-  const shown = useMemo(() => scoped.filter((i) => matchesFilter(i, filter, today)), [scoped, filter, today]);
+  const shown = useMemo(() => scoped.filter((i) => matchesFilter(i, filter, today, quickKeys)), [scoped, filter, today, quickKeys]);
   const plannable = useMemo(
-    () => (snapshot ? snapshot.issues.filter((i) => !i.subtask && matchesFilter(i, filter, today)) : []),
-    [snapshot, filter, today]
+    () => (snapshot ? snapshot.issues.filter((i) => !i.subtask && matchesFilter(i, filter, today, quickKeys)) : []),
+    [snapshot, filter, today, quickKeys]
   );
+  // Sub-tasks come from the whole board, so a card lists its own even when a filter hides them.
+  const subtasks = useMemo(() => subtasksByParent(snapshot?.issues ?? []), [snapshot]);
+  const boardCards = useMemo(() => withoutMergedSubtasks(shown, cardOptions.mergeSubtasks), [shown, cardOptions.mergeSubtasks]);
 
   // Offered on every filter dropdown, built from the whole board so an option
   // doesn't vanish the moment it is ticked.
@@ -250,6 +313,7 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
         { value: "none", label: "Không thuộc Epic" },
       ],
       labels: plain(issues.flatMap((i) => i.labels)),
+      versions: plain([...(snapshot?.versions.map((v) => v.name) ?? []), ...issues.flatMap((i) => i.fixVersions)]),
       priorities: priorities.map((p) => ({ value: p, label: p === "none" ? "Không đặt" : p })),
     };
   }, [snapshot]);
@@ -396,6 +460,94 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
     );
   }
 
+  const getTasks = useCallback((keys: string[]) => keys.map((k) => taskByKey.get(k)).filter((t): t is Task => !!t), [taskByKey]);
+
+  function flagIssues(keys: string[], flagged: boolean) {
+    const set = new Set(keys);
+    return mutate(
+      patchIssues((i) => (set.has(i.key) ? { ...i, flagged } : i)),
+      async () => {
+        for (const k of keys) await api.setFlag(k, flagged);
+      },
+      { failure: flagged ? "Không gắn được cờ" : "Không bỏ được cờ" }
+    );
+  }
+
+  /** One by one — each is a Jira write that can notify people, and a burst would rate-limit. */
+  async function bulkAssign(keys: string[], accountId: string | null) {
+    const person = accountId ? users.find((u) => u.accountId === accountId) : null;
+    const set = new Set(keys);
+    await mutate(
+      patchIssues((i) => (set.has(i.key) ? { ...i, assigneeAccountId: accountId, assigneeName: person?.displayName ?? null } : i)),
+      async () => {
+        const failed: string[] = [];
+        for (const k of keys) {
+          try {
+            await api.updateTask(k, { assigneeAccountId: accountId });
+          } catch (e) {
+            if (e instanceof ApiError && e.status === 401) throw e;
+            failed.push(`${k} (${e instanceof Error ? e.message : "lỗi"})`);
+          }
+        }
+        if (failed.length > 0) throw new Error(failed.join("; "));
+      },
+      { failure: `Không gán được ${keys.length > 1 ? "một số việc" : keys[0]}`, touchesTasks: true }
+    );
+  }
+
+  /**
+   * Status change for one or many backlog rows. The menu already asked each workflow what it
+   * allows and for what it needs; a box only a validator demands is found here instead — the first
+   * refusal that names fields opens one dialog and the rest are sent again with the answer.
+   */
+  async function bulkStatus(statusName: string, keys: string[], values: Record<string, string> = {}) {
+    let needed: { fields: TransitionField[]; reason?: string } | null = null;
+    const waiting: string[] = [];
+    const failed: string[] = [];
+    await mutate(
+      null,
+      async () => {
+        for (const k of keys) {
+          try {
+            await api.updateTask(k, { statusTransition: statusName, ...(Object.keys(values).length > 0 ? { transitionFields: values } : {}) });
+          } catch (e) {
+            if (e instanceof ApiError && e.status === 401) throw e;
+            const n = neededFieldsFrom(e);
+            if (n) {
+              needed ??= n;
+              waiting.push(k);
+            } else {
+              failed.push(`${k} (${e instanceof Error ? e.message : "lỗi"})`);
+            }
+          }
+        }
+        if (failed.length > 0) throw new Error(failed.join("; "));
+      },
+      { failure: `Không đổi được trạng thái sang “${statusName}”`, touchesTasks: true }
+    );
+    if (needed && waiting.length > 0) {
+      const n = needed as { fields: TransitionField[]; reason?: string };
+      setStatusNeeds({ statusName, keys: waiting, fields: n.fields, reason: n.reason });
+    }
+  }
+
+  async function deleteSprint(sprint: Sprint) {
+    const inside = snapshot?.issues.filter((i) => i.sprintId === sprint.id && !i.subtask).length ?? 0;
+    const ok = await dialogs.confirm({
+      title: `Xoá ${sprint.name}?`,
+      message:
+        inside > 0
+          ? `${inside} việc trong sprint sẽ quay về backlog. Việc này xoá sprint trên Jira và không hoàn tác được.`
+          : "Sprint trống. Việc này xoá sprint trên Jira và không hoàn tác được.",
+      confirmLabel: "Xoá sprint",
+      tone: "danger",
+    });
+    if (!ok) return;
+    setBusy(true);
+    await mutate(null, () => api.deleteSprint(sprint.id), { failure: `Không xoá được ${sprint.name}` });
+    setBusy(false);
+  }
+
   async function createSprint() {
     if (!snapshot?.board) return;
     setBusy(true);
@@ -500,7 +652,7 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
   // The value pickers behind the "Bộ lọc" panel. The board's columns already are statuses, so
   // that facet is left out there — and offered again on the Backlog, which has no columns, or
   // while a status filter is on (the assistant can set one) so it can still be seen and cleared.
-  const facets: { key: "types" | "statuses" | "epics" | "labels" | "priorities"; label: string; options: Option[]; selected: Set<string> }[] = [
+  const facets: { key: "types" | "statuses" | "epics" | "labels" | "priorities" | "versions"; label: string; options: Option[]; selected: Set<string> }[] = [
     { key: "types", label: "Loại", options: filterOptions.types, selected: filter.types },
     ...(view === "backlog" || filter.statuses.size > 0
       ? [{ key: "statuses" as const, label: "Trạng thái", options: filterOptions.statuses, selected: filter.statuses }]
@@ -508,6 +660,9 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
     { key: "epics", label: "Epic", options: filterOptions.epics, selected: filter.epics },
     { key: "labels", label: "Nhãn", options: filterOptions.labels, selected: filter.labels },
     { key: "priorities", label: "Ưu tiên", options: filterOptions.priorities, selected: filter.priorities },
+    ...(filterOptions.versions.length > 0
+      ? [{ key: "versions" as const, label: "Phiên bản", options: filterOptions.versions, selected: filter.versions }]
+      : []),
   ];
   const facetsActive = facets.filter((f) => f.selected.size > 0).length;
   const chips = facets
@@ -647,6 +802,57 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
           {/* No refresh button of its own: the header's "Đồng bộ từ Jira" reloads the tasks,
               and this board re-reads whenever they change. A second ↻ here read as a
               different action and left people unsure which one to press. */}
+          {view === "board" && (
+            <Popover
+              className="tf-btn bd-cardbtn"
+              caret={false}
+              active={isCustomized(cardOptions)}
+              menuLabel="Tuỳ chọn thẻ"
+              menuClassName="tf-menu bd-card-menu"
+              title="Chọn thông tin hiện trên thẻ và màu thẻ"
+              label={
+                <>
+                  <Icon name="layers" size={14} />
+                  Thẻ
+                </>
+              }
+            >
+              <div className="bd-card-opts">
+                <div className="menu-heading">Hiện trên thẻ</div>
+                {CARD_FIELDS.map((f) => (
+                  <label key={f.id} className="bd-card-opt">
+                    <input
+                      type="checkbox"
+                      checked={cardOptions.fields[f.id]}
+                      onChange={(e) => setCardOptions({ ...cardOptions, fields: { ...cardOptions.fields, [f.id]: e.target.checked } })}
+                    />
+                    {f.label}
+                  </label>
+                ))}
+                <label className="bd-card-opt">
+                  <input
+                    type="checkbox"
+                    checked={cardOptions.mergeSubtasks}
+                    onChange={(e) => setCardOptions({ ...cardOptions, mergeSubtasks: e.target.checked })}
+                  />
+                  Gộp sub-task vào thẻ cha
+                </label>
+                <div className="menu-sep" role="separator" />
+                <div className="menu-heading">Màu thẻ</div>
+                {COLOR_SCHEMES.map((c) => (
+                  <label key={c.id} className="bd-card-opt">
+                    <input
+                      type="radio"
+                      name="bd-card-color"
+                      checked={cardOptions.colorBy === c.id}
+                      onChange={() => setCardOptions({ ...cardOptions, colorBy: c.id })}
+                    />
+                    {c.label}
+                  </label>
+                ))}
+              </div>
+            </Popover>
+          )}
           {boardUrl && (
             <a className="bd-link" href={boardUrl} target="_blank" rel="noreferrer">
               Mở trên Jira
@@ -664,6 +870,11 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
               Tạo board Scrum
             </button>
           )}
+        </div>
+      )}
+      {quickError && (
+        <div className="bd-fallback" role="status">
+          Jira không chạy được bộ lọc nhanh nên chưa lọc: {quickError}
         </div>
       )}
       {snapshot.truncated && <div className="bd-fallback">Board có quá nhiều việc — chỉ hiển thị 800 việc đầu theo thứ hạng.</div>}
@@ -721,6 +932,26 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
         <button className={`bd-chipbtn ${filter.onlyOverdue ? "is-on" : ""}`} onClick={() => setFilter({ ...filter, onlyOverdue: !filter.onlyOverdue })}>
           Quá hạn
         </button>
+        {/* The board's own quick filters (Board settings → Quick filters): Jira runs their JQL. */}
+        {snapshot.quickFilters.map((q) => {
+          const on = filter.quick.has(String(q.id));
+          return (
+            <button
+              key={q.id}
+              className={`bd-chipbtn bd-quick-filter ${on ? "is-on" : ""}`}
+              aria-pressed={on}
+              title={q.description ?? `Bộ lọc nhanh của board: ${q.name}`}
+              onClick={() => {
+                const next = new Set(filter.quick);
+                if (on) next.delete(String(q.id));
+                else next.add(String(q.id));
+                setFilter({ ...filter, quick: next });
+              }}
+            >
+              {q.name}
+            </button>
+          );
+        })}
         <Popover
           className="tf-btn tf-add"
           caret={false}
@@ -817,7 +1048,10 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
             // Folded columns are remembered per board, so a board switch starts from its own.
             key={snapshot.board?.id ?? "status"}
             snapshot={snapshot}
-            issues={shown}
+            issues={boardCards}
+            options={cardOptions}
+            subtasks={subtasks}
+            onFlag={(key, flagged) => void flagIssues([key], flagged)}
             swimlane={swimlane}
             today={today}
             onMove={moveCard}
@@ -843,6 +1077,14 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
           onCompleteSprint={(sprint) => setModal({ kind: "complete", sprint })}
           onEditSprint={(sprint) => setModal({ kind: "edit", sprint })}
           onPlanSprint={openPlan}
+          onLoadCapacity={(sprint) => api.getSprintCapacity(snapshot.board!.id, sprint.id, clock())}
+          filter={filter}
+          onFilterChange={setFilter}
+          getTasks={getTasks}
+          onBulkAssign={(keys, accountId) => void bulkAssign(keys, accountId)}
+          onBulkStatus={(statusName, keys, values) => void bulkStatus(statusName, keys, values)}
+          onBulkFlag={(keys, flagged) => void flagIssues(keys, flagged)}
+          onDeleteSprint={(sprint) => void deleteSprint(sprint)}
           onSetEstimate={setEstimate}
           onQuickCreate={quickCreate}
           members={members}
@@ -866,6 +1108,20 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
         />
       )}
 
+      {statusNeeds && (
+        <TransitionFieldsDialog
+          title={`Chuyển ${statusNeeds.keys.length} việc sang “${statusNeeds.statusName}”`}
+          message={statusNeeds.reason ?? "Quy trình Jira yêu cầu nhập thông tin này trước khi chuyển."}
+          fields={statusNeeds.fields}
+          applyLabel="Chuyển"
+          onCancel={() => setStatusNeeds(null)}
+          onApply={(values) => {
+            const { statusName, keys } = statusNeeds;
+            setStatusNeeds(null);
+            void bulkStatus(statusName, keys, values);
+          }}
+        />
+      )}
       {modal?.kind === "createBoard" && (
         <CreateBoardModal
           projectKey={projectKey}

@@ -1,10 +1,14 @@
-import { useState, type DragEvent, type MouseEvent } from "react";
-import { canonicalIssueType, localDate, shortDate, totalWeight, velocityAverage, weightOf } from "../boardModel";
+import { useMemo, useState, type DragEvent, type MouseEvent } from "react";
+import { canonicalIssueType, capacityRows, localDate, shortDate, totalWeight, velocityAverage, weightOf, type BoardFilter } from "../boardModel";
+import BacklogPanels from "./BacklogPanels";
+import BulkStatusMenu from "./BulkStatusMenu";
+import CapacityTable from "./CapacityTable";
+import { Icon } from "./Icons";
 import IssueTypeIcon from "./IssueTypeIcon";
 import PriorityMark from "./PriorityMark";
 import AssigneePicker, { type Member } from "./AssigneePicker";
 import QuickCreateOptions, { type QuickOptions } from "./QuickCreateOptions";
-import type { BoardIssue, BoardSnapshot, EstimateSuggestion, Sprint } from "../types";
+import type { BoardIssue, BoardSnapshot, EstimateSuggestion, Sprint, SprintCapacity, Task } from "../types";
 
 /**
  * Backlog + sprint planning, the Scrum half of the Bảng tab.
@@ -36,6 +40,18 @@ interface Props {
   onCompleteSprint: (sprint: Sprint) => void;
   onEditSprint: (sprint: Sprint) => void;
   onPlanSprint: (sprint: Sprint) => void;
+  /** Who can give how many hours to the sprint's window (not AI, open to every project member). */
+  onLoadCapacity: (sprint: Sprint) => Promise<SprintCapacity>;
+  /** The Epic / Phiên bản panel narrows the same filter the toolbar edits. */
+  filter: BoardFilter;
+  onFilterChange: (f: BoardFilter) => void;
+  /** The workspace's tasks for these keys — what the status menu asks the workflow about. */
+  getTasks: (keys: string[]) => Task[];
+  /** Bulk edits over the selection; each runs one issue at a time on the board's side. */
+  onBulkAssign: (keys: string[], accountId: string | null) => void;
+  onBulkStatus: (statusName: string, keys: string[], values: Record<string, string>) => void;
+  onBulkFlag: (keys: string[], flagged: boolean) => void;
+  onDeleteSprint: (sprint: Sprint) => void;
   onSetEstimate: (key: string, value: number | null) => void;
   onQuickCreate: (summary: string, to: SectionId, opts: QuickOptions) => Promise<void>;
   members: Member[];
@@ -62,10 +78,14 @@ export default function BacklogView(props: Props) {
   const [hint, setHint] = useState<Hint | null>(null);
   const [collapsed, setCollapsed] = useState<Set<SectionId>>(new Set());
   const [editing, setEditing] = useState<string | null>(null);
+  // The sprint whose capacity panel is open, with what the server said for it; one at a time.
+  const [capacityOpen, setCapacityOpen] = useState<{ sprintId: number; data: SprintCapacity | null; error: string | null } | null>(null);
   const [creatingIn, setCreatingIn] = useState<SectionId | null>(null);
   const [draft, setDraft] = useState("");
   const [quickOpts, setQuickOpts] = useState<QuickOptions>({ issueType: props.createTypes[0] ?? "Task", assigneeAccountId: null });
 
+  const { getTasks } = props;
+  const selectedTasks = useMemo(() => getTasks([...selected]), [selected, getTasks]);
   const budget = velocityAverage(snapshot);
   const sprints = snapshot.sprints;
   const firstFuture = sprints.find((s) => s.state === "future");
@@ -144,6 +164,21 @@ export default function BacklogView(props: Props) {
     props.onMove(keys, section, beforeKey);
   }
 
+  async function toggleCapacity(sprint: Sprint) {
+    if (capacityOpen?.sprintId === sprint.id) {
+      setCapacityOpen(null);
+      return;
+    }
+    setCapacityOpen({ sprintId: sprint.id, data: null, error: null });
+    try {
+      const data = await props.onLoadCapacity(sprint);
+      setCapacityOpen((cur) => (cur?.sprintId === sprint.id ? { sprintId: sprint.id, data, error: null } : cur));
+    } catch (e) {
+      const error = e instanceof Error ? e.message : "Không tải được năng lực.";
+      setCapacityOpen((cur) => (cur?.sprintId === sprint.id ? { sprintId: sprint.id, data: null, error } : cur));
+    }
+  }
+
   function toggleSection(id: SectionId) {
     setCollapsed((prev) => {
       const next = new Set(prev);
@@ -161,7 +196,9 @@ export default function BacklogView(props: Props) {
   }
 
   return (
-    <div className="bl">
+    <div className="bl bl-layout">
+      <BacklogPanels snapshot={snapshot} unit={unit} filter={props.filter} onFilterChange={props.onFilterChange} />
+      <div className="bl-main">
       {selected.size > 1 && (
         <div className="bl-selection">
           Đã chọn <b>{selected.size}</b> việc
@@ -170,7 +207,36 @@ export default function BacklogView(props: Props) {
               · {totalWeight(issues.filter((i) => selected.has(i.key)), snapshot)} {unit}
             </span>
           )}
-          <span className="bd-muted">— kéo để chuyển cả nhóm</span>
+          <span className="bd-muted">— kéo để chuyển cả nhóm, hoặc:</span>
+          <select
+            className="bl-bulk-assign"
+            value=""
+            aria-label="Gán các việc đã chọn cho"
+            onChange={(e) => {
+              if (e.target.value) props.onBulkAssign([...selected], e.target.value === "__none__" ? null : e.target.value);
+            }}
+          >
+            <option value="">Gán cho…</option>
+            <option value="__none__">— Bỏ gán —</option>
+            {props.members.map((m) => (
+              <option key={m.accountId} value={m.accountId}>
+                {m.displayName}
+              </option>
+            ))}
+          </select>
+          <BulkStatusMenu
+            tasks={selectedTasks}
+            className="bl-bulk-btn"
+            placement="bottom"
+            label="Đổi trạng thái…"
+            onApply={(statusName, ids, values) => props.onBulkStatus(statusName, ids, values)}
+          />
+          <button className="bl-bulk-btn" onClick={() => props.onBulkFlag([...selected], true)} title="Gắn cờ các việc đã chọn">
+            Gắn cờ
+          </button>
+          <button className="bl-bulk-btn" onClick={() => props.onBulkFlag([...selected], false)} title="Bỏ cờ các việc đã chọn">
+            Bỏ cờ
+          </button>
           <button className="link-btn" onClick={() => setSelected(new Set())}>
             Bỏ chọn
           </button>
@@ -239,9 +305,24 @@ export default function BacklogView(props: Props) {
                   Hoàn thành sprint
                 </button>
               )}
+              {sprint && sprint.state !== "closed" && (
+                <button
+                  className={`bl-action ${capacityOpen?.sprintId === sprint.id ? "is-on" : ""}`}
+                  onClick={() => toggleCapacity(sprint)}
+                  aria-expanded={capacityOpen?.sprintId === sprint.id}
+                  title="Mỗi người còn bao nhiêu giờ trong sprint này"
+                >
+                  Năng lực
+                </button>
+              )}
               {sprint && (
                 <button className="bl-icon" onClick={() => props.onEditSprint(sprint)} title="Sửa sprint" aria-label="Sửa sprint">
                   ✎
+                </button>
+              )}
+              {sprint?.state === "future" && (
+                <button className="bl-icon" onClick={() => props.onDeleteSprint(sprint)} title="Xoá sprint (việc trong sprint về backlog)" aria-label="Xoá sprint">
+                  <Icon name="trash" size={14} />
                 </button>
               )}
               {!sprint && (
@@ -264,6 +345,26 @@ export default function BacklogView(props: Props) {
             </header>
 
             {sprint?.goal && !isCollapsed && <div className="bl-goal">🎯 {sprint.goal}</div>}
+
+            {sprint && capacityOpen?.sprintId === sprint.id && !isCollapsed && (
+              <div className="bl-capacity">
+                {capacityOpen.error && <div className="rv-notice rv-notice-error">{capacityOpen.error}</div>}
+                {!capacityOpen.data && !capacityOpen.error && <span className="bd-muted">Đang tính năng lực…</span>}
+                {capacityOpen.data && (
+                  <CapacityTable
+                    // Unfiltered: a person filter on the list must not make someone look idle.
+                    rows={capacityRows(
+                      capacityOpen.data.team,
+                      snapshot.issues.filter((i) => i.sprintId === sprint.id && !i.subtask),
+                      snapshot
+                    )}
+                    window={capacityOpen.data.window}
+                    unit={props.unit}
+                    inHours={snapshot.estimation?.unit === "hours"}
+                  />
+                )}
+              </div>
+            )}
 
             {!isCollapsed && (
               <div className="bl-rows">
@@ -310,7 +411,20 @@ export default function BacklogView(props: Props) {
                             {issue.epicSummary}
                           </span>
                         )}
-                        <span className={`bl-status bl-status-${issue.statusCategory}`}>{issue.statusName}</span>
+                        <span onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
+                          {props.getTasks([issue.key]).length > 0 ? (
+                            <BulkStatusMenu
+                              tasks={props.getTasks([issue.key])}
+                              className={`bl-status bl-status-${issue.statusCategory} bl-status-btn`}
+                              placement="bottom"
+                              title="Đổi trạng thái theo quy trình của Jira"
+                              label={issue.statusName}
+                              onApply={(statusName, ids, values) => props.onBulkStatus(statusName, ids, values)}
+                            />
+                          ) : (
+                            <span className={`bl-status bl-status-${issue.statusCategory}`}>{issue.statusName}</span>
+                          )}
+                        </span>
                         <PriorityMark priority={issue.priority} />
                         <AssigneePicker
                           issueType={issue.issueType}
@@ -412,6 +526,7 @@ export default function BacklogView(props: Props) {
           </section>
         );
       })}
+      </div>
     </div>
   );
 }

@@ -182,11 +182,13 @@ export class JiraClient {
   }
 
   /** Every match, paged — or at most `limit`, for a picker that only shows the first few. */
-  async searchIssues(jql: string, fields: string[], limit?: number): Promise<any[]> {
+  async searchIssues(jql: string, fields: string[], limit?: number, opts?: { expand?: string }): Promise<any[]> {
     const issues: any[] = [];
     let nextPageToken: string | undefined;
     do {
       const body: Record<string, unknown> = { jql, fields, maxResults: Math.min(100, limit ?? 100) };
+      // "changelog" brings each issue's history along (capped by Jira at its newest 100 entries).
+      if (opts?.expand) body.expand = opts.expand;
       if (nextPageToken) body.nextPageToken = nextPageToken;
       const page = await this.request<{ issues: any[]; nextPageToken?: string }>(
         "/rest/api/3/search/jql",
@@ -453,6 +455,26 @@ export class JiraClient {
     return out.slice(0, limit);
   }
 
+  /** The board's own quick filters ("Chỉ việc của tôi", "Bug"…) — a name and a JQL each. Read scope only. */
+  async getBoardQuickFilters(boardId: number): Promise<Array<{ id: number; name: string; jql: string; description?: string; position?: number }>> {
+    const out: Array<{ id: number; name: string; jql: string; description?: string; position?: number }> = [];
+    let startAt = 0;
+    for (let page = 0; page < 5; page++) {
+      const res = await this.request<{ values?: typeof out; isLast?: boolean }>(
+        `/rest/agile/1.0/board/${boardId}/quickfilter?maxResults=50&startAt=${startAt}`
+      );
+      out.push(...(res.values ?? []));
+      if (res.isLast || (res.values?.length ?? 0) === 0) break;
+      startAt += res.values!.length;
+    }
+    return out.sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+  }
+
+  /** Needs `delete:sprint:jira-software` — see AGILE_DELETE_SCOPES, behind JIRA_AGILE_DELETE. */
+  async deleteSprint(sprintId: number): Promise<void> {
+    await this.request(`/rest/agile/1.0/sprint/${sprintId}`, { method: "DELETE" });
+  }
+
   async createSprint(input: { name: string; originBoardId: number; goal?: string; startDate?: string; endDate?: string }): Promise<any> {
     return this.request(`/rest/agile/1.0/sprint`, { method: "POST", body: JSON.stringify(input) });
   }
@@ -604,6 +626,28 @@ export class JiraClient {
         ...(input.comment ? { comment: textToAdf(input.comment) } : {}),
       }),
     });
+  }
+
+  /**
+   * Only what is in `patch` changes — Jira's PUT leaves an omitted field as it was, which is how
+   * editing the hours keeps the original start time of day. A `comment` of "" clears it (an
+   * empty ADF doc), since leaving it out would be indistinguishable from "unchanged".
+   */
+  async updateWorklog(
+    key: string,
+    worklogId: string,
+    patch: { seconds?: number; started?: string; comment?: string | null }
+  ): Promise<any> {
+    const body: Record<string, unknown> = {};
+    if (patch.seconds !== undefined) body.timeSpentSeconds = patch.seconds;
+    if (patch.started !== undefined) body.started = patch.started;
+    if (patch.comment !== undefined) {
+      body.comment = patch.comment ? textToAdf(patch.comment) : { type: "doc", version: 1, content: [] };
+    }
+    return this.request(
+      `/rest/api/3/issue/${encodeURIComponent(key)}/worklog/${encodeURIComponent(worklogId)}?adjustEstimate=leave`,
+      { method: "PUT", body: JSON.stringify(body) }
+    );
   }
 
   async deleteWorklog(key: string, worklogId: string): Promise<void> {

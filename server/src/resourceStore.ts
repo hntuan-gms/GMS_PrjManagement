@@ -1,4 +1,5 @@
 import { db } from "./db/pool.js";
+import { badRequest, notFound } from "./errors.js";
 
 /**
  * The resource pool: who is on the team, how much of a day each can actually
@@ -174,6 +175,36 @@ export async function addAbsence(
      VALUES ($1, $2, $3, $4, $5)
      RETURNING id, account_id, from_date, to_date, reason`,
     [cloudId, accountId, from, to, reason]
+  );
+  const r = rows[0];
+  return { id: String(r.id), accountId: r.account_id, from: r.from_date, to: r.to_date, reason: r.reason };
+}
+
+/**
+ * Change one leave period. Only fields present in `patch` move (`reason: null` clears the note).
+ * The combined range is checked here rather than left to the table's CHECK: moving just the end
+ * date to before the stored start would otherwise surface as a 500 from Postgres.
+ */
+export async function updateAbsence(
+  cloudId: string,
+  id: string,
+  patch: { from?: string; to?: string; reason?: string | null }
+): Promise<ResourceAbsence> {
+  const { rows: found } = await db().query<AbsenceRow>(
+    `SELECT id, account_id, from_date, to_date, reason FROM resource_absence WHERE cloud_id = $1 AND id = $2`,
+    [cloudId, id]
+  );
+  if (found.length === 0) throw notFound("Không tìm thấy kỳ nghỉ này.");
+  const current = found[0];
+  const from = patch.from ?? current.from_date;
+  const to = patch.to ?? current.to_date;
+  if (to < from) throw badRequest("Ngày kết thúc phải sau hoặc bằng ngày bắt đầu.");
+  const reason = patch.reason === undefined ? current.reason : patch.reason;
+  const { rows } = await db().query<AbsenceRow>(
+    `UPDATE resource_absence SET from_date = $3, to_date = $4, reason = $5
+       WHERE cloud_id = $1 AND id = $2
+       RETURNING id, account_id, from_date, to_date, reason`,
+    [cloudId, id, from, to, reason]
   );
   const r = rows[0];
   return { id: String(r.id), accountId: r.account_id, from: r.from_date, to: r.to_date, reason: r.reason };

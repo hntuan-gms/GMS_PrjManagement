@@ -206,6 +206,55 @@ export class TimesheetService {
     };
   }
 
+  /**
+   * Edit one of the signed-in user's own worklogs (Jira refuses anyone else's, and says so).
+   * `date` is sent only when the day actually changed: then the work is re-stamped 09:00 like
+   * a new one; otherwise `started` is left out and the original time of day survives.
+   */
+  async update(
+    issueKey: string,
+    worklogId: string,
+    patch: { date?: string; hours?: number; comment?: string | null; tz: number }
+  ): Promise<WorklogEntry> {
+    this.assertKey(issueKey);
+    const body: { seconds?: number; started?: string; comment?: string | null } = {};
+    if (patch.hours !== undefined) {
+      const seconds = Math.round(patch.hours * 3600);
+      if (!Number.isFinite(seconds) || seconds < 60) throw badRequest("Số giờ phải từ 1 phút trở lên.");
+      if (seconds > 24 * 3600) throw badRequest("Một lần ghi không quá 24 giờ.");
+      body.seconds = seconds;
+    }
+    if (patch.date !== undefined) {
+      if (!ISO_DATE.test(patch.date)) throw badRequest("Ngày ghi giờ phải ở dạng YYYY-MM-DD.");
+      body.started = `${patch.date}T09:00:00.000${jiraOffset(patch.tz)}`;
+    }
+    if (patch.comment !== undefined) body.comment = patch.comment?.trim() || "";
+    if (Object.keys(body).length === 0) throw badRequest("Không có gì để sửa.");
+
+    let w: any;
+    try {
+      w = await this.jira.updateWorklog(issueKey, worklogId, body);
+    } catch (err) {
+      if (err instanceof JiraApiError && (err.status === 400 || err.status === 403)) {
+        throw badRequest(`Jira không cho sửa giờ này của ${issueKey}: ${err.summary || "chỉ sửa được giờ do chính bạn ghi"}.`);
+      }
+      throw err;
+    }
+    const issue = await this.jira.getIssue(issueKey);
+    return {
+      id: String(w.id ?? worklogId),
+      issueKey,
+      summary: issue.fields?.summary ?? issueKey,
+      issueType: issue.fields?.issuetype?.name ?? "Task",
+      authorAccountId: w.author?.accountId ?? this.ctx.accountId,
+      authorName: w.author?.displayName ?? "",
+      date: localDateOf(String(w.started ?? ""), patch.tz) ?? patch.date ?? "",
+      hours: round2((Number(w.timeSpentSeconds) || 0) / 3600),
+      comment: w.comment ? adfToText(w.comment).trim() || null : null,
+      mine: true,
+    };
+  }
+
   async remove(issueKey: string, worklogId: string): Promise<void> {
     this.assertKey(issueKey);
     await this.jira.deleteWorklog(issueKey, worklogId);

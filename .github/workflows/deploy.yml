@@ -39,6 +39,9 @@ name: Deploy to Cloud Run
 #                              FIRST: requesting a scope the app lacks fails /authorize,
 #                              i.e. nobody can log in. Unset = the Bảng tab runs as a
 #                              status board with no sprints.
+#     JIRA_AGILE_DELETE        optional, only with JIRA_AGILE=on; "on" also requests
+#                              delete:sprint:jira-software (the "Xoá sprint" button).
+#                              Same rule: enable that scope on BOTH apps first.
 #   Secret Manager secrets (NOT GitHub secrets):
 #     atlassian-client-secret  the OAuth app's client secret
 #     session-encryption-keys  "k1:<32 random bytes, base64url>" — see server/.env.example
@@ -136,6 +139,7 @@ jobs:
             GEMINI_PRICING=${{ vars.GEMINI_PRICING }}
             GEMINI_PRICING_CURRENCY=${{ vars.GEMINI_PRICING_CURRENCY }}
             JIRA_AGILE=${{ vars.JIRA_AGILE }}
+            JIRA_AGILE_DELETE=${{ vars.JIRA_AGILE_DELETE }}
           # The runtime service account needs roles/secretmanager.secretAccessor on
           # both. Rotate session-encryption-keys by PREPENDING a new key — replacing
           # the list outright logs every user out immediately.

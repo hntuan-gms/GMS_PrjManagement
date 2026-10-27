@@ -1,7 +1,9 @@
 import { Router, type Request } from "express";
 import { requireProject } from "../auth/middleware.js";
 import { BoardService } from "../agile/boardService.js";
+import { availability, plannedWindow } from "../agile/sprintMetrics.js";
 import { badRequest } from "../errors.js";
+import * as resources from "../resourceStore.js";
 
 export const boardRouter = Router();
 
@@ -25,6 +27,15 @@ function intParam(raw: unknown, name: string): number {
   const n = Number(raw);
   if (!Number.isInteger(n) || n <= 0) throw badRequest(`Thiếu hoặc sai ${name}.`);
   return n;
+}
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** The browser's local date and UTC offset — sprint days are calendar days where the team is. */
+export function clock(body: any): { today: string; offset: number } {
+  const today = typeof body?.today === "string" && ISO_DATE.test(body.today) ? body.today : new Date().toISOString().slice(0, 10);
+  const offset = Number(body?.tzOffsetMinutes);
+  return { today, offset: Number.isFinite(offset) && Math.abs(offset) <= 14 * 60 ? offset : 0 };
 }
 
 const ISO_DATETIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
@@ -182,6 +193,78 @@ boardRouter.put("/issues/:key/estimate", async (req, res, next) => {
       b.unit === "hours" ? "hours" : "points"
     );
     res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Who can give how many hours to a sprint's window: working days minus declared leave, times each
+ * person's hours a day. Not AI and not staff-only — it is capacity arithmetic over the same
+ * `resource_profile`/`resource_absence` the timesheet already shows every project member.
+ */
+boardRouter.get("/sprints/:id/capacity", async (req, res, next) => {
+  try {
+    const sprintId = intParam(req.params.id, "sprint");
+    const { today, offset } = clock({ today: req.query.today, tzOffsetMinutes: req.query.tz });
+    const service = boardServiceFor(req);
+    const snapshot = await service.snapshot(intParam(req.query.boardId, "boardId"));
+    const target = snapshot.sprints.find((s) => s.id === sprintId);
+    if (snapshot.mode !== "agile" || !target) throw badRequest("Chỉ xem được năng lực của sprint đang chạy hoặc chưa bắt đầu.");
+
+    const window = plannedWindow(snapshot, target, today, offset);
+    const { session, taskService } = req.auth!;
+    const [members, profiles, absences] = await Promise.all([
+      taskService!.listMembers().then((m) => m.users),
+      resources.listProfiles(session.cloudId).catch(() => []),
+      resources.listAbsences(session.cloudId).catch(() => []),
+    ]);
+    res.json({
+      window,
+      team: availability(members, profiles, absences, window.start, window.end, resources.DEFAULT_CAPACITY_HOURS),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** The cards the board's chosen quick filters let through — `ids=1,2` are ANDed, as on Jira's own board. */
+boardRouter.get("/quickfilters/keys", async (req, res, next) => {
+  try {
+    const ids = String(req.query.ids ?? "")
+      .split(",")
+      .map((n) => Number(n))
+      .filter((n) => Number.isInteger(n) && n > 0)
+      .slice(0, 10);
+    const keys = await boardServiceFor(req).quickFilterKeys(intParam(req.query.boardId, "boardId"), ids);
+    res.json({ keys });
+  } catch (err) {
+    next(err);
+  }
+});
+
+boardRouter.put("/issues/:key/flag", async (req, res, next) => {
+  try {
+    await boardServiceFor(req).setFlag(req.params.key, req.body?.flagged !== false);
+    res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+boardRouter.delete("/sprints/:id", async (req, res, next) => {
+  try {
+    res.json(await boardServiceFor(req).deleteSprint(intParam(req.params.id, "sprint")));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Sprint report + burnup for one sprint — committed vs added vs completed, from the changelog. */
+boardRouter.get("/sprints/:id/report", async (req, res, next) => {
+  try {
+    const { today, offset } = clock({ today: req.query.today, tzOffsetMinutes: req.query.tz });
+    res.json(await boardServiceFor(req).sprintReport(intParam(req.params.id, "sprint"), offset, today));
   } catch (err) {
     next(err);
   }
