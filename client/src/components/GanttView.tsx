@@ -193,13 +193,15 @@ const MIN_COLUMN_WIDTH = 26;
 const MAX_COLUMN_WIDTH = 260;
 const MIN_PIXELS_PER_DAY = MIN_COLUMN_WIDTH / DAYS_PER_COLUMN[ViewMode.Month];
 const MAX_PIXELS_PER_DAY = MAX_COLUMN_WIDTH / DAYS_PER_COLUMN[ViewMode.Day];
-// The pixels-per-day each mode's button jumps to — chosen to match this file's
-// old fixed per-mode column widths (60/160/200), so clicking a button lands
-// exactly where it always used to.
+// The pixels-per-day each mode's button jumps to. Each must land *inside its
+// own mode's band* in pickScale, or the button highlights a different mode:
+// Month's old 200px column (6.6 px/day) made a Week column 46px wide, which
+// still fits, so pickScale kept answering Week. Month therefore sits where a
+// Week column would be under MIN_COLUMN_WIDTH (< 3.7 px/day).
 const DEFAULT_PIXELS_PER_DAY: Record<ViewMode, number> = {
   [ViewMode.Day]: 60,
   [ViewMode.Week]: 160 / DAYS_PER_COLUMN[ViewMode.Week],
-  [ViewMode.Month]: 200 / DAYS_PER_COLUMN[ViewMode.Month],
+  [ViewMode.Month]: 100 / DAYS_PER_COLUMN[ViewMode.Month],
 } as Record<ViewMode, number>;
 // How much one "notch" of trackpad pinch or Ctrl+wheel changes the zoom — tuned
 // so a full pinch gesture (deltaY in the low hundreds) crosses roughly one
