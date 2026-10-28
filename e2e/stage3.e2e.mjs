@@ -100,13 +100,13 @@ await step("kỹ năng + ghi chú lưu cùng một nút 'Lưu thay đổi'", asy
   assert.equal(put.b.notes, "chỉ làm buổi sáng");
 });
 await step("nút kỳ trước/sau dời cả khoảng; 'Tháng này' (trong menu Khoảng) + cột theo tháng", async () => {
-  const from0 = await page.locator(".rv-range input[type=date]").nth(0).inputValue();
+  const from0 = await page.locator(".rv-scrub").getAttribute("data-from");
   await page.locator(".rv-step[aria-label='Kỳ sau']").click();
-  const from1 = await page.locator(".rv-range input[type=date]").nth(0).inputValue();
+  const from1 = await page.locator(".rv-scrub").getAttribute("data-from");
   assert.ok(from1 > from0, `${from0} → ${from1}`);
   await page.locator(".rv-preset").click();
-  await page.locator("[role=menuitemradio]", { hasText: "Tháng này" }).click();
-  assert.ok((await page.locator(".rv-range input[type=date]").nth(0).inputValue()).endsWith("-01"));
+  await page.locator(".rv-preset-item", { hasText: "Tháng này" }).click();
+  assert.ok((await page.locator(".rv-scrub").getAttribute("data-from")).endsWith("-01"));
   assert.ok((await page.locator(".rv-preset").textContent()).includes("Tháng này"), "nhãn nút phải theo khoảng đang chọn");
   await page.locator(".rv-granularity").selectOption("month");
   await page.waitForSelector(".rv-grid-week");

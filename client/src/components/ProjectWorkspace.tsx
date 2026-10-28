@@ -8,7 +8,7 @@ import { toBoardFilter, toTaskFilter, type ViewFilterSpec } from "../viewFilter"
 import { makeEntry, pushEntry, undoSteps, type UndoEntry } from "../undo";
 import { addDays, buildResourceLoad, defaultWindow, todayIso } from "../resourceAllocation";
 import { loadTasksCache, saveTasksCache, tasksCacheKey } from "../tasksCache";
-import { viewCacheScope } from "../viewCache";
+import { dropViewCache, readViewCache, viewCacheScope, writeViewCache } from "../viewCache";
 import type {
   BulkTaskCreateResult,
   DependencyType,
@@ -73,13 +73,22 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
   // Capacity and absences. Held here rather than inside ResourceView so the
   // toolbar can badge overload without mounting the tab, and so switching tabs
   // does not refetch it.
-  const [pool, setPool] = useState<ResourcePool | null>(null);
+  //
+  // The last pool this account got for this project (viewCache.ts, survives F5) is the starting
+  // point. Only an *allowed* answer is ever stored, so what it can do is show the tab at once to
+  // someone who had access a moment ago; the server still refuses, and the fresh answer below
+  // takes the tab away again if access was withdrawn. Without it the tab waited on the member
+  // lookup against Jira — the slowest call on the page — and popped in last, shoving "Báo cáo"
+  // aside, on every reload.
+  const viewScope = viewCacheScope(session.site.cloudId, session.user.accountId, session.project?.key ?? "");
+  const [cachedPool] = useState(() => readViewCache<ResourcePool>(viewScope, "resourcePool", ""));
+  const [pool, setPool] = useState<ResourcePool | null>(cachedPool ?? null);
   const [poolError, setPoolError] = useState<string | null>(null);
   // Whether this user may see the resource tab at all. The server decides (only
   // project admins get an accurate member list — see requireResourceAccess), and
   // answers it through the pool fetch, so "checking" hides the tab until then
   // rather than flashing it at someone who is about to be refused.
-  const [resourceAccess, setResourceAccess] = useState<"checking" | "allowed" | "denied">("checking");
+  const [resourceAccess, setResourceAccess] = useState<"checking" | "allowed" | "denied">(cachedPool ? "allowed" : "checking");
 
   // One filter for the Gantt and the resource heatmap, remembered per project.
   const [taskFilter, setTaskFilter] = useTaskFilter(
@@ -247,11 +256,14 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
         if (!alive) return;
         setPool(p);
         setResourceAccess("allowed");
+        writeViewCache(viewScope, "resourcePool", "", p);
       })
       .catch((e: Error) => {
         if (!alive) return;
         if (e instanceof ApiError && e.code === "RESOURCES_ADMIN_ONLY") {
           setResourceAccess("denied");
+          setPool(null);
+          dropViewCache(viewScope, "resourcePool", "");
           return;
         }
         // Any other failure keeps the old behaviour: the tab stays, with its
@@ -263,7 +275,8 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
     return () => {
       alive = false;
     };
-  }, []);
+    // The scope is a string fixed for this project (the workspace is keyed by it), so this still runs once.
+  }, [viewScope]);
 
   const taskKeys = useMemo(() => new Set(tasks.map((t) => t.id)), [tasks]);
 

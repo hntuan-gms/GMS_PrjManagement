@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { aggregateMonths, aggregateWeeks, type Granularity, type PersonLoad } from "../resourceAllocation";
 import { pct, placeBar, shortDate, taskBarDates, type ColumnSpan } from "../resourceColumns";
+import { cellTooltip } from "../resourceTimeline";
 import type { Task } from "../types";
 import { Icon } from "./Icons";
 
@@ -58,7 +59,8 @@ export default function PersonBlock({
           ratio: w.ratio,
           allocated: w.allocatedHours,
           capacity: w.capacityHours,
-          label: `${w.start} → ${w.end}`,
+          start: w.start,
+          end: w.end,
           taskIds: w.taskIds,
           isToday: today >= w.start && today <= w.end,
         }))
@@ -68,7 +70,8 @@ export default function PersonBlock({
           ratio: d.ratio,
           allocated: d.allocatedHours,
           capacity: d.capacityHours,
-          label: d.date,
+          start: d.date,
+          end: d.date,
           taskIds: d.taskIds,
           isToday: d.date === today,
         }));
@@ -132,9 +135,7 @@ export default function PersonBlock({
           <div
             key={c.key}
             className={`rv-cell band-${c.band} ${c.isToday ? "is-today" : ""}`}
-            title={`${c.label} · ${c.allocated}h / ${c.capacity}h (${pct(c.ratio)})${
-              c.taskIds.length > 0 ? `\n${[...new Set(c.taskIds)].join(", ")}` : ""
-            }`}
+            title={cellTooltip(c)}
           >
             {granularity !== "day" && c.capacity > 0 ? pct(c.ratio) : ""}
           </div>
@@ -191,6 +192,10 @@ function PersonTasks({
   }, [person.days, granularity]);
 
   const todayMark = useMemo(() => placeBar(spans, today, today), [spans, today]);
+  // Positions are shares of the track, not pixels: the columns stretch to fill the table when there are few
+  // of them, and a bar placed in pixels would stay put while the date columns above it moved.
+  const cols = spans.length;
+  const share = (n: number) => `${(n / cols) * 100}%`;
 
   /** Tasks clipped to the visible window, positioned on the heatmap's own columns. */
   const bars = useMemo(
@@ -284,18 +289,18 @@ function PersonTasks({
                   <span
                     key={b.start}
                     className={`rv-tl-off rv-tl-off-${b.reason}`}
-                    style={{ left: `calc(var(--rv-cell) * ${b.start})`, width: `calc(var(--rv-cell) * ${b.length})` }}
+                    style={{ left: share(b.start), width: share(b.length) }}
                   />
                 ))}
                 {todayMark && (
                   <span
                     className="rv-task-today"
-                    style={{ left: `calc(var(--rv-cell) * ${todayMark.left})`, width: `calc(var(--rv-cell) * ${todayMark.width})` }}
+                    style={{ left: share(todayMark.left), width: share(todayMark.width) }}
                   />
                 )}
                 <span
                   className={`rv-tl-bar${conflict ? " is-conflict" : ""}${place.clippedLeft ? " clip-l" : ""}${place.clippedRight ? " clip-r" : ""}`}
-                  style={{ left: `calc(var(--rv-cell) * ${place.left})`, width: `calc(var(--rv-cell) * ${place.width})` }}
+                  style={{ left: share(place.left), width: share(place.width) }}
                 >
                   {task.percentComplete > 0 && <span className="rv-tl-progress" style={{ width: `${task.percentComplete}%` }} />}
                   <span className="rv-tl-bar-label">

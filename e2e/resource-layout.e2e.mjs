@@ -114,14 +114,14 @@ await step("bấm pill 'Có việc' chỉ còn người có việc; 'Tất cả'
 });
 await step("menu 'Khoảng' gom 6 mốc; nhãn đổi theo mốc đã chọn", async () => {
   await page.locator(".rv-preset").click();
-  const items = (await page.locator("[role=menuitemradio]").allTextContents()).map((t) => t.trim());
+  const items = (await page.locator(".rv-preset-item").allTextContents()).map((t) => t.trim());
   assert.deepEqual(items, ["Tháng này", "4 tuần", "8 tuần", "1 quý", "Toàn dự án", "Theo dự án"]);
-  await page.locator("[role=menuitemradio]", { hasText: "8 tuần" }).click();
+  await page.locator(".rv-preset-item", { hasText: "8 tuần" }).click();
   assert.ok((await page.locator(".rv-preset").innerText()).includes("Khoảng: 8 tuần"));
-  const [from, to] = await page.locator(".rv-range input[type=date]").evaluateAll((els) => els.map((e) => e.value));
+  const [from, to] = [await page.locator(".rv-scrub").getAttribute("data-from"), await page.locator(".rv-scrub").getAttribute("data-to")];
   assert.equal((Date.parse(to) - Date.parse(from)) / 86400000 + 1, 56);
   await page.locator(".rv-preset").click();
-  await page.locator("[role=menuitemradio]", { hasText: "Theo dự án" }).click();
+  await page.locator(".rv-preset-item", { hasText: "Theo dự án" }).click();
   assert.ok((await page.locator(".rv-preset").innerText()).includes("Khoảng: Theo dự án"));
   assert.equal(await page.locator(".rv-range .rv-granularity").count(), 1, "chọn cột phải nằm cạnh khoảng thời gian");
 });
@@ -133,6 +133,158 @@ await step("ⓘ cạnh THÀNH VIÊN: rê chuột hiện nguồn danh sách rồi
   assert.ok((await page.locator("[role=tooltip]").innerText()).includes("lấy từ"));
   await page.mouse.move(700, 600);
   await page.waitForSelector("[role=tooltip]", { state: "detached" });
+});
+
+console.log("\n== Bảng lấp đầy bề ngang, nhãn tháng, tooltip ==");
+const pickPreset = async (label) => {
+  await page.locator(".rv-preset").click();
+  await page.locator(".rv-preset-item", { hasText: label }).click();
+};
+const windowOf = async () => {
+  const s = page.locator(".rv-scrub");
+  return { from: await s.getAttribute("data-from"), to: await s.getAttribute("data-to") };
+};
+const lenOf = (w) => (Date.parse(w.to) - Date.parse(w.from)) / 86400000 + 1;
+await step("ít cột: cột ngày giãn hết bề ngang bảng (không còn khoảng trống bên phải)", async () => {
+  const m = await page.evaluate(() => {
+    const scroll = document.querySelector(".rv-heatmap-scroll");
+    const cells = [...document.querySelectorAll(".rv-row-head .rv-head-cell")];
+    return { gap: scroll.getBoundingClientRect().right - cells[cells.length - 1].getBoundingClientRect().right, over: scroll.scrollWidth - scroll.clientWidth, n: cells.length };
+  });
+  assert.ok(m.n < 45, "dữ liệu thử phải ít cột, có " + m.n);
+  assert.ok(m.gap >= 0 && m.gap <= 3, "còn trống " + m.gap + "px bên phải");
+  assert.ok(m.over <= 0, "không được cuộn ngang khi vừa");
+});
+await step("hàng việc mở rộng giãn cùng cột: thanh vẫn thẳng cột sau khi giãn", async () => {
+  await rowOf("Trần Bình").click();
+  await page.waitForSelector(".rv-expand .rv-tl-bar");
+  const res = await page.evaluate(() => {
+    const heads = [...document.querySelectorAll(".rv-head-cell")].map((e) => e.getBoundingClientRect().left);
+    const cell = document.querySelector(".rv-head-cell").getBoundingClientRect().width;
+    return { cell, bars: [...document.querySelectorAll(".rv-expand .rv-tl-bar")].map((b) => {
+      const r = b.getBoundingClientRect();
+      return { near: Math.min(...heads.map((h) => Math.abs(h - r.left))), cols: r.width / cell };
+    }) };
+  });
+  assert.ok(res.cell > 30, "cột chưa giãn: " + res.cell);
+  assert.ok(res.bars.length >= 1);
+  for (const b of res.bars) assert.ok(b.near < 1.5 && Math.abs(b.cols - Math.round(b.cols)) < 0.06, JSON.stringify(b));
+  await rowOf("Trần Bình").click();
+});
+await step("nhiều cột: giữ bề rộng tối thiểu của cột và cuộn ngang", async () => {
+  await pickPreset("1 quý");
+  await page.locator(".rv-granularity").selectOption("day");
+  const m = await page.evaluate(() => {
+    const scroll = document.querySelector(".rv-heatmap-scroll");
+    return { over: scroll.scrollWidth - scroll.clientWidth, cell: document.querySelector(".rv-head-cell").getBoundingClientRect().width };
+  });
+  assert.ok(m.over > 100, "phải cuộn ngang, dư " + m.over);
+  assert.ok(m.cell >= 21.5 && m.cell <= 23, "cột phải giữ ~22px, là " + m.cell);
+});
+await step("nhãn tháng rút gọn khi hẹp (T10/26, T10) và không bao giờ tràn sang tháng bên cạnh", async () => {
+  let compact = 0;
+  for (const preset of ["4 tuần", "8 tuần", "1 quý"]) {
+    for (const g of ["day", "week", "month"]) {
+      await pickPreset(preset);
+      await page.locator(".rv-granularity").selectOption(g);
+      const res = await page.locator(".rv-month").evaluateAll((els) =>
+        els.map((el) => {
+          const shown = [...el.children].find((c) => getComputedStyle(c).display !== "none");
+          return { text: shown?.textContent ?? "", clipped: el.scrollWidth > el.clientWidth + 1, title: el.title };
+        })
+      );
+      for (const r of res) {
+        assert.ok(!r.clipped, `${preset}/${g}: "${r.text}" bị cắt`);
+        assert.ok(r.text && r.title, "thiếu nhãn hoặc title đầy đủ");
+        if (!/^(Thg \d+\/\d{4}|Năm \d{4})$/.test(r.text)) compact++;
+      }
+    }
+  }
+  assert.ok(compact > 0, "không có nhãn nào được rút gọn dù có tháng chỉ hiện vài ngày");
+});
+await step("trả lại 'Theo dự án' + cột tự động", async () => {
+  await pickPreset("Theo dự án");
+  await page.locator(".rv-granularity").selectOption("auto");
+  assert.ok((await page.locator(".rv-preset").innerText()).includes("Theo dự án"));
+});
+await step("tooltip ô: ngày DD/MM/YYYY; ngày nghỉ ghi 'Ngày nghỉ' thay vì 0h / 0h", async () => {
+  const titles = await page.locator(".rv-row-person .rv-cell").evaluateAll((els) => els.map((e) => ({ t: e.title, off: e.className.includes("band-off") })));
+  const off = titles.find((x) => x.off && !x.t.includes("việc bị xếp"));
+  assert.ok(off, "dữ liệu thử phải có ngày nghỉ");
+  assert.match(off.t, /^\d{2}\/\d{2}\/\d{4} · Ngày nghỉ$/);
+  assert.ok(!titles.some((x) => /0h \/ 0h/.test(x.t)), "còn '0h / 0h' trong tooltip");
+  assert.ok(!titles.some((x) => /\d{4}-\d{2}-\d{2}/.test(x.t)), "còn ngày YYYY-MM-DD trong tooltip");
+  const work = titles.find((x) => /h \/ \d/.test(x.t));
+  assert.match(work.t, /^\d{2}\/\d{2}\/\d{4} · [\d.]+h \/ [\d.]+h \(\d+%\)/);
+  const head = await page.locator(".rv-head-cell").first().getAttribute("title");
+  assert.match(head, /^\d{2}\/\d{2}\/\d{4}$/);
+});
+
+console.log("\n== Thanh trượt thời gian ==");
+await step("có thanh trượt thay cho ô Từ/Đến; ngày chính xác nằm trong menu 'Khoảng'", async () => {
+  assert.equal(await page.locator(".rv-scrub [role=slider]").count(), 1);
+  assert.equal(await page.locator(".rv-range > input[type=date]").count(), 0, "ô ngày không được nằm ngoài menu");
+  await page.locator(".rv-preset").click();
+  const w = await windowOf();
+  assert.equal(await page.locator(".rv-exact input[type=date]").nth(0).inputValue(), w.from);
+  assert.equal(await page.locator(".rv-exact input[type=date]").nth(1).inputValue(), w.to);
+  await page.keyboard.press("Escape");
+});
+await step("kéo thân thanh: cả khoảng trượt đi, độ dài giữ nguyên, bảng đổi theo", async () => {
+  const before = await windowOf();
+  const headBefore = await page.locator(".rv-head-cell").first().getAttribute("title");
+  const t = await rect(".rv-scrub-thumb");
+  await page.mouse.move(t.x + t.width / 2, t.y + t.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(t.x + t.width / 2 + 40, t.y + t.height / 2, { steps: 5 });
+  await page.mouse.up();
+  const after = await windowOf();
+  assert.ok(after.from > before.from, `${before.from} → ${after.from}`);
+  assert.equal(lenOf(after), lenOf(before));
+  await page.waitForFunction((h) => document.querySelector(".rv-head-cell").title !== h, headBefore);
+  assert.ok((await page.locator(".rv-preset").innerText()).startsWith("Khoảng:"));
+});
+await step("kéo mép phải: khoảng dài ra, mép trái đứng yên; kéo mép trái ngắn lại", async () => {
+  const before = await windowOf();
+  const e = await rect(".rv-scrub-edge.is-to");
+  await page.mouse.move(e.x + e.width / 2, e.y + e.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(e.x + e.width / 2 + 40, e.y + e.height / 2, { steps: 5 });
+  await page.mouse.up();
+  const grown = await windowOf();
+  assert.equal(grown.from, before.from);
+  assert.ok(lenOf(grown) > lenOf(before), `${lenOf(before)} → ${lenOf(grown)}`);
+  const l = await rect(".rv-scrub-edge.is-from");
+  await page.mouse.move(l.x + l.width / 2, l.y + l.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(l.x + l.width / 2 + 25, l.y + l.height / 2, { steps: 4 });
+  await page.mouse.up();
+  const shrunk = await windowOf();
+  assert.equal(shrunk.to, grown.to);
+  assert.ok(shrunk.from > grown.from);
+});
+await step("bấm lên thanh để nhảy tới đó; phím mũi tên dời một tuần", async () => {
+  const before = await windowOf();
+  const track = await rect(".rv-scrub-track");
+  await page.mouse.click(track.x + track.width - 8, track.y + track.height / 2);
+  const jumped = await windowOf();
+  assert.ok(jumped.from > before.from, `${before.from} → ${jumped.from}`);
+  assert.equal(lenOf(jumped), lenOf(before));
+  await page.locator(".rv-scrub [role=slider]").focus();
+  await page.keyboard.press("ArrowLeft");
+  const back = await windowOf();
+  assert.equal((Date.parse(jumped.from) - Date.parse(back.from)) / 86400000, 7);
+  assert.match(await page.locator(".rv-scrub [role=slider]").getAttribute("aria-valuetext"), /^\d{2}\/\d{2}\/\d{4} – \d{2}\/\d{2}\/\d{4}$/);
+});
+await step("không trượt ra khỏi dự án: kéo quá mép chỉ dừng ở đầu/cuối, không thu nhỏ", async () => {
+  const len = lenOf(await windowOf());
+  await page.locator(".rv-scrub [role=slider]").focus();
+  await page.keyboard.press("End");
+  const end = await windowOf();
+  assert.equal(lenOf(end), len);
+  await page.keyboard.press("Home");
+  assert.equal(lenOf(await windowOf()), len);
+  await pickPreset("Theo dự án");
 });
 
 console.log("\n== Việc chưa gán: thẻ nổi ==");
@@ -341,6 +493,34 @@ await step("Tab không thoát khỏi ngăn kéo; Esc khi chưa sửa đóng ngay
   await page.waitForSelector(".rv-drawer", { state: "detached" });
 });
 
+console.log("\n== Tải lại trang (F5): các tab không phải chờ Jira lần nữa ==");
+// Jira answers slowly: if the tab only paints once the answer lands, the checks below time out.
+const SLOW = 2500;
+const slow = (re) => page.route(re, async (route) => { await new Promise((r) => setTimeout(r, SLOW)); route.continue(); });
+await step("nhãn 'Nguồn lực' và số quá tải hiện ngay sau F5, không đợi danh sách thành viên", async () => {
+  await slow(/\/api\/resources(\?|$)/);
+  await page.reload();
+  await page.waitForSelector(".toolbar-tabs");
+  await page.locator(".toolbar-tabs button", { hasText: "Nguồn lực" }).waitFor({ timeout: 1200 });
+  const labels = (await page.locator(".toolbar-tabs button").allTextContents()).map((t) => t.replace(/\d+\s*thành viên.*$/, "").replace(/\d+$/, "").trim());
+  assert.deepEqual(labels, ["Gantt / WBS", "Bảng", "Chấm công", "Nguồn lực", "Báo cáo"]);
+  await page.unroute(/\/api\/resources(\?|$)/);
+});
+await step("Báo cáo, Bảng, Chấm công đã xem trước đó hiện ngay sau F5 từ bản lưu của tab", async () => {
+  // Visit each once so the tab has something to remember, then reload with Jira slowed down.
+  for (const name of ["Báo cáo", "Bảng", "Chấm công"]) {
+    await page.locator(".toolbar-tabs button", { hasText: name }).click();
+    await page.waitForSelector({ "Báo cáo": ".pr-tile", "Bảng": ".bd-card", "Chấm công": ".ts-grid" }[name]);
+  }
+  await slow(/\/api\/(progress|board|timesheet)/);
+  await page.reload();
+  await page.waitForSelector(".toolbar-tabs");
+  for (const [name, sel] of [["Báo cáo", ".pr-tile"], ["Bảng", ".bd-card"], ["Chấm công", ".ts-grid"]]) {
+    await page.locator(".toolbar-tabs button", { hasText: name }).click();
+    await page.waitForSelector(sel, { timeout: 1500 });
+  }
+  await page.unroute(/\/api\/(progress|board|timesheet)/);
+});
 console.log(`\n${failed ? failed + " lỗi" : "đạt hết"}`);
 console.log("Hộp thoại/console:", problems.length ? problems.join("\n") : "không có");
 await browser.close();

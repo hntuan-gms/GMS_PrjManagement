@@ -18,6 +18,7 @@ import {
   type PeopleView,
   type RangePresetId,
 } from "../resourceColumns";
+import { formatDate, monthLabel, scrubExtent, unionWindow, type DateWindow, type MonthLabel } from "../resourceTimeline";
 import type { JiraUser, ResourceAbsence, ResourceProfile, ResourcePool, Task } from "../types";
 import { csvName, downloadCsv } from "../csv";
 import { buildEpicIndex, isTaskFiltering, matchesTaskFilter, type TaskFilter } from "../taskFilter";
@@ -27,6 +28,7 @@ import InfoTip from "./InfoTip";
 import Popover from "./Popover";
 import ResourcePersonBlock from "./ResourcePersonBlock";
 import ResourceProfileDrawer from "./ResourceProfileDrawer";
+import ResourceScrubber from "./ResourceScrubber";
 import ResourceUnassigned, { type DragState } from "./ResourceUnassigned";
 import SavedFilterMenu from "./SavedFilterMenu";
 import SkillMatrixView from "./SkillMatrixView";
@@ -120,6 +122,14 @@ export default function ResourceView({
   // otherwise every drag that extends the plan would yank the view they are
   // reading out from under them.
   const span = useMemo(() => range ?? defaultWindow(tasks, today), [range, tasks, today]);
+
+  // What the slider's track covers. It only ever grows: if exact dates typed in the menu land outside
+  // the project, the track stretches to hold them — but must not shrink back while the thumb is being
+  // dragged, or the ground would move under the pointer.
+  const [reach, setReach] = useState<DateWindow | null>(null);
+  const natural = useMemo(() => scrubExtent(tasks, today, { from: today, to: today }), [tasks, today]);
+  const extent = unionWindow(natural, reach);
+  if (span.from < extent.from || span.to > extent.to) setReach(unionWindow(extent, span));
 
   // The heatmap has its own member search, and a person picked on the Gantt would
   // blank everyone else's rows here — so only the task facets apply.
@@ -312,48 +322,54 @@ export default function ResourceView({
               <button type="button" className="tb-btn tb-icon rv-step" onClick={() => shiftRange(1)} aria-label="Kỳ sau" title="Kỳ sau">
                 <Icon name="chevronRight" />
               </button>
-              <label className="rv-date">
-                <span>Từ</span>
-                <input
-                  type="date"
-                  value={span.from}
-                  onChange={(e) => e.target.value && setRange({ from: e.target.value, to: span.to })}
-                />
-              </label>
-              <label className="rv-date">
-                <span>Đến</span>
-                <input
-                  type="date"
-                  value={span.to}
-                  onChange={(e) => e.target.value && setRange({ from: span.from, to: e.target.value })}
-                />
-              </label>
+              <ResourceScrubber extent={extent} span={span} today={today} onChange={setRange} />
               <Popover
                 className="tf-btn rv-preset"
                 align="end"
-                role="menu"
                 menuLabel="Khoảng thời gian"
-                title="Chọn nhanh khoảng thời gian của bản đồ nhiệt"
+                menuClassName="rv-range-menu"
+                title="Chọn nhanh một khoảng, hoặc nhập ngày chính xác"
                 label={`Khoảng: ${RANGE_PRESETS.find((p) => p.id === activePreset)?.label ?? "Tuỳ chọn"}`}
               >
-                {({ close }) =>
-                  RANGE_PRESETS.map((p) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      role="menuitemradio"
-                      aria-checked={activePreset === p.id}
-                      className="menu-item"
-                      onClick={() => {
-                        close();
-                        applyPreset(p.id);
-                      }}
-                    >
-                      <span className="rv-menu-check">{activePreset === p.id && <Icon name="check" size={14} />}</span>
-                      {p.label}
-                    </button>
-                  ))
-                }
+                {({ close }) => (
+                  <>
+                    {RANGE_PRESETS.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        aria-pressed={activePreset === p.id}
+                        className="menu-item rv-preset-item"
+                        onClick={() => {
+                          close();
+                          applyPreset(p.id);
+                        }}
+                      >
+                        <span className="rv-menu-check">{activePreset === p.id && <Icon name="check" size={14} />}</span>
+                        {p.label}
+                      </button>
+                    ))}
+                    <div className="menu-sep" role="separator" />
+                    <div className="rv-exact">
+                      <label>
+                        <span>Từ</span>
+                        <input
+                          type="date"
+                          value={span.from}
+                          // Either end dragged past the other takes the other with it, rather than being refused.
+                          onChange={(e) => e.target.value && setRange({ from: e.target.value, to: e.target.value > span.to ? e.target.value : span.to })}
+                        />
+                      </label>
+                      <label>
+                        <span>Đến</span>
+                        <input
+                          type="date"
+                          value={span.to}
+                          onChange={(e) => e.target.value && setRange({ from: e.target.value < span.from ? e.target.value : span.from, to: e.target.value })}
+                        />
+                      </label>
+                    </div>
+                  </>
+                )}
               </Popover>
               <select
                 className="rv-granularity"
@@ -620,12 +636,12 @@ function HeatmapHeader({
   today: string;
   memberNote: ReactNode;
 }) {
-  const months: Array<{ label: string; span: number }> = [];
+  const months: Array<{ label: MonthLabel; span: number }> = [];
   for (const { start } of spans) {
     // By month the columns are months themselves, so the band above them is the year.
-    const label = granularity === "month" ? `Năm ${start.slice(0, 4)}` : `Thg ${Number(start.slice(5, 7))}/${start.slice(0, 4)}`;
+    const label = monthLabel(start, granularity);
     const last = months[months.length - 1];
-    if (last && last.label === label) last.span += 1;
+    if (last && last.label.key === label.key) last.span += 1;
     else months.push({ label, span: 1 });
   }
 
@@ -634,8 +650,11 @@ function HeatmapHeader({
       <div className="rv-row rv-row-months">
         <div className="rv-name rv-corner" />
         {months.map((m, i) => (
-          <div key={i} className="rv-month" style={{ "--span": m.span } as React.CSSProperties}>
-            {m.label}
+          // Three lengths of one label; the stylesheet shows whichever fits (container query on the band's own width).
+          <div key={i} className="rv-month" title={m.label.full} style={{ "--span": m.span } as React.CSSProperties}>
+            <span className="rv-month-full">{m.label.full}</span>
+            <span className="rv-month-mid">{m.label.mid}</span>
+            <span className="rv-month-min">{m.label.min}</span>
           </div>
         ))}
       </div>
@@ -645,7 +664,9 @@ function HeatmapHeader({
           {memberNote}
         </div>
         {spans.map(({ start, end }) => (
-          <div key={start} className={`rv-cell rv-head-cell ${today >= start && today <= end ? "is-today" : ""}`} title={start}>
+          <div key={start} className={`rv-cell rv-head-cell ${today >= start && today <= end ? "is-today" : ""}`}
+            title={start === end ? formatDate(start) : `${formatDate(start)} → ${formatDate(end)}`}
+          >
             {granularity === "week"
               ? `${start.slice(8, 10)}/${start.slice(5, 7)}`
               : granularity === "month"
