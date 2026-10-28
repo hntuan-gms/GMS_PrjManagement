@@ -6,6 +6,7 @@ import { useDialogs } from "./dialogContext";
 import type {
   KbktAction,
   KbktKind,
+  KbktMappedKind,
   KbktLogLine,
   KbktOptions,
   KbktPreview,
@@ -720,6 +721,33 @@ function SettingsForm({
     </select>
   );
 
+  // The project spells an issue type its own way ("Sub-Bug"); settings may say "Sub Bug".
+  const fold = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/đ/gi, "d").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const typeKey = (name: string) => Object.keys(options.fields).find((k) => fold(k) === fold(name));
+  const fieldsOf = (kind: KbktMappedKind) => {
+    const key = typeKey(draft.issueTypes[kind]);
+    return key ? options.fields[key] : [];
+  };
+  /** What applies now: the saved map, or until one is saved, the match by field name. */
+  const effectiveMap = (d: KbktSettings, kind: KbktMappedKind) => {
+    const key = typeKey(d.issueTypes[kind]);
+    return d.fieldMap?.[kind] ?? (key ? options.autoFieldMaps[key]?.[kind] : undefined) ?? {};
+  };
+  const setField = (kind: KbktMappedKind, source: string, fieldId: string) =>
+    set((d) => {
+      const next = { ...effectiveMap(d, kind) };
+      if (fieldId) next[source] = fieldId;
+      else delete next[source];
+      return { ...d, fieldMap: { ...d.fieldMap, [kind]: next } };
+    });
+  // Another issue type has other fields: its map starts again from the name match.
+  const changeType = (kind: KbktMappedKind, v: string) =>
+    set((d) => {
+      const fieldMap = { ...d.fieldMap };
+      delete fieldMap[kind];
+      return { ...d, issueTypes: { ...d.issueTypes, [kind]: v }, fieldMap: Object.keys(fieldMap).length ? fieldMap : undefined };
+    });
+
   const statusFields: Array<[keyof KbktSettings["status"], string, string]> = [
     ["pass", "Đạt (P)", draft.issueTypes.test],
     ["fail", "Không đạt (F)", draft.issueTypes.test],
@@ -742,15 +770,11 @@ function SettingsForm({
         </label>
         <label className="field">
           <span>Test case (sub-task)</span>
-          {select(draft.issueTypes.test, choices(subtasks, draft.issueTypes.test), (v) =>
-            set((d) => ({ ...d, issueTypes: { ...d.issueTypes, test: v } }))
-          )}
+          {select(draft.issueTypes.test, choices(subtasks, draft.issueTypes.test), (v) => changeType("test", v))}
         </label>
         <label className="field">
           <span>Lỗi (sub-task)</span>
-          {select(draft.issueTypes.bug, choices(subtasks, draft.issueTypes.bug), (v) =>
-            set((d) => ({ ...d, issueTypes: { ...d.issueTypes, bug: v } }))
-          )}
+          {select(draft.issueTypes.bug, choices(subtasks, draft.issueTypes.bug), (v) => changeType("bug", v))}
         </label>
       </div>
 
@@ -765,6 +789,58 @@ function SettingsForm({
           </label>
         ))}
       </div>
+
+      <h4>Trường của Jira</h4>
+      <p className="kb-muted">
+        Mỗi phần của test case / lỗi có thể vào một trường riêng của Jira (Module, Test Steps, Expected Result…); phần để
+        "Trong Mô tả" vẫn nằm ở Mô tả như trước.{" "}
+        {draft.fieldMap ? (
+          <button
+            className="link-btn"
+            disabled={disabled}
+            onClick={() => set((d) => ({ ...d, fieldMap: undefined }))}
+          >
+            Khớp lại theo tên trường
+          </button>
+        ) : (
+          "Đang tự khớp theo tên trường."
+        )}
+      </p>
+      {(["test", "bug"] as const).map((kind) => {
+        const fields = fieldsOf(kind);
+        const map = effectiveMap(draft, kind);
+        return (
+          <div key={kind} className="kb-fieldmap">
+            <div className="kb-fieldmap-title">
+              {kind === "test" ? "Test case" : "Lỗi"} ({draft.issueTypes[kind]})
+            </div>
+            {fields.length === 0 ? (
+              <p className="kb-muted">
+                Màn hình tạo {draft.issueTypes[kind]} không có trường nào điền được từ file — mọi nội dung để trong Mô tả.
+              </p>
+            ) : (
+              <div className="kb-grid">
+                {options.fieldSources[kind].map((source) => {
+                  const value = map[source.key] ?? "";
+                  const list = [
+                    { value: "", label: "— Trong Mô tả —" },
+                    ...fields.map((f) => ({ value: f.id, label: f.name })),
+                  ];
+                  if (value && !fields.some((f) => f.id === value)) {
+                    list.push({ value, label: `${value} (không có trên màn hình tạo)` });
+                  }
+                  return (
+                    <label key={source.key} className="field">
+                      <span>{source.label}</span>
+                      {select(value, list, (v) => setField(kind, source.key, v))}
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
 
       <h4>Mức độ lỗi → Ưu tiên</h4>
       <div className="kb-priority">

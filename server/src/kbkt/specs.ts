@@ -30,13 +30,34 @@ export interface Spec {
   status: string | null;
   labels: string[];
   summary: string;
+  /** Every section, as the script wrote it. sync.ts replaces it when some sections go to fields. */
   description: ReturnType<typeof sectionsToAdf> | null;
+  /** The description's parts by key, so a part can go to its own Jira field (kbkt/fields.ts). */
+  sections?: SpecSection[];
+  /** Custom field values, filled by sync.ts from `sections` and the project's field map. */
+  fields?: Record<string, unknown>;
   priority?: string | null;
   images?: KbktImage[];
   /** Don't create it if it doesn't exist yet: a closed/withdrawn bug nobody synced. */
   skipIfNew?: boolean;
   /** Only move an existing issue's status; never touch its fields. */
   onlyStatus?: boolean;
+}
+
+/** One "### heading + body" part of a description, with a key that stays put when the heading is reworded. */
+export interface SpecSection {
+  key: string;
+  head: string;
+  body: string;
+}
+
+/** The sections and the description they make, which is exactly the script's layout. */
+function described(parts: Array<[key: string, head: string, body: string]>): {
+  sections: SpecSection[];
+  description: ReturnType<typeof sectionsToAdf>;
+} {
+  const sections = parts.map(([key, head, body]) => ({ key, head, body }));
+  return { sections, description: sectionsToAdf(sections.map((s) => [s.head, s.body])) };
 }
 
 export interface SpecPlan {
@@ -136,16 +157,16 @@ export function buildSpecs(wb: KbktWorkbook, fileName: string, settings: KbktSet
       status: stateStatus[c.state],
       labels: [...new Set([wl, tid, RESULT_LABELS[c.state]])].sort(),
       summary: summary(`[${c.id}] ${c.purpose}`),
-      description: sectionsToAdf([
-        ["Nhóm", c.section],
-        ["Mục đích kiểm thử", c.purpose],
-        ["Các bước thực hiện", c.steps],
-        ["Kết quả mong muốn", c.expected],
-        ["Kết quả kiểm thử", runs],
-        ["Kết quả hiện tại", c.actual],
-        ["Mã lỗi", c.bug],
-        ["Ghi chú", c.note],
-        ["Nguồn", src(wb.sheet, c.row)],
+      ...described([
+        ["section", "Nhóm", c.section],
+        ["purpose", "Mục đích kiểm thử", c.purpose],
+        ["steps", "Các bước thực hiện", c.steps],
+        ["expected", "Kết quả mong muốn", c.expected],
+        ["runs", "Kết quả kiểm thử", runs],
+        ["actual", "Kết quả hiện tại", c.actual],
+        ["bugCodes", "Mã lỗi", c.bug],
+        ["note", "Ghi chú", c.note],
+        ["source", "Nguồn", src(wb.sheet, c.row)],
       ]),
     });
   }
@@ -193,16 +214,16 @@ export function buildSpecs(wb: KbktWorkbook, fileName: string, settings: KbktSet
       priority: priorityFor(settings, info.sev),
       images: imgs,
       summary: summary(`[${code}][${bid}] ${info.desc}`),
-      description: sectionsToAdf([
-        ["Mô tả", info.desc],
-        ["Mức độ", info.sev],
-        ["Trạng thái trong file", info.status],
-        ["Căn cứ", info.basis],
-        ["Nguyên nhân", info.cause],
-        ["Bằng chứng / tái hiện", info.evidence],
-        ["Hình ảnh minh chứng (đính kèm)", imgs.map((i) => `${i.filename} - ${i.caption}`).join("\n")],
-        ["Test case liên quan", tests],
-        ["Nguồn", info.row ? src("Danh sách lỗi", info.row) : ""],
+      ...described([
+        ["desc", "Mô tả", info.desc],
+        ["sev", "Mức độ", info.sev],
+        ["sheetStatus", "Trạng thái trong file", info.status],
+        ["basis", "Căn cứ", info.basis],
+        ["cause", "Nguyên nhân", info.cause],
+        ["evidence", "Bằng chứng / tái hiện", info.evidence],
+        ["images", "Hình ảnh minh chứng (đính kèm)", imgs.map((i) => `${i.filename} - ${i.caption}`).join("\n")],
+        ["tests", "Test case liên quan", tests],
+        ["source", "Nguồn", info.row ? src("Danh sách lỗi", info.row) : ""],
       ]),
     });
     for (const c of rs) links.push([label("tc-" + c.id), bl]);
@@ -221,13 +242,14 @@ export function buildSpecs(wb: KbktWorkbook, fileName: string, settings: KbktSet
       labels: [wl, bl].sort(),
       priority: null,
       summary: summary(`[${c.id}] ${c.purpose}`),
-      description: sectionsToAdf([
-        ["Mục đích kiểm thử", c.purpose],
-        ["Các bước thực hiện", c.steps],
-        ["Kết quả mong muốn", c.expected],
-        ["Kết quả hiện tại", c.actual],
-        ["Ghi chú", c.note],
-        ["Nguồn", src(wb.sheet, c.row)],
+      // Same keys as a test row's: "steps" means the same cells either way.
+      ...described([
+        ["purpose", "Mục đích kiểm thử", c.purpose],
+        ["steps", "Các bước thực hiện", c.steps],
+        ["expected", "Kết quả mong muốn", c.expected],
+        ["actual", "Kết quả hiện tại", c.actual],
+        ["note", "Ghi chú", c.note],
+        ["source", "Nguồn", src(wb.sheet, c.row)],
       ]),
     });
     links.push([label("tc-" + c.id), bl]);

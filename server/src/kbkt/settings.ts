@@ -1,4 +1,5 @@
 import { badRequest } from "../errors.js";
+import { FIELD_SOURCES, type MappedKind } from "./fields.js";
 
 /**
  * What jira_sync_config.json used to hard-code, now one row per Jira project
@@ -24,6 +25,12 @@ export interface KbktSettings {
   linkType: string;
   /** Which new issues get the run's due date. Only on create, so a date changed in Jira is kept. */
   dueDateOn: SpecKind[];
+  /**
+   * Per kind: section key (kbkt/fields.ts FIELD_SOURCES) → Jira field id. A kind
+   * left out is matched by field name on every run; a section left out of a
+   * saved map stays in the description.
+   */
+  fieldMap?: Partial<Record<MappedKind, Record<string, string>>>;
 }
 
 /** jira_sync_config.json as it stood when the script moved here. */
@@ -75,7 +82,25 @@ export function validateSettings(raw: unknown): KbktSettings {
     priority,
     linkType: str(b.linkType, "Kiểu liên kết"),
     dueDateOn: Array.isArray(b.dueDateOn) ? KINDS.filter((k) => b.dueDateOn.includes(k)) : [],
+    ...fieldMapFrom(b.fieldMap),
   };
+}
+
+/** Only known section keys, only field-id-shaped values; a kind that isn't an object is left to name matching. */
+function fieldMapFrom(raw: unknown): Pick<KbktSettings, "fieldMap"> {
+  if (!raw || typeof raw !== "object") return {};
+  const out: Partial<Record<MappedKind, Record<string, string>>> = {};
+  for (const kind of ["test", "bug"] as const) {
+    const m = (raw as Record<string, unknown>)[kind];
+    if (!m || typeof m !== "object" || Array.isArray(m)) continue;
+    const keys = new Set(FIELD_SOURCES[kind].map((s) => s.key));
+    out[kind] = Object.fromEntries(
+      Object.entries(m as Record<string, unknown>).filter(
+        ([k, v]) => keys.has(k) && typeof v === "string" && /^(customfield_\d+|environment)$/.test(v)
+      )
+    ) as Record<string, string>;
+  }
+  return Object.keys(out).length ? { fieldMap: out } : {};
 }
 
 /**
@@ -90,5 +115,7 @@ export function withDefaults(stored: Partial<KbktSettings> | null | undefined): 
     priority: stored.priority ?? { ...DEFAULT_SETTINGS.priority },
     linkType: stored.linkType ?? DEFAULT_SETTINGS.linkType,
     dueDateOn: stored.dueDateOn ?? [...DEFAULT_SETTINGS.dueDateOn],
+    // Absent for every project saved before fields existed: those match by name.
+    ...(stored.fieldMap ? { fieldMap: stored.fieldMap } : {}),
   };
 }

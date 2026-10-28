@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { JiraClient } from "../src/jiraClient.js";
+import { adfComparable } from "../src/adf.js";
+import { JiraApiError, type JiraClient } from "../src/jiraClient.js";
 import { parseWorkbook } from "../src/kbkt/parse.js";
 import { DEFAULT_SETTINGS } from "../src/kbkt/settings.js";
 import { KbktSync, type LogLine, type SyncOptions } from "../src/kbkt/sync.js";
@@ -136,6 +137,64 @@ describe("KbktSync", () => {
     assert.equal(result.storyKey, "new:story-1E_127");
     assert.equal(count("CREATE"), 10);
     assert.ok(!jira.calls.includes("getIssue AI-33"));
+  });
+
+  it("writes each part of a test case into its own Jira field, and says which went where", async () => {
+    const jira = new FakeJira();
+    const { log, count } = await run(jira, { apply: true });
+    assert.equal(count("ERROR"), 0);
+    const byLabel = (l: string) => [...jira.issues.values()].find((i) => i.fields.labels.includes(l));
+    const tc1 = byLabel("tc-1E_127_1").fields;
+    assert.equal(tc1.customfield_10101, "Giao diện"); // Module
+    assert.equal(adfComparable(tc1.customfield_10103), "1. Mở màn hình"); // Test Steps
+    assert.equal(adfComparable(tc1.customfield_10106), "Hiển thị tiêu đề"); // Expected Result
+    assert.equal(adfComparable(tc1.customfield_10105), "Đúng"); // Actual Result
+    assert.doesNotMatch(adfComparable(tc1.description), /Các bước thực hiện|Kết quả mong muốn/);
+    assert.match(adfComparable(tc1.description), /Mục đích kiểm thử/);
+    // An empty cell is simply not sent on create.
+    assert.ok(!("customfield_10103" in byLabel("tc-1E_127_2").fields));
+    assert.deepEqual(byLabel("bug-1E_127_BUG-01").fields.customfield_10201, { id: "customfield_10201-0" }); // Severity "Cao"
+    assert.ok(log.some((l) => l.action === "INFO" && l.message.includes("Các bước thực hiện → Test Steps")));
+  });
+
+  it("moves the content of issues created before fields existed, once", async () => {
+    const jira = new FakeJira();
+    jira.screens = false;
+    await run(jira, { apply: true });
+    jira.screens = true;
+    const { log, count } = await run(jira, { apply: true });
+    assert.equal(count("CREATE"), 0);
+    assert.ok(count("UPDATE") >= 6);
+    assert.ok(log.some((l) => l.action === "UPDATE" && /Expected Result.*description|description.*Expected Result/.test(l.message)));
+    const tc1 = [...jira.issues.values()].find((i) => i.fields.labels.includes("tc-1E_127_1")).fields;
+    assert.equal(adfComparable(tc1.customfield_10103), "1. Mở màn hình");
+    assert.doesNotMatch(adfComparable(tc1.description), /Các bước thực hiện/);
+    const again = await run(jira, { apply: true });
+    assert.equal(again.count("UPDATE"), 0);
+  });
+
+  it("a saved map with nothing in it keeps everything in the description", async () => {
+    const jira = new FakeJira();
+    const log: LogLine[] = [];
+    const s = { ...settings, fieldMap: { test: {}, bug: {} } };
+    await new KbktSync(jira as unknown as JiraClient, "AI", s, (l) => log.push(l)).run(parseWorkbook(sampleWorkbook()), FILE, {
+      ...base,
+      apply: true,
+    });
+    const tc1 = [...jira.issues.values()].find((i) => i.fields.labels.includes("tc-1E_127_1")).fields;
+    assert.ok(!Object.keys(tc1).some((k) => k.startsWith("customfield_")));
+    assert.match(adfComparable(tc1.description), /Các bước thực hiện/);
+  });
+
+  it("a screen that cannot be read is a warning, and the import still runs with the full description", async () => {
+    const jira = new FakeJira();
+    jira.getCreateMetaFields = async () => {
+      throw new JiraApiError(403, '{"errorMessages":["Không có quyền"]}');
+    };
+    const { log, count } = await run(jira, { apply: true });
+    assert.equal(count("ERROR"), 0);
+    assert.equal(count("CREATE"), 10);
+    assert.ok(log.some((l) => l.action === "WARN" && l.message.includes("Không đọc được các trường của Sub Testcase")));
   });
 
   it("needs an Epic for a new Story and says so", async () => {

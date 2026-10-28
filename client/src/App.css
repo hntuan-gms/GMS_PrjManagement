@@ -8414,6 +8414,19 @@ button.tf-chip-x:hover:not(:disabled) {
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 10px;
 }
+.kb-fieldmap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+.kb-fieldmap-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
 .kb-priority {
   display: flex;
   flex-direction: column;
