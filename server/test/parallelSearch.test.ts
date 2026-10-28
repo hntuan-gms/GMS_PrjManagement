@@ -23,15 +23,17 @@ function fakeJira(n: number, opts: { dayOf?: (i: number) => number; count?: numb
   const dayOf = opts.dayOf ?? ((i: number) => Math.floor(i / 10));
   const all = Array.from({ length: n }, (_, i) => ({
     key: i % 7 === 0 ? `OLD-${i}` : `P-${i}`,
-    fields: { created: `${day(dayOf(i))}T10:00:00.000+0700` },
+    fields: { created: `${day(dayOf(i))}T${String(8 + (i % 10)).padStart(2, "0")}:${String(i % 60).padStart(2, "0")}:00.000+0700` },
   })).sort((a, b) => a.fields.created.localeCompare(b.fields.created));
   const log: string[] = [];
   let active = 0;
   let peak = 0;
   const filter = (jql: string) => {
-    const from = jql.match(/created >= "(\d{4}-\d{2}-\d{2})"/)?.[1];
-    const to = jql.match(/created < "(\d{4}-\d{2}-\d{2})"/)?.[1];
-    return all.filter((x) => (!from || x.fields.created.slice(0, 10) >= from) && (!to || x.fields.created.slice(0, 10) < to));
+    // Boundaries are "yyyy-MM-dd HH:mm"; compared as text against the issue's own "yyyy-MM-dd HH:mm".
+    const from = jql.match(/created >= "([^"]+)"/)?.[1];
+    const to = jql.match(/created < "([^"]+)"/)?.[1];
+    const at = (x: { fields: { created: string } }) => x.fields.created.slice(0, 16).replace("T", " ");
+    return all.filter((x) => (!from || at(x) >= from) && (!to || at(x) < to));
   };
   const jira: ProjectSearcher = {
     async searchIssues(jql, _fields, limit) {
@@ -133,6 +135,7 @@ describe("searchProjectIssues", () => {
     assert.equal(new Set(res.issues.map((i) => i.key)).size, 4000, "an issue twice");
     assert.deepEqual(res.issues.map((i) => i.key), all.map((i) => i.key), "not oldest first");
     assert.ok(res.requests >= 4000 / SLICE_SIZE, `only ${res.requests} slices`);
+    assert.match(res.detail ?? "", /^plan \d+ms, read \d+ms, biggest slice \d+$/);
     assert.ok(peak() <= CONCURRENCY + 2, `peak ${peak()}`);
   });
 
@@ -144,11 +147,21 @@ describe("searchProjectIssues", () => {
     assert.ok(all.some((i) => i.key.startsWith("OLD-")));
   });
 
-  it("copes with everything created on one day (cannot be cut further): that slice is read whole", async () => {
+  it("cuts a single busy day into minutes: a day holding a thousand issues is not one long chain of pages", async () => {
     const { jira } = fakeJira(1000, { dayOf: () => 5 });
     const res = await searchProjectIssues(jira, "P", ["summary"]);
     assert.equal(res.mode, "parallel");
     assert.equal(res.issues.length, 1000);
+    assert.ok(res.requests >= 1000 / SLICE_SIZE, `only ${res.requests} slices for one day`);
+  });
+
+  it("everything created in the same minute cannot be cut further: that slice is read whole", async () => {
+    const real = fakeJira(600, { dayOf: () => 5 });
+    const same = real.all.map((x) => ({ ...x, fields: { created: "2026-01-06T09:00:00.000+0700" } }));
+    real.all.splice(0, real.all.length, ...same);
+    const res = await searchProjectIssues(real.jira, "P", ["summary"]);
+    assert.equal(res.mode, "parallel");
+    assert.equal(res.issues.length, 600);
   });
 
   it("copes with a burst: most issues on a few days, a few spread out", async () => {
