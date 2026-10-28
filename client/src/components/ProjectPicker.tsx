@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import type { ProjectSummary, Session } from "../types";
+import { readViewCache, viewCacheScope, writeViewCache } from "../viewCache";
 
 interface Props {
   session: Session;
@@ -12,7 +13,13 @@ interface Props {
 }
 
 export default function ProjectPicker({ session, variant, onSelect, onCancel, onLogout }: Props) {
-  const [projects, setProjects] = useState<ProjectSummary[] | null>(null);
+  // The list this account saw last time (viewCache.ts, survives F5) is shown at once while the fresh one is
+  // fetched: with hundreds of projects the listing is several Jira pages, and "Đổi dự án" waited for all of
+  // them every time.
+  const cacheScope = viewCacheScope(session.site.cloudId, session.user.accountId, "");
+  const [projects, setProjects] = useState<ProjectSummary[] | null>(
+    () => readViewCache<ProjectSummary[]>(cacheScope, "projects", "") ?? null
+  );
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
   const [choosing, setChoosing] = useState<string | null>(null);
@@ -20,11 +27,11 @@ export default function ProjectPicker({ session, variant, onSelect, onCancel, on
 
   useEffect(() => {
     let cancelled = false;
-    setProjects(null);
     setError(null);
     api
       .listProjects()
       .then((list) => {
+        writeViewCache(cacheScope, "projects", "", list);
         if (!cancelled) setProjects(list);
       })
       .catch((e: unknown) => {
@@ -33,7 +40,7 @@ export default function ProjectPicker({ session, variant, onSelect, onCancel, on
     return () => {
       cancelled = true;
     };
-  }, [reloadToken]);
+  }, [reloadToken, cacheScope]);
 
   const visible = useMemo(() => {
     if (!projects) return [];

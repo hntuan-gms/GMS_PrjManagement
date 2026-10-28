@@ -17,15 +17,28 @@ export const overviewParams = (asOf: string, scope: ProgressScope) =>
  *
  * A failure is ignored here: the tab asks for itself when it is opened, exactly as before.
  */
-async function warm<T>(scope: string, view: string, params: string, fetch: () => Promise<T>): Promise<void> {
+const inFlight = new Map<string, Promise<void>>();
+
+function warm<T>(scope: string, view: string, params: string, fetch: () => Promise<T>): Promise<void> {
+  // The same answer asked for twice at once (React runs a mount effect twice in development, and a reload on a
+  // pinned tab starts the workspace twice over) is one request.
+  const id = `${scope}|${view}|${params}`;
+  const running = inFlight.get(id);
+  if (running) return running;
   const startedAt = Date.now();
-  try {
-    const answer = await fetch();
-    writeViewCache(scope, view, params, answer);
-    markViewFresh(scope, view, params, startedAt);
-  } catch {
-    // The tab will ask when it is opened.
-  }
+  const run = (async () => {
+    try {
+      const answer = await fetch();
+      writeViewCache(scope, view, params, answer);
+      markViewFresh(scope, view, params, startedAt);
+    } catch {
+      // The tab will ask when it is opened.
+    } finally {
+      inFlight.delete(id);
+    }
+  })();
+  inFlight.set(id, run);
+  return run;
 }
 
 /**

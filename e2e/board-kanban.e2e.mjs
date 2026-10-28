@@ -115,8 +115,12 @@ await step("tạo ở cột In Progress → tạo việc rồi chuyển sang c�
   await area.fill("Việc tạo từ cột giữa");
   await fetch(API + "/api/__reset", { method: "POST" });
   await area.press("Enter");
-  await page.waitForFunction(async () => (await (await fetch("/api/__log")).json()).log.some((l) => l.p.endsWith("/move")));
-  const entries = await log();
+  // Polled from here: an async predicate handed to waitForFunction is a Promise, which is truthy at once.
+  let entries = await log();
+  for (let i = 0; i < 50 && !entries.some((l) => l.p.endsWith("/move")); i++) {
+    await page.waitForTimeout(100);
+    entries = await log();
+  }
   assert.ok(entries.some((l) => l.m === "POST" && l.p === "/api/tasks"));
   const move = entries.find((l) => l.p.endsWith("/move"));
   assert.deepEqual(move.b.toStatusIds, ["2"]);

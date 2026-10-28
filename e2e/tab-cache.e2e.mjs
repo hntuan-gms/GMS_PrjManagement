@@ -25,6 +25,16 @@ const tab = (name) => page.locator(".toolbar-tabs button", { hasText: name }).cl
 await page.goto(process.env.E2E_APP ?? "http://localhost:5173/");
 await page.waitForSelector(".wbs-row");
 
+/**
+ * Tabs fetched ahead and untouched are not asked for again (viewCache.isViewFresh); an edit or a sync makes
+ * what was fetched stale, so the tab asks again — which is what these steps need to observe.
+ */
+async function makeStale() {
+  await page.getByRole("button", { name: /Đồng bộ từ Jira/ }).click();
+  await page.waitForFunction(() => [...document.querySelectorAll(".toolbar button")].some((b) => b.textContent.includes("Đồng bộ từ Jira")));
+  await page.waitForTimeout(150);
+}
+
 /** Holds back every request whose path matches, until `release()`. */
 async function hold(pattern) {
   let release;
@@ -44,6 +54,7 @@ await step("Bảng: lần đầu đợi API, lần sau hiện thẻ ngay khi API
   await page.waitForSelector(".bd-card");
   await tab("Gantt");
   await page.waitForSelector(".wbs-row");
+  await makeStale();
   const held = await hold("**/api/board*");
   await tab("Bảng");
   await page.waitForSelector(".bd-card", { timeout: 1500 });
@@ -57,6 +68,7 @@ await step("Chấm công: hiện lại bảng giờ công cũ trong lúc tải",
   await page.waitForFunction(() => !document.body.textContent.includes("Đang tải từ Jira"));
   const before = await page.locator(".ts-grid tbody tr").count();
   await tab("Gantt");
+  await makeStale();
   const held = await hold("**/api/timesheet*");
   await tab("Chấm công");
   await page.waitForSelector(".ts-wrap");
@@ -69,6 +81,7 @@ await step("Báo cáo: hiện số liệu cũ ngay, không có màn 'đang tải
   await tab("Báo cáo");
   await page.waitForFunction(() => !document.querySelector(".pr-loading"));
   await tab("Gantt");
+  await makeStale();
   const held = await hold("**/api/progress?*");
   await tab("Báo cáo");
   await page.waitForTimeout(300);

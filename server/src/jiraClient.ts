@@ -9,6 +9,7 @@
 import { JIRA_API_BASE } from "./auth/config.js";
 import { textToAdf } from "./adf.js";
 import type { JiraFieldMeta } from "./transitionFields.js";
+import { readAllPages } from "./pagedList.js";
 
 export interface JiraClientOptions {
   cloudId: string;
@@ -795,22 +796,15 @@ export class JiraClient {
    * past the first 50.
    */
   async listProjects(): Promise<Array<{ id: string; key: string; name: string; avatarUrl: string | null }>> {
+    const raw = await readAllPages<any>((startAt) =>
+      this.request(`/rest/api/3/project/search?maxResults=50&startAt=${startAt}&orderBy=name`)
+    );
+    const seen = new Set<string>();
     const out: Array<{ id: string; key: string; name: string; avatarUrl: string | null }> = [];
-    let startAt = 0;
-    for (let page = 0; page < 20; page++) {
-      const res = await this.request<{ values: any[]; isLast: boolean; maxResults: number }>(
-        `/rest/api/3/project/search?maxResults=50&startAt=${startAt}&orderBy=name`
-      );
-      for (const p of res.values) {
-        out.push({
-          id: p.id,
-          key: p.key,
-          name: p.name,
-          avatarUrl: p.avatarUrls?.["24x24"] ?? null,
-        });
-      }
-      if (res.isLast || res.values.length === 0) break;
-      startAt += res.values.length;
+    for (const p of raw) {
+      if (seen.has(p.id)) continue;
+      seen.add(p.id);
+      out.push({ id: p.id, key: p.key, name: p.name, avatarUrl: p.avatarUrls?.["24x24"] ?? null });
     }
     return out;
   }
