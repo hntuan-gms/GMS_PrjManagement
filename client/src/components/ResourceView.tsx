@@ -1,25 +1,34 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useId, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  aggregateMonths,
-  aggregateWeeks,
   autoGranularity,
-  BAND_LABEL,
   buildResourceLoad,
   defaultWindow,
-  monthWindow,
   shiftWindow,
-  addDays,
   todayIso,
   type Granularity,
-  type LoadBand,
-  type PersonLoad,
 } from "../resourceAllocation";
+import {
+  columnSpans,
+  currentPreset,
+  filterPeople,
+  pct,
+  peopleCounts,
+  RANGE_PRESETS,
+  rangeForPreset,
+  type PeopleView,
+  type RangePresetId,
+} from "../resourceColumns";
 import type { JiraUser, ResourceAbsence, ResourceProfile, ResourcePool, Task } from "../types";
 import { csvName, downloadCsv } from "../csv";
 import { buildEpicIndex, isTaskFiltering, matchesTaskFilter, type TaskFilter } from "../taskFilter";
 import FilterBar from "./FilterBar";
+import { Icon } from "./Icons";
+import InfoTip from "./InfoTip";
+import Popover from "./Popover";
+import ResourcePersonBlock from "./ResourcePersonBlock";
+import ResourceProfileDrawer from "./ResourceProfileDrawer";
+import ResourceUnassigned, { type DragState } from "./ResourceUnassigned";
 import SavedFilterMenu from "./SavedFilterMenu";
-import ResourcePersonPanel from "./ResourcePersonPanel";
 import SkillMatrixView from "./SkillMatrixView";
 
 interface Props {
@@ -40,18 +49,6 @@ interface Props {
   jqlKeys?: Set<string> | null;
 }
 
-/**
- * The dragged task, held in React state rather than read back out of the
- * DataTransfer: `getData` is write-only during dragover in Chrome and Safari,
- * and the drop targets need to know what is coming to decide whether to light
- * up at all (dropping a task on the person who already holds it is a no-op).
- */
-interface DragState {
-  taskId: string;
-  summary: string;
-  fromAccountId: string | null;
-}
-
 /** Sentinel for the "remove from whoever holds it" drop zone. */
 const UNASSIGNED_ZONE = "__unassigned__";
 
@@ -62,21 +59,16 @@ const GRANULARITIES: Array<{ value: Granularity | "auto"; label: string }> = [
   { value: "month", label: "Tháng" },
 ];
 
-const PRESETS: Array<{ label: string; days: number | null }> = [
-  { label: "4 tuần", days: 28 },
-  { label: "8 tuần", days: 56 },
-  { label: "1 quý", days: 90 },
-  { label: "Toàn dự án", days: null },
+const LEGEND: Array<{ band: string; short: string; title: string }> = [
+  { band: "light", short: "<50%", title: "Nhẹ tải: dưới 50% công suất — còn chỗ nhận thêm việc" },
+  { band: "healthy", short: "50–100%", title: "Hợp lý: từ 50% đến 100% công suất" },
+  { band: "over", short: ">100%", title: "Quá tải: trên 100% công suất" },
+  {
+    band: "off",
+    short: "Ngày nghỉ",
+    title: "Cuối tuần hoặc ngày nghỉ phép (sọc xám). Sọc đỏ: có việc bị xếp vào ngày nghỉ — không ai làm được. Ô trống: chưa có việc.",
+  },
 ];
-
-function shortDate(iso: string): string {
-  return `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
-}
-
-function pct(ratio: number): string {
-  if (!Number.isFinite(ratio)) return "—";
-  return `${Math.round(ratio * 100)}%`;
-}
 
 /**
  * The resource tab: who is overloaded, when, and by how much.
@@ -85,6 +77,11 @@ function pct(ratio: number): string {
  * resourceAllocation.ts), so dragging a bar in the Gantt recolours this tab on
  * the same render rather than after a round trip. Only the two things Jira has
  * no field for — capacity and absence — are fetched.
+ *
+ * Two rows of chrome and then the table: the toolbar (view, search, filters, window, columns,
+ * export) and the KPI pills, which are also the people filter. A person opens *inside* the
+ * table (their tasks on the same date columns); what is edited about them — role, hours, leave,
+ * skills — is a slide-over; work nobody owns is a floating card, closed until asked for.
  */
 export default function ResourceView({
   tasks,
@@ -101,18 +98,21 @@ export default function ResourceView({
 }: Props) {
   const [drag, setDrag] = useState<DragState | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  const [profileId, setProfileId] = useState<string | null>(null);
   // Everyone on the project by default. Showing only people who already hold
   // dated work makes the tab go blank on a project nobody has assigned yet,
   // which reads as "broken" rather than as "nothing is assigned" — and the
   // whole point of a resource tab is to see who is free.
-  const [onlyBusy, setOnlyBusy] = useState(false);
+  const [peopleView, setPeopleView] = useState<PeopleView>("all");
   const [query, setQuery] = useState("");
   const [range, setRange] = useState<{ from: string; to: string } | null>(null);
-  const [showAllUnassigned, setShowAllUnassigned] = useState(false);
+  const [unassignedOpen, setUnassignedOpen] = useState(false);
   // The heatmap (load over time) or the skills matrix (who can do what): two views of the same people.
   const [mode, setMode] = useState<"load" | "skills">("load");
   const [granularityChoice, setGranularityChoice] = useState<Granularity | "auto">("auto");
+  const unassignedBtn = useRef<HTMLButtonElement>(null);
+  const unassignedId = useId();
 
   const today = useMemo(() => todayIso(), []);
 
@@ -131,6 +131,8 @@ export default function ResourceView({
     return tasks.filter((t) => matchesTaskFilter(t, taskFacets, ctx));
   }, [tasks, taskFacets, filtering, today, jqlKeys]);
 
+  // Always everyone: "Có việc" and "Đang quá tải" are pills over this list, not a different
+  // computation, so the counts on the pills and the average beside them stay one set of numbers.
   const load = useMemo(
     () =>
       buildResourceLoad({
@@ -141,27 +143,29 @@ export default function ResourceView({
         defaultCapacityHours: pool?.defaultCapacityHours,
         from: span.from,
         to: span.to,
-        includeIdle: !onlyBusy,
+        includeIdle: true,
       }),
-    [filteredTasks, users, pool, span, onlyBusy]
+    [filteredTasks, users, pool, span]
   );
 
   const granularity: Granularity = granularityChoice === "auto" ? autoGranularity(span.from, span.to) : granularityChoice;
+  const spans = useMemo(() => columnSpans(load.dates, granularity), [load.dates, granularity]);
+  const counts = useMemo(() => peopleCounts(load.people), [load.people]);
+  const utilisation = load.people.length > 0 ? load.people.reduce((n, p) => n + p.utilisation, 0) / load.people.length : 0;
 
   const visiblePeople = useMemo(() => {
+    const base = filterPeople(load.people, peopleView);
     const needle = query.trim().toLowerCase();
-    if (!needle) return load.people;
-    return load.people.filter(
-      (p) =>
-        p.displayName.toLowerCase().includes(needle) ||
-        (p.role ?? "").toLowerCase().includes(needle)
+    if (!needle) return base;
+    return base.filter(
+      (p) => p.displayName.toLowerCase().includes(needle) || (p.role ?? "").toLowerCase().includes(needle)
     );
-  }, [load.people, query]);
+  }, [load.people, peopleView, query]);
 
-  const selected = load.people.find((p) => p.accountId === selectedId) ?? null;
+  const profilePerson = load.people.find((p) => p.accountId === profileId) ?? null;
 
-  // Everyone on the project, not just the rows on screen: with "only people with
-  // work" on, the idle members are exactly who you would hand something to.
+  // Everyone on the project, not just the rows on screen: with "Có việc" on,
+  // the idle members are exactly who you would hand something to.
   const assignable = useMemo(
     () => users.map((u) => ({ accountId: u.accountId, displayName: u.displayName })),
     [users]
@@ -188,14 +192,10 @@ export default function ResourceView({
     [pool]
   );
 
-  function applyPreset(days: number | null) {
-    if (days === null) {
-      setRange(defaultWindow(tasks, today, 3650));
-      return;
-    }
-    const from = span.from;
-    setRange({ from, to: addDays(from, days - 1) });
+  function applyPreset(id: RangePresetId) {
+    setRange(rangeForPreset(id, span, today, tasks));
   }
+  const activePreset = currentPreset(range, today, tasks);
 
   // Saves are applied to the cached pool rather than triggering a refetch: the
   // response is the authoritative row, and a round trip here would make the
@@ -221,6 +221,14 @@ export default function ResourceView({
     onPoolChange({ ...pool, absences: pool.absences.filter((a) => a.id !== id) });
   }
 
+  function toggleExpanded(accountId: string) {
+    setExpanded((cur) => {
+      const next = new Set(cur);
+      if (!next.delete(accountId)) next.add(accountId);
+      return next;
+    });
+  }
+
   function beginDrag(task: Task) {
     setDrag({ taskId: task.id, summary: task.summary, fromAccountId: task.assigneeAccountId });
   }
@@ -240,6 +248,12 @@ export default function ResourceView({
     endDrag();
   }
 
+  const pills: Array<{ view: PeopleView; label: string; n: number; tone?: "danger" }> = [
+    { view: "all", label: "Tất cả", n: counts.all },
+    { view: "busy", label: "Có việc", n: counts.busy },
+    { view: "over", label: "Đang quá tải", n: counts.over, tone: counts.over > 0 ? "danger" : undefined },
+  ];
+
   return (
     <div className="resource-view" onDragEnd={endDrag}>
       <FilterBar
@@ -250,31 +264,128 @@ export default function ResourceView({
         facets={["statuses", "types", "epics", "labels", "priorities", "overdue"]}
         matched={filteredTasks.length}
         total={tasks.length}
-        // Applies the whole shared filter, people included, so the Gantt shows
-        // the same saved view when you switch back.
-        leading={<SavedFilterMenu filter={filter} onApply={onFilterChange} myAccountId={myAccountId} />}
+        leading={
+          <>
+            <div className="segmented-control rv-modes" role="tablist" aria-label="Kiểu xem nguồn lực">
+              <button
+                role="tab"
+                aria-selected={mode === "load"}
+                className={`segmented-btn ${mode === "load" ? "active" : ""}`}
+                onClick={() => setMode("load")}
+              >
+                Mức tải
+              </button>
+              <button
+                role="tab"
+                aria-selected={mode === "skills"}
+                className={`segmented-btn ${mode === "skills" ? "active" : ""}`}
+                onClick={() => setMode("skills")}
+              >
+                Kỹ năng
+              </button>
+            </div>
+            {mode === "load" && (
+              <div className="tf-search rv-member-search">
+                <Icon name="search" size={14} className="tf-search-icon" />
+                <input
+                  type="search"
+                  className="rv-search"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={(e) => e.key === "Escape" && setQuery("")}
+                  placeholder="Tìm thành viên..."
+                  aria-label="Tìm thành viên"
+                />
+              </div>
+            )}
+            {/* Applies the whole shared filter, people included, so the Gantt shows
+                the same saved view when you switch back. */}
+            <SavedFilterMenu filter={filter} onApply={onFilterChange} myAccountId={myAccountId} />
+          </>
+        }
+        trailing={
+          mode === "load" ? (
+            <div className="rv-range">
+              <button type="button" className="tb-btn tb-icon rv-step" onClick={() => shiftRange(-1)} aria-label="Kỳ trước" title="Kỳ trước">
+                <Icon name="chevronLeft" />
+              </button>
+              <button type="button" className="tb-btn tb-icon rv-step" onClick={() => shiftRange(1)} aria-label="Kỳ sau" title="Kỳ sau">
+                <Icon name="chevronRight" />
+              </button>
+              <label className="rv-date">
+                <span>Từ</span>
+                <input
+                  type="date"
+                  value={span.from}
+                  onChange={(e) => e.target.value && setRange({ from: e.target.value, to: span.to })}
+                />
+              </label>
+              <label className="rv-date">
+                <span>Đến</span>
+                <input
+                  type="date"
+                  value={span.to}
+                  onChange={(e) => e.target.value && setRange({ from: span.from, to: e.target.value })}
+                />
+              </label>
+              <Popover
+                className="tf-btn rv-preset"
+                align="end"
+                role="menu"
+                menuLabel="Khoảng thời gian"
+                title="Chọn nhanh khoảng thời gian của bản đồ nhiệt"
+                label={`Khoảng: ${RANGE_PRESETS.find((p) => p.id === activePreset)?.label ?? "Tuỳ chọn"}`}
+              >
+                {({ close }) =>
+                  RANGE_PRESETS.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={activePreset === p.id}
+                      className="menu-item"
+                      onClick={() => {
+                        close();
+                        applyPreset(p.id);
+                      }}
+                    >
+                      <span className="rv-menu-check">{activePreset === p.id && <Icon name="check" size={14} />}</span>
+                      {p.label}
+                    </button>
+                  ))
+                }
+              </Popover>
+              <select
+                className="rv-granularity"
+                value={granularityChoice}
+                onChange={(e) => setGranularityChoice(e.target.value as Granularity | "auto")}
+                aria-label="Mỗi cột là"
+                title={`Mỗi cột của bản đồ nhiệt là một ngày, tuần hay tháng${
+                  granularityChoice === "auto" ? ` (đang tự chọn: ${{ day: "ngày", week: "tuần", month: "tháng" }[granularity]})` : ""
+                }`}
+              >
+                {GRANULARITIES.map((g) => (
+                  <option key={g.value} value={g.value}>
+                    Cột: {g.label}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="tb-btn"
+                onClick={exportCsv}
+                aria-label="Xuất CSV"
+                title="Tải giờ phân bổ từng người theo ngày về file CSV"
+              >
+                <Icon name="download" />
+                <span className="tb-label">Xuất CSV</span>
+              </button>
+            </div>
+          ) : undefined
+        }
       />
-      <div className="segmented-control rv-modes" role="tablist" aria-label="Kiểu xem nguồn lực">
-        <button
-          role="tab"
-          aria-selected={mode === "load"}
-          className={`segmented-btn ${mode === "load" ? "active" : ""}`}
-          onClick={() => setMode("load")}
-        >
-          Mức tải
-        </button>
-        <button
-          role="tab"
-          aria-selected={mode === "skills"}
-          className={`segmented-btn ${mode === "skills" ? "active" : ""}`}
-          onClick={() => setMode("skills")}
-        >
-          Kỹ năng
-        </button>
-      </div>
-      {mode === "skills" && (
-        <SkillMatrixView users={users} profiles={pool?.profiles ?? []} onProfileSaved={upsertProfile} />
-      )}
+
+      {mode === "skills" && <SkillMatrixView users={users} profiles={pool?.profiles ?? []} onProfileSaved={upsertProfile} />}
       {mode === "load" && filtering && (
         <div className="rv-notice">
           Đang lọc: mức tải bên dưới chỉ tính các công việc khớp bộ lọc, không phải toàn bộ khối lượng của mỗi người.
@@ -282,248 +393,128 @@ export default function ResourceView({
       )}
       {mode === "load" && (
         <>
-      <div className="rv-controls">
-        <div className="rv-range">
-          <button className="rv-preset rv-step" onClick={() => shiftRange(-1)} aria-label="Kỳ trước" title="Kỳ trước">
-            ‹
-          </button>
-          <button className="rv-preset rv-step" onClick={() => shiftRange(1)} aria-label="Kỳ sau" title="Kỳ sau">
-            ›
-          </button>
-          <label>
-            Từ
-            <input
-              type="date"
-              value={span.from}
-              onChange={(e) =>
-                e.target.value && setRange({ from: e.target.value, to: span.to })
-              }
-            />
-          </label>
-          <label>
-            Đến
-            <input
-              type="date"
-              value={span.to}
-              onChange={(e) =>
-                e.target.value && setRange({ from: span.from, to: e.target.value })
-              }
-            />
-          </label>
-          <button className="rv-preset" onClick={() => setRange(monthWindow(today))}>
-            Tháng này
-          </button>
-          {PRESETS.map((p) => (
-            <button key={p.label} className="rv-preset" onClick={() => applyPreset(p.days)}>
-              {p.label}
-            </button>
-          ))}
-          {range && (
-            <button className="link-btn" onClick={() => setRange(null)}>
-              Theo dự án
-            </button>
-          )}
-        </div>
-
-        <div className="rv-control-right">
-          <select
-            className="rv-granularity"
-            value={granularityChoice}
-            onChange={(e) => setGranularityChoice(e.target.value as Granularity | "auto")}
-            aria-label="Mỗi cột là"
-            title="Mỗi cột của bản đồ nhiệt là một ngày, tuần hay tháng"
-          >
-            {GRANULARITIES.map((g) => (
-              <option key={g.value} value={g.value}>
-                {g.value === "auto" ? `Cột: tự động (${{ day: "ngày", week: "tuần", month: "tháng" }[granularity]})` : `Cột: ${g.label.toLowerCase()}`}
-              </option>
-            ))}
-          </select>
-          <input
-            type="search"
-            className="rv-search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => e.key === "Escape" && setQuery("")}
-            placeholder="Tìm thành viên..."
-            aria-label="Tìm thành viên"
-          />
-          <button className="rv-preset" onClick={exportCsv} title="Tải giờ phân bổ từng người theo ngày về file CSV">
-            Xuất CSV
-          </button>
-          <label className="rv-toggle">
-            <input
-              type="checkbox"
-              checked={onlyBusy}
-              onChange={(e) => setOnlyBusy(e.target.checked)}
-            />
-            Chỉ hiện người đang có việc
-          </label>
-        </div>
-      </div>
-
-      <div className="rv-summary">
-        <Stat value={String(load.people.length)} label="thành viên có việc" />
-        <Stat
-          value={String(load.overloadedPeople)}
-          label="đang quá tải"
-          tone={load.overloadedPeople > 0 ? "danger" : "ok"}
-        />
-        <Stat
-          value={pct(
-            load.people.length > 0
-              ? load.people.reduce((n, p) => n + p.utilisation, 0) / load.people.length
-              : 0
-          )}
-          label="hiệu suất trung bình"
-        />
-        <Stat
-          value={String(load.unassigned.length)}
-          label="công việc chưa gán"
-          tone={load.unassigned.length > 0 ? "warn" : "ok"}
-        />
-        <div className="rv-legend">
-          {(["free", "light", "healthy", "over", "off-violation"] as LoadBand[]).map((b) => (
-            <span key={b} className="rv-legend-item">
-              <i className={`rv-swatch band-${b}`} />
-              {BAND_LABEL[b]}
-            </span>
-          ))}
-        </div>
-      </div>
-
-      <MemberSourceNote pool={pool} count={load.people.length} />
-
-      {poolError && (
-        <div className="rv-notice">
-          Không tải được công suất và lịch nghỉ ({poolError}). Bản đồ nhiệt vẫn tính theo mặc định{" "}
-          {pool?.defaultCapacityHours ?? 8} giờ/ngày.
-        </div>
-      )}
-
-      {visiblePeople.length === 0 ? (
-        <div className="empty-state">
-          {load.people.length > 0
-            ? "Không có thành viên nào khớp."
-            : onlyBusy
-              ? "Không ai có công việc trong khoảng thời gian này. Bỏ chọn “Chỉ hiện người đang có việc” để xem toàn bộ thành viên dự án."
-              : pool === null
-                ? "Đang tải danh sách thành viên..."
-                : "Dự án này chưa có thành viên nào trên Jira, hoặc tài khoản của bạn không đọc được danh sách."}
-        </div>
-      ) : (
-        <div className="rv-heatmap-scroll">
-          <div className={`rv-grid ${granularity === "day" ? "rv-grid-day" : "rv-grid-week"}`}>
-            <HeatmapHeader dates={load.dates} granularity={granularity} today={today} />
-            {visiblePeople.map((person) => (
-              <PersonRow
-                key={person.accountId}
-                person={person}
-                granularity={granularity}
-                today={today}
-                selected={person.accountId === selectedId}
-                onSelect={() =>
-                  setSelectedId((cur) => (cur === person.accountId ? null : person.accountId))
-                }
-                droppable={canDropOn(person.accountId)}
-                isDropTarget={dropTarget === person.accountId}
-                onDragOver={() => setDropTarget(person.accountId)}
-                onDrop={() => dropOn(person.accountId)}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Mounted whenever something is being dragged, even with nothing
-          unassigned: it is the only place to drop a task in order to take it
-          off someone, so it cannot appear only when it already has contents. */}
-      {(load.unassigned.length > 0 || drag !== null) && (
-        <div
-          className={`rv-unassigned ${canDropOn(null) ? "is-droppable" : ""} ${
-            dropTarget === UNASSIGNED_ZONE ? "is-drop-target" : ""
-          }`}
-          onDragOver={(e) => {
-            if (!canDropOn(null)) return;
-            e.preventDefault();
-            setDropTarget(UNASSIGNED_ZONE);
-          }}
-          onDragLeave={() => setDropTarget((cur) => (cur === UNASSIGNED_ZONE ? null : cur))}
-          onDrop={(e) => {
-            e.preventDefault();
-            dropOn(null);
-          }}
-        >
-          <strong>
-            {drag && canDropOn(null)
-              ? `Thả vào đây để bỏ gán "${drag.summary}"`
-              : `${load.unassigned.length} công việc chưa có người phụ trách`}
-          </strong>
-          <div className="rv-unassigned-list">
-            {(showAllUnassigned ? load.unassigned : load.unassigned.slice(0, 12)).map((t) => (
-              <span key={t.id} className="rv-chip-wrap">
+          <div className="rv-kpis">
+            <div className="rv-pills" role="group" aria-label="Lọc thành viên">
+              {pills.map((p) => (
                 <button
-                  className="rv-chip"
-                  draggable
-                  onDragStart={(e) => {
-                    e.dataTransfer.effectAllowed = "move";
-                    e.dataTransfer.setData("text/plain", t.id);
-                    beginDrag(t);
-                  }}
-                  onClick={() => onOpenEdit(t)}
-                  title="Kéo thả lên một thành viên để gán"
+                  key={p.view}
+                  type="button"
+                  className={`rv-pill${peopleView === p.view ? " is-on" : ""}${p.tone ? ` rv-pill-${p.tone}` : ""}`}
+                  aria-pressed={peopleView === p.view}
+                  onClick={() => setPeopleView(p.view)}
                 >
-                  {t.id} · {t.summary}
+                  {p.label} ({p.n})
                 </button>
-                {/* Drag-and-drop is the fast path; this is the one that works
-                    from a keyboard or a touch screen. */}
-                <select
-                  className="rv-assign-select"
-                  value=""
-                  onChange={(e) => e.target.value && onAssign(t.id, e.target.value)}
-                  aria-label={`Gán ${t.id} cho`}
-                >
-                  <option value="">Gán…</option>
-                  {assignable.map((p) => (
-                    <option key={p.accountId} value={p.accountId}>
-                      {p.displayName}
-                    </option>
-                  ))}
-                </select>
-              </span>
-            ))}
-            {load.unassigned.length > 12 && (
-              <button className="rv-chip-more link-btn" onClick={() => setShowAllUnassigned((v) => !v)}>
-                {showAllUnassigned ? "Thu gọn" : `+${load.unassigned.length - 12} nữa`}
-              </button>
-            )}
-          </div>
-        </div>
-      )}
+              ))}
+            </div>
+            <span className="rv-kpi-stat" title="Giờ đã giao chia cho giờ khả dụng, trung bình trên mọi thành viên trong khoảng đang xem">
+              Hiệu suất TB: <b>{pct(utilisation)}</b>
+            </span>
+            <button
+              ref={unassignedBtn}
+              type="button"
+              className={`rv-pill rv-pill-warn${unassignedOpen ? " is-on" : ""}${load.unassigned.length === 0 ? " is-empty" : ""}`}
+              aria-expanded={unassignedOpen}
+              aria-controls={unassignedId}
+              onClick={() => setUnassignedOpen((v) => !v)}
+              title="Danh sách việc chưa có người phụ trách — kéo một việc thả lên thành viên để gán"
+            >
+              <Icon name="alert" size={13} />
+              {load.unassigned.length} công việc chưa gán
+              <Icon name="chevronDown" size={12} className="rv-pill-caret" />
+            </button>
 
-      {selected && (
-        <ResourcePersonPanel
-          key={selected.accountId}
-          person={selected}
-          dates={load.dates}
-          today={today}
-          defaultCapacityHours={pool?.defaultCapacityHours ?? 8}
-          onClose={() => setSelectedId(null)}
-          onOpenEdit={onOpenEdit}
-          members={assignable}
-          onAssign={onAssign}
-          onProfileSaved={upsertProfile}
-          onAbsenceAdded={addAbsence}
-          onAbsenceRemoved={removeAbsence}
-          onAbsenceUpdated={replaceAbsence}
-          skillSuggestions={skillSuggestions}
-          onDragTask={beginDrag}
-          droppable={canDropOn(selected.accountId)}
-          isDropTarget={dropTarget === selected.accountId}
-          onDragOverPanel={() => setDropTarget(selected.accountId)}
-          onDropOnPanel={() => dropOn(selected.accountId)}
-        />
-      )}
+            <div className="rv-legend" role="group" aria-label="Chú giải màu">
+              {LEGEND.map((l) => (
+                <span key={l.band} className="rv-legend-item" title={l.title}>
+                  <i className={`rv-swatch band-${l.band}`} />
+                  {l.short}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {poolError && (
+            <div className="rv-notice">
+              Không tải được công suất và lịch nghỉ ({poolError}). Bản đồ nhiệt vẫn tính theo mặc định{" "}
+              {pool?.defaultCapacityHours ?? 8} giờ/ngày.
+            </div>
+          )}
+
+          {visiblePeople.length === 0 ? (
+            <div className="empty-state">
+              {load.people.length > 0
+                ? peopleView === "all"
+                  ? "Không có thành viên nào khớp."
+                  : "Không có thành viên nào khớp. Chọn “Tất cả” để xem toàn bộ thành viên dự án."
+                : pool === null
+                  ? "Đang tải danh sách thành viên..."
+                  : "Dự án này chưa có thành viên nào trên Jira, hoặc tài khoản của bạn không đọc được danh sách."}
+            </div>
+          ) : (
+            <div className="rv-heatmap-scroll">
+              <div className={`rv-grid ${granularity === "day" ? "rv-grid-day" : "rv-grid-week"}`} style={{ "--cols": spans.length } as React.CSSProperties}>
+                <HeatmapHeader
+                  spans={spans}
+                  granularity={granularity}
+                  today={today}
+                  memberNote={<MemberSourceTip pool={pool} count={load.people.length} />}
+                />
+                {visiblePeople.map((person) => (
+                  <ResourcePersonBlock
+                    key={person.accountId}
+                    person={person}
+                    granularity={granularity}
+                    today={today}
+                    spans={spans}
+                    expanded={expanded.has(person.accountId)}
+                    onToggle={() => toggleExpanded(person.accountId)}
+                    onOpenProfile={() => setProfileId(person.accountId)}
+                    onOpenEdit={onOpenEdit}
+                    members={assignable}
+                    onAssign={onAssign}
+                    onDragTask={beginDrag}
+                    droppable={canDropOn(person.accountId)}
+                    isDropTarget={dropTarget === person.accountId}
+                    onDragOverPerson={() => setDropTarget(person.accountId)}
+                    onDropOnPerson={() => dropOn(person.accountId)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          <ResourceUnassigned
+            panelId={unassignedId}
+            open={unassignedOpen}
+            onClose={() => setUnassignedOpen(false)}
+            anchorRef={unassignedBtn}
+            tasks={load.unassigned}
+            members={assignable}
+            drag={drag}
+            canDropUnassigned={canDropOn(null)}
+            isDropTarget={dropTarget === UNASSIGNED_ZONE}
+            onDragStartTask={beginDrag}
+            onAssign={onAssign}
+            onOpenEdit={onOpenEdit}
+            onDragOverZone={() => setDropTarget(UNASSIGNED_ZONE)}
+            onDragLeaveZone={() => setDropTarget((cur) => (cur === UNASSIGNED_ZONE ? null : cur))}
+            onDropZone={() => dropOn(null)}
+          />
+
+          {profilePerson && (
+            <ResourceProfileDrawer
+              key={profilePerson.accountId}
+              person={profilePerson}
+              defaultCapacityHours={pool?.defaultCapacityHours ?? 8}
+              skillSuggestions={skillSuggestions}
+              onClose={() => setProfileId(null)}
+              onProfileSaved={upsertProfile}
+              onAbsenceAdded={addAbsence}
+              onAbsenceRemoved={removeAbsence}
+              onAbsenceUpdated={replaceAbsence}
+            />
+          )}
         </>
       )}
     </div>
@@ -531,39 +522,40 @@ export default function ResourceView({
 }
 
 /**
- * One line saying where the member list came from.
+ * Where the member list came from, behind an ⓘ beside the column's title.
  *
- * Without it, "why is X not here / why is this stranger here" has no answer on
- * screen: the two sources differ enormously (a project's declared roles versus
- * everyone on the site holding one permission), and which one you get depends
- * on a Jira permission the user cannot see from here.
+ * It cannot go away entirely: without it, "why is X not here / why is this stranger here" has no
+ * answer on screen — the two sources differ enormously (a project's declared roles versus
+ * everyone on the site holding one permission), and which one you get depends on a Jira
+ * permission the user cannot see from here. So the normal case is a quiet ⓘ, and the fallback
+ * (the list is probably wider than the real team) is the same control in warning colours.
  */
-function MemberSourceNote({ pool, count }: { pool: ResourcePool | null; count: number }) {
+function MemberSourceTip({ pool, count }: { pool: ResourcePool | null; count: number }) {
   if (!pool) return null;
 
   if (pool.memberSource === "project-roles") {
     return (
-      <div className="rv-source">
+      <InfoTip label="Danh sách thành viên lấy từ đâu">
         {count} thành viên, lấy từ vai trò dự án trên Jira
-        {pool.memberRoles.length > 0 && <> ({pool.memberRoles.join(", ")})</>}. Sửa danh sách này
-        trong Jira: <b>Project settings → People</b>.
+        {pool.memberRoles.length > 0 && <> ({pool.memberRoles.join(", ")})</>}. Sửa danh sách này trong Jira:{" "}
+        <b>Project settings → People</b>.
         {pool.memberSkippedGroups > 0 && (
           <>
             {" "}
-            Chỉ gồm người được thêm trực tiếp vào vai trò — {pool.memberSkippedGroups} nhóm trong vai
-            trò không đọc được thành viên nên chưa được tính.
+            Chỉ gồm người được thêm trực tiếp vào vai trò — {pool.memberSkippedGroups} nhóm trong vai trò không đọc được
+            thành viên nên chưa được tính.
           </>
         )}
-      </div>
+      </InfoTip>
     );
   }
 
   return (
-    <div className="rv-source rv-source-warn">
-      {count} người, lấy từ danh sách <b>có thể được giao việc</b> — {fallbackReasonText(pool)}{" "}
-      Danh sách này thường rộng hơn đội thật.
+    <InfoTip label="Danh sách thành viên có thể rộng hơn đội thật — xem lý do" tone="warn">
+      {count} người, lấy từ danh sách <b>có thể được giao việc</b> — {fallbackReasonText(pool)} Danh sách này thường rộng hơn
+      đội thật.
       {pool.memberTruncated && " Jira đã cắt ở 100 người, có thể còn thiếu."}
-    </div>
+    </InfoTip>
   );
 }
 
@@ -579,8 +571,7 @@ function fallbackReasonText(pool: ResourcePool): ReactNode {
     case "roles-forbidden":
       return (
         <>
-          tài khoản của bạn không có quyền <i>Administer Projects</i> nên Jira từ chối đọc vai trò
-          dự án{status}.
+          tài khoản của bạn không có quyền <i>Administer Projects</i> nên Jira từ chối đọc vai trò dự án{status}.
         </>
       );
     case "actors-unreadable":
@@ -588,24 +579,22 @@ function fallbackReasonText(pool: ResourcePool): ReactNode {
     case "groups-unreadable":
       return (
         <>
-          vai trò dự án chỉ gồm nhóm, và tài khoản của bạn không có quyền toàn cục{" "}
-          <i>Browse users and groups</i> để xem thành viên nhóm{status}. Thêm từng người trực tiếp
-          vào vai trò sẽ khắc phục.
+          vai trò dự án chỉ gồm nhóm, và tài khoản của bạn không có quyền toàn cục <i>Browse users and groups</i> để xem
+          thành viên nhóm{status}. Thêm từng người trực tiếp vào vai trò sẽ khắc phục.
         </>
       );
     case "groups-out-of-scope":
       return (
         <>
-          vai trò dự án chỉ gồm nhóm, và ứng dụng chưa được Atlassian cấp phạm vi truy cập để xem
-          thành viên nhóm{status}. Đây là cấu hình của ứng dụng, không phải quyền của bạn trên Jira.
-          Thêm từng người trực tiếp vào vai trò sẽ khắc phục.
+          vai trò dự án chỉ gồm nhóm, và ứng dụng chưa được Atlassian cấp phạm vi truy cập để xem thành viên nhóm{status}.
+          Đây là cấu hình của ứng dụng, không phải quyền của bạn trên Jira. Thêm từng người trực tiếp vào vai trò sẽ khắc
+          phục.
         </>
       );
     case "roles-empty":
       return (
         <>
-          đọc được vai trò dự án nhưng chưa vai trò nào có người. Thêm thành viên tại{" "}
-          <b>Project settings → People</b>.
+          đọc được vai trò dự án nhưng chưa vai trò nào có người. Thêm thành viên tại <b>Project settings → People</b>.
         </>
       );
     case "error":
@@ -615,43 +604,26 @@ function fallbackReasonText(pool: ResourcePool): ReactNode {
   }
 }
 
-function Stat({
-  value,
-  label,
-  tone,
-}: {
-  value: string;
-  label: string;
-  tone?: "ok" | "warn" | "danger";
-}) {
-  return (
-    <div className={`rv-stat ${tone ? `rv-stat-${tone}` : ""}`}>
-      <b>{value}</b>
-      <span>{label}</span>
-    </div>
-  );
-}
-
 /**
  * Two header rows: months spanning their days, then the day (or week) itself.
  * The month row is what makes a 90-column strip readable — bare day numbers
  * repeat every month and give a reader nothing to anchor on.
  */
 function HeatmapHeader({
-  dates,
+  spans,
   granularity,
   today,
+  memberNote,
 }: {
-  dates: string[];
+  spans: Array<{ start: string; end: string }>;
   granularity: Granularity;
   today: string;
+  memberNote: ReactNode;
 }) {
-  const columns = granularity === "week" ? weekStarts(dates) : granularity === "month" ? monthStarts(dates) : dates;
-
   const months: Array<{ label: string; span: number }> = [];
-  for (const iso of columns) {
+  for (const { start } of spans) {
     // By month the columns are months themselves, so the band above them is the year.
-    const label = granularity === "month" ? `Năm ${iso.slice(0, 4)}` : `Thg ${Number(iso.slice(5, 7))}/${iso.slice(0, 4)}`;
+    const label = granularity === "month" ? `Năm ${start.slice(0, 4)}` : `Thg ${Number(start.slice(5, 7))}/${start.slice(0, 4)}`;
     const last = months[months.length - 1];
     if (last && last.label === label) last.span += 1;
     else months.push({ label, span: 1 });
@@ -668,125 +640,20 @@ function HeatmapHeader({
         ))}
       </div>
       <div className="rv-row rv-row-head">
-        <div className="rv-name rv-corner">Thành viên</div>
-        {columns.map((iso) => (
-          <div
-            key={iso}
-            className={`rv-cell rv-head-cell ${iso === today ? "is-today" : ""}`}
-            title={iso}
-          >
-            {granularity === "week" ? shortDate(iso) : granularity === "month" ? `Thg ${Number(iso.slice(5, 7))}` : iso.slice(8, 10)}
+        <div className="rv-name rv-corner">
+          Thành viên
+          {memberNote}
+        </div>
+        {spans.map(({ start, end }) => (
+          <div key={start} className={`rv-cell rv-head-cell ${today >= start && today <= end ? "is-today" : ""}`} title={start}>
+            {granularity === "week"
+              ? `${start.slice(8, 10)}/${start.slice(5, 7)}`
+              : granularity === "month"
+                ? `Thg ${Number(start.slice(5, 7))}`
+                : start.slice(8, 10)}
           </div>
         ))}
       </div>
     </>
-  );
-}
-
-function monthStarts(dates: string[]): string[] {
-  return dates.filter((d, i) => i === 0 || d.slice(0, 7) !== dates[i - 1].slice(0, 7));
-}
-
-function weekStarts(dates: string[]): string[] {
-  const out: string[] = [];
-  dates.forEach((d, i) => {
-    if (i === 0 || new Date(`${d}T00:00:00Z`).getUTCDay() === 1) out.push(d);
-  });
-  return out;
-}
-
-function PersonRow({
-  person,
-  granularity,
-  today,
-  selected,
-  onSelect,
-  droppable,
-  isDropTarget,
-  onDragOver,
-  onDrop,
-}: {
-  person: PersonLoad;
-  granularity: Granularity;
-  today: string;
-  selected: boolean;
-  onSelect: () => void;
-  droppable: boolean;
-  isDropTarget: boolean;
-  onDragOver: () => void;
-  onDrop: () => void;
-}) {
-  const cells = granularity !== "day"
-    ? (granularity === "month" ? aggregateMonths(person.days) : aggregateWeeks(person.days)).map((w) => ({
-        key: w.start,
-        band: w.band,
-        ratio: w.ratio,
-        allocated: w.allocatedHours,
-        capacity: w.capacityHours,
-        label: `${w.start} → ${w.end}`,
-        taskIds: w.taskIds,
-        isToday: today >= w.start && today <= w.end,
-      }))
-    : person.days.map((d) => ({
-        key: d.date,
-        band: d.band,
-        ratio: d.ratio,
-        allocated: d.allocatedHours,
-        capacity: d.capacityHours,
-        label: d.date,
-        taskIds: d.taskIds,
-        isToday: d.date === today,
-      }));
-
-  return (
-    <div
-      className={`rv-row rv-row-person ${selected ? "is-selected" : ""} ${
-        droppable ? "is-droppable" : ""
-      } ${isDropTarget ? "is-drop-target" : ""}`}
-      onClick={onSelect}
-      // preventDefault on dragover is what marks an element as a drop target at
-      // all; without it the browser refuses the drop and fires nothing.
-      onDragOver={(e) => {
-        if (!droppable) return;
-        e.preventDefault();
-        e.dataTransfer.dropEffect = "move";
-        onDragOver();
-      }}
-      onDrop={(e) => {
-        e.preventDefault();
-        onDrop();
-      }}
-    >
-      <div className="rv-name">
-        {person.avatarUrl ? (
-          <img src={person.avatarUrl} alt="" className="rv-avatar" />
-        ) : (
-          <span className="rv-avatar rv-avatar-empty">{person.displayName.slice(0, 1)}</span>
-        )}
-        <span className="rv-person-text">
-          <b>{person.displayName}</b>
-          <small>
-            {person.role ? `${person.role} · ` : ""}
-            {person.capacityHoursPerDay}h/ngày · {person.tasks.length} việc
-          </small>
-        </span>
-        {person.overloadedDays > 0 && (
-          <span className="rv-badge-over" title={`${person.overloadedDays} ngày quá tải`}>
-            {person.overloadedDays}
-          </span>
-        )}
-      </div>
-      {cells.map((c) => (
-        <div
-          key={c.key}
-          className={`rv-cell band-${c.band} ${c.isToday ? "is-today" : ""}`}
-          title={`${c.label} · ${c.allocated}h / ${c.capacity}h (${pct(c.ratio)})${
-            c.taskIds.length > 0 ? `\n${[...new Set(c.taskIds)].join(", ")}` : ""
-          }`}
-        >
-          {granularity !== "day" && c.capacity > 0 ? pct(c.ratio) : ""}
-        </div>
-      ))}
-    </div>
   );
 }

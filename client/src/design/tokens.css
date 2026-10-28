@@ -64,7 +64,9 @@
   --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
   --transition-normal: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 
-  /* Stacking: a popover sits above the page, a modal above a popover, a confirmation above a modal. */
+  /* Stacking: a floating tool card (resource tab's unassigned list) sits above the page but under every popover,
+     so a filter menu opened over it is not hidden; a popover above that, a modal above a popover, a confirmation above a modal. */
+  --z-float: 40;
   --z-popover: 50;
   --z-modal: 50;
   --z-dialog: 80;

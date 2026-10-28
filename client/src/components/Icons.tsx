@@ -35,7 +35,9 @@ export type IconName =
   | "chevronUp"
   | "equals"
   | "collapseColumn"
-  | "clock";
+  | "clock"
+  | "grip"
+  | "edit";
 
 /** One outline family (24 grid, 2px stroke) so the header and toolbar read as a set.
  * Inline rather than an icon package: a few dozen paths isn't worth a dependency, and
@@ -240,6 +242,22 @@ const PATHS: Record<IconName, ReactNode> = {
     <>
       <circle cx="12" cy="12" r="9" />
       <path d="M12 7v5l3 2" />
+    </>
+  ),
+  grip: (
+    <>
+      <path d="M9 6v.01" />
+      <path d="M15 6v.01" />
+      <path d="M9 12v.01" />
+      <path d="M15 12v.01" />
+      <path d="M9 18v.01" />
+      <path d="M15 18v.01" />
+    </>
+  ),
+  edit: (
+    <>
+      <path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4Z" />
+      <path d="M13.5 6.5l4 4" />
     </>
   ),
 };
