@@ -4,6 +4,7 @@ import {
   CONCURRENCY,
   createdDay,
   limiter,
+  named,
   PARALLEL_MIN_ISSUES,
   searchProjectIssues,
   shareInflight,
@@ -82,6 +83,44 @@ describe("limiter", () => {
     );
     assert.deepEqual(out, Array.from({ length: 12 }, (_, i) => i));
     assert.equal(peak, 3);
+  });
+});
+
+describe("named", () => {
+  const status = (n: number, body = "") => Object.assign(new Error(`Jira API error ${n}`), { status: n, body });
+
+  it("retries a 5xx and returns the later success", async () => {
+    let calls = 0;
+    const out = await named("x", async () => {
+      if (++calls < 3) throw status(502);
+      return "ok";
+    });
+    assert.equal(out, "ok");
+    assert.equal(calls, 3);
+  });
+
+  it("gives up after the retries, naming the call and what Jira said", async () => {
+    let calls = 0;
+    await assert.rejects(
+      named("slice 2026-01-01..2026-01-09", async () => {
+        calls++;
+        throw status(502, "<html>Bad   Gateway</html>");
+      }),
+      /slice 2026-01-01\.\.2026-01-09: Jira API error 502 \(<html>Bad Gateway<\/html>\)/
+    );
+    assert.equal(calls, 3);
+  });
+
+  it("does not retry a 4xx (a query Jira refuses will be refused again)", async () => {
+    let calls = 0;
+    await assert.rejects(
+      named("count", async () => {
+        calls++;
+        throw status(400, "bad jql");
+      }),
+      /count: Jira API error 400/
+    );
+    assert.equal(calls, 1);
   });
 });
 

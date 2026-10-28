@@ -61,6 +61,31 @@ export function limiter(limit: number): <T>(fn: () => Promise<T>) => Promise<T> 
   };
 }
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+/** Attempts per request on a server-side (5xx) answer: Atlassian's gateway returns the odd 502 under load. */
+const RETRIES_ON_5XX = 2;
+
+/**
+ * One request, named. A 5xx is tried again a couple of times; any failure that remains says WHICH
+ * call it was and what Jira answered, because "Jira API error 502" alone cannot tell a bad query
+ * from a busy gateway — and the only place this runs is production.
+ */
+export async function named<T>(label: string, fn: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      const status = typeof err?.status === "number" ? err.status : 0;
+      if (status >= 500 && attempt < RETRIES_ON_5XX) {
+        await sleep(300 * (attempt + 1));
+        continue;
+      }
+      const body = typeof err?.body === "string" ? err.body.replace(/\s+/g, " ").trim().slice(0, 160) : "";
+      throw new Error(`${label}: ${err?.message ?? err}${body ? ` (${body})` : ""}`);
+    }
+  }
+}
+
 export interface Slice {
   /** First day, inclusive, as "yyyy-MM-dd". */
   from: string;
@@ -98,15 +123,15 @@ export async function searchProjectIssues(
   });
 
   try {
-    const expected = await jira.countIssues(whole).catch(() => null);
+    const expected = await named("count", () => jira.countIssues(whole)).catch(() => null);
     if (expected === null) return sequential("no count from Jira");
     if (expected < PARALLEL_MIN_ISSUES) return sequential(`small project (${expected} issues)`);
 
     // The span of creation days. Padded a day each side: the timestamps are read in one time zone
     // and the JQL below in another, so the ends must not depend on them agreeing.
     const [oldest, newest] = await Promise.all([
-      jira.searchIssues(`${whole} ORDER BY created ASC`, ["created"], 1),
-      jira.searchIssues(`${whole} ORDER BY created DESC`, ["created"], 1),
+      named("oldest", () => jira.searchIssues(`${whole} ORDER BY created ASC`, ["created"], 1)),
+      named("newest", () => jira.searchIssues(`${whole} ORDER BY created DESC`, ["created"], 1)),
     ]);
     const first = createdDay(oldest[0]);
     const last = createdDay(newest[0]);
@@ -117,7 +142,7 @@ export async function searchProjectIssues(
     const limited = limiter(CONCURRENCY);
     const plan = async (s: Slice): Promise<Slice[]> => {
       const days = dayNumber(s.to) - dayNumber(s.from);
-      const count = await limited(() => jira.countIssues(sliceJql(whole, s)));
+      const count = await limited(() => named(`count ${s.from}..${s.to}`, () => jira.countIssues(sliceJql(whole, s))));
       if (count === null) throw new Error("no count for a slice");
       if (count === 0) return [];
       if (count <= SLICE_SIZE || days <= 1) return [s];
@@ -128,7 +153,9 @@ export async function searchProjectIssues(
     const slices = await plan({ from: isoOfDay(dayNumber(first) - 1), to: isoOfDay(dayNumber(last) + 2) });
 
     const pages = await Promise.all(
-      slices.map((s) => limited(() => jira.searchIssues(`${sliceJql(whole, s)} ORDER BY created ASC`, fields)))
+      slices.map((s) =>
+        limited(() => named(`slice ${s.from}..${s.to}`, () => jira.searchIssues(`${sliceJql(whole, s)} ORDER BY created ASC`, fields)))
+      )
     );
     const issues = pages.flat();
 
@@ -140,7 +167,7 @@ export async function searchProjectIssues(
     // take, a rate limit that outlasted the retries) the ordinary read still has to work. An
     // expired session fails the same way there and is reported by it.
     console.warn(`[parallelSearch] ${projectKey}: falling back to the sequential read — ${(err as Error)?.message ?? err}`);
-    return sequential(`fast path failed: ${(err as Error)?.message ?? err}`.slice(0, 200));
+    return sequential(`fast path failed: ${(err as Error)?.message ?? err}`.slice(0, 320));
   }
 }
 
