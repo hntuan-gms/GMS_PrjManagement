@@ -3,7 +3,8 @@ import { api, ApiError } from "../api";
 import { csvName, downloadCsv } from "../csv";
 import { localToday, roundHours } from "../taskForm";
 import type { Session, Task, Timesheet, TimesheetPerson, WorklogEntry } from "../types";
-import { readViewCache, viewCacheScope, writeViewCache } from "../viewCache";
+import { addDays, rangeOf, weekday, type TimesheetMode } from "../timesheetRange";
+import { isViewFresh, readViewCache, viewCacheScope, writeViewCache } from "../viewCache";
 import NumberInput from "./NumberInput";
 
 /**
@@ -15,30 +16,13 @@ import NumberInput from "./NumberInput";
  * defaulting to a full working day.
  */
 
-type Mode = "week" | "month";
+type Mode = TimesheetMode;
 type Selection = { accountId: string; date: string | null } | null;
 
 const WEEKDAYS = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
 
-function addDays(iso: string, n: number): string {
-  const d = new Date(iso + "T00:00:00Z");
-  d.setUTCDate(d.getUTCDate() + n);
-  return d.toISOString().slice(0, 10);
-}
-const weekday = (iso: string) => new Date(iso + "T00:00:00Z").getUTCDay();
 const isWeekend = (iso: string) => weekday(iso) === 0 || weekday(iso) === 6;
 const dm = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
-
-function rangeOf(mode: Mode, anchor: string): { from: string; to: string } {
-  if (mode === "week") {
-    const from = addDays(anchor, -((weekday(anchor) + 6) % 7));
-    return { from, to: addDays(from, 6) };
-  }
-  const from = `${anchor.slice(0, 7)}-01`;
-  const next = new Date(from + "T00:00:00Z");
-  next.setUTCMonth(next.getUTCMonth() + 1);
-  return { from, to: addDays(next.toISOString().slice(0, 10), -1) };
-}
 
 function eachDay(from: string, to: string): string[] {
   const out: string[] = [];
@@ -101,6 +85,14 @@ export default function TimesheetView({
   const [result, setResult] = useState<{ key: string; sheet?: Timesheet; error?: string } | null>(null);
   useEffect(() => {
     let alive = true;
+    // Fetched ahead when the project opened (warmViews.ts) and nothing changed since: no second read of Jira.
+    if (reloadKey === 0 && isViewFresh(cacheScope, "timesheet", range)) {
+      const ahead = readViewCache<Timesheet>(cacheScope, "timesheet", range);
+      if (ahead) {
+        setResult({ key: requestKey, sheet: ahead });
+        return;
+      }
+    }
     api
       .getTimesheet(from, to)
       .then((sheet) => {
@@ -115,7 +107,7 @@ export default function TimesheetView({
     return () => {
       alive = false;
     };
-  }, [from, to, range, requestKey, cacheScope]);
+  }, [from, to, range, requestKey, reloadKey, cacheScope]);
   const loading = result?.key !== requestKey;
   // Until this range's answer lands, the last one seen for it (viewCache.ts) beats a blank page.
   const sheet =

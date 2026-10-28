@@ -16,6 +16,16 @@ const MAX_ENTRIES = 40;
 const MAX_CHARS = 1_500_000;
 const PREFIX = "gms.viewCache.v1.";
 const entries = new Map<string, unknown>();
+/**
+ * Answers fetched ahead of a visit (warmViews.ts), by the time their request STARTED. A tab that finds one
+ * of these still fresh shows it and does not ask again — it would only repeat a read of Jira that began a
+ * moment ago. Memory only: after a reload nothing is fresh, so a tab asks as it always did.
+ */
+const freshSince = new Map<string, number>();
+/** When the workspace's tasks last changed under the user (a drag, an edit), per scope. */
+const changedAt = new Map<string, number>();
+/** An answer older than this is asked for again even if nothing changed: Jira changes without us. */
+export const FRESH_MAX_AGE_MS = 60_000;
 
 type Store = Pick<Storage, "getItem" | "setItem" | "removeItem" | "key" | "length">;
 
@@ -51,6 +61,7 @@ export function writeViewCache(scope: string, view: string, params: string, valu
   // Re-inserted so the oldest entry is the one least recently written; a timesheet range
   // per week visited would otherwise grow without bound.
   entries.delete(key);
+  freshSince.delete(key); // a write that is not a warm-up is no longer "the one fetched ahead"
   entries.set(key, value);
   try {
     const json = JSON.stringify(value);
@@ -70,10 +81,28 @@ export function writeViewCache(scope: string, view: string, params: string, valu
   }
 }
 
+/** Say the answer just written was fetched ahead, by a request that began at `startedAt`. */
+export function markViewFresh(scope: string, view: string, params: string, startedAt: number): void {
+  freshSince.set(keyOf(scope, view, params), startedAt);
+}
+
+/** The tasks changed under the user: every answer fetched before now describes the old plan. */
+export function noteViewsStale(scope: string, now = Date.now()): void {
+  changedAt.set(scope, now);
+}
+
+/** True while a warmed answer began after the last change to the tasks and is not too old. */
+export function isViewFresh(scope: string, view: string, params: string, now = Date.now()): boolean {
+  const started = freshSince.get(keyOf(scope, view, params));
+  if (started === undefined || now - started > FRESH_MAX_AGE_MS) return false;
+  return started > (changedAt.get(scope) ?? 0);
+}
+
 /** Forget one answer — for an answer that must not be shown again (a refusal). */
 export function dropViewCache(scope: string, view: string, params: string, storage: Store | null = session()): void {
   const key = keyOf(scope, view, params);
   entries.delete(key);
+  freshSince.delete(key);
   try {
     storage?.removeItem(PREFIX + key);
   } catch {
@@ -83,6 +112,8 @@ export function dropViewCache(scope: string, view: string, params: string, stora
 
 export function clearViewCache(storage: Store | null = session()): void {
   entries.clear();
+  freshSince.clear();
+  changedAt.clear();
   try {
     if (!storage) return;
     const keys: string[] = [];

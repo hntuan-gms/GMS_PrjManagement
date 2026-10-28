@@ -451,3 +451,15 @@ export function idleDays(issue: BoardIssue, today: string): number {
   if (!last || last >= today) return 0;
   return workingDaysLocal(addDaysLocal(last, 1), today).length;
 }
+
+/** The board this browser last chose for a project (null = none yet: the server picks the default). */
+export const storedBoardKey = (project: string) => `gms.board.${project}`;
+
+export function readStoredBoardId(project: string): number | null {
+  try {
+    const raw = localStorage.getItem(storedBoardKey(project));
+    return raw ? Number(raw) || null : null;
+  } catch {
+    return null;
+  }
+}

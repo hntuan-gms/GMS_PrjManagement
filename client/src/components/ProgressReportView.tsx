@@ -4,7 +4,8 @@ import { computeCriticalPath } from "../criticalPath";
 import { todayIso } from "../resourceAllocation";
 import { csvName, downloadCsv } from "../csv";
 import { isAssignableType, type Health, type ProgressOverview, type ProgressReport, type ProgressScope, type Task } from "../types";
-import { readViewCache, writeViewCache } from "../viewCache";
+import { isViewFresh, readViewCache, writeViewCache } from "../viewCache";
+import { overviewParams } from "../warmViews";
 import { buildReportLink } from "../deepLink";
 import AgileReports from "./AgileReports";
 import AiBrief from "./AiBrief";
@@ -31,9 +32,6 @@ interface Props {
   /** The workspace is still on its saved copy of the tasks; asking now would be answered twice. */
   refreshing?: boolean;
 }
-
-const overviewParams = (asOf: string, scope: ProgressScope) =>
-  JSON.stringify([asOf, scope.assignee ?? "", scope.epic ?? "", [...(scope.types ?? [])].sort()]);
 
 /**
  * The progress report tab — a dashboard and an analyst side by side.
@@ -128,6 +126,15 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
   // worth having if it actually is live.
   useEffect(() => {
     if (refreshing) return;
+    // Fetched ahead when the project opened (warmViews.ts) and nothing changed since: no second read of Jira.
+    if (reloadTick === 0 && isViewFresh(cacheScope, "progress", overviewParams(asOf, scope))) {
+      const ahead = readViewCache<ProgressOverview>(cacheScope, "progress", overviewParams(asOf, scope));
+      if (ahead) {
+        setOverview(ahead);
+        setLoadError(null);
+        return;
+      }
+    }
     let alive = true;
     api
       .getProgress(asOf, scope)

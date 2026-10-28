@@ -48,7 +48,8 @@ import Popover from "./Popover";
 import type { QuickOptions } from "./QuickCreateOptions";
 import KanbanBoard from "./KanbanBoard";
 import SprintHeader from "./SprintHeader";
-import { readViewCache, viewCacheScope, writeViewCache } from "../viewCache";
+import { readStoredBoardId, storedBoardKey } from "../boardModel";
+import { isViewFresh, readViewCache, viewCacheScope, writeViewCache } from "../viewCache";
 import { CompleteSprintModal, CreateBoardModal, SprintFormModal, SprintPlanModal } from "./SprintModals";
 import { TransitionFieldsDialog } from "./TransitionFields";
 import { useDialogs } from "./dialogContext";
@@ -92,16 +93,8 @@ type Modal =
   | { kind: "complete"; sprint: Sprint }
   | { kind: "plan"; sprint: Sprint };
 
-const storageKey = (project: string) => `gms.board.${project}`;
-
-function readStoredBoard(project: string): number | null {
-  try {
-    const raw = localStorage.getItem(storageKey(project));
-    return raw ? Number(raw) || null : null;
-  } catch {
-    return null;
-  }
-}
+const storageKey = storedBoardKey;
+const readStoredBoard = readStoredBoardId;
 
 export default function BoardView({ session, tasks, users, onOpenEdit, onTasksChanged, incomingFilter, onIncomingFilterTaken, refreshing }: Props) {
   const projectKey = session.project?.key ?? "";
@@ -207,6 +200,15 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
   // edit in the Gantt, the task modal or the assistant can move a card too.
   useEffect(() => {
     if (refreshing) return;
+    // Fetched ahead when the project opened (warmViews.ts) and nothing changed since: no second read of Jira.
+    if (isViewFresh(cacheScope, "board", String(boardId))) {
+      const ahead = readViewCache<BoardSnapshot>(cacheScope, "board", String(boardId));
+      if (ahead) {
+        setSnapshot(ahead);
+        setLoadError(null);
+        return;
+      }
+    }
     load(boardId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boardId, tasks, refreshing]);

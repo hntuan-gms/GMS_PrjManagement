@@ -8,7 +8,8 @@ import { toBoardFilter, toTaskFilter, type ViewFilterSpec } from "../viewFilter"
 import { makeEntry, pushEntry, undoSteps, type UndoEntry } from "../undo";
 import { addDays, buildResourceLoad, defaultWindow, todayIso } from "../resourceAllocation";
 import { loadTasksCache, saveTasksCache, tasksCacheKey } from "../tasksCache";
-import { dropViewCache, readViewCache, viewCacheScope, writeViewCache } from "../viewCache";
+import { dropViewCache, noteViewsStale, readViewCache, viewCacheScope, writeViewCache } from "../viewCache";
+import { warmBoardAndTimesheet, warmProgress } from "../warmViews";
 import type {
   BulkTaskCreateResult,
   DependencyType,
@@ -209,6 +210,15 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
     return ++seqCounter.current;
   }
 
+  // The tasks this workspace last took from a full read. Any other change to `tasks` is the user's edit, and
+  // what the tabs fetched ahead then describes the old plan (viewCache.noteViewsStale).
+  const freshApplied = useRef<Task[] | null>(null);
+  const firstTasks = useRef(tasks);
+  useEffect(() => {
+    if (tasks === firstTasks.current || tasks === freshApplied.current) return;
+    noteViewsStale(viewScope);
+  }, [tasks, viewScope]);
+
   async function loadAll() {
     // With a cached copy on screen nothing blocks: this only swaps the fresh data in.
     if (!cached) setLoading(true);
@@ -219,12 +229,20 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
     // to draw; waiting for the slower of the two made a 15-task project load as slowly as a 4000-task one.
     const usersReq = api.listUsers();
     usersReq.catch(() => {}); // awaited below; this only keeps an early failure from being "unhandled"
+    // The Báo cáo tab's numbers are computed from the same read of Jira as the tasks, which the server shares
+    // between callers that ask together — so asking now costs nothing extra, and the tab opens already filled.
+    void warmProgress(viewScope);
     let shown = false;
     try {
       const t = await api.listTasks();
       // A drag or edit made while the old copy was showing has its own refresh coming;
       // this response was asked for before it and would put the old schedule back.
-      if (seqCounter.current === seqAtStart) setTasks(t);
+      if (seqCounter.current === seqAtStart) {
+        freshApplied.current = t;
+        setTasks(t);
+        // The plan is on screen: now the other tabs' own reads (board, this week's timesheet) can start.
+        void warmBoardAndTimesheet(viewScope, session.project?.key ?? "");
+      }
       shown = true;
       setLoading(false);
       setShowingCache(false);
