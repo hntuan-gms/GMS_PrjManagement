@@ -3,11 +3,17 @@
  *
  * `/search/jql` pages by an opaque `nextPageToken`, so a project of 4000 issues is 41 requests
  * that cannot start before the previous one answered — about a second each, which was the entire
- * 40-second page load. A key range (`key >= X-1 AND key <= X-300`) is a query of its own, so the
- * ranges run side by side and only the three or four pages inside one range stay sequential.
+ * 40-second page load. A slice of the project by creation day is a query of its own, so the
+ * slices run side by side and only the two or three pages inside one slice stay sequential.
+ *
+ * Slices are by `created`, not by issue key: key ranges (`key >= P-1 AND key <= P-300`) were
+ * tried first and in production reached only 3513 of a project's 4044 issues, and neither did the
+ * complement of the range — Jira simply does not match some issues by key number. Every issue has
+ * a creation date, and day boundaries written as the same string on both sides of a cut partition
+ * the project exactly, whatever time zone Jira reads them in.
  *
  * Small projects are read the old way: one query is already one or two round trips, and the
- * extra "what is the newest key" call would only make them slower.
+ * extra bookkeeping would only make them slower.
  */
 
 /** The part of JiraClient this needs, so the logic can be tested without Jira. */
@@ -17,56 +23,65 @@ export interface ProjectSearcher {
   countIssues(jql: string): Promise<number | null>;
 }
 
-/** Below this many issues (by highest key) one sequential read is as fast. */
+/** Below this many issues one sequential read is as fast. */
 export const PARALLEL_MIN_ISSUES = 300;
-/** Issues per range: three pages of 100 — enough to amortise a request, small enough to fan out. */
-export const RANGE_SIZE = 300;
-/** Ranges in flight at once. Jira's rate limiter answers 429 (and JiraClient retries) if pushed. */
-export const RANGE_CONCURRENCY = 6;
+/** A slice is split in two while it holds more than this: three pages of 100. */
+export const SLICE_SIZE = 300;
+/** Requests to Jira in flight at once (counts while planning, pages while reading). Jira answers 429 if pushed. */
+export const CONCURRENCY = 6;
 
-export interface KeyRange {
-  from: number;
-  to: number;
+const DAY_MS = 86_400_000;
+
+/** "2026-03-01" → UTC day number. */
+const dayNumber = (iso: string): number => Math.floor(Date.parse(`${iso}T00:00:00Z`) / DAY_MS);
+const isoOfDay = (n: number): string => new Date(n * DAY_MS).toISOString().slice(0, 10);
+
+/** The day part of a Jira timestamp ("2026-03-01T10:00:00.000+0700"), as Jira itself wrote it. */
+export function createdDay(issue: any): string | null {
+  const created = issue?.fields?.created;
+  return typeof created === "string" && /^\d{4}-\d{2}-\d{2}/.test(created) ? created.slice(0, 10) : null;
 }
 
-/** [1..size], [size+1..2·size], … up to and including `max`. */
-export function keyRanges(max: number, size = RANGE_SIZE): KeyRange[] {
-  const ranges: KeyRange[] = [];
-  for (let from = 1; from <= max; from += size) ranges.push({ from, to: Math.min(max, from + size - 1) });
-  return ranges;
-}
-
-/** "ABC-123" → 123; null for anything else. */
-export function issueNumber(key: unknown): number | null {
-  const m = typeof key === "string" ? key.match(/-(\d+)$/) : null;
-  return m ? Number(m[1]) : null;
-}
-
-/** Runs `worker` over `items`, at most `limit` at a time, keeping the results in input order. */
-async function mapLimit<T, R>(items: T[], limit: number, worker: (item: T) => Promise<R>): Promise<R[]> {
-  const out = new Array<R>(items.length);
-  let next = 0;
-  async function lane() {
-    while (next < items.length) {
-      const i = next++;
-      out[i] = await worker(items[i]);
+/** At most `limit` of the calls run at once; each call still gets its own result. */
+export function limiter(limit: number): <T>(fn: () => Promise<T>) => Promise<T> {
+  let active = 0;
+  const waiting: Array<() => void> = [];
+  const next = () => {
+    active--;
+    waiting.shift()?.();
+  };
+  return async <T>(fn: () => Promise<T>): Promise<T> => {
+    if (active >= limit) await new Promise<void>((resolve) => waiting.push(resolve));
+    active++;
+    try {
+      return await fn();
+    } finally {
+      next();
     }
-  }
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, lane));
-  return out;
+  };
 }
+
+export interface Slice {
+  /** First day, inclusive, as "yyyy-MM-dd". */
+  from: string;
+  /** Day after the last, exclusive. */
+  to: string;
+}
+
+const sliceJql = (whole: string, s: Slice) => `${whole} AND created >= "${s.from}" AND created < "${s.to}"`;
 
 export interface ProjectSearchResult {
   issues: any[];
-  /** "parallel" when the key ranges were used, "sequential" otherwise (small project, or a check failed). */
+  /** "parallel" when the slices were used, "sequential" otherwise (small project, or a check failed). */
   mode: "parallel" | "sequential";
+  /** Slices read in parallel. */
   requests: number;
   /** Why the ordinary read was used, when the fast one was not — shown in the [perf] log line. */
   reason?: string;
 }
 
 /**
- * Every issue of the project, ordered by key. `projectKey` is already validated by the session
+ * Every issue of the project, oldest first. `projectKey` is already validated by the session
  * (it is interpolated into JQL exactly as `listTasks` always did).
  */
 export async function searchProjectIssues(
@@ -83,41 +98,43 @@ export async function searchProjectIssues(
   });
 
   try {
-    // The newest key tells how far the numbers go; the count is what the result is checked against.
-    const [newest, expected] = await Promise.all([
-      jira.searchIssues(`${whole} ORDER BY key DESC`, ["summary"], 1),
-      jira.countIssues(whole).catch(() => null),
-    ]);
-    const max = issueNumber(newest[0]?.key);
-    if (max === null) return sequential(`no newest key (${newest[0]?.key ?? "none"})`);
+    const expected = await jira.countIssues(whole).catch(() => null);
     if (expected === null) return sequential("no count from Jira");
-    if (max < PARALLEL_MIN_ISSUES) return sequential(`small project (max key ${max})`);
+    if (expected < PARALLEL_MIN_ISSUES) return sequential(`small project (${expected} issues)`);
 
-    const ranges = keyRanges(max);
-    const pages = await mapLimit(ranges, RANGE_CONCURRENCY, (r) =>
-      jira.searchIssues(`${whole} AND key >= ${projectKey}-${r.from} AND key <= ${projectKey}-${r.to} ORDER BY key ASC`, fields)
+    // The span of creation days. Padded a day each side: the timestamps are read in one time zone
+    // and the JQL below in another, so the ends must not depend on them agreeing.
+    const [oldest, newest] = await Promise.all([
+      jira.searchIssues(`${whole} ORDER BY created ASC`, ["created"], 1),
+      jira.searchIssues(`${whole} ORDER BY created DESC`, ["created"], 1),
+    ]);
+    const first = createdDay(oldest[0]);
+    const last = createdDay(newest[0]);
+    if (!first || !last) return sequential("no creation dates");
+
+    // Split the span in halves until each piece holds a few pages. Counts are cheap (no issue is
+    // read) and the halves are counted side by side.
+    const limited = limiter(CONCURRENCY);
+    const plan = async (s: Slice): Promise<Slice[]> => {
+      const days = dayNumber(s.to) - dayNumber(s.from);
+      const count = await limited(() => jira.countIssues(sliceJql(whole, s)));
+      if (count === null) throw new Error("no count for a slice");
+      if (count === 0) return [];
+      if (count <= SLICE_SIZE || days <= 1) return [s];
+      const mid = isoOfDay(dayNumber(s.from) + Math.floor(days / 2));
+      const halves = await Promise.all([plan({ from: s.from, to: mid }), plan({ from: mid, to: s.to })]);
+      return halves.flat();
+    };
+    const slices = await plan({ from: isoOfDay(dayNumber(first) - 1), to: isoOfDay(dayNumber(last) + 2) });
+
+    const pages = await Promise.all(
+      slices.map((s) => limited(() => jira.searchIssues(`${sliceJql(whole, s)} ORDER BY created ASC`, fields)))
     );
     const issues = pages.flat();
-    let requests = ranges.length;
 
-    // A key range finds an issue by its number under the project's current key. Some issues are
-    // not reachable that way — in production 531 of 4044 were not (an older key, from a renamed
-    // or merged project, is the likely reason) — so what the ranges did not return is asked for
-    // directly, as the complement of the whole range. It is small, and pages on its own.
-    if (issues.length < expected) {
-      const seen = new Set(issues.map((i) => i.key));
-      const rest = await jira.searchIssues(
-        `${whole} AND NOT (key >= ${projectKey}-1 AND key <= ${projectKey}-${max}) ORDER BY created ASC`,
-        fields
-      );
-      requests += Math.ceil(rest.length / 100) || 1;
-      for (const issue of rest) if (!seen.has(issue.key)) issues.push(issue);
-    }
-
-    // Still short of what Jira counts: neither query can be trusted to be complete here, and an
-    // incomplete task list is worse than a slow one — read it the slow way.
-    if (issues.length < expected) return sequential(`ranges + rest found ${issues.length} of ${expected} counted (max key ${max})`);
-    return { issues, mode: "parallel", requests };
+    // Short of what Jira counts: an incomplete task list is worse than a slow one — read it the slow way.
+    if (issues.length < expected) return sequential(`slices found ${issues.length} of ${expected} counted (${slices.length} slices)`);
+    return { issues, mode: "parallel", requests: slices.length };
   } catch (err) {
     // The fast path is an optimisation: if anything about it goes wrong (a query Jira will not
     // take, a rate limit that outlasted the retries) the ordinary read still has to work. An

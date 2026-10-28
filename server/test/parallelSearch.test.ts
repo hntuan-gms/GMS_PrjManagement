@@ -1,86 +1,122 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
-  issueNumber,
-  keyRanges,
+  CONCURRENCY,
+  createdDay,
+  limiter,
   PARALLEL_MIN_ISSUES,
-  RANGE_CONCURRENCY,
   searchProjectIssues,
   shareInflight,
+  SLICE_SIZE,
   type ProjectSearcher,
 } from "../src/parallelSearch.js";
 
-/** A project of issues P-1..P-n; understands exactly the JQL shapes the module sends. */
-function fakeJira(n: number, opts: { count?: number | null; missing?: Set<number>; legacy?: number; legacyInComplement?: boolean } = {}) {
+const day = (n: number) => new Date(Date.UTC(2026, 0, 1) + n * 86_400_000).toISOString().slice(0, 10);
+
+/**
+ * A project of `n` issues, the i-th created on `dayOf(i)`. Understands exactly the JQL shapes the
+ * module sends. Keys are deliberately NOT in creation order and some are foreign ("OLD-n"), because
+ * production issues were: slicing must not depend on them.
+ */
+function fakeJira(n: number, opts: { dayOf?: (i: number) => number; count?: number | null; hide?: number } = {}) {
+  const dayOf = opts.dayOf ?? ((i: number) => Math.floor(i / 10));
+  const all = Array.from({ length: n }, (_, i) => ({
+    key: i % 7 === 0 ? `OLD-${i}` : `P-${i}`,
+    fields: { created: `${day(dayOf(i))}T10:00:00.000+0700` },
+  })).sort((a, b) => a.fields.created.localeCompare(b.fields.created));
   const log: string[] = [];
   let active = 0;
   let peak = 0;
+  const filter = (jql: string) => {
+    const from = jql.match(/created >= "(\d{4}-\d{2}-\d{2})"/)?.[1];
+    const to = jql.match(/created < "(\d{4}-\d{2}-\d{2})"/)?.[1];
+    return all.filter((x) => (!from || x.fields.created.slice(0, 10) >= from) && (!to || x.fields.created.slice(0, 10) < to));
+  };
   const jira: ProjectSearcher = {
     async searchIssues(jql, _fields, limit) {
       log.push(jql);
       active++;
       peak = Math.max(peak, active);
-      await new Promise((r) => setTimeout(r, 5));
+      await new Promise((r) => setTimeout(r, 3));
       active--;
-      let from = 1;
-      let to = n;
-      const range = jql.includes("AND NOT (") ? null : jql.match(/key >= P-(\d+) AND key <= P-(\d+)/);
-      if (range) [from, to] = [Number(range[1]), Number(range[2])];
-      const desc = jql.includes("ORDER BY key DESC");
-      const complement = jql.includes("AND NOT (key >=");
-      const keys: number[] = [];
-      for (let i = from; i <= to; i++) if (!opts.missing?.has(i)) keys.push(i);
-      if (complement) keys.length = 0; // every P-n is inside the range the complement excludes
-      if (desc) keys.reverse();
-      const out = keys.map((i) => ({ key: `P-${i}` }));
-      // Issues no key range can reach (an older key): only the whole-project and complement queries see them.
-      const reachable = !range && !desc && (!complement || opts.legacyInComplement !== false);
-      if (reachable) for (let i = 1; i <= (opts.legacy ?? 0); i++) out.push({ key: `OLD-${i}` });
+      let out = filter(jql);
+      if (jql.includes("ORDER BY created DESC")) out = [...out].reverse();
+      if (opts.hide && !limit && jql.includes("created >=")) out = out.slice(0, Math.max(0, out.length - opts.hide));
       return limit === undefined ? out : out.slice(0, limit);
     },
-    async countIssues() {
-      return opts.count === undefined ? n - (opts.missing?.size ?? 0) + (opts.legacy ?? 0) : opts.count;
+    async countIssues(jql) {
+      log.push("COUNT " + jql);
+      active++;
+      peak = Math.max(peak, active);
+      await new Promise((r) => setTimeout(r, 2));
+      active--;
+      return opts.count === undefined ? filter(jql).length : opts.count;
     },
   };
-  return { jira, log, peak: () => peak };
+  return { jira, all, log, peak: () => peak };
 }
 
-describe("keyRanges", () => {
-  it("covers 1..max exactly, with a short last range", () => {
-    assert.deepEqual(keyRanges(7, 3), [
-      { from: 1, to: 3 },
-      { from: 4, to: 6 },
-      { from: 7, to: 7 },
-    ]);
-    assert.deepEqual(keyRanges(6, 3), [
-      { from: 1, to: 3 },
-      { from: 4, to: 6 },
-    ]);
-    assert.deepEqual(keyRanges(0), []);
+describe("createdDay", () => {
+  it("reads the day part of a Jira timestamp", () => {
+    assert.equal(createdDay({ fields: { created: "2026-03-01T23:30:00.000+0700" } }), "2026-03-01");
+    assert.equal(createdDay({ fields: {} }), null);
+    assert.equal(createdDay(undefined), null);
   });
 });
 
-describe("issueNumber", () => {
-  it("reads the trailing number of a key", () => {
-    assert.equal(issueNumber("AI-4044"), 4044);
-    assert.equal(issueNumber("AI"), null);
-    assert.equal(issueNumber(undefined), null);
+describe("limiter", () => {
+  it("never runs more than the limit at once, and returns each caller its own result", async () => {
+    const limited = limiter(3);
+    let active = 0;
+    let peak = 0;
+    const out = await Promise.all(
+      Array.from({ length: 12 }, (_, i) =>
+        limited(async () => {
+          active++;
+          peak = Math.max(peak, active);
+          await new Promise((r) => setTimeout(r, 4));
+          active--;
+          return i;
+        })
+      )
+    );
+    assert.deepEqual(out, Array.from({ length: 12 }, (_, i) => i));
+    assert.equal(peak, 3);
   });
 });
 
 describe("searchProjectIssues", () => {
-  it("reads a big project in key ranges, in key order, with bounded concurrency", async () => {
-    const { jira, log, peak } = fakeJira(2000);
+  it("reads a big project in creation-day slices: every issue once, oldest first, bounded concurrency", async () => {
+    const { jira, all, peak } = fakeJira(4000);
+    const res = await searchProjectIssues(jira, "P", ["summary"]);
+    assert.equal(res.mode, "parallel");
+    assert.equal(res.issues.length, 4000);
+    assert.equal(new Set(res.issues.map((i) => i.key)).size, 4000, "an issue twice");
+    assert.deepEqual(res.issues.map((i) => i.key), all.map((i) => i.key), "not oldest first");
+    assert.ok(res.requests >= 4000 / SLICE_SIZE, `only ${res.requests} slices`);
+    assert.ok(peak() <= CONCURRENCY + 2, `peak ${peak()}`);
+  });
+
+  it("does not depend on issue keys at all (foreign prefixes, gaps)", async () => {
+    const { jira, all } = fakeJira(900);
+    const res = await searchProjectIssues(jira, "P", ["summary"]);
+    assert.equal(res.mode, "parallel");
+    assert.equal(res.issues.length, 900);
+    assert.ok(all.some((i) => i.key.startsWith("OLD-")));
+  });
+
+  it("copes with everything created on one day (cannot be cut further): that slice is read whole", async () => {
+    const { jira } = fakeJira(1000, { dayOf: () => 5 });
+    const res = await searchProjectIssues(jira, "P", ["summary"]);
+    assert.equal(res.mode, "parallel");
+    assert.equal(res.issues.length, 1000);
+  });
+
+  it("copes with a burst: most issues on a few days, a few spread out", async () => {
+    const { jira } = fakeJira(2000, { dayOf: (i) => (i < 1800 ? 40 + (i % 3) : i % 120) });
     const res = await searchProjectIssues(jira, "P", ["summary"]);
     assert.equal(res.mode, "parallel");
     assert.equal(res.issues.length, 2000);
-    assert.deepEqual(
-      res.issues.map((i) => i.key),
-      Array.from({ length: 2000 }, (_, i) => `P-${i + 1}`)
-    );
-    assert.equal(res.requests, 7); // ceil(2000 / 300)
-    assert.ok(peak() <= RANGE_CONCURRENCY + 1, `peak ${peak()}`);
-    assert.ok(log.some((q) => q.includes("key >= P-1 AND key <= P-300")));
   });
 
   it("reads a small project in one ordinary query", async () => {
@@ -91,56 +127,34 @@ describe("searchProjectIssues", () => {
     assert.ok(log.some((q) => q.endsWith("ORDER BY created ASC")));
   });
 
-  it("asks for what the ranges cannot reach as a complement, instead of re-reading everything", async () => {
-    const { jira, log } = fakeJira(1000, { legacy: 120 });
-    const res = await searchProjectIssues(jira, "P", ["summary"]);
-    assert.equal(res.mode, "parallel");
-    assert.equal(res.issues.length, 1120);
-    assert.equal(new Set(res.issues.map((i) => i.key)).size, 1120, "no issue twice");
-    assert.ok(log.some((q) => q.includes("AND NOT (key >= P-1 AND key <= P-1000)")));
-    assert.ok(!log.some((q) => q.endsWith("ORDER BY created ASC") && !q.includes("NOT")), "the slow full read must not run");
-  });
-
-  it("falls back to the full read when even the complement leaves it short", async () => {
-    const { jira } = fakeJira(1000, { legacy: 120, legacyInComplement: false });
+  it("falls back to the full read, saying why, when the slices come up short of Jira's count", async () => {
+    const { jira } = fakeJira(1000, { hide: 40 });
     const res = await searchProjectIssues(jira, "P", ["summary"]);
     assert.equal(res.mode, "sequential");
-    assert.equal(res.issues.length, 1120);
-    assert.match(res.reason ?? "", /ranges \+ rest found 1000 of 1120/);
-  });
-
-  it("falls back to the full read when the ranges came up short of Jira's count", async () => {
-    // Say Jira counts 1000 issues but only 900 have a number the ranges can find.
-    const { jira } = fakeJira(1000, { count: 1100 });
-    const res = await searchProjectIssues(jira, "P", ["summary"]);
-    assert.equal(res.mode, "sequential");
+    assert.equal(res.issues.length, 1000);
+    assert.match(res.reason ?? "", /slices found \d+ of 1000 counted/);
   });
 
   it("falls back when the count is unavailable", async () => {
     const { jira } = fakeJira(1000, { count: null });
-    assert.equal((await searchProjectIssues(jira, "P", ["summary"])).mode, "sequential");
+    const res = await searchProjectIssues(jira, "P", ["summary"]);
+    assert.equal(res.mode, "sequential");
+    assert.match(res.reason ?? "", /no count/);
   });
 
-  it("falls back to the full read when a range query fails", async () => {
+  it("falls back to the full read when a slice query fails", async () => {
     const real = fakeJira(1000);
     const jira: ProjectSearcher = {
       countIssues: real.jira.countIssues,
       searchIssues(jql, fields, limit) {
-        if (jql.includes("key >= P-")) return Promise.reject(new Error("Jira said no"));
+        if (jql.includes("created >=") && !limit) return Promise.reject(new Error("Jira said no"));
         return real.jira.searchIssues(jql, fields, limit);
       },
     };
     const res = await searchProjectIssues(jira, "P", ["summary"]);
     assert.equal(res.mode, "sequential");
     assert.equal(res.issues.length, 1000);
-  });
-
-  it("tolerates gaps in the numbering (deleted or moved issues)", async () => {
-    const missing = new Set([5, 17, 400, 401]);
-    const { jira } = fakeJira(1000, { missing });
-    const res = await searchProjectIssues(jira, "P", ["summary"]);
-    assert.equal(res.mode, "parallel");
-    assert.equal(res.issues.length, 1000 - missing.size);
+    assert.match(res.reason ?? "", /Jira said no/);
   });
 });
 
