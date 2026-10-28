@@ -207,7 +207,7 @@ export class TaskService {
     // Where a slow page load went. Jira and Postgres run side by side, so the longer of
     // the two is what the request waited for.
     console.log(
-      `[perf] listTasks ${this.ctx.projectKey}: ${tasks.length} tasks, jira ${jiraRes.ms}ms (${issues.length} issues, ${jiraRes.value.mode}${jiraRes.value.requests ? ` ×${jiraRes.value.requests}` : ""}), ` +
+      `[perf] listTasks ${this.ctx.projectKey}: ${tasks.length} tasks, jira ${jiraRes.ms}ms (${issues.length} issues, ${jiraRes.value.mode}${jiraRes.value.requests ? ` ×${jiraRes.value.requests}` : ""}${jiraRes.value.reason ? `: ${jiraRes.value.reason}` : ""}), ` +
         `overlays ${overlayRes.ms}ms, reconcile ${tReconcile - tReads}ms, persist ${tPersist - tReconcile}ms (${toPersist.length} rows), ` +
         `jira writes ${Date.now() - tPersist}ms (${toWriteJira.length}), total ${Date.now() - t0}ms`
     );

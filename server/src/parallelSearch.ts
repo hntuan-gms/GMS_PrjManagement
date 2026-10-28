@@ -61,6 +61,8 @@ export interface ProjectSearchResult {
   /** "parallel" when the key ranges were used, "sequential" otherwise (small project, or a check failed). */
   mode: "parallel" | "sequential";
   requests: number;
+  /** Why the ordinary read was used, when the fast one was not — shown in the [perf] log line. */
+  reason?: string;
 }
 
 /**
@@ -73,10 +75,11 @@ export async function searchProjectIssues(
   fields: string[]
 ): Promise<ProjectSearchResult> {
   const whole = `project = ${projectKey}`;
-  const sequential = async (): Promise<ProjectSearchResult> => ({
+  const sequential = async (reason: string): Promise<ProjectSearchResult> => ({
     issues: await jira.searchIssues(`${whole} ORDER BY created ASC`, fields),
     mode: "sequential",
     requests: 0,
+    reason,
   });
 
   try {
@@ -86,7 +89,9 @@ export async function searchProjectIssues(
       jira.countIssues(whole).catch(() => null),
     ]);
     const max = issueNumber(newest[0]?.key);
-    if (max === null || max < PARALLEL_MIN_ISSUES || expected === null) return sequential();
+    if (max === null) return sequential(`no newest key (${newest[0]?.key ?? "none"})`);
+    if (expected === null) return sequential("no count from Jira");
+    if (max < PARALLEL_MIN_ISSUES) return sequential(`small project (max key ${max})`);
 
     const ranges = keyRanges(max);
     const pages = await mapLimit(ranges, RANGE_CONCURRENCY, (r) =>
@@ -97,14 +102,14 @@ export async function searchProjectIssues(
     // Key ranges find an issue by its number under the project's current key. An issue Jira still
     // holds under an older key (a renamed project) would be missed — so a short result is not
     // trusted, and the slow, complete read is used instead.
-    if (issues.length < expected) return sequential();
+    if (issues.length < expected) return sequential(`ranges found ${issues.length} of ${expected} counted (max key ${max})`);
     return { issues, mode: "parallel", requests: ranges.length };
   } catch (err) {
     // The fast path is an optimisation: if anything about it goes wrong (a query Jira will not
     // take, a rate limit that outlasted the retries) the ordinary read still has to work. An
     // expired session fails the same way there and is reported by it.
     console.warn(`[parallelSearch] ${projectKey}: falling back to the sequential read — ${(err as Error)?.message ?? err}`);
-    return sequential();
+    return sequential(`fast path failed: ${(err as Error)?.message ?? err}`.slice(0, 200));
   }
 }
 
