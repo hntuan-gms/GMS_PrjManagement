@@ -148,24 +148,37 @@ async function fromRoles(jira: JiraClient, projectKey: string): Promise<RolesRes
   let rolesDenied = 0;
   let lastActorStatus: number | undefined;
 
-  for (const [roleName, url] of Object.entries(roles)) {
-    if (roleName === APP_ACCESS_ROLE) continue;
-    const roleId = roleIdFrom(url);
-    if (!roleId) continue;
+  // Every role's actors are asked for at once — a project has a dozen roles and each answer is a Jira round
+  // trip, which made this lookup the slowest call of a cold page load (9–10 s). The answers are then handled
+  // in the roles' own order, exactly as when they came one by one.
+  const wanted = Object.entries(roles)
+    .filter(([roleName]) => roleName !== APP_ACCESS_ROLE)
+    .map(([roleName, url]) => ({ roleName, roleId: roleIdFrom(url) }))
+    .filter((r): r is { roleName: string; roleId: string } => !!r.roleId);
+  const fetched = await Promise.all(
+    wanted.map(async ({ roleName, roleId }) => {
+      try {
+        return { roleName, actors: (await jira.getProjectRoleActors(projectKey, roleId)).actors ?? ([] as RoleActor[]) };
+      } catch (err) {
+        return { roleName, err };
+      }
+    })
+  );
+
+  for (const result of fetched) {
+    const { roleName } = result;
     rolesTried++;
 
-    let actors: RoleActor[];
-    try {
-      actors = (await jira.getProjectRoleActors(projectKey, roleId)).actors ?? [];
-    } catch (err) {
+    if ("err" in result) {
       // One unreadable role must not lose the others.
-      if (isDenied(err)) {
+      if (isDenied(result.err)) {
         rolesDenied++;
-        lastActorStatus = err.status;
+        lastActorStatus = result.err.status;
         continue;
       }
-      throw err;
+      throw result.err;
     }
+    const actors = result.actors;
     if (actors.length === 0) continue;
     contributing.push(roleName);
 
@@ -185,9 +198,20 @@ async function fromRoles(jira: JiraClient, projectKey: string): Promise<RolesRes
   let groupsDenied = 0;
   let groupsOutOfScope = 0;
   let lastGroupStatus: number | undefined;
-  for (const groupId of groupIds.keys()) {
+  // Groups likewise: all at once, handled in order (so a group member record still wins over a role actor).
+  const expanded = await Promise.all(
+    [...groupIds.keys()].map(async (groupId) => {
+      try {
+        return { members: await jira.getGroupMembers(groupId) };
+      } catch (error) {
+        return { error };
+      }
+    })
+  );
+  for (const result of expanded) {
     try {
-      for (const member of await jira.getGroupMembers(groupId)) {
+      if ("error" in result) throw result.error;
+      for (const member of result.members) {
         if (!isPerson(member)) continue;
         // Role actors already carry a display name and avatar; a group member
         // record has the better avatar, so it wins on a re-add.
