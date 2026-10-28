@@ -4,10 +4,10 @@ import {
   chunks,
   COUNT_CONCURRENCY,
   createdDay,
+  FIRST_PAGE,
   ID_CHUNK,
   limiter,
   named,
-  PARALLEL_MIN_ISSUES,
   READ_CONCURRENCY,
   searchProjectIssues,
   shareInflight,
@@ -24,12 +24,16 @@ interface FakeOptions {
   count?: number | null;
   /** What a page of ids-only really holds (Jira clamps the 5000 asked for); 100 makes listing the ids a chain. */
   idPage?: number;
-  /** Issues `id in (…)` does not find (kept by key name here for readability). */
+  /** Issues `id in (…)` does not find (named by key here for readability). */
   hiddenFromIdQuery?: Set<string>;
   /** Makes every `id in (…)` query fail. */
   idQueryFails?: boolean;
+  /** Makes the first page of full issues fail. */
+  firstPageFails?: boolean;
   /** Issues the time slices do not return. */
   hiddenFromSlices?: number;
+  /** Every request is refused for rate, as Jira does when the hourly quota is spent. */
+  rateLimited?: boolean;
 }
 
 /**
@@ -56,6 +60,7 @@ function fakeJira(n: number, opts: FakeOptions = {}) {
   const jira: ProjectSearcher = {
     async searchIssues(jql, fields, limit, o) {
       log.push(jql);
+      if (opts.rateLimited) throw Object.assign(new Error("Jira API error 429"), { status: 429, retryAfter: "2439" });
       active++;
       peak = Math.max(peak, active);
       await new Promise((r) => setTimeout(r, 3));
@@ -69,26 +74,31 @@ function fakeJira(n: number, opts: FakeOptions = {}) {
         return all.filter((x) => wanted.has(x.id) && !opts.hiddenFromIdQuery?.has(x.key)).reverse();
       }
 
+      const idsOnly = fields.length === 1 && fields[0] === "id";
+      if (opts.firstPageFails && !idsOnly && limit === FIRST_PAGE && !jql.includes("created >=")) {
+        throw Object.assign(new Error("Jira API error 400"), { status: 400, body: "bad page" });
+      }
+
       let out = filter(jql);
       if (jql.includes("ORDER BY created DESC")) out = [...out].reverse();
       if (opts.hiddenFromSlices && jql.includes("created >=")) out = out.slice(0, Math.max(0, out.length - opts.hiddenFromSlices));
 
-      // Paging as Jira does it: pages of what the server allows (keys-only gets more), each reported.
-      const server = fields.length === 1 && fields[0] === "id" ? (opts.idPage ?? 5000) : 100;
+      // Paging as Jira does it: pages of what the server allows (ids-only gets more), each reported.
+      const server = idsOnly ? (opts.idPage ?? 5000) : 100;
       const page = Math.min(o?.pageSize ?? 100, server, limit ?? Infinity);
-      // Asking for the id alone gets the id alone — no key — as Jira answers it.
-      const idsOnly = fields.length === 1 && fields[0] === "id";
       const got: any[] = [];
       for (let i = 0; i < out.length; i += page) {
+        // Asking for the id alone gets the id alone — no key — as Jira answers it.
         const slice: any[] = out.slice(i, i + page).map((x) => (idsOnly ? { id: x.id } : x));
         got.push(...slice);
-        if (o?.onPage?.(slice.length) === false) break;
+        if (o?.onPage?.(slice.length, i + page < out.length) === false) break;
         if (limit !== undefined && got.length >= limit) break;
       }
       return limit === undefined ? got : got.slice(0, limit);
     },
     async countIssues(jql) {
       log.push("COUNT " + jql);
+      if (opts.rateLimited) throw Object.assign(new Error("Jira API error 429"), { status: 429, retryAfter: "2439" });
       active++;
       peak = Math.max(peak, active);
       await new Promise((r) => setTimeout(r, 2));
@@ -169,6 +179,19 @@ describe("named", () => {
     assert.equal(calls, 3);
   });
 
+  it("passes a 429 on untouched and unretried, so the caller can tell it was a rate limit", async () => {
+    let calls = 0;
+    const original = status(429, "slow down");
+    await assert.rejects(
+      named("count", async () => {
+        calls++;
+        throw original;
+      }),
+      (err) => err === original
+    );
+    assert.equal(calls, 1);
+  });
+
   it("does not retry a 4xx (a query Jira will not take will be refused again)", async () => {
     let calls = 0;
     await assert.rejects(
@@ -182,30 +205,69 @@ describe("named", () => {
   });
 });
 
+describe("searchProjectIssues — a small project is one request, with no count", () => {
+  for (const n of [15, 100]) {
+    it(`${n} issues: the first page is everything`, async () => {
+      const { jira, all, log } = fakeJira(n);
+      const res = await searchProjectIssues(jira, "P", ["summary"]);
+      assert.equal(res.mode, "single");
+      assert.equal(res.requests, 1);
+      assert.deepEqual(res.issues.map((i) => i.key), all.map((i) => i.key));
+      assert.match(res.detail ?? "", new RegExp(`^by id: ${n} ids in \\d+ms, one page by \\d+ms$`));
+      assert.ok(!log.some((q) => q.startsWith("COUNT")), "a small project needs no count");
+      assert.ok(!log.some((q) => q.includes(" id in (")), "nor a second round of reads");
+    });
+  }
+
+  it("an empty project is read without trouble", async () => {
+    const { jira } = fakeJira(0);
+    const res = await searchProjectIssues(jira, "P", ["summary"]);
+    assert.equal(res.mode, "single");
+    assert.equal(res.issues.length, 0);
+  });
+});
+
 describe("searchProjectIssues — by id", () => {
-  it("lists the ids, then reads them in groups at once: every issue once, oldest first, bounded concurrency", async () => {
+  it("one page more than a page: the first page plus one group, no count", async () => {
+    const { jira, all, log } = fakeJira(FIRST_PAGE + 50);
+    const res = await searchProjectIssues(jira, "P", ["summary"]);
+    assert.equal(res.mode, "parallel");
+    assert.equal(res.requests, 2);
+    assert.deepEqual(res.issues.map((i) => i.key), all.map((i) => i.key));
+    assert.ok(!log.some((q) => q.startsWith("COUNT")));
+  });
+
+  it("lists the ids, then reads the rest in groups at once: every issue once, oldest first, bounded concurrency", async () => {
     const { jira, all, peak, log } = fakeJira(4044);
     const res = await searchProjectIssues(jira, "P", ["summary"]);
     assert.equal(res.mode, "parallel");
-    assert.match(res.detail ?? "", /^by id: 4044 ids in \d+ms \(page 4044\), 41 groups/);
+    assert.match(res.detail ?? "", /^by id: 4044 ids in \d+ms \(page 4044\), first page \+ 40 groups/);
     assert.equal(res.issues.length, 4044);
     assert.equal(new Set(res.issues.map((i) => i.key)).size, 4044, "an issue twice");
     assert.deepEqual(res.issues.map((i) => i.key), all.map((i) => i.key), "not oldest first");
-    assert.equal(res.requests, Math.ceil(4044 / ID_CHUNK));
-    assert.ok(peak() <= READ_CONCURRENCY + 1, `peak ${peak()}`);
-    assert.ok(!log.some((q) => q.startsWith("COUNT") && q.includes("created")), "no time slicing needed");
+    assert.equal(res.requests, 1 + Math.ceil((4044 - FIRST_PAGE) / ID_CHUNK));
+    assert.ok(peak() <= READ_CONCURRENCY + 2, `peak ${peak()}`);
+    assert.ok(!log.some((q) => q.startsWith("COUNT")), "no counting needed");
   });
 
-  it("does not depend on what the keys look like (foreign prefixes, gaps)", async () => {
+  it("does not depend on what the keys look like (the ids are all it uses)", async () => {
     const { jira, all } = fakeJira(900);
     const res = await searchProjectIssues(jira, "P", ["summary"]);
     assert.equal(res.mode, "parallel");
     assert.equal(res.issues.length, 900);
     assert.ok(all.some((i) => i.key.startsWith("OLD-")));
   });
+
+  it("when the first page fails, the ids it would have covered are asked for again — the read still succeeds", async () => {
+    const { jira, all } = fakeJira(1000, { firstPageFails: true });
+    const res = await searchProjectIssues(jira, "P", ["summary"]);
+    assert.equal(res.mode, "parallel");
+    assert.deepEqual(res.issues.map((i) => i.key), all.map((i) => i.key));
+    assert.match(res.detail ?? "", /\(100 asked for again\)/);
+  });
 });
 
-describe("searchProjectIssues — by creation time (when listing the ids would itself be a chain)", () => {
+describe("searchProjectIssues — by creation time (when the id way cannot be used)", () => {
   const clamped = { idPage: 100 };
 
   it("falls back to creation-time slices, saying why, and still returns everything oldest first", async () => {
@@ -217,7 +279,7 @@ describe("searchProjectIssues — by creation time (when listing the ids would i
     assert.equal(new Set(res.issues.map((i) => i.key)).size, 4000, "an issue twice");
     assert.deepEqual(res.issues.map((i) => i.key), all.map((i) => i.key), "not oldest first");
     assert.ok(res.requests >= 4000 / SLICE_SIZE, `only ${res.requests} slices`);
-    assert.ok(peak() <= COUNT_CONCURRENCY + READ_CONCURRENCY + 2, `peak ${peak()}`);
+    assert.ok(peak() <= COUNT_CONCURRENCY + READ_CONCURRENCY + 3, `peak ${peak()}`);
   });
 
   it("cuts a single busy day into minutes: a day holding a thousand issues is not one long chain of pages", async () => {
@@ -244,13 +306,14 @@ describe("searchProjectIssues — by creation time (when listing the ids would i
     assert.equal(res.issues.length, 2000);
   });
 
-  it("is used when Jira does not find some issues by id (they are in the id list but not in `id in`)", async () => {
-    const hidden = new Set(["P-1", "P-2", "OLD-14", "OLD-21"]);
+  it("is used when Jira does not find some issues by id (named in the id list, missing from `id in`)", async () => {
+    // Late in the creation order, so the first page (the oldest 100) does not cover them.
+    const hidden = new Set(["P-500", "P-501", "OLD-497", "OLD-504"]);
     const { jira } = fakeJira(1000, { hiddenFromIdQuery: hidden });
     const res = await searchProjectIssues(jira, "P", ["summary"]);
     assert.equal(res.mode, "parallel");
     assert.equal(res.issues.length, 1000);
-    assert.match(res.detail ?? "", /^by time:.*\[after: readByIds found 99\d of 1000 counted/);
+    assert.match(res.detail ?? "", /^by time:.*\[after: readByIds: id list named 1000, 4 not found by id/);
   });
 
   it("is used when the `id in` query is refused", async () => {
@@ -258,21 +321,13 @@ describe("searchProjectIssues — by creation time (when listing the ids would i
     const res = await searchProjectIssues(jira, "P", ["summary"]);
     assert.equal(res.mode, "parallel");
     assert.equal(res.issues.length, 1000);
-    assert.match(res.detail ?? "", /readByIds failed: ids 0: Jira API error 400/);
+    assert.match(res.detail ?? "", /readByIds failed: (ids|missing) \d+: Jira API error 400/);
   });
 });
 
-describe("searchProjectIssues — the ordinary read", () => {
-  it("reads a small project in one ordinary query", async () => {
-    const { jira, log } = fakeJira(PARALLEL_MIN_ISSUES - 1);
-    const res = await searchProjectIssues(jira, "P", ["summary"]);
-    assert.equal(res.mode, "sequential");
-    assert.equal(res.issues.length, PARALLEL_MIN_ISSUES - 1);
-    assert.ok(log.some((q) => q.endsWith("ORDER BY created ASC")));
-  });
-
-  it("is the last resort, with every reason, when both fast ways come up short of Jira's count", async () => {
-    const { jira } = fakeJira(1000, { hiddenFromSlices: 40, idQueryFails: true, idPage: 100 });
+describe("searchProjectIssues — the ordinary read, as the last resort", () => {
+  it("is used, with every reason, when both fast ways come up short of Jira's count", async () => {
+    const { jira } = fakeJira(1000, { hiddenFromSlices: 40, idPage: 100 });
     const res = await searchProjectIssues(jira, "P", ["summary"]);
     assert.equal(res.mode, "sequential");
     assert.equal(res.issues.length, 1000);
@@ -280,11 +335,29 @@ describe("searchProjectIssues — the ordinary read", () => {
     assert.match(res.reason ?? "", /readByTime found \d+ of 1000 counted/);
   });
 
-  it("is used when the count is unavailable", async () => {
-    const { jira } = fakeJira(1000, { count: null });
+  it("is used when the id way cannot be and there is no count to size slices with", async () => {
+    const { jira } = fakeJira(1000, { count: null, idPage: 100 });
     const res = await searchProjectIssues(jira, "P", ["summary"]);
     assert.equal(res.mode, "sequential");
     assert.match(res.reason ?? "", /no count/);
+    assert.match(res.reason ?? "", /id list pages at 100/);
+  });
+
+  it("is used for a project too small to be worth slicing by time, when the id way cannot be used", async () => {
+    const { jira } = fakeJira(250, { idPage: 100 });
+    const res = await searchProjectIssues(jira, "P", ["summary"]);
+    assert.equal(res.mode, "sequential");
+    assert.equal(res.issues.length, 250);
+    assert.match(res.reason ?? "", /^small project \(250 issues\)/);
+  });
+});
+
+describe("searchProjectIssues — rate limited", () => {
+  it("stops at once with Jira's own refusal: no slicing, no second way, no ordinary read on top", async () => {
+    const { jira, log } = fakeJira(4044, { rateLimited: true });
+    await assert.rejects(searchProjectIssues(jira, "P", ["summary"]), (err: any) => err.status === 429 && err.retryAfter === "2439");
+    // The two requests started together (first page, id list); nothing after the refusal.
+    assert.ok(log.length <= 3, `${log.length} requests after being refused: ${log.join(" | ")}`);
   });
 });
 

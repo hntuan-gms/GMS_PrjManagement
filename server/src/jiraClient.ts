@@ -162,7 +162,10 @@ export class JiraClient {
     if (res.status === 429) {
       const retryAfter = res.headers.get("retry-after") ?? undefined;
       const attempt = (init as any).__rateLimitAttempt ?? 0;
-      if (attempt < RATE_LIMIT_RETRIES) {
+      // A short Retry-After is a burst limit: waiting it out works. A long one (seen: 2439 s) is the hourly
+      // quota, and waiting 5 s twice per request only delays the same refusal — say so at once.
+      const askedMs = retryAfter ? Number(retryAfter) * 1000 : 0;
+      if (attempt < RATE_LIMIT_RETRIES && !(askedMs > RATE_LIMIT_MAX_WAIT_MS)) {
         const waitMs = Math.min(
           retryAfter ? Number(retryAfter) * 1000 || 1000 : 1000 * 2 ** attempt,
           RATE_LIMIT_MAX_WAIT_MS
@@ -195,8 +198,11 @@ export class JiraClient {
        * answered once with 100, so asking can never make a read fail.
        */
       pageSize?: number;
-      /** Called with how many issues each page held; returning `false` stops paging there (the rest is not wanted). */
-      onPage?: (issues: number) => boolean | void;
+      /**
+       * Called with how many issues each page held and whether more pages follow; returning `false`
+       * stops paging there (the rest is not wanted).
+       */
+      onPage?: (issues: number, more: boolean) => boolean | void;
     }
   ): Promise<any[]> {
     const issues: any[] = [];
@@ -221,7 +227,7 @@ export class JiraClient {
         }
         throw err;
       }
-      if (opts?.onPage?.(page.issues.length) === false) stopped = true;
+      if (opts?.onPage?.(page.issues.length, !!page.nextPageToken) === false) stopped = true;
       issues.push(...page.issues);
       nextPageToken = page.nextPageToken;
     } while (nextPageToken && !stopped && (limit === undefined || issues.length < limit));

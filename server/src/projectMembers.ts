@@ -23,6 +23,7 @@
  */
 import type { JiraClient, JiraUserLike, RoleActor } from "./jiraClient.js";
 import { JiraApiError } from "./jiraClient.js";
+import { shareInflight } from "./parallelSearch.js";
 import type { JiraUser } from "./types.js";
 
 const TTL_MS = 5 * 60 * 1000;
@@ -285,10 +286,23 @@ export async function getProjectMembers(
   // (It also leaked the other way: role data read with admin rights, served to
   // accounts Jira would have refused.)
   const key = `${cloudId}:${projectKey}:${accountId}`;
-  const now = Date.now();
   const hit = cache.get(key);
-  if (hit && hit.expiresAt > now) return hit.value;
+  if (hit && hit.expiresAt > Date.now()) return hit.value;
 
+  // `/users` and `/resources` ask for the same list at the same moment on every page load, and the
+  // lookup is one call per project role plus one per group: it used to run twice, side by side, and
+  // take 3–10 s each on a cold instance. Concurrent callers now share the one run.
+  return shareInflight(`members:${key}`, async () => {
+    const value = await lookupMembers(jira, projectKey);
+    const now = Date.now();
+    pruneExpired(now);
+    const ttl = value.fallback?.reason === "error" ? ERROR_TTL_MS : TTL_MS;
+    cache.set(key, { value, expiresAt: now + ttl });
+    return value;
+  });
+}
+
+async function lookupMembers(jira: JiraClient, projectKey: string): Promise<ProjectMembers> {
   let value: ProjectMembers;
   let result: RolesResult;
   try {
@@ -313,10 +327,6 @@ export async function getProjectMembers(
     );
     value = await fromAssignable(jira, projectKey, result.fallback);
   }
-
-  pruneExpired(now);
-  const ttl = value.fallback?.reason === "error" ? ERROR_TTL_MS : TTL_MS;
-  cache.set(key, { value, expiresAt: now + ttl });
   return value;
 }
 

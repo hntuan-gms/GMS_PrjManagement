@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadAuthConfig } from "./auth/config.js";
+import { responseCompression } from "./compress.js";
 import { migrate } from "./db/migrate.js";
 import { errorHandler } from "./errors.js";
 import { apiRouter } from "./routes/api.js";
@@ -31,6 +32,8 @@ const app = express();
 // Cloud Run terminates TLS upstream; without this req.secure is false and any
 // protocol-derived logic is wrong.
 app.set("trust proxy", 1);
+// Compressed on the way out (see compress.ts): Cloud Run sends what the container gives it.
+app.use(responseCompression());
 const jsonBody = express.json();
 // POST /api/ai/chat can carry attached files (base64), so it has its own, larger body
 // limit — applied in routes/ai.ts AFTER authentication. Parsing it here would let
@@ -55,7 +58,16 @@ if (existsSync(path.join(publicDir, "index.html"))) {
   // so accept the extensionless form too — otherwise /privacy falls through to the
   // SPA catch-all below and quietly renders the login screen instead.
   app.get("/privacy", (_req, res) => res.redirect(301, "/privacy.html"));
-  app.use(express.static(publicDir));
+  // Vite names built files by content hash (/assets/index-AbC123.js), so a file under /assets never changes
+  // under its name: let the browser keep it for good instead of asking again on every load (it used to
+  // revalidate the 694 KB bundle each time — a 300 ms round trip even when the answer is "unchanged").
+  app.use(
+    express.static(publicDir, {
+      setHeaders(res, filePath) {
+        if (/[\\/]assets[\\/]/.test(filePath)) res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      },
+    })
+  );
   // Excludes bare /api and /health as well as their subpaths; the previous
   // /^(?!\/api\/).*/ let "/api" itself fall through to index.html.
   app.get(/^(?!\/(api|health)(\/|$)).*/, (_req, res) => {

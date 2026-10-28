@@ -214,21 +214,32 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
     if (!cached) setLoading(true);
     setLoadError(null);
     const seqAtStart = seqCounter.current;
+    // Both asked for at once, but the plan is shown as soon as the TASKS are in. The member list can take
+    // seconds on a cold server (one Jira request per project role and group) and the Gantt does not need it
+    // to draw; waiting for the slower of the two made a 15-task project load as slowly as a 4000-task one.
+    const usersReq = api.listUsers();
+    usersReq.catch(() => {}); // awaited below; this only keeps an early failure from being "unhandled"
+    let shown = false;
     try {
-      const [t, u] = await Promise.all([api.listTasks(), api.listUsers()]);
-      setUsers(u);
+      const t = await api.listTasks();
       // A drag or edit made while the old copy was showing has its own refresh coming;
       // this response was asked for before it and would put the old schedule back.
-      if (seqCounter.current === seqAtStart) {
-        setTasks(t);
-        saveTasksCache(cacheKey, t, u);
-      }
+      if (seqCounter.current === seqAtStart) setTasks(t);
+      shown = true;
+      setLoading(false);
+      setShowingCache(false);
+      const u = await usersReq;
+      setUsers(u);
+      if (seqCounter.current === seqAtStart) saveTasksCache(cacheKey, t, u);
     } catch (e) {
       // The shell is already swapping in the login screen; a red banner here would
       // just flash during the transition.
       if (e instanceof ApiError && e.status === 401) return;
       const message = e instanceof Error ? e.message : "Không tải được dữ liệu dự án.";
-      if (cached) {
+      if (shown) {
+        // The plan itself is fresh and on screen; only the member list is missing.
+        setSyncError(`Chưa tải được danh sách thành viên (${message}).`);
+      } else if (cached) {
         // Keep working on what is shown, but say it may be out of date.
         setSyncError(`Chưa làm mới được dữ liệu (${message}) — đang hiện bản lưu lần trước.`);
       } else {

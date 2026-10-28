@@ -14,7 +14,8 @@ import {
 import { loadAuthConfig } from "../auth/config.js";
 import { clearAuthCookies, clearCookie, oauthCookieName } from "../auth/cookies.js";
 import { requireAuth } from "../auth/middleware.js";
-import { forgetProjectList, resolveProject } from "../auth/projectScope.js";
+import { findAccessibleProject, forgetProjectList, rememberProjectList, resolveProject } from "../auth/projectScope.js";
+import { getProjectMembers } from "../projectMembers.js";
 import {
   commitAccess,
   commitOAuthFlow,
@@ -179,6 +180,16 @@ authRouter.get("/callback", async (req, res, next) => {
   }
 });
 
+/**
+ * Starts the member lookup without waiting for it. It is the slowest call of a page load (one request per
+ * project role and per group, 3–10 s cold), the workspace needs it right after, and concurrent callers share
+ * one run (projectMembers.getProjectMembers) — so a head start costs nothing and hides most of the wait.
+ */
+function warmMembers(req: import("express").Request, projectKey: string): void {
+  const { session, jira } = req.auth!;
+  getProjectMembers(jira, session.cloudId, projectKey, session.accountId).catch(() => {});
+}
+
 /** Session probe. Returns 401 when logged out — the client treats that as "show login". */
 authRouter.get("/me", requireAuth, async (req, res, next) => {
   const { session, jira } = req.auth!;
@@ -191,6 +202,8 @@ authRouter.get("/me", requireAuth, async (req, res, next) => {
     next(err);
     return;
   }
+  // The workspace asks for the member list a moment after this; started now, it is ready (or nearly) by then.
+  if (project) warmMembers(req, project.key);
   const meta: SessionMeta = {
     user: {
       accountId: session.accountId,
@@ -213,7 +226,9 @@ authRouter.get("/me", requireAuth, async (req, res, next) => {
 /** Projects this user can browse — the picker's source. */
 authRouter.get("/projects", requireAuth, async (req, res, next) => {
   try {
-    res.json(await req.auth!.jira.listProjects());
+    const projects = await req.auth!.jira.listProjects();
+    rememberProjectList(req.auth!.session, projects);
+    res.json(projects);
   } catch (err) {
     next(err);
   }
@@ -230,14 +245,15 @@ authRouter.post("/project", requireAuth, async (req, res, next) => {
       next(badRequest("Thiếu mã dự án."));
       return;
     }
-    const projects = await req.auth!.jira.listProjects();
-    const match = projects.find((p) => p.key === key);
+    // From the listing the picker has just fetched; Jira is asked again only if the key is not in it.
+    const match = await findAccessibleProject(req.auth!.jira, req.auth!.session, key);
     if (!match) {
       next(badRequest(`Bạn không có quyền truy cập dự án ${key}.`));
       return;
     }
     const session = { ...req.auth!.session, projectKey: match.key, projectName: match.name };
     commitSession(res, session);
+    warmMembers(req, match.key);
     res.json({ key: match.key, name: match.name });
   } catch (err) {
     next(err);

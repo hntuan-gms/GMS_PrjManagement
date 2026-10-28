@@ -78,6 +78,26 @@ async function accessibleProjects(jira: JiraClient, session: SessionData, force:
   return pending;
 }
 
+/**
+ * Remember a listing the picker has just fetched, so the choice made a moment later does not list
+ * the account's projects (~1 s of Jira) a second time to check the key is one of them.
+ */
+export function rememberProjectList(session: SessionData, projects: Array<{ key: string; name: string }>): void {
+  listed.set(`${session.cloudId}:${session.accountId}`, {
+    at: Date.now(),
+    projects: projects.map((p) => ({ key: p.key, name: p.name })),
+  });
+}
+
+/** The project of that key if this account can browse it: from the remembered list, relisted once if it may be stale. */
+export async function findAccessibleProject(jira: JiraClient, session: SessionData, key: string): Promise<ProjectRef | null> {
+  let list = await accessibleProjects(jira, session, false);
+  if (!list.projects.some((p) => p.key === key) && Date.now() - list.at > RELIST_AFTER_MS) {
+    list = await accessibleProjects(jira, session, true);
+  }
+  return list.projects.find((p) => p.key === key) ?? null;
+}
+
 /** Forget what an account may browse (logout, or a test). */
 export function forgetProjectList(cloudId: string, accountId: string): void {
   listed.delete(`${cloudId}:${accountId}`);
@@ -89,9 +109,5 @@ export async function resolveProject(req: Request, jira: JiraClient, session: Se
   // The cookie's own project was validated when it was chosen; nothing to ask Jira.
   if (!requested || current?.key === requested) return current;
 
-  let list = await accessibleProjects(jira, session, false);
-  if (!list.projects.some((p) => p.key === requested) && Date.now() - list.at > RELIST_AFTER_MS) {
-    list = await accessibleProjects(jira, session, true);
-  }
-  return pickProject(requested, current, list.projects);
+  return findAccessibleProject(jira, session, requested);
 }

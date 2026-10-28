@@ -115,6 +115,45 @@ export function projectHeaders(): Record<string, string> {
   return tabProject ? { "X-Project-Key": tabProject } : {};
 }
 
+/**
+ * Reload on a project this tab already has pinned: the app boots, asks /auth/me, and only THEN mounts the
+ * workspace that asks for the tasks and the members — so the two slow reads waited for a request that
+ * has nothing to do with them (about a second, more when the server is cold). The tab knows its project from
+ * sessionStorage before any of that, so both are started at boot and handed to the workspace when it asks.
+ * Handed over to the workspace's first ask and to any ask in the next moment (React's StrictMode runs a mount
+ * effect twice in development, and both asks should get the one answer); after that, and once it is old or for
+ * another project, every ask goes to the server as before — a refresh must never be answered from boot.
+ */
+const PREFETCH_MAX_AGE_MS = 20_000;
+const PREFETCH_SHARE_MS = 1_500;
+let prefetched: {
+  project: string;
+  at: number;
+  tasks: Promise<Task[]>;
+  users: Promise<JiraUser[]>;
+  firstTaken: { tasks: number | null; users: number | null };
+} | null = null;
+
+export function prefetchWorkspace(): void {
+  if (!tabProject) return;
+  const tasks = request<Task[]>("/tasks");
+  const users = request<JiraUser[]>("/users");
+  // Whoever takes them handles the outcome; this only keeps a failure nobody asked about from being "unhandled".
+  tasks.catch(() => {});
+  users.catch(() => {});
+  prefetched = { project: tabProject, at: Date.now(), tasks, users, firstTaken: { tasks: null, users: null } };
+}
+
+function takePrefetched<T>(kind: "tasks" | "users"): Promise<T> | null {
+  const p = prefetched;
+  const now = Date.now();
+  if (!p || p.project !== tabProject || now - p.at > PREFETCH_MAX_AGE_MS) return null;
+  const first = p.firstTaken[kind];
+  if (first !== null && now - first > PREFETCH_SHARE_MS) return null;
+  p.firstTaken[kind] ??= now;
+  return p[kind] as Promise<T>;
+}
+
 let unauthorizedHandler: (() => void) | null = null;
 let notifiedUnauthorized = false;
 
@@ -235,8 +274,8 @@ export const api = {
     }),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
 
-  listTasks: () => request<Task[]>("/tasks"),
-  listUsers: () => request<JiraUser[]>("/users"),
+  listTasks: () => takePrefetched<Task[]>("tasks") ?? request<Task[]>("/tasks"),
+  listUsers: () => takePrefetched<JiraUser[]>("users") ?? request<JiraUser[]>("/users"),
   listPriorities: () => request<string[]>("/priorities"),
   listLabels: () => request<string[]>("/labels"),
   listIssueTypes: () => request<Array<{ name: string; subtask: boolean }>>("/issue-types"),
