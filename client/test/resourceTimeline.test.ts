@@ -2,12 +2,9 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   cellTooltip,
-  dateAtFraction,
   formatDate,
   monthLabel,
-  resizeWindow,
   scrubExtent,
-  slideWindow,
 } from "../src/resourceTimeline";
 import type { Task } from "../src/types";
 
@@ -67,27 +64,5 @@ describe("resource tab time slider", () => {
     const e = scrubExtent(far, today, span);
     assert.ok(e.from <= span.from && e.to >= span.to);
     assert.ok(e.to < "2030-01-01", e.to);
-  });
-
-  it("slides a window without changing its length, and stops at the ends", () => {
-    const extent = { from: "2026-09-01", to: "2026-12-31" };
-    assert.deepEqual(slideWindow(span, 7, extent), { from: "2026-11-04", to: "2026-11-24" });
-    assert.deepEqual(slideWindow(span, -200, extent), { from: "2026-09-01", to: "2026-09-21" });
-    assert.deepEqual(slideWindow(span, 200, extent), { from: "2026-12-11", to: "2026-12-31" });
-  });
-
-  it("resizes one edge, never below the minimum or past the extent", () => {
-    const extent = { from: "2026-09-01", to: "2026-12-31" };
-    assert.deepEqual(resizeWindow(span, "to", "2026-12-01", extent), { from: "2026-10-28", to: "2026-12-01" });
-    assert.deepEqual(resizeWindow(span, "to", "2026-10-29", extent), { from: "2026-10-28", to: "2026-11-03" });
-    assert.deepEqual(resizeWindow(span, "from", "2026-01-01", extent), { from: "2026-09-01", to: "2026-11-17" });
-    assert.deepEqual(resizeWindow(span, "from", "2026-11-17", extent), { from: "2026-11-11", to: "2026-11-17" });
-  });
-
-  it("turns a position on the track into a date", () => {
-    const extent = { from: "2026-01-01", to: "2026-01-11" };
-    assert.equal(dateAtFraction(extent, 0), "2026-01-01");
-    assert.equal(dateAtFraction(extent, 0.5), "2026-01-06");
-    assert.equal(dateAtFraction(extent, 2), "2026-01-11");
   });
 });

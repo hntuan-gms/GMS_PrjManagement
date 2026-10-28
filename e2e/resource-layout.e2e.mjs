@@ -63,6 +63,22 @@ await page.waitForSelector(".resource-view .rv-row-person");
 
 const rect = (sel) => page.locator(sel).first().boundingBox();
 const rowOf = (name) => page.locator(".rv-row-person", { hasText: name });
+// The window, read from (and written through) the exact-date boxes in the "Khoảng" menu.
+const windowOf = async () => {
+  await page.locator(".rv-preset").click();
+  const inputs = page.locator(".rv-exact input[type=date]");
+  const w = { from: await inputs.nth(0).inputValue(), to: await inputs.nth(1).inputValue() };
+  await page.keyboard.press("Escape");
+  return w;
+};
+const setWindow = async (from, to) => {
+  await page.locator(".rv-preset").click();
+  const inputs = page.locator(".rv-exact input[type=date]");
+  await inputs.nth(0).fill(from);
+  await inputs.nth(1).fill(to);
+  await page.keyboard.press("Escape");
+};
+const lenOf = (w) => (Date.parse(w.to) - Date.parse(w.from)) / 86400000 + 1;
 
 console.log("\n== Hai hàng: toolbar + KPI ==");
 await step("toolbar một hàng và hàng KPI một dòng ở 1500px và 1280px, trang không cuộn ngang", async () => {
@@ -118,8 +134,7 @@ await step("menu 'Khoảng' gom 6 mốc; nhãn đổi theo mốc đã chọn", a
   assert.deepEqual(items, ["Tháng này", "4 tuần", "8 tuần", "1 quý", "Toàn dự án", "Theo dự án"]);
   await page.locator(".rv-preset-item", { hasText: "8 tuần" }).click();
   assert.ok((await page.locator(".rv-preset").innerText()).includes("Khoảng: 8 tuần"));
-  const [from, to] = [await page.locator(".rv-scrub").getAttribute("data-from"), await page.locator(".rv-scrub").getAttribute("data-to")];
-  assert.equal((Date.parse(to) - Date.parse(from)) / 86400000 + 1, 56);
+  assert.equal(lenOf(await windowOf()), 56);
   await page.locator(".rv-preset").click();
   await page.locator(".rv-preset-item", { hasText: "Theo dự án" }).click();
   assert.ok((await page.locator(".rv-preset").innerText()).includes("Khoảng: Theo dự án"));
@@ -140,16 +155,17 @@ const pickPreset = async (label) => {
   await page.locator(".rv-preset").click();
   await page.locator(".rv-preset-item", { hasText: label }).click();
 };
-const windowOf = async () => {
-  const s = page.locator(".rv-scrub");
-  return { from: await s.getAttribute("data-from"), to: await s.getAttribute("data-to") };
-};
-const lenOf = (w) => (Date.parse(w.to) - Date.parse(w.from)) / 86400000 + 1;
+await step("đặt khoảng quanh hôm nay, cột theo ngày (để đối chiếu thanh với cột)", async () => {
+  await setWindow(isoIn(-2), isoIn(25));
+  await page.locator(".rv-granularity").selectOption("day");
+});
 await step("ít cột: cột ngày giãn hết bề ngang bảng (không còn khoảng trống bên phải)", async () => {
   const m = await page.evaluate(() => {
     const scroll = document.querySelector(".rv-heatmap-scroll");
     const cells = [...document.querySelectorAll(".rv-row-head .rv-head-cell")];
-    return { gap: scroll.getBoundingClientRect().right - cells[cells.length - 1].getBoundingClientRect().right, over: scroll.scrollWidth - scroll.clientWidth, n: cells.length };
+    // The box minus its vertical scrollbar, which the pane now has when the people do not all fit.
+    const right = scroll.getBoundingClientRect().left + scroll.clientLeft + scroll.clientWidth;
+    return { gap: right - cells[cells.length - 1].getBoundingClientRect().right, over: scroll.scrollWidth - scroll.clientWidth, n: cells.length };
   });
   assert.ok(m.n < 45, "dữ liệu thử phải ít cột, có " + m.n);
   assert.ok(m.gap >= 0 && m.gap <= 3, "còn trống " + m.gap + "px bên phải");
@@ -202,10 +218,9 @@ await step("nhãn tháng rút gọn khi hẹp (T10/26, T10) và không bao giờ
   }
   assert.ok(compact > 0, "không có nhãn nào được rút gọn dù có tháng chỉ hiện vài ngày");
 });
-await step("trả lại 'Theo dự án' + cột tự động", async () => {
-  await pickPreset("Theo dự án");
-  await page.locator(".rv-granularity").selectOption("auto");
-  assert.ok((await page.locator(".rv-preset").innerText()).includes("Theo dự án"));
+await step("trả lại khoảng quanh hôm nay, cột theo ngày", async () => {
+  await setWindow(isoIn(-2), isoIn(25));
+  await page.locator(".rv-granularity").selectOption("day");
 });
 await step("tooltip ô: ngày DD/MM/YYYY; ngày nghỉ ghi 'Ngày nghỉ' thay vì 0h / 0h", async () => {
   const titles = await page.locator(".rv-row-person .rv-cell").evaluateAll((els) => els.map((e) => ({ t: e.title, off: e.className.includes("band-off") })));
@@ -220,71 +235,151 @@ await step("tooltip ô: ngày DD/MM/YYYY; ngày nghỉ ghi 'Ngày nghỉ' thay v
   assert.match(head, /^\d{2}\/\d{2}\/\d{4}$/);
 });
 
-console.log("\n== Thanh trượt thời gian ==");
-await step("có thanh trượt thay cho ô Từ/Đến; ngày chính xác nằm trong menu 'Khoảng'", async () => {
-  assert.equal(await page.locator(".rv-scrub [role=slider]").count(), 1);
+console.log("\n== Cuộn và zoom như Gantt ==");
+await step("không còn thanh trượt cửa sổ, mũi tên kỳ trước/sau; có 'Hôm nay'; ngày chính xác vẫn ở menu 'Khoảng'", async () => {
+  assert.equal(await page.locator(".rv-scrub").count(), 0);
+  assert.equal(await page.locator(".rv-step").count(), 0);
   assert.equal(await page.locator(".rv-range > input[type=date]").count(), 0, "ô ngày không được nằm ngoài menu");
-  await page.locator(".rv-preset").click();
+  assert.equal(await page.locator(".rv-range button", { hasText: "Hôm nay" }).count(), 1);
   const w = await windowOf();
-  assert.equal(await page.locator(".rv-exact input[type=date]").nth(0).inputValue(), w.from);
-  assert.equal(await page.locator(".rv-exact input[type=date]").nth(1).inputValue(), w.to);
-  await page.keyboard.press("Escape");
+  assert.equal(w.from, isoIn(-2));
+  assert.equal(w.to, isoIn(25));
 });
-await step("kéo thân thanh: cả khoảng trượt đi, độ dài giữ nguyên, bảng đổi theo", async () => {
-  const before = await windowOf();
-  const headBefore = await page.locator(".rv-head-cell").first().getAttribute("title");
-  const t = await rect(".rv-scrub-thumb");
-  await page.mouse.move(t.x + t.width / 2, t.y + t.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(t.x + t.width / 2 + 40, t.y + t.height / 2, { steps: 5 });
-  await page.mouse.up();
-  const after = await windowOf();
-  assert.ok(after.from > before.from, `${before.from} → ${after.from}`);
-  assert.equal(lenOf(after), lenOf(before));
-  await page.waitForFunction((h) => document.querySelector(".rv-head-cell").title !== h, headBefore);
-  assert.ok((await page.locator(".rv-preset").innerText()).startsWith("Khoảng:"));
-});
-await step("kéo mép phải: khoảng dài ra, mép trái đứng yên; kéo mép trái ngắn lại", async () => {
-  const before = await windowOf();
-  const e = await rect(".rv-scrub-edge.is-to");
-  await page.mouse.move(e.x + e.width / 2, e.y + e.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(e.x + e.width / 2 + 40, e.y + e.height / 2, { steps: 5 });
-  await page.mouse.up();
-  const grown = await windowOf();
-  assert.equal(grown.from, before.from);
-  assert.ok(lenOf(grown) > lenOf(before), `${lenOf(before)} → ${lenOf(grown)}`);
-  const l = await rect(".rv-scrub-edge.is-from");
-  await page.mouse.move(l.x + l.width / 2, l.y + l.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(l.x + l.width / 2 + 25, l.y + l.height / 2, { steps: 4 });
-  await page.mouse.up();
-  const shrunk = await windowOf();
-  assert.equal(shrunk.to, grown.to);
-  assert.ok(shrunk.from > grown.from);
-});
-await step("bấm lên thanh để nhảy tới đó; phím mũi tên dời một tuần", async () => {
-  const before = await windowOf();
-  const track = await rect(".rv-scrub-track");
-  await page.mouse.click(track.x + track.width - 8, track.y + track.height / 2);
-  const jumped = await windowOf();
-  assert.ok(jumped.from > before.from, `${before.from} → ${jumped.from}`);
-  assert.equal(lenOf(jumped), lenOf(before));
-  await page.locator(".rv-scrub [role=slider]").focus();
-  await page.keyboard.press("ArrowLeft");
-  const back = await windowOf();
-  assert.equal((Date.parse(jumped.from) - Date.parse(back.from)) / 86400000, 7);
-  assert.match(await page.locator(".rv-scrub [role=slider]").getAttribute("aria-valuetext"), /^\d{2}\/\d{2}\/\d{4} – \d{2}\/\d{2}\/\d{4}$/);
-});
-await step("không trượt ra khỏi dự án: kéo quá mép chỉ dừng ở đầu/cuối, không thu nhỏ", async () => {
-  const len = lenOf(await windowOf());
-  await page.locator(".rv-scrub [role=slider]").focus();
-  await page.keyboard.press("End");
-  const end = await windowOf();
-  assert.equal(lenOf(end), len);
-  await page.keyboard.press("Home");
-  assert.equal(lenOf(await windowOf()), len);
+await step("mặc định vẽ cả dự án (không cắt theo cửa sổ 4 tuần): cột đầu ≤ việc sớm nhất, cột cuối ≥ việc muộn nhất", async () => {
   await pickPreset("Theo dự án");
+  await page.locator(".rv-granularity").selectOption("week");
+  const tasks = await (await api("GET", "/api/tasks")).json();
+  const dated = tasks.filter((t) => t.startDate);
+  const minStart = dated.map((t) => t.startDate).sort()[0];
+  const maxDue = dated.map((t) => t.dueDate ?? t.startDate).sort().at(-1);
+  const titles = await page.locator(".rv-head-cell").evaluateAll((els) => els.map((e) => e.title));
+  const iso = (dmy) => dmy.split("/").reverse().join("-");
+  const first = iso(titles[0].split(" → ")[0]);
+  const last = iso(titles.at(-1).split(" → ").at(-1));
+  assert.ok(first <= minStart, `cột đầu ${first} sau việc sớm nhất ${minStart}`);
+  assert.ok(last >= maxDue, `cột cuối ${last} trước việc muộn nhất ${maxDue}`);
+});
+await step("bảng có thanh cuộn riêng: cuộn dọc thì tiêu đề đứng yên, cuộn ngang thì cột tên đứng yên", async () => {
+  await page.setViewportSize({ width: 1500, height: 430 });
+  await page.locator(".rv-granularity").selectOption("day");
+  await rowOf("Nguyễn Anh").click();
+  await rowOf("Trần Bình").click();
+  await page.waitForSelector(".rv-expand");
+  const m = await page.evaluate(() => {
+    const sc = document.querySelector(".rv-heatmap-scroll");
+    return { v: sc.scrollHeight - sc.clientHeight, h: sc.scrollWidth - sc.clientWidth, page: document.documentElement.scrollHeight - window.innerHeight };
+  });
+  assert.ok(m.v > 40, "phải cuộn dọc được trong bảng, dư " + m.v);
+  assert.ok(m.h > 40, "phải cuộn ngang được trong bảng, dư " + m.h);
+  assert.ok(m.page <= 1, "trang không được tự cuộn: " + m.page);
+  const head = await rect(".rv-row-head .rv-head-cell");
+  const name = await rect(".rv-row-head .rv-name");
+  await page.evaluate(() => {
+    const sc = document.querySelector(".rv-heatmap-scroll");
+    sc.scrollTop = 120;
+    sc.scrollLeft = 300;
+  });
+  await page.waitForTimeout(100);
+  const head2 = await rect(".rv-row-head .rv-head-cell");
+  const name2 = await rect(".rv-row-head .rv-name");
+  assert.ok(Math.abs(head2.y - head.y) < 1, `tiêu đề trượt ${head2.y - head.y}px khi cuộn dọc`);
+  assert.ok(Math.abs(name2.x - name.x) < 1, `cột tên trượt ${name2.x - name.x}px khi cuộn ngang`);
+  await page.evaluate(() => {
+    const sc = document.querySelector(".rv-heatmap-scroll");
+    sc.scrollTop = 0;
+    sc.scrollLeft = 0;
+  });
+});
+await step("Ctrl + cuộn chỉ zoom trục thời gian: cột rộng/hẹp theo, số hàng, chiều cao hàng và vị trí cuộn dọc không đổi", async () => {
+  await page.locator(".rv-granularity").selectOption("week");
+  const snap = () =>
+    page.evaluate(() => {
+      const sc = document.querySelector(".rv-heatmap-scroll");
+      return {
+        cell: document.querySelector(".rv-head-cell").getBoundingClientRect().width,
+        people: document.querySelectorAll(".rv-row-person").length,
+        tasks: document.querySelectorAll(".rv-task-row").length,
+        rowH: document.querySelector(".rv-row-person").getBoundingClientRect().height,
+        taskH: document.querySelector(".rv-task-row").getBoundingClientRect().height,
+        top: sc.scrollTop,
+        granularity: document.querySelector(".rv-granularity").value,
+      };
+    });
+  await page.evaluate(() => (document.querySelector(".rv-heatmap-scroll").scrollTop = 60));
+  const before = await snap();
+  const box = await rect(".rv-heatmap-scroll");
+  await page.mouse.move(box.x + box.width * 0.6, box.y + box.height * 0.5);
+  await page.keyboard.down("Control");
+  for (let i = 0; i < 8; i++) {
+    await page.mouse.wheel(0, -120);
+    await page.waitForTimeout(30);
+  }
+  const zoomedIn = await snap();
+  assert.ok(zoomedIn.cell > before.cell * 1.3 || zoomedIn.granularity !== before.granularity, `cột ${before.cell} → ${zoomedIn.cell}`);
+  for (let i = 0; i < 40; i++) {
+    await page.mouse.wheel(0, 120);
+    await page.waitForTimeout(15);
+  }
+  await page.keyboard.up("Control");
+  const zoomedOut = await snap();
+  assert.equal(zoomedOut.granularity, "month", "thu nhỏ hết cỡ phải sang cột tháng");
+  for (const s of [zoomedIn, zoomedOut]) {
+    assert.equal(s.people, before.people);
+    assert.equal(s.tasks, before.tasks, "số hàng việc đổi khi zoom");
+    assert.equal(s.rowH, before.rowH);
+    assert.equal(s.taskH, before.taskH);
+    assert.equal(s.top, before.top, `cuộn dọc đổi ${before.top} → ${s.top}`);
+  }
+  // Choosing a granularity is the same zoom, in one click.
+  await page.locator(".rv-granularity").selectOption("day");
+  assert.ok(Math.abs((await snap()).cell - 22) < 1);
+  await page.evaluate(() => (document.querySelector(".rv-heatmap-scroll").scrollTop = 0));
+});
+await step("zoom giữ nguyên ngày đang ở dưới con trỏ", async () => {
+  await page.locator(".rv-granularity").selectOption("day");
+  await page.evaluate(() => (document.querySelector(".rv-heatmap-scroll").scrollLeft = 500));
+  const box = await rect(".rv-heatmap-scroll");
+  const px = box.x + box.width * 0.6;
+  const dateAt = (x) =>
+    page.evaluate((x) => {
+      const cells = [...document.querySelectorAll(".rv-row-head .rv-head-cell")];
+      const hit = cells.find((c) => {
+        const r = c.getBoundingClientRect();
+        return x >= r.left && x < r.right;
+      });
+      return hit ? hit.title : null;
+    }, x);
+  const before = await dateAt(px);
+  assert.ok(before, "con trỏ không nằm trên cột nào");
+  await page.mouse.move(px, box.y + 200);
+  await page.keyboard.down("Control");
+  for (let i = 0; i < 5; i++) {
+    await page.mouse.wheel(0, -120);
+    await page.waitForTimeout(30);
+  }
+  await page.keyboard.up("Control");
+  const after = await dateAt(px);
+  assert.ok(after, "sau zoom con trỏ không còn nằm trên cột nào");
+  const day = (t) => Date.parse(t.split(" → ")[0].split("/").reverse().join("-"));
+  assert.ok(Math.abs(day(after) - day(before)) <= 2 * 86400000, `${before} → ${after}`);
+});
+await step("mở một người: mọi việc của họ đều có hàng, kể cả việc nằm ngoài khoảng đang xem (hiện mũi tên ở mép)", async () => {
+  await page.setViewportSize({ width: 1500, height: 900 });
+  const total = async (name) => Number((await rowOf(name).locator(".rv-person-text small").innerText()).match(/(\d+) việc/)[1]);
+  const anh = await total("Nguyễn Anh");
+  assert.ok(anh >= 2);
+  // A window that holds none of Anh's tasks.
+  await setWindow(isoIn(200), isoIn(228));
+  const block = page.locator(".rv-block", { has: rowOf("Nguyễn Anh") });
+  await block.locator(".rv-task-row").first().waitFor();
+  assert.equal(await block.locator(".rv-task-row").count(), anh, "mất hàng việc khi việc nằm ngoài khoảng");
+  assert.equal(await block.locator(".rv-tl-beyond").count(), anh);
+  assert.equal(await page.locator(".rv-expand-note").count(), 0);
+  await setWindow(isoIn(-2), isoIn(25));
+  await page.locator(".rv-granularity").selectOption("day");
+  await rowOf("Nguyễn Anh").click();
+  await rowOf("Trần Bình").click();
+  assert.equal(await page.locator(".rv-expand").count(), 0);
 });
 
 console.log("\n== Việc chưa gán: thẻ nổi ==");

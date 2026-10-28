@@ -1674,7 +1674,6 @@ kbd {
   /* One source of truth for the axis: the heatmap cell, the task track and
      the sticky name column all measure themselves from these. */
   --rv-cell: 22px;
-  --rv-cell-week: 46px;
   --rv-name-w: 296px;
   --rv-row-h: 34px;
   --rv-task-h: 28px;
@@ -1723,129 +1722,15 @@ kbd {
   display: flex;
   align-items: center;
   gap: 2px;
-  --rv-scrub-w: 280px;
 }
 /* The right-hand group is `flex: none` in the FilterBar, so nothing in it may shrink on its own: a squeezed
-   select wraps "Cột: Tự động" onto two lines and makes the whole bar taller. */
+   select wraps "Cột: Tuần" onto two lines and makes the whole bar taller. */
 .rv-range > *,
 .rv-range select {
   flex: none;
   white-space: nowrap;
 }
-@media (max-width: 1400px) {
-  .rv-range {
-    --rv-scrub-w: 170px;
-  }
-}
-/* The slider: the track is the whole project, the thumb is the window on screen. */
-.rv-range > .rv-scrub {
-  flex: 0 0 var(--rv-scrub-w);
-  padding: 0 6px;
-}
-.rv-scrub-track {
-  position: relative;
-  height: 24px;
-  border: 1px solid var(--color-border-hover);
-  border-radius: var(--radius-full);
-  background: var(--color-ghost-hover);
-  cursor: pointer;
-  touch-action: none;
-  user-select: none;
-}
-.rv-scrub-tick {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 1px;
-  background: var(--color-border-hover);
-  pointer-events: none;
-}
-.rv-scrub-tick i {
-  position: absolute;
-  bottom: 1px;
-  left: 3px;
-  font-size: 9.5px;
-  font-style: normal;
-  line-height: 1;
-  color: var(--color-text-muted);
-}
-.rv-scrub-today {
-  position: absolute;
-  top: -2px;
-  bottom: -2px;
-  width: 2px;
-  margin-left: -1px;
-  border-radius: 1px;
-  background: var(--color-primary);
-  pointer-events: none;
-}
-.rv-scrub-thumb {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  min-width: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1.5px solid var(--color-primary);
-  border-radius: var(--radius-full);
-  background: rgba(37, 99, 235, 0.14);
-  cursor: grab;
-  container-type: inline-size;
-  transition: background var(--transition-fast), box-shadow var(--transition-fast);
-}
-.rv-scrub-thumb:hover,
-.rv-scrub-track.is-dragging .rv-scrub-thumb {
-  background: rgba(37, 99, 235, 0.22);
-}
-.rv-scrub-track.is-dragging .rv-scrub-thumb {
-  cursor: grabbing;
-}
-.rv-scrub-thumb:focus-visible {
-  outline: none;
-  box-shadow: var(--control-ring);
-}
-.rv-scrub-edge {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 10px;
-  cursor: ew-resize;
-}
-.rv-scrub-edge.is-from {
-  left: -3px;
-}
-.rv-scrub-edge.is-to {
-  right: -3px;
-}
-.rv-scrub-edge::after {
-  content: "";
-  position: absolute;
-  top: 6px;
-  bottom: 6px;
-  left: 4px;
-  width: 2px;
-  border-radius: 1px;
-  background: var(--color-primary);
-  opacity: 0.55;
-}
-/* The window's dates, once the thumb is wide enough to hold them. */
-.rv-scrub-label {
-  display: none;
-  padding: 0 12px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--color-primary);
-  white-space: nowrap;
-  pointer-events: none;
-  font-variant-numeric: tabular-nums;
-}
-@container (min-width: 150px) {
-  .rv-scrub-label {
-    display: inline;
-  }
-}
-/* The "Khoang" menu: presets, then exact dates for when a slider is not precise enough. */
+/* The "Khoảng" menu: presets, then exact dates. */
 .rv-range .rv-range-menu {
   min-width: 232px;
 }
@@ -2054,19 +1939,33 @@ button.infotip-btn.is-warn {
 
 /* --- heatmap --- */
 .rv-heatmap-scroll {
-  overflow-x: auto;
+  overflow: auto;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
+}
+/* The load view is a fixed pane with its own scrollbars — sideways along the time axis, downwards
+   through the people — like the Gantt, not a page that scrolls with a table somewhere in it. The
+   header stays and the name column stays. */
+.resource-view.is-grid {
+  overflow: hidden;
+}
+.resource-view.is-grid > .rv-heatmap-scroll {
+  flex: 1 1 0;
+  min-height: 0;
+}
+/* Vertical zoom does not exist: rows keep their height whatever the time axis is doing. */
+.rv-header {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--color-surface);
 }
 
 /* At least as wide as the table and as its columns need: few columns stretch to fill it, many scroll. */
 .rv-grid {
   width: 100%;
   min-width: min-content;
-}
-.rv-grid-week {
-  --rv-cell: var(--rv-cell-week);
 }
 
 .rv-row {
@@ -2144,10 +2043,6 @@ button.infotip-btn.is-warn {
 .rv-row-head {
   height: 24px;
   border-bottom: 1px solid var(--color-border);
-  position: sticky;
-  top: 0;
-  z-index: 3;
-  background: var(--color-surface);
 }
 
 .rv-cell {
@@ -2369,14 +2264,6 @@ button.rv-profile-text:hover:not(:disabled) {
   font-size: 11.5px;
   font-variant-numeric: tabular-nums;
 }
-.rv-expand-note {
-  position: sticky;
-  left: 0;
-  width: max-content;
-  padding: 4px 10px 6px;
-  font-size: 11.5px;
-  color: var(--color-text-muted);
-}
 
 .rv-task-row {
   height: var(--rv-task-h);
@@ -2513,6 +2400,26 @@ button.rv-profile-text:hover:not(:disabled) {
 .rv-tl-bar.clip-r {
   border-top-right-radius: 0;
   border-bottom-right-radius: 0;
+}
+/* A task wholly outside the columns on screen: its row stays, with its dates pinned to the edge it lies beyond. */
+.rv-tl-beyond {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 1px 8px;
+  border-radius: var(--radius-full);
+  background: var(--color-ghost-hover);
+  color: var(--color-text-muted);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.rv-tl-beyond.is-before {
+  left: 4px;
+}
+.rv-tl-beyond.is-after {
+  right: 4px;
 }
 .rv-tl-progress {
   position: absolute;

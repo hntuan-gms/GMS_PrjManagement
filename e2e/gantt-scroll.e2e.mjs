@@ -258,6 +258,26 @@ await step("cuộn ngang và dọc đều mượt: khung hình p95 dưới 100ms
   assert(frames.length > 30, "quá ít khung hình để đo: " + frames.length);
   assert(p95 < 100, `khung hình p95 = ${p95.toFixed(0)}ms (tệ nhất ${sorted.at(-1).toFixed(0)}ms)`);
 });
+await step("Ctrl + cuộn chỉ phóng to trục thời gian: hàng không trượt, không mất hàng, vẫn thẳng hàng với thanh", async () => {
+  // Somewhere in the middle, so a vertical scroll caused by the zoom would have somewhere to go.
+  await page.evaluate(() => (document.querySelector(".gantt-vscroll").scrollTop = 20000));
+  await page.waitForTimeout(400);
+  const before = await snap();
+  const body = await page.locator(".gantt-body").boundingBox();
+  await page.mouse.move(body.x + body.width * 0.7, body.y + body.height * 0.5);
+  await page.keyboard.down("Control");
+  for (let i = 0; i < 12; i++) {
+    await page.mouse.wheel(0, i < 6 ? -120 : 120); // in, then back out
+    await page.waitForTimeout(30);
+  }
+  await page.keyboard.up("Control");
+  await page.waitForTimeout(400);
+  const after = await snap();
+  assert.equal(after.scrollTop, before.scrollTop, `cuộn dọc đổi ${before.scrollTop} → ${after.scrollTop}`);
+  assert.equal(after.firstKey, before.firstKey, "dòng đầu tiên trên màn hình đã đổi sau khi zoom");
+  assert.ok(after.maxDy < 3, `dòng và thanh lệch ${after.maxDy}px sau khi zoom`);
+  assert.ok(after.rows > 20, `chỉ còn ${after.rows} dòng`);
+});
 await step("không có lỗi trình duyệt (kể cả 'Maximum update depth')", async () => {
   assert.deepEqual(problems, []);
 });

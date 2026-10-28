@@ -1,24 +1,20 @@
-import { useId, useMemo, useRef, useState, type ReactNode } from "react";
-import {
-  autoGranularity,
-  buildResourceLoad,
-  defaultWindow,
-  shiftWindow,
-  todayIso,
-  type Granularity,
-} from "../resourceAllocation";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { buildResourceLoad, todayIso, type Granularity } from "../resourceAllocation";
 import {
   columnSpans,
   currentPreset,
   filterPeople,
   pct,
   peopleCounts,
+  placeBar,
   RANGE_PRESETS,
   rangeForPreset,
+  type ColumnSpan,
   type PeopleView,
   type RangePresetId,
 } from "../resourceColumns";
-import { formatDate, monthLabel, scrubExtent, unionWindow, type DateWindow, type MonthLabel } from "../resourceTimeline";
+import { formatDate, monthLabel, scrubExtent, type MonthLabel } from "../resourceTimeline";
+import { DEFAULT_PIXELS_PER_DAY, pickScale, zoomByWheel } from "../timeZoom";
 import type { JiraUser, ResourceAbsence, ResourceProfile, ResourcePool, Task } from "../types";
 import { csvName, downloadCsv } from "../csv";
 import { buildEpicIndex, isTaskFiltering, matchesTaskFilter, type TaskFilter } from "../taskFilter";
@@ -28,7 +24,6 @@ import InfoTip from "./InfoTip";
 import Popover from "./Popover";
 import ResourcePersonBlock from "./ResourcePersonBlock";
 import ResourceProfileDrawer from "./ResourceProfileDrawer";
-import ResourceScrubber from "./ResourceScrubber";
 import ResourceUnassigned, { type DragState } from "./ResourceUnassigned";
 import SavedFilterMenu from "./SavedFilterMenu";
 import SkillMatrixView from "./SkillMatrixView";
@@ -54,8 +49,7 @@ interface Props {
 /** Sentinel for the "remove from whoever holds it" drop zone. */
 const UNASSIGNED_ZONE = "__unassigned__";
 
-const GRANULARITIES: Array<{ value: Granularity | "auto"; label: string }> = [
-  { value: "auto", label: "Tự động" },
+const GRANULARITIES: Array<{ value: Granularity; label: string }> = [
   { value: "day", label: "Ngày" },
   { value: "week", label: "Tuần" },
   { value: "month", label: "Tháng" },
@@ -112,24 +106,19 @@ export default function ResourceView({
   const [unassignedOpen, setUnassignedOpen] = useState(false);
   // The heatmap (load over time) or the skills matrix (who can do what): two views of the same people.
   const [mode, setMode] = useState<"load" | "skills">("load");
-  const [granularityChoice, setGranularityChoice] = useState<Granularity | "auto">("auto");
+  // The one zoom variable (timeZoom.ts): which of day / week / month columns show, and how wide they
+  // are, both come from it — the same gesture and the same mechanism as the Gantt's.
+  const [pixelsPerDay, setPixelsPerDay] = useState(DEFAULT_PIXELS_PER_DAY.week);
+  const scale = pickScale(pixelsPerDay);
   const unassignedBtn = useRef<HTMLButtonElement>(null);
   const unassignedId = useId();
 
   const today = useMemo(() => todayIso(), []);
 
-  // The window follows the project until the user touches it, then stops —
-  // otherwise every drag that extends the plan would yank the view they are
-  // reading out from under them.
-  const span = useMemo(() => range ?? defaultWindow(tasks, today), [range, tasks, today]);
-
-  // What the slider's track covers. It only ever grows: if exact dates typed in the menu land outside
-  // the project, the track stretches to hold them — but must not shrink back while the thumb is being
-  // dragged, or the ground would move under the pointer.
-  const [reach, setReach] = useState<DateWindow | null>(null);
-  const natural = useMemo(() => scrubExtent(tasks, today, { from: today, to: today }), [tasks, today]);
-  const extent = unionWindow(natural, reach);
-  if (span.from < extent.from || span.to > extent.to) setReach(unionWindow(extent, span));
+  // The table draws the whole project and scrolls, like the Gantt: nothing is cut off by a window
+  // that has to be slid, so a person's tasks are all there. A window only exists if one is picked
+  // from the "Khoảng" menu, and even then no task row is dropped (see PersonTasks).
+  const span = useMemo(() => range ?? scrubExtent(tasks, today, { from: today, to: today }), [range, tasks, today]);
 
   // The heatmap has its own member search, and a person picked on the Gantt would
   // blank everyone else's rows here — so only the task facets apply.
@@ -158,7 +147,7 @@ export default function ResourceView({
     [filteredTasks, users, pool, span]
   );
 
-  const granularity: Granularity = granularityChoice === "auto" ? autoGranularity(span.from, span.to) : granularityChoice;
+  const granularity: Granularity = scale.granularity;
   const spans = useMemo(() => columnSpans(load.dates, granularity), [load.dates, granularity]);
   const counts = useMemo(() => peopleCounts(load.people), [load.people]);
   const utilisation = load.people.length > 0 ? load.people.reduce((n, p) => n + p.utilisation, 0) / load.people.length : 0;
@@ -192,9 +181,70 @@ export default function ResourceView({
     downloadCsv(csvName("nguon-luc", today), [header, ...rows]);
   }
 
-  // One step earlier or later: a whole calendar month moves by month, anything else by its own length.
-  function shiftRange(dir: -1 | 1) {
-    setRange(shiftWindow(span, dir));
+  /* ---- scrolling and zoom: the table's own scrollbars, Ctrl+wheel for the time axis ---- */
+  const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const attachScroll = useCallback((el: HTMLDivElement | null) => {
+    scrollRef.current = el;
+    setScrollEl(el);
+  }, []);
+  // Which part of the time axis sits under the pointer when a zoom starts, so it is still there after.
+  const anchor = useRef<{ frac: number; x: number } | null>(null);
+  const latest = useRef<{ spans: ColumnSpan[]; today: string; cell: number }>({ spans, today, cell: scale.cellWidth });
+  useLayoutEffect(() => {
+    latest.current = { spans, today, cell: scale.cellWidth };
+  });
+
+  const nameWidth = (sc: HTMLElement) => sc.querySelector<HTMLElement>(".rv-name")?.offsetWidth ?? 0;
+  const anchorAt = useCallback((sc: HTMLElement, x: number) => {
+    const nameW = nameWidth(sc);
+    const trackW = sc.scrollWidth - nameW;
+    if (trackW > 0) anchor.current = { frac: (sc.scrollLeft + x - nameW) / trackW, x };
+  }, []);
+
+  /** Brings a date to just right of the name column. */
+  const scrollToDate = useCallback((sc: HTMLElement, iso: string) => {
+    const { spans: cols, cell } = latest.current;
+    const place = placeBar(cols, iso, iso);
+    if (!place) return;
+    const trackW = sc.scrollWidth - nameWidth(sc);
+    sc.scrollLeft = Math.max(0, (place.left / cols.length) * trackW - 2 * cell);
+  }, []);
+
+  // Ctrl+wheel / pinch zooms the time axis only. Native and non-passive (React's onWheel is passive,
+  // where preventDefault is ignored and the browser would zoom the page); everything else — a plain
+  // wheel, Shift+wheel, the scrollbars — is the browser's own scrolling, rows and columns alike.
+  useEffect(() => {
+    if (!scrollEl) return;
+    function onWheel(e: WheelEvent) {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      const sc = scrollEl!;
+      anchorAt(sc, Math.max(nameWidth(sc), e.clientX - sc.getBoundingClientRect().left));
+      setPixelsPerDay((prev) => zoomByWheel(prev, e.deltaY));
+    }
+    scrollEl.addEventListener("wheel", onWheel, { passive: false });
+    return () => scrollEl.removeEventListener("wheel", onWheel);
+  }, [scrollEl, anchorAt]);
+
+  // Applied in the commit that changed the column widths, so the axis never flashes at the old position.
+  useLayoutEffect(() => {
+    const a = anchor.current;
+    const sc = scrollRef.current;
+    if (!a || !sc) return;
+    anchor.current = null;
+    const nameW = nameWidth(sc);
+    sc.scrollLeft = a.frac * (sc.scrollWidth - nameW) + nameW - a.x;
+  }, [pixelsPerDay]);
+
+  // Opens on today, not on the project's first day.
+  useEffect(() => {
+    if (scrollEl) scrollToDate(scrollEl, latest.current.today);
+  }, [scrollEl, scrollToDate]);
+
+  function chooseGranularity(g: Granularity) {
+    if (scrollEl) anchorAt(scrollEl, nameWidth(scrollEl) + (scrollEl.clientWidth - nameWidth(scrollEl)) / 2);
+    setPixelsPerDay(DEFAULT_PIXELS_PER_DAY[g]);
   }
 
   const skillSuggestions = useMemo(
@@ -265,7 +315,7 @@ export default function ResourceView({
   ];
 
   return (
-    <div className="resource-view" onDragEnd={endDrag}>
+    <div className={`resource-view${mode === "load" ? " is-grid" : ""}`} onDragEnd={endDrag}>
       <FilterBar
         tasks={tasks}
         filter={taskFacets}
@@ -316,13 +366,14 @@ export default function ResourceView({
         trailing={
           mode === "load" ? (
             <div className="rv-range">
-              <button type="button" className="tb-btn tb-icon rv-step" onClick={() => shiftRange(-1)} aria-label="Kỳ trước" title="Kỳ trước">
-                <Icon name="chevronLeft" />
+              <button
+                type="button"
+                className="tb-btn"
+                onClick={() => scrollEl && scrollToDate(scrollEl, today)}
+                title="Cuộn bảng tới ngày hôm nay"
+              >
+                Hôm nay
               </button>
-              <button type="button" className="tb-btn tb-icon rv-step" onClick={() => shiftRange(1)} aria-label="Kỳ sau" title="Kỳ sau">
-                <Icon name="chevronRight" />
-              </button>
-              <ResourceScrubber extent={extent} span={span} today={today} onChange={setRange} />
               <Popover
                 className="tf-btn rv-preset"
                 align="end"
@@ -373,12 +424,10 @@ export default function ResourceView({
               </Popover>
               <select
                 className="rv-granularity"
-                value={granularityChoice}
-                onChange={(e) => setGranularityChoice(e.target.value as Granularity | "auto")}
+                value={granularity}
+                onChange={(e) => chooseGranularity(e.target.value as Granularity)}
                 aria-label="Mỗi cột là"
-                title={`Mỗi cột của bản đồ nhiệt là một ngày, tuần hay tháng${
-                  granularityChoice === "auto" ? ` (đang tự chọn: ${{ day: "ngày", week: "tuần", month: "tháng" }[granularity]})` : ""
-                }`}
+                title="Mỗi cột của bản đồ nhiệt là một ngày, tuần hay tháng. Ctrl + cuộn (hoặc chụm hai ngón) để phóng to / thu nhỏ trục thời gian."
               >
                 {GRANULARITIES.map((g) => (
                   <option key={g.value} value={g.value}>
@@ -468,8 +517,8 @@ export default function ResourceView({
                   : "Dự án này chưa có thành viên nào trên Jira, hoặc tài khoản của bạn không đọc được danh sách."}
             </div>
           ) : (
-            <div className="rv-heatmap-scroll">
-              <div className={`rv-grid ${granularity === "day" ? "rv-grid-day" : "rv-grid-week"}`} style={{ "--cols": spans.length } as React.CSSProperties}>
+            <div className="rv-heatmap-scroll" ref={attachScroll}>
+              <div className="rv-grid" style={{ "--cols": spans.length, "--rv-cell": `${scale.cellWidth}px` } as React.CSSProperties}>
                 <HeatmapHeader
                   spans={spans}
                   granularity={granularity}
@@ -646,7 +695,8 @@ function HeatmapHeader({
   }
 
   return (
-    <>
+    // One sticky block: both header rows stay put while the people scroll under them.
+    <div className="rv-header">
       <div className="rv-row rv-row-months">
         <div className="rv-name rv-corner" />
         {months.map((m, i) => (
@@ -675,6 +725,6 @@ function HeatmapHeader({
           </div>
         ))}
       </div>
-    </>
+    </div>
   );
 }

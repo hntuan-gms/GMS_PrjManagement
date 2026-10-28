@@ -1,5 +1,6 @@
 import { getProjectMembers, type ProjectMembers } from "./projectMembers.js";
 import { adfToText, textToAdf } from "./adf.js";
+import { searchProjectIssues, shareInflight } from "./parallelSearch.js";
 import { JiraApiError, matchTransition, type JiraClient } from "./jiraClient.js";
 import { describeField, fieldValue, fieldsNamedInAny, optionalTransitionFields, requiredTransitionFields, type JiraFieldMeta, type TransitionField } from "./transitionFields.js";
 import * as store from "./store.js";
@@ -154,18 +155,23 @@ export class TaskService {
    */
   async listTasks(opts: { description?: boolean } = {}): Promise<Task[]> {
     const t0 = Date.now();
-    const jql = `project = ${this.ctx.projectKey} ORDER BY created ASC`;
     const fields = this.searchFields(true).filter((f) => opts.description !== false || f !== "description");
     // The whole project's overlays in one read, and one write for whatever
     // reconciliation changed. Against the old JSON file a read and a write per
     // task were free; against Postgres they are a round trip each, so a 100-task
     // project would otherwise spend 200 of them inside a single page load.
     const [jiraRes, overlayRes] = await Promise.all([
-      timed(() => this.jira.searchIssues(jql, fields)),
+      // One read per (account, project, field set) at a time: the page asks for the task list
+      // and the progress figures together, and each used to walk the whole project on its own.
+      timed(() =>
+        shareInflight(`${this.ctx.cloudId}|${this.ctx.accountId}|${this.ctx.projectKey}|${fields.join(",")}`, () =>
+          searchProjectIssues(this.jira, this.ctx.projectKey, fields)
+        )
+      ),
       timed(() => store.getProjectOverlays(this.ctx.cloudId, this.ctx.projectKey)),
     ]);
     const tReads = Date.now();
-    const issues = jiraRes.value;
+    const issues = jiraRes.value.issues;
     const overlays = overlayRes.value;
 
     const tasks: Task[] = [];
@@ -201,7 +207,7 @@ export class TaskService {
     // Where a slow page load went. Jira and Postgres run side by side, so the longer of
     // the two is what the request waited for.
     console.log(
-      `[perf] listTasks ${this.ctx.projectKey}: ${tasks.length} tasks, jira ${jiraRes.ms}ms (${issues.length} issues), ` +
+      `[perf] listTasks ${this.ctx.projectKey}: ${tasks.length} tasks, jira ${jiraRes.ms}ms (${issues.length} issues, ${jiraRes.value.mode}${jiraRes.value.requests ? ` ×${jiraRes.value.requests}` : ""}), ` +
         `overlays ${overlayRes.ms}ms, reconcile ${tReconcile - tReads}ms, persist ${tPersist - tReconcile}ms (${toPersist.length} rows), ` +
         `jira writes ${Date.now() - tPersist}ms (${toWriteJira.length}), total ${Date.now() - t0}ms`
     );

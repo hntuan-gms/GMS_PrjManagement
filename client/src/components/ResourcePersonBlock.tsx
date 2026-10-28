@@ -197,17 +197,21 @@ function PersonTasks({
   const cols = spans.length;
   const share = (n: number) => `${(n / cols) * 100}%`;
 
-  /** Tasks clipped to the visible window, positioned on the heatmap's own columns. */
+  /**
+   * Every task of the person, positioned on the heatmap's own columns. A task outside the columns
+   * on screen still gets its row — with an arrow at the edge it lies beyond — so opening someone
+   * always lists all their work, however the time axis is cut.
+   */
   const bars = useMemo(
     () =>
-      person.tasks.flatMap((task) => {
+      person.tasks.map((task) => {
         const dates = taskBarDates(task);
         const place = dates ? placeBar(spans, dates.start, dates.end) : null;
-        return place ? [{ task, place }] : [];
+        const beyond = !place && dates && spans.length > 0 ? (dates.end < spans[0].start ? "before" : "after") : null;
+        return { task, dates, place, beyond } as const;
       }),
     [person.tasks, spans]
   );
-  const outsideWindow = person.tasks.length - bars.length;
 
   return (
     <div className="rv-expand" id={id}>
@@ -236,9 +240,9 @@ function PersonTasks({
       </div>
 
       {bars.length === 0 ? (
-        <div className="rv-tl-empty">Không có công việc nào trong khoảng thời gian này.</div>
+        <div className="rv-tl-empty">Chưa có công việc nào được giao.</div>
       ) : (
-        bars.map(({ task, place }) => {
+        bars.map(({ task, dates, place, beyond }) => {
           const conflict = conflictIds.has(task.id);
           return (
             <div
@@ -298,22 +302,32 @@ function PersonTasks({
                     style={{ left: share(todayMark.left), width: share(todayMark.width) }}
                   />
                 )}
-                <span
-                  className={`rv-tl-bar${conflict ? " is-conflict" : ""}${place.clippedLeft ? " clip-l" : ""}${place.clippedRight ? " clip-r" : ""}`}
-                  style={{ left: share(place.left), width: share(place.width) }}
-                >
-                  {task.percentComplete > 0 && <span className="rv-tl-progress" style={{ width: `${task.percentComplete}%` }} />}
-                  <span className="rv-tl-bar-label">
-                    {task.estimateHours != null ? `${task.estimateHours}h` : `${task.durationDays}n`}
+                {place ? (
+                  <span
+                    className={`rv-tl-bar${conflict ? " is-conflict" : ""}${place.clippedLeft ? " clip-l" : ""}${place.clippedRight ? " clip-r" : ""}`}
+                    style={{ left: share(place.left), width: share(place.width) }}
+                  >
+                    {task.percentComplete > 0 && <span className="rv-tl-progress" style={{ width: `${task.percentComplete}%` }} />}
+                    <span className="rv-tl-bar-label">
+                      {task.estimateHours != null ? `${task.estimateHours}h` : `${task.durationDays}n`}
+                    </span>
                   </span>
-                </span>
+                ) : (
+                  beyond &&
+                  dates && (
+                    <span
+                      className={`rv-tl-beyond is-${beyond}`}
+                      title={`${shortDate(dates.start)} → ${shortDate(dates.end)}: nằm ${beyond === "before" ? "trước" : "sau"} khoảng đang xem`}
+                    >
+                      {beyond === "before" ? `◂ ${shortDate(dates.start)}–${shortDate(dates.end)}` : `${shortDate(dates.start)}–${shortDate(dates.end)} ▸`}
+                    </span>
+                  )
+                )}
               </div>
             </div>
           );
         })
       )}
-
-      {outsideWindow > 0 && <div className="rv-expand-note">{outsideWindow} công việc nằm ngoài khoảng đang xem.</div>}
     </div>
   );
 }

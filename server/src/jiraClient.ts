@@ -200,6 +200,15 @@ export class JiraClient {
     return limit === undefined ? issues : issues.slice(0, limit);
   }
 
+  /** How many issues match, as Jira estimates it (cheap: no issue is read). */
+  async countIssues(jql: string): Promise<number | null> {
+    const res = await this.request<{ count?: number }>("/rest/api/3/search/approximate-count", {
+      method: "POST",
+      body: JSON.stringify({ jql }),
+    });
+    return typeof res?.count === "number" ? res.count : null;
+  }
+
   /** `fields` narrows the response; omitted, Jira returns every navigable field. */
   async getIssue(key: string, fields?: string[]): Promise<any> {
     const query = fields && fields.length > 0 ? `?fields=${fields.map(encodeURIComponent).join(",")}` : "";

@@ -3,9 +3,9 @@ import { pct } from "./resourceColumns";
 import type { Task } from "./types";
 
 /*
- * Pure helpers for how the resource tab *reads* time: the labels on the heatmap and the slider that
- * moves its window. Kept out of the components so the edge cases (a month with four days showing,
- * a window dragged past the end of the project) are tested without a browser.
+ * Pure helpers for how the resource tab *reads* time: the labels on the heatmap and how far its time
+ * axis reaches. Kept out of the components so the edge cases (a month with four days showing, a
+ * project dated far in the future) are tested without a browser.
  */
 
 /* ------------------------------------------------------- humane labels */
@@ -57,7 +57,7 @@ export function monthLabel(start: string, granularity: Granularity): MonthLabel 
   return { key: `${year}-${m}`, full: `Thg ${m}/${year}`, mid: `T${m}/${year.slice(2)}`, min: `T${m}` };
 }
 
-/* ------------------------------------------------------------ the slider */
+/* ------------------------------------------------------------ the time axis */
 
 export interface DateWindow {
   from: string;
@@ -87,29 +87,4 @@ export function scrubExtent(tasks: Task[], today: string, span: DateWindow): Dat
   if (span.from < from) from = span.from;
   if (span.to > to) to = span.to;
   return { from: addDays(from, -7), to: addDays(to, 7) };
-}
-
-const clampDate = (iso: string, lo: string, hi: string) => (iso < lo ? lo : iso > hi ? hi : iso);
-
-/** The same-length window moved by `days`, stopping at the ends of the extent rather than shrinking. */
-export function slideWindow(span: DateWindow, days: number, extent: DateWindow): DateWindow {
-  const length = diffDays(span.from, span.to);
-  const from = clampDate(addDays(span.from, days), extent.from, addDays(extent.to, -length));
-  return { from, to: addDays(from, length) };
-}
-
-/** One edge dragged to `date`; the window never gets shorter than `minDays` or leaves the extent. */
-export function resizeWindow(span: DateWindow, edge: "from" | "to", date: string, extent: DateWindow, minDays = 7): DateWindow {
-  if (edge === "from") return { from: clampDate(date, extent.from, addDays(span.to, -(minDays - 1))), to: span.to };
-  return { from: span.from, to: clampDate(date, addDays(span.from, minDays - 1), extent.to) };
-}
-
-/** The smallest window containing both; `b` may be absent. */
-export function unionWindow(a: DateWindow, b: DateWindow | null): DateWindow {
-  return b ? { from: a.from < b.from ? a.from : b.from, to: a.to > b.to ? a.to : b.to } : a;
-}
-
-/** The date a fraction (0–1) of the way along the extent. */
-export function dateAtFraction(extent: DateWindow, fraction: number): string {
-  return addDays(extent.from, Math.round(Math.max(0, Math.min(1, fraction)) * diffDays(extent.from, extent.to)));
 }

@@ -11,6 +11,7 @@ import { resolveBaselines } from "../baselineGeometry";
 import { orderByWbs, resolveRanges, toGanttTasks, type OrderedTask } from "../ganttMapping";
 import type { DependencyType, ProjectVersion, Task } from "../types";
 import { isMilestone } from "../timelineGeometry";
+import { zoomByWheel } from "../timeZoom";
 import { overlayCsvCells, overlayCsvHeader } from "../wbsExport";
 import BaselineOverlay from "./BaselineOverlay";
 import DependencyOverlay from "./DependencyOverlay";
@@ -203,10 +204,6 @@ const DEFAULT_PIXELS_PER_DAY: Record<ViewMode, number> = {
   [ViewMode.Week]: 160 / DAYS_PER_COLUMN[ViewMode.Week],
   [ViewMode.Month]: 100 / DAYS_PER_COLUMN[ViewMode.Month],
 } as Record<ViewMode, number>;
-// How much one "notch" of trackpad pinch or Ctrl+wheel changes the zoom — tuned
-// so a full pinch gesture (deltaY in the low hundreds) crosses roughly one
-// mode's whole comfort band in one smooth motion, not a single jump.
-const ZOOM_SENSITIVITY = 0.9;
 
 /**
  * The single source of truth for "how zoomed in are we": everything else
@@ -595,20 +592,23 @@ export default function GanttView({
   // React attaches wheel handlers as passive by default, where preventDefault()
   // is silently ignored — the browser would still zoom the whole page underneath
   // this chart's own zoom.
+  //
+  // In the CAPTURE phase, and the event is stopped here: gantt-task-react listens for wheel on
+  // its own wrapper (below this element) and treats any wheel without Shift or a sideways delta
+  // as a vertical scroll of its rows. Left to bubble up, a pinch scrolled the rows by deltaY
+  // on top of zooming — on a long list the rows slid out of view while zooming. Zoom is the time
+  // axis only; the rows must not move.
   useEffect(() => {
     const el = bodyRef.current;
     if (!el) return;
     function onWheel(e: WheelEvent) {
       if (!e.ctrlKey) return;
       e.preventDefault();
-      setPixelsPerDay((prev) => {
-        // deltaY < 0 is pinch-out / scroll-up — zoom in.
-        const next = prev * Math.exp((-e.deltaY / 100) * ZOOM_SENSITIVITY * 0.1);
-        return Math.min(MAX_PIXELS_PER_DAY, Math.max(MIN_PIXELS_PER_DAY, next));
-      });
+      e.stopPropagation();
+      setPixelsPerDay((prev) => zoomByWheel(prev, e.deltaY, MIN_PIXELS_PER_DAY, MAX_PIXELS_PER_DAY));
     }
-    el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
+    el.addEventListener("wheel", onWheel, { passive: false, capture: true });
+    return () => el.removeEventListener("wheel", onWheel, { capture: true });
   }, []);
 
   // Day-view header: gantt-task-react always renders "Th 2, 15" (weekday + day),
