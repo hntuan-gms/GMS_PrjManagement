@@ -1,6 +1,7 @@
 import express, { Router, type Request } from "express";
 import { requireProject } from "../auth/middleware.js";
 import { badRequest, describeError } from "../errors.js";
+import { autoFieldMap, FIELD_SOURCES, mappableFields } from "../kbkt/fields.js";
 import { parseWorkbook } from "../kbkt/parse.js";
 import { validateSettings } from "../kbkt/settings.js";
 import { getSettings, saveSettings } from "../kbkt/settingsStore.js";
@@ -46,7 +47,27 @@ kbktRouter.get("/options", async (req, res, next) => {
           ["summary"]
         )
       : [];
+    // Each sub-task type's fillable fields and the name-matched default map —
+    // test cases and bugs are sub-tasks, so only those are read (one call each).
+    const subtaskTypes = issueTypes.filter((t) => t.subtask);
+    const metas = await Promise.all(
+      subtaskTypes.map((t) => jira.getCreateMetaFields(projectKey, t.id).catch(() => null))
+    );
+    const fields: Record<string, Array<{ id: string; name: string; kind: string }>> = {};
+    const autoFieldMaps: Record<string, { test: Record<string, string>; bug: Record<string, string> }> = {};
+    subtaskTypes.forEach((t, i) => {
+      const meta = metas[i];
+      if (!meta) return;
+      fields[t.name] = mappableFields(meta);
+      autoFieldMaps[t.name] = { test: autoFieldMap("test", meta), bug: autoFieldMap("bug", meta) };
+    });
     res.json({
+      fieldSources: {
+        test: FIELD_SOURCES.test.map(({ key, label }) => ({ key, label })),
+        bug: FIELD_SOURCES.bug.map(({ key, label }) => ({ key, label })),
+      },
+      fields,
+      autoFieldMaps,
       issueTypes: issueTypes.map((t) => ({ name: t.name, subtask: !!t.subtask })),
       statuses: Object.fromEntries(statuses.map((s) => [s.name, s.statuses.map((x) => x.name)])),
       priorities: priorities.map((p) => p.name),

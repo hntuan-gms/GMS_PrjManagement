@@ -1,5 +1,15 @@
 import { adfComparable } from "../adf.js";
 import { JiraApiError, type JiraClient } from "../jiraClient.js";
+import {
+  applyFieldMap,
+  autoFieldMap,
+  FIELD_SOURCES,
+  resolveTargets,
+  sameFieldValue,
+  type FieldTarget,
+  type JiraFieldMeta,
+  type MappedKind,
+} from "./fields.js";
 import { label, type KbktWorkbook } from "./parse.js";
 import type { KbktSettings, SpecKind } from "./settings.js";
 import { buildSpecs, storyKeyFromFileName, type Spec } from "./specs.js";
@@ -80,6 +90,7 @@ const SEARCH_FIELDS = ["summary", "description", "labels", "status", "issuetype"
 export class SyncAborted extends Error {}
 
 interface IssueType {
+  id: string;
   name: string;
   subtask: boolean;
   hierarchyLevel?: number;
@@ -121,6 +132,8 @@ export class KbktSync {
   private epics = new Map<string, { key: string; fields: any }>();
   /** Transitions are a property of the workflow step, not the issue: cached per type + status. */
   private transitions = new Map<string, Promise<Array<{ id: string; name: string; to?: { name: string } }>>>();
+  /** Per kind: section key → the custom field it is written to (kbkt/fields.ts). */
+  private fieldTargets = new Map<MappedKind, Map<string, FieldTarget>>();
   private opts!: SyncOptions;
 
   constructor(
@@ -215,7 +228,36 @@ export class KbktSync {
     }
     const ownEpic: string | null = own?.fields.parent?.key ?? null;
 
-    const existing = await this.findExisting(wb.code, new Set([...specs.map((s) => s.id), oldEpic]));
+    const names: Record<SpecKind, string> = { story: "", test: "", bug: "" };
+    try {
+      names.story = await this.resolveType(this.settings.issueTypes.story, false);
+      names.test = await this.resolveType(this.settings.issueTypes.test, true);
+      names.bug = await this.resolveType(this.settings.issueTypes.bug, true);
+    } catch (err) {
+      if (err instanceof JiraApiError && err.status === 401) throw err;
+      this.log("ERROR", errorText(err));
+      return this.done(wb, null);
+    }
+    for (const s of specs) s.type = names[s.kind];
+
+    // Parts with a field of their own on this project's screens leave the
+    // description. Resolved before the search, which must also read those
+    // fields to tell whether an existing issue already says the same.
+    const warned = new Set<string>();
+    const warnOnce = (message: string) => {
+      if (warned.has(message)) return;
+      warned.add(message);
+      this.log("WARN", message);
+    };
+    this.fieldTargets.clear();
+    for (const kind of ["test", "bug"] as const) {
+      const targets = await this.resolveFields(kind, names[kind], warnOnce);
+      this.fieldTargets.set(kind, targets);
+      for (const s of specs) if (s.kind === kind && !s.onlyStatus) applyFieldMap(s, targets, warnOnce);
+    }
+    const fieldIds = [...new Set([...this.fieldTargets.values()].flatMap((t) => [...t.values()].map((x) => x.id)))];
+
+    const existing = await this.findExisting(wb.code, new Set([...specs.map((s) => s.id), oldEpic]), fieldIds);
     if (!ref && !own && existing.has(storyId)) {
       // Synced before: stay under the same Epic.
       ref = existing.get(storyId)!.fields.parent?.key ?? null;
@@ -244,18 +286,6 @@ export class KbktSync {
         return this.done(wb, null);
       }
     }
-
-    const names: Record<SpecKind, string> = { story: "", test: "", bug: "" };
-    try {
-      names.story = await this.resolveType(this.settings.issueTypes.story, false);
-      names.test = await this.resolveType(this.settings.issueTypes.test, true);
-      names.bug = await this.resolveType(this.settings.issueTypes.bug, true);
-    } catch (err) {
-      if (err instanceof JiraApiError && err.status === 401) throw err;
-      this.log("ERROR", errorText(err));
-      return this.done(wb, null);
-    }
-    for (const s of specs) s.type = names[s.kind];
 
     if (own) {
       this.log(
@@ -359,10 +389,48 @@ export class KbktSync {
 
   /* ------------------------------------------------------------- lookups */
 
-  private async findExisting(code: string, ids: Set<string>): Promise<Map<string, any>> {
+  /**
+   * Reads the create screen of a test-case / bug issue type and settles where
+   * each section goes: the project's saved map, or by field name when it has
+   * none. A screen that cannot be read leaves everything in the description,
+   * as before — the import still works, just without the fields.
+   */
+  private async resolveFields(
+    kind: MappedKind,
+    typeName: string,
+    warnOnce: (message: string) => void
+  ): Promise<Map<string, FieldTarget>> {
+    const type = this.types?.find((t) => t.name === typeName);
+    if (!type) return new Map();
+    let meta: JiraFieldMeta[];
+    try {
+      meta = await this.jira.getCreateMetaFields(this.projectKey, type.id);
+    } catch (err) {
+      if (err instanceof JiraApiError && err.status === 401 && !err.scopeProblem && !err.configRefused) throw err;
+      warnOnce(`Không đọc được các trường của ${typeName} (${errorText(err)}) — mọi nội dung để trong Mô tả.`);
+      return new Map();
+    }
+    const map = this.settings.fieldMap?.[kind] ?? autoFieldMap(kind, meta);
+    const targets = resolveTargets(kind, map, meta, typeName, warnOnce);
+    if (targets.size > 0) {
+      const labels = new Map(FIELD_SOURCES[kind].map((s) => [s.key, s.label]));
+      this.log(
+        "INFO",
+        `${typeName}: ` + [...targets].map(([key, t]) => `${labels.get(key)} → ${t.name}`).join("; ") + "; phần còn lại để trong Mô tả."
+      );
+    }
+    return targets;
+  }
+
+  private fieldTarget(kind: SpecKind, id: string): FieldTarget | undefined {
+    if (kind === "story") return undefined;
+    return [...(this.fieldTargets.get(kind)?.values() ?? [])].find((t) => t.id === id);
+  }
+
+  private async findExisting(code: string, ids: Set<string>, extraFields: string[]): Promise<Map<string, any>> {
     const existing = new Map<string, any>();
     const jql = `project = ${jqlString(this.projectKey)} AND labels = ${jqlString(label("kbkt-" + code))}`;
-    for (const issue of await this.jira.searchIssues(jql, SEARCH_FIELDS)) {
+    for (const issue of await this.jira.searchIssues(jql, [...SEARCH_FIELDS, ...extraFields])) {
       for (const l of (issue.fields?.labels ?? []) as string[]) {
         if (!ids.has(l)) continue;
         if (existing.has(l)) {
@@ -438,6 +506,7 @@ export class KbktSync {
     };
     if (parentKey && !parentKey.startsWith("new:")) fields.parent = { key: parentKey };
     if (spec.priority) fields.priority = { name: spec.priority };
+    for (const [id, value] of Object.entries(spec.fields ?? {})) if (value !== null && value !== undefined) fields[id] = value;
     // Only on create, so a date someone changed in Jira is kept.
     if (this.opts.dueDate && this.settings.dueDateOn.includes(spec.kind)) fields.duedate = this.opts.dueDate;
     return fields;
@@ -539,13 +608,22 @@ export class KbktSync {
       if (adfComparable(f.description) !== adfComparable(spec.description)) fields.description = spec.description;
       if (spec.priority && f.priority?.name !== spec.priority) fields.priority = { name: spec.priority };
       if (parentKey && !parentKey.startsWith("new:") && f.parent?.key !== parentKey) fields.parent = { key: parentKey };
+      // Custom fields: an empty cell clears the field (null), like any other Excel-owned value.
+      const fieldNames = new Map<string, string>();
+      for (const [id, value] of Object.entries(spec.fields ?? {})) {
+        const target = this.fieldTarget(spec.kind, id);
+        if (!target || sameFieldValue(target, f[id], value)) continue;
+        fields[id] = value ?? null;
+        fieldNames.set(id, target.name);
+      }
       const have = new Set<string>(f.labels ?? []);
       const want = new Set(spec.labels);
       const ops = [
         ...[...want].filter((l) => !have.has(l)).sort().map((l) => ({ add: l })),
         ...[...have].filter((l) => l.startsWith("result-") && !want.has(l)).sort().map((l) => ({ remove: l })),
       ];
-      const changed = [...Object.keys(fields).sort(), ...(ops.length ? ["labels"] : [])];
+      // A custom field is logged by its name, not "customfield_10050".
+      const changed = [...Object.keys(fields).map((k) => fieldNames.get(k) ?? k).sort(), ...(ops.length ? ["labels"] : [])];
       if (changed.length > 0) {
         this.log("UPDATE", `${this.tag(spec)} ${key} [${changed.join(", ")}]`);
         if (this.opts.apply) {

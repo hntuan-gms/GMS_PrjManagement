@@ -65,6 +65,14 @@ await step("mục 'Nhập KBKT' (cạnh Xuất CSV, trong menu Nhập / Xuất) 
   await modal.locator(".kb-settings-body").waitFor();
   // "Sub Bug" in the settings matches the project's "Sub-Bug" only at sync time; the picker flags it.
   assert.ok(await modal.locator(".kb-settings-body option", { hasText: "Sub Bug (không có trong dự án)" }).count());
+  // Parts of a test case matched to the project's fields by name until someone saves a map.
+  // By the block's title: the bug block has a "Test case liên quan" row too.
+  const testMap = modal.locator(".kb-fieldmap").filter({ has: page.locator(".kb-fieldmap-title", { hasText: /^Test case/ }) });
+  const fieldOf = (label) => testMap.locator(".field", { hasText: label }).locator("select");
+  assert.equal(await fieldOf("Các bước thực hiện").inputValue(), "customfield_10103");
+  assert.equal(await fieldOf("Nhóm").inputValue(), "customfield_10101");
+  assert.equal(await fieldOf("Ghi chú").inputValue(), "", "unmatched parts stay in Description");
+  await modal.locator(".kb-settings-body", { hasText: "Đang tự khớp theo tên trường." }).waitFor();
   await modal.locator(".kb-settings > summary").click();
 });
 
@@ -112,6 +120,14 @@ await step("áp dụng → xác nhận, ghi đúng 1 file, nhật ký chạy d�
   assert.ok(log.some((l) => l.startsWith("Chuyển trạng thái")), "no MOVE line in the streamed log");
   // The workspace reloads its tasks after a run that wrote something.
   assert.ok((await posts("/api/kbkt/apply")).length === 1);
+});
+
+await step("test case vào đúng trường của Jira (Module, Test Steps, Expected/Actual Result), không dồn hết vào Mô tả", async () => {
+  const issues = await (await fetch(API + "/api/__kbkt/issues")).json();
+  const tc1 = issues.find((i) => i.labels.includes("tc-1E_127_1"));
+  assert.deepEqual(tc1.custom.sort(), ["customfield_10101", "customfield_10103", "customfield_10105", "customfield_10106"]);
+  const log = await card("_v2.xlsx").locator(".kb-log li").allTextContents();
+  assert.ok(log.some((l) => l.includes("Các bước thực hiện → Test Steps")), "the run says which part went where");
 });
 
 await step("xem trước lại cùng file → không còn gì cần ghi (khớp theo nhãn), nút Áp dụng tắt", async () => {

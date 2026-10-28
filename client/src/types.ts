@@ -894,9 +894,22 @@ export interface KbktSettings {
   priority: Record<string, string>;
   linkType: string;
   dueDateOn: KbktKind[];
+  /**
+   * Per kind: part of the test case / bug → Jira field id. A kind left out is
+   * matched by field name on every run; a part left out stays in Description.
+   */
+  fieldMap?: Partial<Record<KbktMappedKind, Record<string, string>>>;
 }
 
+export type KbktMappedKind = "test" | "bug";
+
 export interface KbktOptions {
+  /** The parts of a test case / bug that can go to a field of their own. */
+  fieldSources: Record<KbktMappedKind, Array<{ key: string; label: string }>>;
+  /** Sub-task issue type name → the fields of its create screen this import can fill. */
+  fields: Record<string, Array<{ id: string; name: string; kind: "adf" | "text" | "option" }>>;
+  /** Sub-task issue type name → the map matched by field name (what applies until one is saved). */
+  autoFieldMaps: Record<string, Record<KbktMappedKind, Record<string, string>>>;
   issueTypes: Array<{ name: string; subtask: boolean }>;
   /** Issue type name → the statuses its workflow has. */
   statuses: Record<string, string[]>;

@@ -3,6 +3,7 @@
 // the REAL computeProgress, so the report page is exercised end to end.
 import express from "express";
 import { computeProgress } from "../server/src/progress.ts";
+import { autoFieldMap, FIELD_SOURCES, mappableFields } from "../server/src/kbkt/fields.ts";
 import { parseWorkbook } from "../server/src/kbkt/parse.ts";
 import { DEFAULT_SETTINGS, validateSettings } from "../server/src/kbkt/settings.ts";
 import { AppError } from "../server/src/errors.ts";
@@ -543,7 +544,7 @@ const newKbktJira = () => {
 let kbktJira = newKbktJira();
 let kbktSettings = structuredClone(DEFAULT_SETTINGS);
 app.post("/api/__kbkt/reset", (_q, r) => { kbktJira = newKbktJira(); kbktSettings = structuredClone(DEFAULT_SETTINGS); r.json({}); });
-app.get("/api/__kbkt/issues", (_q, r) => r.json([...kbktJira.issues.values()].map((i) => ({ key: i.key, summary: i.fields.summary, parent: i.fields.parent?.key ?? null, labels: i.fields.labels }))));
+app.get("/api/__kbkt/issues", (_q, r) => r.json([...kbktJira.issues.values()].map((i) => ({ key: i.key, summary: i.fields.summary, parent: i.fields.parent?.key ?? null, labels: i.fields.labels, custom: Object.keys(i.fields).filter((k) => k.startsWith("customfield_") && i.fields[k] != null) }))));
 // Story-level issues by key or title words, like the real route (minus JQL).
 app.get("/api/kbkt/stories", (req, res) => {
   const q = String(req.query.q ?? "").trim().toLowerCase();
@@ -554,7 +555,20 @@ app.get("/api/kbkt/stories", (req, res) => {
     .map((i) => ({ key: i.key, summary: i.fields.summary, type: i.fields.issuetype.name, status: i.fields.status?.name ?? "" })));
 });
 app.get("/api/__kbkt/sample", (_q, r) => r.type("application/octet-stream").send(Buffer.from(sampleWorkbook())));
-app.get("/api/kbkt/options", (_q, r) => r.json({
+app.get("/api/kbkt/options", async (_q, r) => r.json({
+  // The real field rules over the fake's create screens (Sub Testcase = 3, Sub-Bug = 4).
+  fieldSources: {
+    test: FIELD_SOURCES.test.map(({ key, label }) => ({ key, label })),
+    bug: FIELD_SOURCES.bug.map(({ key, label }) => ({ key, label })),
+  },
+  fields: {
+    "Sub Testcase": mappableFields((await kbktJira.getCreateMetaFields("DEMO", "3")) as any),
+    "Sub-Bug": mappableFields((await kbktJira.getCreateMetaFields("DEMO", "4")) as any),
+  },
+  autoFieldMaps: {
+    "Sub Testcase": { test: autoFieldMap("test", (await kbktJira.getCreateMetaFields("DEMO", "3")) as any), bug: {} },
+    "Sub-Bug": { test: {}, bug: autoFieldMap("bug", (await kbktJira.getCreateMetaFields("DEMO", "4")) as any) },
+  },
   issueTypes: [{ name: "Epic", subtask: false }, { name: "Story", subtask: false }, { name: "Sub Testcase", subtask: true }, { name: "Sub-Bug", subtask: true }],
   statuses: { "Sub Testcase": ["Not run", "Passed", "Failed", "Pending"], "Sub-Bug": ["To Do", "In Progress", "Done"] },
   priorities: ["Highest", "High", "Medium", "Low", "Lowest"],

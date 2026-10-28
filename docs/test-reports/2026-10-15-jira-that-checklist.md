@@ -118,6 +118,9 @@ Test tự động đã chứng minh: đọc file giống hệt `jira_sync.py` (c
 | C6 | File `AI-33_…` mà AI-33 là Story có sẵn trong dự án | Hộp thoại tự chọn "Story có sẵn" AI-33 (hiện tên); test case vào dưới AI-33; AI-33 không bị đổi tên, **không bị chuyển Epic** dù đang chọn Epic ở trên | |
 | C6b | File `AI-xx_…`, chọn "Story có sẵn" → tìm theo tên một Story, áp dụng | Hàng chục Sub Testcase / Sub Bug nằm dưới đúng Story đã chọn; không có Story mới nào được tạo | |
 | C6c | Workbook đã nhập vào Story riêng, nay chọn "Story có sẵn" khác rồi áp dụng | Các sub-task cũ **chuyển sang** Story mới chọn (Jira thật có cho đổi parent sub-task qua API không — ghi lại); có cảnh báo Story cũ không còn dùng | |
+| C6d | Mở "Cấu hình dự án" → khối "Trường của Jira" | Test case (Sub Testcase): Nhóm → Module, Các bước thực hiện → Test Steps, Kết quả mong muốn → Expected Result, Kết quả hiện tại → Actual Result (đúng tên trường của dự án AI); "Đang tự khớp theo tên trường." | |
+| C6e | Nhập lại một file **đã đồng bộ trước đây** (nội dung đang nằm hết trong Description) | Xem trước báo "Cập nhật [Actual Result, description, Expected Result, Module, Test Steps]"; sau khi áp dụng, các ô đó trên Jira có nội dung, Description chỉ còn Mục đích / Kết quả kiểm thử / Mã lỗi / Ghi chú / Nguồn; nhập lại lần nữa không còn gì cần ghi | |
+| C6f | Sub Bug có trường Severity dạng chọn mà lựa chọn không khớp "Cao/Trung bình/Thấp" | Một cảnh báo cho mỗi giá trị, Mức độ vẫn ở Description, không issue nào bị lỗi khi tạo | |
 | C7 | File của một workbook **đã đồng bộ bằng `jira_sync.py`** (dự án AI) | Xem trước: không có dòng "Tạo mới" nào — issue cũ được nhận ra theo nhãn | |
 | C8 | Đặt một trạng thái không có bước chuyển (ví dụ đổi "Đạt" sang trạng thái không với tới được) | Kết quả báo "không chuyển được …" thay vì im lặng; phần còn lại vẫn ghi | |
 | C9 | File lớn nhất có ảnh (~100 test case) | Áp dụng xong trong vòng 300 giây (giới hạn Cloud Run); nhật ký chạy dần | |

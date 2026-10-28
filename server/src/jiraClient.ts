@@ -837,6 +837,39 @@ export class JiraClient {
     return { keys, truncated: false };
   }
 
+  /**
+   * The fields on the *create* screen of one issue type in one project, with
+   * their schema and a select's options — what the KBKT import needs to know
+   * what it may write and how. Paged (startAt/total); the response key is
+   * `fields` on current Jira Cloud, `values` on some older answers.
+   */
+  async getCreateMetaFields(
+    projectKey: string,
+    issueTypeId: string
+  ): Promise<
+    Array<{
+      fieldId: string;
+      name: string;
+      required?: boolean;
+      schema?: { type?: string; custom?: string; system?: string };
+      allowedValues?: Array<{ id: string; value?: string; name?: string }>;
+    }>
+  > {
+    const out: any[] = [];
+    let startAt = 0;
+    for (let page = 0; page < 10; page++) {
+      const res = await this.request<{ fields?: any[]; values?: any[]; total?: number }>(
+        `/rest/api/3/issue/createmeta/${encodeURIComponent(projectKey)}/issuetypes/${encodeURIComponent(issueTypeId)}` +
+          `?startAt=${startAt}&maxResults=100`
+      );
+      const batch = res.fields ?? res.values ?? [];
+      out.push(...batch);
+      startAt += batch.length;
+      if (batch.length === 0 || startAt >= (res.total ?? 0)) break;
+    }
+    return out;
+  }
+
   async getFields(): Promise<Array<{ id: string; name: string; custom: boolean; schema?: { type?: string; custom?: string } }>> {
     return this.request(`/rest/api/3/field`);
   }
