@@ -3,28 +3,34 @@
  *
  * `/search/jql` pages by an opaque `nextPageToken`, so a project of 4000 issues is 41 requests
  * that cannot start before the previous one answered — about a second each, which was the entire
- * 40-second page load. A slice of the project by creation time is a query of its own, so the
- * slices run side by side and only the page or two inside one slice stay sequential.
+ * 40-second page load. Two ways to break that chain, tried in this order:
  *
- * Slices are by `created`, not by issue key: key ranges (`key >= P-1 AND key <= P-300`) were
- * tried first and in production reached only 3513 of a project's 4044 issues, and neither did the
- * complement of the range — Jira simply does not match some issues by key number. Every issue has
- * a creation time, and a boundary written as the same string on both sides of a cut partitions the
- * project exactly, whatever time zone Jira reads it in. Boundaries are to the minute, the finest
- * JQL takes: a day on which a thousand issues were bulk-created would otherwise be one slice that
- * a single request chain has to read page after page.
+ *  1. **By id.** Ask for the project's issue ids alone — Jira hands out far bigger pages when
+ *     only the id is requested (and then returns nothing else, not even the key), so the whole
+ *     list is one or two requests — then read the issues in groups of 100 ids (`id in (…)`), all
+ *     groups at once. The groups are cut from the list itself, so nothing can fall between them,
+ *     and there is nothing to count.
+ *  2. **By creation time.** If Jira pages the id list at 100 too (so listing it would be the
+ *     very chain being avoided), the project is cut by `created`, to the minute, into slices of
+ *     a page or two each, counted with `search/approximate-count`, and the slices run together.
  *
- * Small projects are read the old way: one query is already one or two round trips, and the
- * extra bookkeeping would only make them slower.
+ * Both are verified against Jira's own count, and anything unexpected — a refused query, a short
+ * result, a rate limit that outlasted the retries — falls back to the ordinary single query, with
+ * the reason in the `[perf]` line. An incomplete task list is worse than a slow one.
+ *
+ * Why not key RANGES (`key >= P-1 AND key <= P-300`): tried first, they reached 3513 of a
+ * project's 4044 issues in production, and so did the complement — Jira does not match some
+ * issues by key number. And why `created` slices are cut by an explicit time rather than halved:
+ * halving cost one round of counts per level, about twenty from a year down to a dense minute.
+ *
+ * Small projects are read the old way: one query is already one or two round trips.
  */
 
 export interface SearchOptions {
   /** Page size to ask for; see JiraClient.searchIssues. */
   pageSize?: number;
-  /** Called with how many issues each page really held. */
-  onPage?: (issues: number) => void;
-  /** Stop after this many pages. */
-  maxPages?: number;
+  /** Called with how many issues each page really held; returning `false` stops paging. */
+  onPage?: (issues: number) => boolean | void;
 }
 
 /** The part of JiraClient this needs, so the logic can be tested without Jira. */
@@ -36,19 +42,19 @@ export interface ProjectSearcher {
 
 /** Below this many issues one sequential read is as fast. */
 export const PARALLEL_MIN_ISSUES = 300;
-/** A slice is cut further while it holds more than this, when Jira only gives 100 per page: two pages. */
-export const SLICE_SIZE = 200;
-/** …and this, when Jira hands out bigger pages: one page. */
-export const SLICE_SIZE_BIG_PAGES = 500;
-/** The page size asked for. Jira clamps it to what it allows; the first read of a run finds out what that is. */
-export const WANTED_PAGE_SIZE = 1000;
-/** Counts in flight at once while planning the slices. Jira answers 429 if pushed. */
+/** The page size asked for when listing ids; Jira clamps it to what it allows. */
+export const ID_PAGE_SIZE = 5000;
+/** Ids per `id in (…)` read: one page of full issues. */
+export const ID_CHUNK = 100;
+/** Page reads in flight at once. Jira answers 429 if pushed (JiraClient retries those). */
+export const READ_CONCURRENCY = 16;
+/** Counts in flight at once while planning time slices. */
 export const COUNT_CONCURRENCY = 6;
-/** Page reads in flight at once; they are limited apart from the counts. */
-export const READ_CONCURRENCY = 6;
+/** A time slice is cut further while it holds more than this: two pages of 100. */
+export const SLICE_SIZE = 200;
 /** The most pieces a slice is cut into at once. */
 export const MAX_WAYS = 32;
-/** Pieces are sized to hold about this share of a slice's limit, so most come out under it and need no second cut. */
+/** Pieces are sized to hold about this share of the limit, so most come out under it and need no second cut. */
 const TARGET_FILL = 0.7;
 
 const MINUTE_MS = 60_000;
@@ -124,16 +130,128 @@ export function waysFor(count: number, limit: number): number {
   return Math.max(2, Math.min(MAX_WAYS, Math.ceil(count / Math.max(1, limit * TARGET_FILL))));
 }
 
+/** Consecutive groups of at most `size`. */
+export function chunks<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
 export interface ProjectSearchResult {
   issues: any[];
-  /** "parallel" when the slices were used, "sequential" otherwise (small project, or a check failed). */
+  /** "parallel" when one of the fast ways was used, "sequential" otherwise (small project, or a check failed). */
   mode: "parallel" | "sequential";
-  /** Slices read in parallel. */
+  /** Requests made to read the issues themselves. */
   requests: number;
-  /** Where the time went, for the [perf] line. */
+  /** Which fast way and where the time went, for the [perf] line. */
   detail?: string;
   /** Why the ordinary read was used, when the fast one was not — shown in the [perf] line. */
   reason?: string;
+}
+
+/** A way that does not apply is `null` with a reason; one that fails throws; one that works returns the issues. */
+type Attempt = { issues: any[]; requests: number; detail: string } | { skip: string };
+
+/** Way 1: list the ids, then read them in groups, all groups at once. */
+async function readByIds(jira: ProjectSearcher, whole: string, fields: string[], expected: number): Promise<Attempt> {
+  const t0 = Date.now();
+  let page = 0;
+  let clamped = false;
+  const listed = await named("ids", () =>
+    jira.searchIssues(`${whole} ORDER BY created ASC`, ["id"], undefined, {
+      pageSize: ID_PAGE_SIZE,
+      onPage: (n) => {
+        page = Math.max(page, n);
+        // A page of 100 or fewer with more to come: listing the ids is the chain this avoids. Stop at once.
+        if (n <= 100) {
+          clamped = true;
+          return false;
+        }
+      },
+    })
+  );
+  const tIds = Date.now() - t0;
+  if (clamped && listed.length < expected) return { skip: `id list pages at ${page} (${tIds}ms)` };
+  // An issue is only its id here: a keys-only listing carries no key.
+  const ids = listed.map((i) => (i.id === undefined || i.id === null ? "" : String(i.id))).filter(Boolean);
+  if (ids.length < expected) return { skip: `id list found ${ids.length} of ${expected} counted` };
+
+  const reading = limiter(READ_CONCURRENCY);
+  const groups = chunks(ids, ID_CHUNK);
+  const order = new Map(ids.map((id, i) => [id, i]));
+  const pages = await Promise.all(
+    groups.map((group, i) =>
+      reading(async () => {
+        const found = await named(`ids ${i}`, () => jira.searchIssues(`${whole} AND id in (${group.join(",")})`, fields));
+        // `id in` answers in no particular order; the list's own order (oldest first) is kept.
+        return found.sort((a, b) => (order.get(String(a.id)) ?? 0) - (order.get(String(b.id)) ?? 0));
+      })
+    )
+  );
+  const issues = pages.flat();
+  return {
+    issues,
+    requests: groups.length,
+    detail: `by id: ${ids.length} ids in ${tIds}ms (page ${page}), ${groups.length} groups read by ${Date.now() - t0}ms`,
+  };
+}
+
+/** Way 2: cut the project by creation time, count the pieces, read them together. */
+async function readByTime(jira: ProjectSearcher, whole: string, fields: string[], expected: number): Promise<Attempt> {
+  void expected;
+  const [oldest, newest] = await Promise.all([
+    named("oldest", () => jira.searchIssues(`${whole} ORDER BY created ASC`, ["created"], 1)),
+    named("newest", () => jira.searchIssues(`${whole} ORDER BY created DESC`, ["created"], 1)),
+  ]);
+  // Padded a day each side: the timestamps are read in one time zone and the JQL below in another,
+  // so the ends must not depend on them agreeing.
+  const first = createdDay(oldest[0]);
+  const last = createdDay(newest[0]);
+  if (!first || !last) return { skip: "no creation dates" };
+
+  const counting = limiter(COUNT_CONCURRENCY);
+  const reading = limiter(READ_CONCURRENCY);
+  const t0 = Date.now();
+  let counts = 0;
+  const reads: Array<{ slice: Slice; issues: Promise<any[]> }> = [];
+  const plan = async (s: Slice): Promise<void> => {
+    const start = minuteNumber(s.from);
+    const minutes = minuteNumber(s.to) - start;
+    counts++;
+    const count = await counting(() => named(`count ${s.from}..${s.to}`, () => jira.countIssues(sliceJql(whole, s))));
+    if (count === null) throw new Error("no count for a slice");
+    if (count === 0) return;
+    if (count <= SLICE_SIZE || minutes <= 1) {
+      // Read at once, while the rest is still being counted.
+      const issues = reading(() =>
+        named(`slice ${s.from}..${s.to}`, () => jira.searchIssues(`${sliceJql(whole, s)} ORDER BY created ASC`, fields))
+      );
+      // Settled by Promise.all below; this only stops an early failure being "unhandled" meanwhile.
+      issues.catch(() => {});
+      reads.push({ slice: s, issues });
+      return;
+    }
+    // Equal cuts, none empty: fewer pieces than asked for just means the slice is a few minutes long.
+    const ways = waysFor(count, SLICE_SIZE);
+    const edges = new Set<number>();
+    for (let i = 0; i <= ways; i++) edges.add(start + Math.floor((minutes * i) / ways));
+    const cuts = [...edges];
+    await Promise.all(cuts.slice(0, -1).map((from, i) => plan({ from: stampOfMinute(from), to: stampOfMinute(cuts[i + 1]) })));
+  };
+  await plan({
+    from: stampOfMinute(minuteNumber(first) - DAY_MIN),
+    to: stampOfMinute(minuteNumber(last) + 2 * DAY_MIN),
+  });
+  const tPlanned = Date.now() - t0;
+
+  // Oldest first, as the one-query read returns them; leaves finished planning in no particular order.
+  reads.sort((a, b) => (a.slice.from < b.slice.from ? -1 : a.slice.from > b.slice.from ? 1 : 0));
+  const issues = (await Promise.all(reads.map((r) => r.issues))).flat();
+  return {
+    issues,
+    requests: reads.length,
+    detail: `by time: ${reads.length} slices, ${counts} counts planned in ${tPlanned}ms, all read by ${Date.now() - t0}ms`,
+  };
 }
 
 /**
@@ -153,87 +271,41 @@ export async function searchProjectIssues(
     reason,
   });
 
+  const skipped: string[] = [];
   try {
-    // Four requests at once: a small project wastes three cheap ones, a big one saves their round trips.
-    // The last asks for a page far bigger than 100 and reports what Jira gave — that decides how big a slice may be.
-    let page = 0;
-    const [expected, oldest, newest] = await Promise.all([
-      named("count", () => jira.countIssues(whole)).catch(() => null),
-      named("oldest", () => jira.searchIssues(`${whole} ORDER BY created ASC`, ["created"], 1)),
-      named("newest", () => jira.searchIssues(`${whole} ORDER BY created DESC`, ["created"], 1)),
-      named("page size", () =>
-        jira.searchIssues(`${whole} ORDER BY created ASC`, fields, undefined, {
-          pageSize: WANTED_PAGE_SIZE,
-          maxPages: 1,
-          onPage: (n) => (page = Math.max(page, n)),
-        })
-      ).catch(() => []),
-    ]);
+    const expected = await named("count", () => jira.countIssues(whole)).catch(() => null);
     if (expected === null) return sequential("no count from Jira");
     if (expected < PARALLEL_MIN_ISSUES) return sequential(`small project (${expected} issues)`);
 
-    // The span of creation days. Padded a day each side: the timestamps are read in one time zone
-    // and the JQL below in another, so the ends must not depend on them agreeing.
-    const first = createdDay(oldest[0]);
-    const last = createdDay(newest[0]);
-    if (!first || !last) return sequential("no creation dates");
-
-    const bigPages = page > 120;
-    const sliceLimit = bigPages ? Math.min(SLICE_SIZE_BIG_PAGES, page) : SLICE_SIZE;
-    const pageSize = bigPages ? WANTED_PAGE_SIZE : 100;
-
-    // Cut the span until each piece holds a page or two. Counts are cheap (no issue is read). A piece
-    // that is small enough is read AT ONCE, while the rest is still being counted.
-    const counting = limiter(COUNT_CONCURRENCY);
-    const reading = limiter(READ_CONCURRENCY);
-    const t0 = Date.now();
-    let biggest = 0;
-    let counts = 0;
-    const reads: Array<{ slice: Slice; issues: Promise<any[]> }> = [];
-    const plan = async (s: Slice): Promise<void> => {
-      const start = minuteNumber(s.from);
-      const minutes = minuteNumber(s.to) - start;
-      counts++;
-      const count = await counting(() => named(`count ${s.from}..${s.to}`, () => jira.countIssues(sliceJql(whole, s))));
-      if (count === null) throw new Error("no count for a slice");
-      if (count === 0) return;
-      if (count <= sliceLimit || minutes <= 1) {
-        biggest = Math.max(biggest, count);
-        const issues = reading(() =>
-          named(`slice ${s.from}..${s.to}`, () =>
-            jira.searchIssues(`${sliceJql(whole, s)} ORDER BY created ASC`, fields, undefined, { pageSize })
-          )
-        );
-        // Settled by Promise.all below; this only stops an early failure being "unhandled" meanwhile.
-        issues.catch(() => {});
-        reads.push({ slice: s, issues });
-        return;
+    for (const way of [readByIds, readByTime]) {
+      let attempt: Attempt;
+      try {
+        attempt = await way(jira, whole, fields, expected);
+      } catch (err) {
+        // A way that fails (a query Jira will not take, a rate limit that outlasted the retries) does not
+        // end the attempt: the next one is tried, and the ordinary read is the last resort.
+        skipped.push(`${way.name} failed: ${(err as Error)?.message ?? err}`);
+        continue;
       }
-      // Equal cuts, none empty: fewer pieces than asked for just means the slice is a few minutes long.
-      const ways = waysFor(count, sliceLimit);
-      const edges = new Set<number>();
-      for (let i = 0; i <= ways; i++) edges.add(start + Math.floor((minutes * i) / ways));
-      const cuts = [...edges];
-      await Promise.all(cuts.slice(0, -1).map((from, i) => plan({ from: stampOfMinute(from), to: stampOfMinute(cuts[i + 1]) })));
-    };
-    await plan({
-      from: stampOfMinute(minuteNumber(first) - DAY_MIN),
-      to: stampOfMinute(minuteNumber(last) + 2 * DAY_MIN),
-    });
-    const tPlanned = Date.now();
-
-    // Oldest first, as the one-query read returns them; leaves finished planning in no particular order.
-    reads.sort((a, b) => (a.slice.from < b.slice.from ? -1 : a.slice.from > b.slice.from ? 1 : 0));
-    const issues = (await Promise.all(reads.map((r) => r.issues))).flat();
-    const detail = `page ${page}, ${counts} counts planned in ${tPlanned - t0}ms, all read at ${Date.now() - t0}ms, biggest slice ${biggest}`;
-
-    // Short of what Jira counts: an incomplete task list is worse than a slow one — read it the slow way.
-    if (issues.length < expected) return sequential(`slices found ${issues.length} of ${expected} counted (${reads.length} slices; ${detail})`);
-    return { issues, mode: "parallel", requests: reads.length, detail };
+      if ("skip" in attempt) {
+        skipped.push(`${way.name}: ${attempt.skip}`);
+        continue;
+      }
+      // Short of what Jira counts: an incomplete task list is worse than a slow one.
+      if (attempt.issues.length < expected) {
+        skipped.push(`${way.name} found ${attempt.issues.length} of ${expected} counted (${attempt.detail})`);
+        continue;
+      }
+      return {
+        issues: attempt.issues,
+        mode: "parallel",
+        requests: attempt.requests,
+        detail: attempt.detail + (skipped.length ? ` [after: ${skipped.join("; ")}]` : ""),
+      };
+    }
+    console.warn(`[parallelSearch] ${projectKey}: falling back to the sequential read — ${skipped.join("; ")}`);
+    return sequential(skipped.join("; ").slice(0, 400));
   } catch (err) {
-    // The fast path is an optimisation: if anything about it goes wrong (a query Jira will not
-    // take, a rate limit that outlasted the retries) the ordinary read still has to work. An
-    // expired session fails the same way there and is reported by it.
     console.warn(`[parallelSearch] ${projectKey}: falling back to the sequential read — ${(err as Error)?.message ?? err}`);
     return sequential(`fast path failed: ${(err as Error)?.message ?? err}`.slice(0, 320));
   }

@@ -195,15 +195,14 @@ export class JiraClient {
        * answered once with 100, so asking can never make a read fail.
        */
       pageSize?: number;
-      onPage?: (issues: number) => void;
-      /** Stop after this many pages, whatever is left (a probe of the page size reads exactly one). */
-      maxPages?: number;
+      /** Called with how many issues each page held; returning `false` stops paging there (the rest is not wanted). */
+      onPage?: (issues: number) => boolean | void;
     }
   ): Promise<any[]> {
     const issues: any[] = [];
     let nextPageToken: string | undefined;
     let size = opts?.pageSize ?? 100;
-    let pages = 0;
+    let stopped = false;
     do {
       const body: Record<string, unknown> = { jql, fields, maxResults: Math.min(size, limit ?? size) };
       // "changelog" brings each issue's history along (capped by Jira at its newest 100 entries).
@@ -222,11 +221,10 @@ export class JiraClient {
         }
         throw err;
       }
-      pages++;
-      opts?.onPage?.(page.issues.length);
+      if (opts?.onPage?.(page.issues.length) === false) stopped = true;
       issues.push(...page.issues);
       nextPageToken = page.nextPageToken;
-    } while (nextPageToken && (limit === undefined || issues.length < limit) && (opts?.maxPages === undefined || pages < opts.maxPages));
+    } while (nextPageToken && !stopped && (limit === undefined || issues.length < limit));
     return limit === undefined ? issues : issues.slice(0, limit);
   }
 
