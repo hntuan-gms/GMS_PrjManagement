@@ -182,21 +182,51 @@ export class JiraClient {
   }
 
   /** Every match, paged — or at most `limit`, for a picker that only shows the first few. */
-  async searchIssues(jql: string, fields: string[], limit?: number, opts?: { expand?: string }): Promise<any[]> {
+  async searchIssues(
+    jql: string,
+    fields: string[],
+    limit?: number,
+    opts?: {
+      expand?: string;
+      /**
+       * Page size to ask for (default 100). Jira's enhanced search documents a ceiling well above
+       * 100 when only some fields are requested, and applies a lower one itself rather than
+       * failing — `onPage` reports what a page actually held. A 400 for a size above 100 is
+       * answered once with 100, so asking can never make a read fail.
+       */
+      pageSize?: number;
+      onPage?: (issues: number) => void;
+      /** Stop after this many pages, whatever is left (a probe of the page size reads exactly one). */
+      maxPages?: number;
+    }
+  ): Promise<any[]> {
     const issues: any[] = [];
     let nextPageToken: string | undefined;
+    let size = opts?.pageSize ?? 100;
+    let pages = 0;
     do {
-      const body: Record<string, unknown> = { jql, fields, maxResults: Math.min(100, limit ?? 100) };
+      const body: Record<string, unknown> = { jql, fields, maxResults: Math.min(size, limit ?? size) };
       // "changelog" brings each issue's history along (capped by Jira at its newest 100 entries).
       if (opts?.expand) body.expand = opts.expand;
       if (nextPageToken) body.nextPageToken = nextPageToken;
-      const page = await this.request<{ issues: any[]; nextPageToken?: string }>(
-        "/rest/api/3/search/jql",
-        { method: "POST", body: JSON.stringify(body) }
-      );
+      let page: { issues: any[]; nextPageToken?: string };
+      try {
+        page = await this.request<{ issues: any[]; nextPageToken?: string }>("/rest/api/3/search/jql", {
+          method: "POST",
+          body: JSON.stringify(body),
+        });
+      } catch (err) {
+        if (size > 100 && err instanceof JiraApiError && err.status === 400) {
+          size = 100;
+          continue;
+        }
+        throw err;
+      }
+      pages++;
+      opts?.onPage?.(page.issues.length);
       issues.push(...page.issues);
       nextPageToken = page.nextPageToken;
-    } while (nextPageToken && (limit === undefined || issues.length < limit));
+    } while (nextPageToken && (limit === undefined || issues.length < limit) && (opts?.maxPages === undefined || pages < opts.maxPages));
     return limit === undefined ? issues : issues.slice(0, limit);
   }
 

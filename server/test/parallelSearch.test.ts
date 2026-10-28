@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
-  CONCURRENCY,
+  COUNT_CONCURRENCY,
   createdDay,
   limiter,
   named,
   PARALLEL_MIN_ISSUES,
+  READ_CONCURRENCY,
   searchProjectIssues,
   shareInflight,
+  SLICE_SIZE_BIG_PAGES,
+  waysFor,
   SLICE_SIZE,
   type ProjectSearcher,
 } from "../src/parallelSearch.js";
@@ -19,7 +22,7 @@ const day = (n: number) => new Date(Date.UTC(2026, 0, 1) + n * 86_400_000).toISO
  * module sends. Keys are deliberately NOT in creation order and some are foreign ("OLD-n"), because
  * production issues were: slicing must not depend on them.
  */
-function fakeJira(n: number, opts: { dayOf?: (i: number) => number; count?: number | null; hide?: number } = {}) {
+function fakeJira(n: number, opts: { dayOf?: (i: number) => number; count?: number | null; hide?: number; serverPage?: number } = {}) {
   const dayOf = opts.dayOf ?? ((i: number) => Math.floor(i / 10));
   const all = Array.from({ length: n }, (_, i) => ({
     key: i % 7 === 0 ? `OLD-${i}` : `P-${i}`,
@@ -36,7 +39,7 @@ function fakeJira(n: number, opts: { dayOf?: (i: number) => number; count?: numb
     return all.filter((x) => (!from || at(x) >= from) && (!to || at(x) < to));
   };
   const jira: ProjectSearcher = {
-    async searchIssues(jql, _fields, limit) {
+    async searchIssues(jql, _fields, limit, o) {
       log.push(jql);
       active++;
       peak = Math.max(peak, active);
@@ -45,6 +48,10 @@ function fakeJira(n: number, opts: { dayOf?: (i: number) => number; count?: numb
       let out = filter(jql);
       if (jql.includes("ORDER BY created DESC")) out = [...out].reverse();
       if (opts.hide && !limit && jql.includes("created >=")) out = out.slice(0, Math.max(0, out.length - opts.hide));
+      // What a page really holds: what was asked for, clamped by the server.
+      const page = Math.min(o?.pageSize ?? 100, opts.serverPage ?? 100, limit ?? Infinity);
+      o?.onPage?.(Math.min(out.length, page));
+      if (o?.maxPages === 1) return out.slice(0, page);
       return limit === undefined ? out : out.slice(0, limit);
     },
     async countIssues(jql) {
@@ -64,6 +71,16 @@ describe("createdDay", () => {
     assert.equal(createdDay({ fields: { created: "2026-03-01T23:30:00.000+0700" } }), "2026-03-01");
     assert.equal(createdDay({ fields: {} }), null);
     assert.equal(createdDay(undefined), null);
+  });
+});
+
+describe("waysFor", () => {
+  it("cuts a slice so each piece should land under the limit, never fewer than two nor more than the cap", () => {
+    assert.equal(waysFor(4044, 200), 29);
+    assert.equal(waysFor(4044, 500), 12);
+    assert.equal(waysFor(250, 200), 2);
+    assert.equal(waysFor(100000, 100), 32);
+    assert.ok(waysFor(4044, 200) * 200 * 0.7 >= 4044 - 200, "pieces would not average under the limit");
   });
 });
 
@@ -135,8 +152,21 @@ describe("searchProjectIssues", () => {
     assert.equal(new Set(res.issues.map((i) => i.key)).size, 4000, "an issue twice");
     assert.deepEqual(res.issues.map((i) => i.key), all.map((i) => i.key), "not oldest first");
     assert.ok(res.requests >= 4000 / SLICE_SIZE, `only ${res.requests} slices`);
-    assert.match(res.detail ?? "", /^plan \d+ms, read \d+ms, biggest slice \d+$/);
-    assert.ok(peak() <= CONCURRENCY + 2, `peak ${peak()}`);
+    assert.match(res.detail ?? "", /^page \d+, \d+ counts planned in \d+ms, all read at \d+ms, biggest slice \d+$/);
+    assert.ok(peak() <= COUNT_CONCURRENCY + READ_CONCURRENCY + 2, `peak ${peak()}`);
+  });
+
+  it("asks for bigger pages and, when Jira hands them out, cuts the project into far fewer slices", async () => {
+    const small = fakeJira(4000);
+    const smallRes = await searchProjectIssues(small.jira, "P", ["summary"]);
+    const big = fakeJira(4000, { serverPage: 1000 });
+    const bigRes = await searchProjectIssues(big.jira, "P", ["summary"]);
+    assert.equal(bigRes.mode, "parallel");
+    assert.equal(bigRes.issues.length, 4000);
+    assert.match(bigRes.detail ?? "", /^page 1000,/);
+    assert.match(smallRes.detail ?? "", /^page 100,/);
+    assert.ok(bigRes.requests < smallRes.requests / 2, `${bigRes.requests} vs ${smallRes.requests} slices`);
+    assert.ok(bigRes.requests >= 4000 / SLICE_SIZE_BIG_PAGES);
   });
 
   it("does not depend on issue keys at all (foreign prefixes, gaps)", async () => {
