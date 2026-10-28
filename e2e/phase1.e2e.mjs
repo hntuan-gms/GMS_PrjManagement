@@ -242,12 +242,17 @@ await step("lọc → hiện cảnh báo mức tải chỉ tính phần khớp",
   assert.ok((await page.textContent(".rv-notice")).includes("Đang lọc"));
   await clearFilter();
 });
-await step("danh sách chưa gán có ô 'Gán…' (không chỉ kéo thả)", async () => {
+await step("danh sách chưa gán: đóng sẵn, mở bằng nút KPI, có ô 'Gán…' (không chỉ kéo thả)", async () => {
+  assert.equal(await page.locator(".rv-unassigned").count(), 0, "mặc định phải đóng");
+  await page.locator(".rv-pill-warn").click();
+  await page.waitForSelector(".rv-unassigned");
   assert.ok(await page.locator(".rv-unassigned .rv-assign-select").count() >= 1);
   await reset();
   await page.locator(".rv-unassigned .rv-assign-select").first().selectOption({ label: "Lê Chi" });
   await page.waitForFunction(async () => (await (await fetch("/api/__log")).json()).log.some((l) => l.m === "PATCH"));
   assert.equal((await patches())[0].b.assigneeAccountId, "chi");
+  await page.locator(".rv-unassigned .rv-un-close").click();
+  assert.equal(await page.locator(".rv-unassigned").count(), 0);
 });
 await step("chọn từng người: panel hiện đúng người (lỗi giữ dữ liệu người cũ)", async () => {
   const names = await page.$$eval(".rv-person-name, .rv-name", (n) => n.map((x) => x.textContent));

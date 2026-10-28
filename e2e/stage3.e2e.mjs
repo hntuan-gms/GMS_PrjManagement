@@ -64,41 +64,50 @@ await step("gõ 'react' ở ô tìm chỉ còn người có kỹ năng đó", as
 await step("sửa kỳ nghỉ: thêm rồi đổi ngày kết thúc (PATCH, không xoá-tạo lại)", async () => {
   await page.locator(".rv-modes button", { hasText: "Mức tải" }).click();
   await page.waitForSelector(".rv-row-person");
-  await page.locator(".rv-row-person").first().click();
-  await page.waitForSelector(".rv-panel");
+  // By name, not "the first row": a person with new leave on a day they have work moves up the list.
+  const who = (await page.locator(".rv-row-person .rv-person-text b").first().textContent()).trim();
+  const openProfile = () => page.locator(".rv-row-person", { hasText: who }).locator(".rv-profile-btn").click();
+  await openProfile();
+  await page.waitForSelector(".rv-drawer");
   const from = isoIn(3);
   const to = isoIn(4);
   const later = isoIn(6);
-  await page.locator(".rv-panel-form input[type=date]").nth(0).fill(from);
-  await page.locator(".rv-panel-form input[type=date]").nth(1).fill(to);
-  await page.locator(".rv-panel-form button", { hasText: "Thêm kỳ nghỉ" }).click();
+  await page.locator(".rv-drawer input[type=date]").nth(0).fill(from);
+  await page.locator(".rv-drawer input[type=date]").nth(1).fill(to);
+  await page.locator(".rv-drawer-foot button.primary", { hasText: "Lưu thay đổi" }).click();
+  await page.waitForSelector(".rv-drawer", { state: "detached" });
+  await openProfile();
   await page.waitForSelector(".rv-abs-chip");
   await reset();
   await page.locator(".rv-abs-chip button[aria-label='Sửa kỳ nghỉ']").click();
-  assert.equal(await page.locator(".rv-panel-form input[type=date]").nth(1).inputValue(), to);
-  await page.locator(".rv-panel-form input[type=date]").nth(1).fill(later);
-  await page.locator(".rv-panel-form button", { hasText: "Lưu kỳ nghỉ" }).click();
+  assert.equal(await page.locator(".rv-drawer input[type=date]").nth(1).inputValue(), to);
+  await page.locator(".rv-drawer input[type=date]").nth(1).fill(later);
+  await page.locator(".rv-drawer-foot button.primary", { hasText: "Lưu thay đổi" }).click();
   const patch = await waitLog((l) => l.m === "PATCH" && l.p.startsWith("/api/resources/absences/"));
   assert.equal(patch.b.to, later);
+  await page.waitForSelector(".rv-drawer", { state: "detached" });
+  await openProfile();
   assert.equal(await page.locator(".rv-abs-chip").count(), 1, "vẫn một kỳ nghỉ, không nhân đôi");
 });
-await step("kỹ năng + ghi chú lưu cùng nút Lưu của hồ sơ", async () => {
+await step("kỹ năng + ghi chú lưu cùng một nút 'Lưu thay đổi'", async () => {
   await page.locator(".skills-input input").fill("SQL");
   await page.keyboard.press("Enter");
   await page.locator(".rv-notes-field textarea").fill("chỉ làm buổi sáng");
   await reset();
-  await page.locator(".rv-panel-form button.btn-primary", { hasText: "Lưu" }).click();
+  await page.locator(".rv-drawer-foot button.primary", { hasText: "Lưu thay đổi" }).click();
   const put = await waitLog((l) => l.m === "PUT" && l.p.startsWith("/api/resources/"));
   assert.ok(put.b.skills.includes("SQL"), JSON.stringify(put.b));
   assert.equal(put.b.notes, "chỉ làm buổi sáng");
 });
-await step("nút kỳ trước/sau dời cả khoảng; 'Tháng này' + cột theo tháng", async () => {
+await step("nút kỳ trước/sau dời cả khoảng; 'Tháng này' (trong menu Khoảng) + cột theo tháng", async () => {
   const from0 = await page.locator(".rv-range input[type=date]").nth(0).inputValue();
   await page.locator(".rv-step[aria-label='Kỳ sau']").click();
   const from1 = await page.locator(".rv-range input[type=date]").nth(0).inputValue();
   assert.ok(from1 > from0, `${from0} → ${from1}`);
-  await page.locator(".rv-preset", { hasText: "Tháng này" }).click();
+  await page.locator(".rv-preset").click();
+  await page.locator("[role=menuitemradio]", { hasText: "Tháng này" }).click();
   assert.ok((await page.locator(".rv-range input[type=date]").nth(0).inputValue()).endsWith("-01"));
+  assert.ok((await page.locator(".rv-preset").textContent()).includes("Tháng này"), "nhãn nút phải theo khoảng đang chọn");
   await page.locator(".rv-granularity").selectOption("month");
   await page.waitForSelector(".rv-grid-week");
   assert.ok((await page.locator(".rv-head-cell").first().textContent()).startsWith("Thg"));
