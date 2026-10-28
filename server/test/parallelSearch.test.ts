@@ -11,7 +11,7 @@ import {
 } from "../src/parallelSearch.js";
 
 /** A project of issues P-1..P-n; understands exactly the JQL shapes the module sends. */
-function fakeJira(n: number, opts: { count?: number | null; missing?: Set<number> } = {}) {
+function fakeJira(n: number, opts: { count?: number | null; missing?: Set<number>; legacy?: number; legacyInComplement?: boolean } = {}) {
   const log: string[] = [];
   let active = 0;
   let peak = 0;
@@ -24,17 +24,22 @@ function fakeJira(n: number, opts: { count?: number | null; missing?: Set<number
       active--;
       let from = 1;
       let to = n;
-      const range = jql.match(/key >= P-(\d+) AND key <= P-(\d+)/);
+      const range = jql.includes("AND NOT (") ? null : jql.match(/key >= P-(\d+) AND key <= P-(\d+)/);
       if (range) [from, to] = [Number(range[1]), Number(range[2])];
       const desc = jql.includes("ORDER BY key DESC");
+      const complement = jql.includes("AND NOT (key >=");
       const keys: number[] = [];
       for (let i = from; i <= to; i++) if (!opts.missing?.has(i)) keys.push(i);
+      if (complement) keys.length = 0; // every P-n is inside the range the complement excludes
       if (desc) keys.reverse();
       const out = keys.map((i) => ({ key: `P-${i}` }));
+      // Issues no key range can reach (an older key): only the whole-project and complement queries see them.
+      const reachable = !range && !desc && (!complement || opts.legacyInComplement !== false);
+      if (reachable) for (let i = 1; i <= (opts.legacy ?? 0); i++) out.push({ key: `OLD-${i}` });
       return limit === undefined ? out : out.slice(0, limit);
     },
     async countIssues() {
-      return opts.count === undefined ? n - (opts.missing?.size ?? 0) : opts.count;
+      return opts.count === undefined ? n - (opts.missing?.size ?? 0) + (opts.legacy ?? 0) : opts.count;
     },
   };
   return { jira, log, peak: () => peak };
@@ -84,6 +89,24 @@ describe("searchProjectIssues", () => {
     assert.equal(res.mode, "sequential");
     assert.equal(res.issues.length, PARALLEL_MIN_ISSUES - 1);
     assert.ok(log.some((q) => q.endsWith("ORDER BY created ASC")));
+  });
+
+  it("asks for what the ranges cannot reach as a complement, instead of re-reading everything", async () => {
+    const { jira, log } = fakeJira(1000, { legacy: 120 });
+    const res = await searchProjectIssues(jira, "P", ["summary"]);
+    assert.equal(res.mode, "parallel");
+    assert.equal(res.issues.length, 1120);
+    assert.equal(new Set(res.issues.map((i) => i.key)).size, 1120, "no issue twice");
+    assert.ok(log.some((q) => q.includes("AND NOT (key >= P-1 AND key <= P-1000)")));
+    assert.ok(!log.some((q) => q.endsWith("ORDER BY created ASC") && !q.includes("NOT")), "the slow full read must not run");
+  });
+
+  it("falls back to the full read when even the complement leaves it short", async () => {
+    const { jira } = fakeJira(1000, { legacy: 120, legacyInComplement: false });
+    const res = await searchProjectIssues(jira, "P", ["summary"]);
+    assert.equal(res.mode, "sequential");
+    assert.equal(res.issues.length, 1120);
+    assert.match(res.reason ?? "", /ranges \+ rest found 1000 of 1120/);
   });
 
   it("falls back to the full read when the ranges came up short of Jira's count", async () => {

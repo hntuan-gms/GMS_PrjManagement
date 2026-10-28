@@ -98,12 +98,26 @@ export async function searchProjectIssues(
       jira.searchIssues(`${whole} AND key >= ${projectKey}-${r.from} AND key <= ${projectKey}-${r.to} ORDER BY key ASC`, fields)
     );
     const issues = pages.flat();
+    let requests = ranges.length;
 
-    // Key ranges find an issue by its number under the project's current key. An issue Jira still
-    // holds under an older key (a renamed project) would be missed — so a short result is not
-    // trusted, and the slow, complete read is used instead.
-    if (issues.length < expected) return sequential(`ranges found ${issues.length} of ${expected} counted (max key ${max})`);
-    return { issues, mode: "parallel", requests: ranges.length };
+    // A key range finds an issue by its number under the project's current key. Some issues are
+    // not reachable that way — in production 531 of 4044 were not (an older key, from a renamed
+    // or merged project, is the likely reason) — so what the ranges did not return is asked for
+    // directly, as the complement of the whole range. It is small, and pages on its own.
+    if (issues.length < expected) {
+      const seen = new Set(issues.map((i) => i.key));
+      const rest = await jira.searchIssues(
+        `${whole} AND NOT (key >= ${projectKey}-1 AND key <= ${projectKey}-${max}) ORDER BY created ASC`,
+        fields
+      );
+      requests += Math.ceil(rest.length / 100) || 1;
+      for (const issue of rest) if (!seen.has(issue.key)) issues.push(issue);
+    }
+
+    // Still short of what Jira counts: neither query can be trusted to be complete here, and an
+    // incomplete task list is worse than a slow one — read it the slow way.
+    if (issues.length < expected) return sequential(`ranges + rest found ${issues.length} of ${expected} counted (max key ${max})`);
+    return { issues, mode: "parallel", requests };
   } catch (err) {
     // The fast path is an optimisation: if anything about it goes wrong (a query Jira will not
     // take, a rate limit that outlasted the retries) the ordinary read still has to work. An
