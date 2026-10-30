@@ -12,6 +12,7 @@ import { orderByWbs, resolveRanges, toGanttTasks, type OrderedTask } from "../ga
 import type { DependencyType, ProjectVersion, Task } from "../types";
 import { isMilestone } from "../timelineGeometry";
 import { zoomByWheel } from "../timeZoom";
+import { SLA_STATE_LABEL, slaIds, slaSentence, slaShortText, type SlaView } from "../sla";
 import { overlayCsvCells, overlayCsvHeader } from "../wbsExport";
 import BaselineOverlay from "./BaselineOverlay";
 import DependencyOverlay from "./DependencyOverlay";
@@ -232,7 +233,7 @@ function pickScale(pixelsPerDay: number): { viewMode: ViewMode; columnWidth: num
 
 /* ---------------------------------------------------------------- columns */
 
-type ColumnId = "type" | "status" | "priority" | "labels" | "components" | "versions" | "sprint" | "assignee" | "start" | "due" | "duration" | "estimate" | "spent" | "pct";
+type ColumnId = "type" | "status" | "priority" | "labels" | "components" | "versions" | "sprint" | "assignee" | "start" | "due" | "sla" | "duration" | "estimate" | "spent" | "pct";
 
 interface ColumnDef {
   id: ColumnId;
@@ -241,8 +242,11 @@ interface ColumnDef {
   long: string;
   width: number;
   align?: "right";
-  /** `range` is the bar's own span — an Epic's rolls up its children, so its columns must too. */
-  cell: (task: Task, range: { start: string; end: string } | undefined, today: string) => ReactNode;
+  /**
+   * `range` is the bar's own span — an Epic's rolls up its children, so its columns must too.
+   * `sla` is the project's computed SLA (null while it is off), which a module-level column cannot reach otherwise.
+   */
+  cell: (task: Task, range: { start: string; end: string } | undefined, today: string, sla: SlaView | null) => ReactNode;
 }
 
 const dm = (iso: string | null | undefined) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(2, 4)}` : "—");
@@ -307,6 +311,21 @@ const COLUMNS: ColumnDef[] = [
       ),
   },
   {
+    id: "sla",
+    label: "SLA",
+    long: "Trạng thái SLA",
+    width: 104,
+    cell: (t, _r, _today, sla) => {
+      const r = sla?.byId.get(t.id);
+      if (!sla || !r) return "—";
+      return (
+        <span className={`sla-chip is-${r.state}`} title={`${SLA_STATE_LABEL[r.state]} — ${slaSentence(r, sla.settings, sla.nowMs)}`}>
+          {slaShortText(r, sla.settings)}
+        </span>
+      );
+    },
+  },
+  {
     id: "duration",
     label: "T.lượng",
     long: "Thời lượng (ngày)",
@@ -334,7 +353,7 @@ const COLUMNS: ColumnDef[] = [
 ];
 
 /** The same value a column shows, as plain data for a spreadsheet. */
-function csvValue(id: ColumnId, t: Task, r: { start: string; end: string } | undefined): CsvCell {
+function csvValue(id: ColumnId, t: Task, r: { start: string; end: string } | undefined, sla: SlaView | null): CsvCell {
   switch (id) {
     case "type":
       return t.issueType;
@@ -356,6 +375,10 @@ function csvValue(id: ColumnId, t: Task, r: { start: string; end: string } | und
       return r?.start ?? t.startDate;
     case "due":
       return r?.end ?? t.dueDate;
+    case "sla": {
+      const res = sla?.byId.get(t.id);
+      return res && sla ? `${SLA_STATE_LABEL[res.state]} — ${slaSentence(res, sla.settings, sla.nowMs)}` : "";
+    }
     case "duration":
       return r ? spanDays(r) : t.durationDays;
     case "estimate":
@@ -470,6 +493,8 @@ interface Props {
   versions: ProjectVersion[];
   /** Issue keys Jira returned for `filter.jql`; null until they arrive. */
   jqlKeys: Set<string> | null;
+  /** The project's computed SLA; null while SLA is off (no "Trễ SLA" button, the column shows "—"). */
+  sla: SlaView | null;
   /** The JQL box. */
   jql: JqlControl;
   /** What undo would take back (null = nothing to undo) and how to do it. */
@@ -509,6 +534,7 @@ export default function GanttView({
   onDeleteDependency,
   versions,
   jqlKeys,
+  sla,
   jql,
   undo,
   onOpenImport,
@@ -686,9 +712,10 @@ export default function GanttView({
   const baselines = useMemo(() => resolveBaselines(ordered), [ordered]);
 
   const epicOf = useMemo(() => buildEpicIndex(tasks), [tasks]);
+  const slaBreached = useMemo(() => (sla ? slaIds(sla.byId, "breached") : null), [sla]);
   const matchIds = useMemo(
-    () => filterTaskIds(tasks, filter, { today, epicOf, jqlKeys }),
-    [tasks, filter, today, epicOf, jqlKeys]
+    () => filterTaskIds(tasks, filter, { today, epicOf, jqlKeys, slaBreached }),
+    [tasks, filter, today, epicOf, jqlKeys, slaBreached]
   );
 
   /**
@@ -801,7 +828,7 @@ export default function GanttView({
     const body = list.map((o) => [
       o.task.id,
       o.task.summary,
-      ...columns.map((c) => csvValue(c.id, o.task, ranges.get(o.task.id))),
+      ...columns.map((c) => csvValue(c.id, o.task, ranges.get(o.task.id), sla)),
       ...overlayCsvCells(o.task, ranges.get(o.task.id), baselines.get(o.task.id), includePct),
     ]);
     downloadCsv(csvName(`wbs-${tasks[0]?.id.split("-")[0] ?? "du-an"}`, today), [header, ...body]);
@@ -1017,14 +1044,14 @@ export default function GanttView({
               className={`wbs-col wbs-col-extra wbs-cell-${c.id} ${c.align === "right" ? "is-right" : ""}`}
               style={{ width: c.width }}
             >
-              {c.cell(task, ranges.get(task.id), today)}
+              {c.cell(task, ranges.get(task.id), today, sla)}
             </div>
           ))}
         </div>
       ))}
     </div>
     ),
-    [rows, matchIds, selectedIds, selectedId, showCriticalPath, criticalIds, listWidth, columns, collapsed, ranges, today, onSelect, onOpenEdit, onToggleCollapse]
+    [rows, matchIds, selectedIds, selectedId, showCriticalPath, criticalIds, listWidth, columns, collapsed, ranges, today, sla, onSelect, onOpenEdit, onToggleCollapse]
   );
   const table = useMemo(() => (windowed ? null : buildTable(rows)), [windowed, buildTable, rows]);
   const rowIndex = useMemo(() => (windowed ? new Map(rows.map((r, i) => [r.task.id, i])) : null), [windowed, rows]);
@@ -1050,7 +1077,21 @@ export default function GanttView({
         leading={<SavedFilterMenu filter={filter} onApply={onFilterChange} myAccountId={myAccountId} />}
         jql={jql}
         extras={
-          unscheduled.length > 0 && (
+          <>
+            {/* Kept on screen while it is switched on, even if SLA was turned off since, so it can be switched off. */}
+            {(sla || filter.onlySlaBreached) && (
+              <button
+                type="button"
+                className={`tf-btn${filter.onlySlaBreached ? " is-on" : ""}`}
+                aria-pressed={filter.onlySlaBreached}
+                onClick={() => onFilterChange({ ...filter, onlySlaBreached: !filter.onlySlaBreached })}
+                title="Việc chưa xong đã quá thời hạn SLA (tính theo giờ làm việc)"
+              >
+                <Icon name="clock" size={14} />
+                Trễ SLA{slaBreached ? ` (${slaBreached.size})` : ""}
+              </button>
+            )}
+            {unscheduled.length > 0 && (
             <Popover
               className="tf-btn warning-pill"
               role="menu"
@@ -1085,7 +1126,8 @@ export default function GanttView({
                 </>
               )}
             </Popover>
-          )
+            )}
+          </>
         }
         trailing={
           <>

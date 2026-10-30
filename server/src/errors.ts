@@ -25,6 +25,7 @@ export type ErrorCode =
   | "PROJECT_NOT_ACCESSIBLE"
   | "STAFF_ONLY"
   | "RESOURCES_ADMIN_ONLY"
+  | "SLA_ADMIN_ONLY"
   | "BAD_REQUEST"
   | "TRANSITION_FIELDS_REQUIRED"
   | "TRANSITION_REFUSED"
@@ -70,6 +71,14 @@ export const resourcesAdminOnly = () =>
     403,
     "RESOURCES_ADMIN_ONLY",
     "Trang Nguồn lực chỉ dành cho người có quyền Administer Projects trên dự án này."
+  );
+
+/** SLA targets are what the team commits to, so only a project admin sets them (routes/sla.ts). */
+export const slaAdminOnly = () =>
+  new AppError(
+    403,
+    "SLA_ADMIN_ONLY",
+    "Chỉ người có quyền Administer Projects trên dự án này mới sửa được cài đặt SLA."
   );
 
 export const badRequest = (message: string) => new AppError(400, "BAD_REQUEST", message);

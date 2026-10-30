@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { AppError } from "../src/errors.js";
 import { MAX_NAME, validateFilterInput, validateSpec } from "../src/savedFilters.js";
 
-const spec = { people: ["@me", "none"], statuses: ["In Progress"], types: [], epics: [], labels: [], priorities: [], components: [], versions: [], sprints: [], jql: "", onlyOverdue: false };
+const spec = { people: ["@me", "none"], statuses: ["In Progress"], types: [], epics: [], labels: [], priorities: [], components: [], versions: [], sprints: [], jql: "", onlyOverdue: false, onlySlaBreached: false };
 
 function rejects(fn: () => unknown, pattern: RegExp) {
   assert.throws(fn, (e: unknown) => e instanceof AppError && e.status === 400 && pattern.test(e.message));
@@ -24,9 +24,16 @@ describe("validateSpec", () => {
       sprints: [],
       jql: "",
       onlyOverdue: true,
+      onlySlaBreached: false,
     });
     // The search box is never part of a saved view.
     assert.equal("text" in out, false);
+  });
+
+  it("keeps the SLA toggle, which alone is a filter worth saving", () => {
+    const out = validateSpec({ onlySlaBreached: true });
+    assert.equal(out.onlySlaBreached, true);
+    assert.equal(out.onlyOverdue, false);
   });
 
   it("refuses an empty filter, wrong types and oversized lists", () => {
@@ -34,6 +41,7 @@ describe("validateSpec", () => {
     rejects(() => validateSpec({ people: "a" }), /people/);
     rejects(() => validateSpec({ labels: [1] }), /labels/);
     rejects(() => validateSpec({ onlyOverdue: "yes" }), /onlyOverdue/);
+    rejects(() => validateSpec({ onlySlaBreached: 1 }), /onlySlaBreached/);
     rejects(() => validateSpec({ statuses: Array.from({ length: 201 }, (_, i) => `s${i}`) }), /quá nhiều/);
     rejects(() => validateSpec({ statuses: ["x".repeat(201)] }), /quá dài/);
   });

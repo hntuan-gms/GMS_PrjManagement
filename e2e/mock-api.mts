@@ -8,6 +8,7 @@ import { parseWorkbook } from "../server/src/kbkt/parse.ts";
 import { DEFAULT_SETTINGS, validateSettings } from "../server/src/kbkt/settings.ts";
 import { AppError } from "../server/src/errors.ts";
 import { validateFilterInput } from "../server/src/savedFilters.ts";
+import { DEFAULT_SLA_SETTINGS, validateSlaSettings } from "../server/src/sla.ts";
 import { KbktSync, type LogLine } from "../server/src/kbkt/sync.ts";
 import { XlsxFormatError } from "../server/src/kbkt/xlsx.ts";
 import { FakeJira } from "../server/test/kbktFakeJira.ts";
@@ -18,6 +19,12 @@ import { sampleWorkbook } from "../server/test/kbktFixture.ts";
 const localToday = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 const TODAY = localToday();
 const day = (n: number) => new Date(Date.parse(TODAY) + n * 86400000).toISOString().slice(0, 10);
+// SLA clock instants (Vietnam time, the policy's default). Chosen so a state cannot depend on the hour
+// the suite runs: DEMO-3 (High, 16 working hours) was opened a month ago → late; DEMO-4 (Medium, 40h)
+// was resolved an hour after it was created → on time; DEMO-7 (Highest, 4h) is opened as the stand-in
+// starts → well within.
+const at = (n: number, hhmm: string) => `${day(n)}T${hhmm}:00.000+0700`;
+const STARTED_AT = new Date().toISOString();
 
 const users = [
   { accountId: "me", displayName: "Tuấn Test", avatarUrl: null },
@@ -36,11 +43,11 @@ const base = {
 let tasks: any[] = [
   { id: "DEMO-1", summary: "Giai đoạn 1 — Khảo sát", issueType: "Epic", startDate: day(-10), dueDate: day(5) },
   { id: "DEMO-2", summary: "Giai đoạn 2 — Xây dựng", issueType: "Epic", startDate: day(2), dueDate: day(20) },
-  { id: "DEMO-3", summary: "Phân tích yêu cầu", issueType: "Story", wbsParentId: "DEMO-1", assigneeAccountId: "anh", statusName: "In Progress", statusCategory: "indeterminate", startDate: day(-8), dueDate: day(-1), labels: ["urgent"], priority: "High" },
-  { id: "DEMO-4", summary: "Viết tài liệu BRD", issueType: "Task", wbsParentId: "DEMO-1", assigneeAccountId: "binh", statusName: "Done", statusCategory: "done", percentComplete: 100, startDate: day(-9), dueDate: day(-4) },
+  { id: "DEMO-3", summary: "Phân tích yêu cầu", issueType: "Story", wbsParentId: "DEMO-1", assigneeAccountId: "anh", statusName: "In Progress", statusCategory: "indeterminate", startDate: day(-8), dueDate: day(-1), labels: ["urgent"], priority: "High", createdAt: at(-30, "09:00") },
+  { id: "DEMO-4", summary: "Viết tài liệu BRD", issueType: "Task", wbsParentId: "DEMO-1", assigneeAccountId: "binh", statusName: "Done", statusCategory: "done", percentComplete: 100, startDate: day(-9), dueDate: day(-4), createdAt: at(-20, "09:00"), resolvedAt: at(-20, "10:00") },
   { id: "DEMO-5", summary: "Thiết kế cơ sở dữ liệu", issueType: "Task", wbsParentId: "DEMO-2", assigneeAccountId: "anh", startDate: day(2), dueDate: day(6), estimateHours: 16, components: ["Backend"], fixVersions: ["1.0"], sprint: { id: 7, name: "Sprint 7", state: "active" } },
   { id: "DEMO-6", summary: "Dựng API đăng nhập", issueType: "Task", wbsParentId: "DEMO-2", assigneeAccountId: "chi", startDate: day(3), dueDate: day(9), labels: ["backend"] },
-  { id: "DEMO-7", summary: "Sửa lỗi hiển thị bảng", issueType: "Bug", wbsParentId: "DEMO-2", startDate: day(1), dueDate: day(3), priority: "Highest" },
+  { id: "DEMO-7", summary: "Sửa lỗi hiển thị bảng", issueType: "Bug", wbsParentId: "DEMO-2", startDate: day(1), dueDate: day(3), priority: "Highest", createdAt: STARTED_AT },
   { id: "DEMO-8", summary: "Kiểm thử tích hợp", issueType: "Task", wbsParentId: "DEMO-2", assigneeAccountId: "binh", startDate: day(8), dueDate: day(14), labels: ["milestone"] },
   { id: "DEMO-9", summary: "Công việc chưa có ngày", issueType: "Task", assigneeAccountId: "me", startDate: null, dueDate: null },
 ].map((t: any) => ({ ...base, baselineStart: t.startDate, baselineDue: t.dueDate, ...t, assigneeName: nameOf(t.assigneeAccountId ?? null) }));
@@ -77,6 +84,7 @@ app.post("/api/__restore", (_q, r) => {
   sessionProject = "DEMO";
   tasksSeen = [];
   attachmentsOf5 = seedFiles();
+  sla = { settings: structuredClone(DEFAULT_SLA_SETTINGS), canEdit: true };
   log.length = 0;
   r.json({});
 });
@@ -576,6 +584,18 @@ app.get("/api/kbkt/options", async (_q, r) => r.json({
   epics: [{ key: "DEMO-1", summary: "Đợt 1" }],
 }));
 app.get("/api/kbkt/settings", (_q, r) => r.json(kbktSettings));
+
+// The SLA policy, through the real validator. The stand-in user is a project admin (canEdit).
+let sla = { settings: structuredClone(DEFAULT_SLA_SETTINGS), canEdit: true };
+app.get("/api/sla/settings", (_q, r) => r.json(sla));
+app.put("/api/sla/settings", (req, res) => {
+  try {
+    sla = { settings: validateSlaSettings(req.body), canEdit: true };
+    res.json(sla);
+  } catch (e) {
+    res.status(e instanceof AppError ? e.status : 500).json({ error: (e as Error).message, code: e instanceof AppError ? e.code : undefined });
+  }
+});
 app.put("/api/kbkt/settings", (req, res) => { kbktSettings = validateSettings(req.body); res.json(kbktSettings); });
 const kbktRun = (req: express.Request) => {
   const q = req.query as Record<string, string | undefined>;

@@ -45,6 +45,8 @@ import type {
   KbktRunParams,
   KbktStory,
   KbktSettings,
+  SlaSettings,
+  SlaSettingsResponse,
   KbktStreamEvent,
   SavedFilter,
   SavedFilterSpec,
@@ -416,6 +418,9 @@ export const api = {
 
   // KBKT import. The preview reads Jira and writes nothing; kbktApply (above) is the real run.
   getKbktOptions: () => request<KbktOptions>("/kbkt/options"),
+  getSlaSettings: () => request<SlaSettingsResponse>("/sla/settings"),
+  saveSlaSettings: (settings: SlaSettings) =>
+    request<SlaSettingsResponse>("/sla/settings", { method: "PUT", body: JSON.stringify(settings) }),
   getKbktSettings: () => request<KbktSettings>("/kbkt/settings"),
   saveKbktSettings: (settings: KbktSettings) =>
     request<KbktSettings>("/kbkt/settings", { method: "PUT", body: JSON.stringify(settings) }),

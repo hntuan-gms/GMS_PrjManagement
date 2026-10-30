@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { api } from "../api";
 import { isAssignableType } from "../types";
-import type { DependencyType, JiraUser, Predecessor, Task, TaskAttachments, TaskTransition, TaskUpdateInput, TransitionField } from "../types";
+import type { DependencyType, JiraUser, Predecessor, SlaSettings, Task, TaskAttachments, TaskTransition, TaskUpdateInput, TransitionField } from "../types";
 import { filesFromClipboard, hasPending, NO_ATTACHMENTS, uploadPending, type PendingAttachments } from "../attachments";
 import AttachmentPicker from "./AttachmentPicker";
 import TaskAttachmentList from "./TaskAttachmentList";
@@ -19,6 +19,7 @@ import TaskWatchers from "./TaskWatchers";
 import { TransitionFieldsForm } from "./TransitionFields";
 import { missingFields, neededFieldsFrom } from "../transitionFields";
 import { parentOptions, typeBlockedReason, type TypeInfo } from "../structure";
+import { SLA_STATE_LABEL, slaSentence, type SlaResult } from "../sla";
 
 interface Props {
   task: Task;
@@ -33,6 +34,8 @@ interface Props {
   myAccountId: string;
   /** Opens the create form with this task as the parent. */
   onAddSubtask: (parent: Task) => void;
+  /** This task's SLA under the project's policy; null while SLA is off (no row at all). */
+  sla?: { result: SlaResult | null; settings: SlaSettings; nowMs: number } | null;
 }
 
 const DEP_TYPES: DependencyType[] = ["FS", "SS", "FF", "SF"];
@@ -64,7 +67,7 @@ function Group({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-export default function TaskEditModal({ task, allTasks, users, onClose, onSave, onDelete, onWorkLogged, myAccountId, onAddSubtask }: Props) {
+export default function TaskEditModal({ task, allTasks, users, onClose, onSave, onDelete, onWorkLogged, myAccountId, onAddSubtask, sla }: Props) {
   const dialogs = useDialogs();
   const [summary, setSummary] = useState(task.summary);
   // The project list leaves descriptions out, so this is fetched on open. Until it is here
@@ -685,6 +688,22 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
                     ))}
                   </select>
                 </label>
+                {sla && (
+                  // Read-only: the deadline follows from the priority above and the project's SLA policy.
+                  <div className="field td-row td-sla">
+                    <span>SLA</span>
+                    <span className="td-value-text">
+                      {sla.result ? (
+                        <>
+                          <span className={`sla-chip is-${sla.result.state}`}>{SLA_STATE_LABEL[sla.result.state]}</span>{" "}
+                          {slaSentence(sla.result, sla.settings, sla.nowMs)}
+                        </>
+                      ) : (
+                        <em className="muted">Không áp dụng (loại việc hoặc mức ưu tiên này không có SLA)</em>
+                      )}
+                    </span>
+                  </div>
+                )}
                 <div className="field td-row">
                   <span>Nhãn</span>
                   <LabelsInput value={labels} onChange={setLabels} suggestions={labelSuggestions} />

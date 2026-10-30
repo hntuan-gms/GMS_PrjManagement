@@ -39,6 +39,12 @@ const SEARCH_FIELDS = [
   "labels",
   "components",
   "fixVersions",
+  // The SLA clock (client/src/sla.ts): it starts when the issue was created and
+  // stops when it was resolved. Some workflows close without setting a resolution,
+  // so the time the status last changed category stands in for those.
+  "created",
+  "resolutiondate",
+  "statuscategorychangedate",
 ];
 
 /** Runs `fn` and reports how long it took beside its result. */
@@ -240,6 +246,7 @@ export class TaskService {
 
   private fromJiraIssue(issue: any): Record<string, unknown> {
     const f = issue.fields;
+    const statusCategory = statusCategoryKey(f.status?.statusCategory?.key ?? "new");
     return {
       id: issue.key,
       wbsParentId: f.parent?.key ?? null,
@@ -248,7 +255,7 @@ export class TaskService {
       description: f.description === undefined ? undefined : f.description ? adfToText(f.description) : null,
       issueType: f.issuetype?.name as IssueTypeName,
       statusName: f.status?.name ?? "Không rõ",
-      statusCategory: statusCategoryKey(f.status?.statusCategory?.key ?? "new"),
+      statusCategory,
       assigneeAccountId: f.assignee?.accountId ?? null,
       assigneeName: f.assignee?.displayName ?? null,
       assigneeAvatarUrl: f.assignee?.avatarUrls?.["24x24"] ?? null,
@@ -263,6 +270,8 @@ export class TaskService {
       components: Array.isArray(f.components) ? f.components.map((c: any) => String(c.name)) : [],
       fixVersions: Array.isArray(f.fixVersions) ? f.fixVersions.map((v: any) => String(v.name)) : [],
       sprint: this.ctx.sprintFieldId ? pickSprint(f[this.ctx.sprintFieldId]) : null,
+      createdAt: f.created ?? null,
+      resolvedAt: f.resolutiondate ?? (statusCategory === "done" ? f.statuscategorychangedate ?? null : null),
       jiraUrl: `${this.ctx.siteUrl}/browse/${issue.key}`,
     };
   }

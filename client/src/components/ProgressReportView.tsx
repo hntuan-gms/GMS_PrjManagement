@@ -7,6 +7,7 @@ import { isAssignableType, type Health, type ProgressOverview, type ProgressRepo
 import { isViewFresh, readViewCache, writeViewCache } from "../viewCache";
 import { overviewParams } from "../warmViews";
 import { buildReportLink } from "../deepLink";
+import type { SlaView } from "../sla";
 import AgileReports from "./AgileReports";
 import AiBrief from "./AiBrief";
 import { MultiSelect } from "./FilterBar";
@@ -31,6 +32,8 @@ interface Props {
   projectKey: string;
   /** The workspace is still on its saved copy of the tasks; asking now would be answered twice. */
   refreshing?: boolean;
+  /** The project's computed SLA; null while SLA is off (no SLA tiles). */
+  sla?: SlaView | null;
 }
 
 /**
@@ -54,7 +57,7 @@ const HEALTH: Record<Health, { label: string; icon: string }> = {
 /** What a drill-down shows. Resolved against live `tasks`, so it is never capped like the metric lists. */
 type Drill =
   | { kind: "state"; state: WorkState }
-  | { kind: "overdue" | "slipped" | "notStarted" | "unassigned" | "undated" | "noBaseline" | "dueSoon" }
+  | { kind: "overdue" | "slipped" | "notStarted" | "unassigned" | "undated" | "noBaseline" | "dueSoon" | "slaBreached" | "slaWarn" }
   | { kind: "phase"; id: string | null; label: string }
   | { kind: "person"; accountId: string | null; label: string }
   | { kind: "keys"; keys: string[]; label: string };
@@ -67,6 +70,8 @@ const DRILL_TITLE: Record<string, string> = {
   undated: "Việc chưa có ngày",
   noBaseline: "Việc chưa có baseline",
   dueSoon: "Hạn trong 7 ngày tới",
+  slaBreached: "Việc trễ SLA (chưa xong)",
+  slaWarn: "Việc sắp trễ SLA",
 };
 
 function fmtDate(iso: string | null): string {
@@ -89,7 +94,7 @@ function signed(n: number): string {
   return v > 0 ? `+${v}` : `${v}`;
 }
 
-export default function ProgressReportView({ tasks, focusReportId, canGenerate, onOpenEdit, cacheScope, projectKey, refreshing }: Props) {
+export default function ProgressReportView({ tasks, focusReportId, canGenerate, onOpenEdit, cacheScope, projectKey, refreshing, sla = null }: Props) {
   const dialogs = useDialogs();
   // The last figures this tab showed for today's unscoped view, so reopening it paints at once.
   const [overview, setOverview] = useState<ProgressOverview | null>(
@@ -272,6 +277,14 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
     { kind: "notStarted", label: "Chưa bắt đầu", value: m.counts.notStarted, tone: "warn", icon: "▷" },
     { kind: "unassigned", label: "Chưa gán người", value: m.counts.unassigned, tone: "neutral", icon: "?" },
   ];
+  // SLA is measured against the clock, not the report's date, so it only sits beside today's figures.
+  // Counted with resolveDrill itself, so a tile and the list it opens always agree.
+  if (sla && m.asOf === today) {
+    attention.push(
+      { kind: "slaBreached", label: "Trễ SLA", value: resolveDrill({ kind: "slaBreached" }, tasks, m.asOf, scope, sla).rows.length, tone: "crit", icon: "⏰" },
+      { kind: "slaWarn", label: "Sắp trễ SLA", value: resolveDrill({ kind: "slaWarn" }, tasks, m.asOf, scope, sla).rows.length, tone: "warn", icon: "⏰" }
+    );
+  }
 
   // Anything that makes the charts less trustworthy, as clickable chips.
   const quality = [
@@ -575,6 +588,7 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
           tasks={tasks}
           asOf={m.asOf}
           scope={scope}
+          sla={sla}
           critical={critical}
           onClose={() => setDrill(null)}
           onOpenEdit={onOpenEdit}
@@ -596,6 +610,7 @@ function TaskDrawer({
   tasks,
   asOf,
   scope,
+  sla,
   critical,
   onClose,
   onOpenEdit,
@@ -604,6 +619,7 @@ function TaskDrawer({
   tasks: Task[];
   asOf: string;
   scope: ProgressScope;
+  sla: SlaView | null;
   critical: Set<string>;
   onClose: () => void;
   onOpenEdit: (task: Task) => void;
@@ -617,7 +633,7 @@ function TaskDrawer({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const { title, rows: all } = useMemo(() => resolveDrill(drill, tasks, asOf, scope), [drill, tasks, asOf, scope]);
+  const { title, rows: all } = useMemo(() => resolveDrill(drill, tasks, asOf, scope, sla), [drill, tasks, asOf, scope, sla]);
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<"urgency" | "due" | "assignee" | "key">("urgency");
   const rows = useMemo(() => {
@@ -717,7 +733,7 @@ function TaskDrawer({
   );
 }
 
-function resolveDrill(drill: Drill, tasks: Task[], asOf: string, scope: ProgressScope): { title: string; rows: Task[] } {
+function resolveDrill(drill: Drill, tasks: Task[], asOf: string, scope: ProgressScope, sla: SlaView | null = null): { title: string; rows: Task[] } {
   const byId = new Map(tasks.map((t) => [t.id, t]));
 
   if (drill.kind === "keys") {
@@ -738,15 +754,26 @@ function resolveDrill(drill: Drill, tasks: Task[], asOf: string, scope: Progress
     return null;
   };
 
-  // The same narrowing server/src/progress.ts applies, after the leaf test, so a
-  // drawer opened from a filtered dashboard lists exactly the tasks counted there.
-  const work = tasks.filter((t) => {
-    if (!isAssignableType(t.issueType) || parentIds.has(t.id)) return false;
+  const inScope = (t: Task) => {
     if (scope.assignee && (t.assigneeAccountId ?? "none") !== scope.assignee) return false;
     if (scope.epic && epicOf(t) !== scope.epic) return false;
     if (scope.types && scope.types.length > 0 && !scope.types.includes(t.issueType)) return false;
     return true;
-  });
+  };
+
+  // SLA is per issue, whatever its place in the WBS — a Story with sub-tasks has its own
+  // deadline — so it skips the leaf test and lists the same issues the Gantt's "Trễ SLA"
+  // button does (within the dashboard's scope), most late first.
+  if (drill.kind === "slaBreached" || drill.kind === "slaWarn") {
+    const state = drill.kind === "slaBreached" ? "breached" : "warn";
+    const rows = sla ? tasks.filter((t) => sla.byId.get(t.id)?.state === state && inScope(t)) : [];
+    const left = (t: Task) => sla?.byId.get(t.id)?.remainingMs ?? 0;
+    return { title: DRILL_TITLE[drill.kind], rows: rows.sort((a, b) => left(a) - left(b)) };
+  }
+
+  // The same narrowing server/src/progress.ts applies, after the leaf test, so a
+  // drawer opened from a filtered dashboard lists exactly the tasks counted there.
+  const work = tasks.filter((t) => isAssignableType(t.issueType) && !parentIds.has(t.id) && inScope(t));
   const open = work.filter((t) => t.statusCategory !== "done");
   const weekAhead = new Date(toUtc(asOf) + 7 * 86_400_000).toISOString().slice(0, 10);
 

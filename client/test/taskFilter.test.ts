@@ -35,6 +35,13 @@ describe("filterTaskIds", () => {
     assert.deepEqual(ids({ people: new Set(["none"]) }), ["P-1", "P-2", "P-7"]);
   });
 
+  it("Trễ SLA: only the breached ids; restricts nothing until they are known", () => {
+    const slaBreached = new Set(["P-6", "P-7"]);
+    assert.deepEqual([...(filterTaskIds(tasks, f({ onlySlaBreached: true }), { ...ctx, slaBreached }) ?? [])].sort(), ["P-6", "P-7"]);
+    assert.equal(filterTaskIds(tasks, f({ onlySlaBreached: true }), ctx)?.size, tasks.length);
+    assert.equal(isTaskFiltering(f({ onlySlaBreached: true })), true);
+  });
+
   it("labels", () => {
     assert.deepEqual(ids({ labels: new Set(["urgent"]) }), ["P-7"]);
   });

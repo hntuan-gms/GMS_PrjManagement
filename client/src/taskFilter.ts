@@ -29,6 +29,11 @@ export interface TaskFilter {
   priorities: Set<string>;
   onlyOverdue: boolean;
   /**
+   * Only open work past its SLA deadline. Which tasks those are is computed from the
+   * project's SLA policy (sla.ts) and arrives through FilterContext.slaBreached.
+   */
+  onlySlaBreached: boolean;
+  /**
    * A JQL the user typed, which Jira — not this code — evaluates. Only the text lives
    * here (it is remembered with the rest of the filter); the matching issue keys are
    * fetched by ProjectWorkspace and arrive through FilterContext.jqlKeys.
@@ -48,6 +53,7 @@ export const EMPTY_TASK_FILTER: TaskFilter = {
   sprints: new Set(),
   priorities: new Set(),
   onlyOverdue: false,
+  onlySlaBreached: false,
   jql: "",
 };
 
@@ -64,7 +70,8 @@ export function isTaskFiltering(f: TaskFilter): boolean {
     f.sprints.size > 0 ||
     !!f.jql.trim() ||
     f.priorities.size > 0 ||
-    f.onlyOverdue
+    f.onlyOverdue ||
+    f.onlySlaBreached
   );
 }
 
@@ -81,7 +88,8 @@ export function facetCount(f: TaskFilter): number {
     (f.sprints.size > 0 ? 1 : 0) +
     (f.jql.trim() ? 1 : 0) +
     (f.priorities.size > 0 ? 1 : 0) +
-    (f.onlyOverdue ? 1 : 0)
+    (f.onlyOverdue ? 1 : 0) +
+    (f.onlySlaBreached ? 1 : 0)
   );
 }
 
@@ -119,6 +127,11 @@ export interface FilterContext {
    * for the length of a request or because of a typo.
    */
   jqlKeys?: Set<string> | null;
+  /**
+   * Ids of open tasks past their SLA deadline. Null when SLA is off or its policy has
+   * not loaded: the toggle then restricts nothing, like an unanswered JQL.
+   */
+  slaBreached?: Set<string> | null;
 }
 
 export function matchesTaskFilter(t: Task, f: TaskFilter, ctx: FilterContext): boolean {
@@ -140,6 +153,7 @@ export function matchesTaskFilter(t: Task, f: TaskFilter, ctx: FilterContext): b
   if (f.jql.trim() && ctx.jqlKeys && !ctx.jqlKeys.has(t.id)) return false;
   if (f.priorities.size > 0 && !f.priorities.has(t.priority ?? "none")) return false;
   if (f.onlyOverdue && !isOverdueTask(t, ctx.today)) return false;
+  if (f.onlySlaBreached && ctx.slaBreached && !ctx.slaBreached.has(t.id)) return false;
   return true;
 }
 
@@ -164,6 +178,7 @@ interface Stored {
   sprints?: string[];
   priorities?: string[];
   onlyOverdue?: boolean;
+  onlySlaBreached?: boolean;
   jql?: string;
 }
 
@@ -185,6 +200,7 @@ function load(key: string): TaskFilter {
       sprints: arr(s.sprints),
       priorities: arr(s.priorities),
       onlyOverdue: s.onlyOverdue === true,
+      onlySlaBreached: s.onlySlaBreached === true,
       jql: typeof s.jql === "string" ? s.jql : "",
     };
   } catch {
@@ -205,6 +221,7 @@ function save(key: string, f: TaskFilter): void {
       sprints: [...f.sprints],
       priorities: [...f.priorities],
       onlyOverdue: f.onlyOverdue,
+      onlySlaBreached: f.onlySlaBreached,
       jql: f.jql,
     };
     localStorage.setItem(key, JSON.stringify(s));
