@@ -21,6 +21,14 @@ describe("saved filter spec", () => {
     assert.equal(forBinh.text, "");
   });
 
+  it("keeps the Trễ SLA toggle; a filter saved before it existed opens with it off", () => {
+    assert.equal(fromSavedSpec(toSavedSpec(f({ onlySlaBreached: true }), "me-1"), "me-1").onlySlaBreached, true);
+    const old = toSavedSpec(f({ onlyOverdue: true }), "me-1");
+    delete old.onlySlaBreached;
+    assert.equal(fromSavedSpec(old, "me-1").onlySlaBreached, false);
+    assert.ok(matchesSaved(f({ onlyOverdue: true }), old, "me-1"));
+  });
+
   it("recognises the filter in effect regardless of order or search text", () => {
     const spec = toSavedSpec(f({ statuses: new Set(["Done", "To Do"]), people: new Set(["me-1"]) }), "me-1");
     assert.ok(matchesSaved(f({ text: "x", statuses: new Set(["To Do", "Done"]), people: new Set(["me-1"]) }), spec, "me-1"));

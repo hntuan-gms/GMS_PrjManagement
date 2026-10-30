@@ -21,6 +21,8 @@ interface Props {
   refreshing?: boolean;
   lastSyncedAt: string | null;
   onSwitchProject: () => void;
+  /** Opens the project's SLA policy (read-only for anyone but a project admin). */
+  onOpenSla: () => void;
   onLogout: () => void;
 }
 
@@ -45,6 +47,7 @@ export default function Toolbar({
   refreshing,
   lastSyncedAt,
   onSwitchProject,
+  onOpenSla,
   onLogout,
 }: Props) {
   // Jira avatar URLs behind the OAuth gateway need a bearer token and 403 as a
@@ -113,6 +116,18 @@ export default function Toolbar({
                 >
                   <Icon name="switch" />
                   Đổi dự án…
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="menu-item"
+                  onClick={() => {
+                    close();
+                    onOpenSla();
+                  }}
+                >
+                  <Icon name="clock" />
+                  Cài đặt SLA…
                 </button>
               </>
             )}

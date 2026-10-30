@@ -10,6 +10,7 @@ import { addDays, buildResourceLoad, defaultWindow, todayIso } from "../resource
 import { loadTasksCache, saveTasksCache, tasksCacheKey } from "../tasksCache";
 import { dropViewCache, noteViewsStale, readViewCache, viewCacheScope, writeViewCache } from "../viewCache";
 import { warmBoardAndTimesheet, warmProgress } from "../warmViews";
+import { computeSla } from "../sla";
 import type {
   BulkTaskCreateResult,
   DependencyType,
@@ -17,6 +18,7 @@ import type {
   Predecessor,
   ProjectVersion,
   ResourcePool,
+  SlaSettingsResponse,
   Session,
   Task,
   TaskUpdateInput,
@@ -34,6 +36,7 @@ import KbktImportModal from "./KbktImportModal";
 import ProgressReportView from "./ProgressReportView";
 import ResourceView from "./ResourceView";
 import TaskEditModal from "./TaskEditModal";
+import SlaSettingsModal from "./SlaSettingsModal";
 import { Icon } from "./Icons";
 import BulkStatusMenu from "./BulkStatusMenu";
 import { useDialogs } from "./dialogContext";
@@ -307,6 +310,37 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
     // The scope is a string fixed for this project (the workspace is keyed by it), so this still runs once.
   }, [viewScope]);
 
+  // The SLA policy, read once like the resource pool and kept in the view cache so the
+  // column and chips paint straight away after F5. Readable by everyone; a failure just
+  // means no SLA is shown, never a broken workspace.
+  const [sla, setSla] = useState<SlaSettingsResponse | null>(() => readViewCache<SlaSettingsResponse>(viewScope, "sla", "") ?? null);
+  const [slaOpen, setSlaOpen] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    api.getSlaSettings().then(
+      (r) => {
+        if (!alive) return;
+        setSla(r);
+        writeViewCache(viewScope, "sla", "", r);
+      },
+      () => undefined
+    );
+    return () => {
+      alive = false;
+    };
+  }, [viewScope]);
+  // SLA states move with the clock, not only with the tasks; once a minute is enough.
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNowMs(Date.now()), 60_000);
+    return () => window.clearInterval(id);
+  }, []);
+  const slaById = useMemo(() => computeSla(tasks, sla?.settings ?? null, nowMs), [tasks, sla, nowMs]);
+  const slaView = useMemo(
+    () => (sla?.settings.enabled ? { settings: sla.settings, byId: slaById, nowMs } : null),
+    [sla, slaById, nowMs]
+  );
+
   const taskKeys = useMemo(() => new Set(tasks.map((t) => t.id)), [tasks]);
 
   // The toolbar's overload count, over the same default window the resource tab
@@ -386,14 +420,14 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
       if (e.key.toLowerCase() !== "z" || !(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
       const el = e.target as HTMLElement | null;
       if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable)) return;
-      if (editingTask || creating || reviewRunId || importing || importingKbkt) return;
+      if (editingTask || creating || reviewRunId || importing || importingKbkt || slaOpen) return;
       if (view !== "gantt") return;
       e.preventDefault();
       void undoRef.current();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [editingTask, creating, reviewRunId, importing, importingKbkt, view]);
+  }, [editingTask, creating, reviewRunId, importing, importingKbkt, slaOpen, view]);
 
   async function handleSync() {
     setSyncing(true);
@@ -859,6 +893,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
         refreshing={showingCache}
         lastSyncedAt={lastSyncedAt}
         onSwitchProject={onSwitchProject}
+        onOpenSla={() => setSlaOpen(true)}
         onLogout={onLogout}
       />
 
@@ -1003,6 +1038,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
             onDeleteDependency={handleDeleteDependency}
             versions={versions}
             jqlKeys={jqlKeys}
+            sla={slaView}
             jql={{ state: jqlState, onRun: runJql, onClear: () => setTaskFilter({ ...taskFilter, jql: "" }) }}
             undo={{ label: undoing ? null : (undoStack.at(-1)?.label ?? null), onUndo: () => void undo() }}
             onOpenImport={() => setImporting(true)}
@@ -1044,6 +1080,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
             onOpenEdit={setEditingTask}
             cacheScope={viewCacheScope(session.site.cloudId, session.user.accountId, session.project?.key ?? "")}
             refreshing={showingCache}
+            sla={slaView}
           />
         )}
       </div>
@@ -1067,6 +1104,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
           task={editingTask}
           allTasks={tasks}
           users={users}
+          sla={slaView ? { result: slaView.byId.get(editingTask.id) ?? null, settings: slaView.settings, nowMs: slaView.nowMs } : null}
           onClose={() => setEditingTask(null)}
           onSave={async (patch) => {
             const seq = nextSeq();
@@ -1115,6 +1153,17 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
           users={users}
           onClose={() => setReviewRunId(null)}
           onApplied={refreshTasks}
+        />
+      )}
+
+      {slaOpen && sla && (
+        <SlaSettingsModal
+          current={sla}
+          onClose={() => setSlaOpen(false)}
+          onSaved={(r) => {
+            setSla(r);
+            writeViewCache(viewScope, "sla", "", r);
+          }}
         />
       )}
 

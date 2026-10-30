@@ -62,6 +62,10 @@ export interface Task {
   fixVersions: string[];
   /** From the site's Sprint field; null when in no sprint or the site has no Jira Software. */
   sprint: SprintRef | null;
+  /** Jira datetimes for the SLA clock (sla.ts); absent on a task cached before they existed. */
+  createdAt?: string | null;
+  /** When the issue was resolved; null while it is open. */
+  resolvedAt?: string | null;
   jiraUrl: string;
 }
 
@@ -980,6 +984,8 @@ export interface SavedFilterSpec {
   /** A JQL Jira evaluates when it is applied; "" = none. */
   jql: string;
   onlyOverdue: boolean;
+  /** Absent on filters saved before SLA existed. */
+  onlySlaBreached?: boolean;
 }
 
 export interface SavedFilter {
@@ -994,4 +1000,33 @@ export interface SavedFilter {
   /** From Jira's member list; null when that lookup failed. */
   ownerName: string | null;
   updatedAt: string;
+}
+
+/**
+ * A project's SLA policy — server/src/sla.ts holds the same shape and the rules for
+ * a valid one. Priorities and issue types by name, the way Task carries them.
+ */
+export interface SlaSettings {
+  enabled: boolean;
+  /** Only issues created on or after this day (YYYY-MM-DD) are measured. */
+  appliesFrom: string | null;
+  /** Working hours allowed per priority; null = no SLA for that priority. */
+  targets: Array<{ priority: string; hours: number | null }>;
+  /** "Sắp trễ" once the remaining time is at most this share of the target. 0 = never. */
+  warnPercent: number;
+  /** Issue types measured; empty = every type except Epic. */
+  issueTypes: string[];
+  /** ISO weekdays, 1 = Monday … 7 = Sunday. */
+  workDays: number[];
+  /** "HH:mm", ascending, not overlapping. */
+  periods: Array<{ start: string; end: string }>;
+  holidays: Array<{ date: string; name: string }>;
+  /** The calendar's timezone, minutes east of UTC (420 = UTC+7). */
+  tzOffsetMinutes: number;
+}
+
+export interface SlaSettingsResponse {
+  settings: SlaSettings;
+  /** Whether the signed-in user may change it (a project admin). */
+  canEdit: boolean;
 }

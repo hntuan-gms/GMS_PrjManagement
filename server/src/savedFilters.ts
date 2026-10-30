@@ -23,6 +23,8 @@ export interface SavedFilterSpec {
   /** A JQL Jira evaluates when the filter is applied; "" = none. */
   jql: string;
   onlyOverdue: boolean;
+  /** Only open work past its SLA deadline (client/src/sla.ts). Absent on filters saved before SLA existed. */
+  onlySlaBreached: boolean;
 }
 
 export interface SavedFilterInput {
@@ -55,6 +57,9 @@ export function validateSpec(raw: unknown): SavedFilterSpec {
   if (o.onlyOverdue !== undefined && typeof o.onlyOverdue !== "boolean") {
     throw badRequest('Bộ lọc không hợp lệ: "onlyOverdue" phải là đúng/sai.');
   }
+  if (o.onlySlaBreached !== undefined && typeof o.onlySlaBreached !== "boolean") {
+    throw badRequest('Bộ lọc không hợp lệ: "onlySlaBreached" phải là đúng/sai.');
+  }
   if (o.jql !== undefined && typeof o.jql !== "string") throw badRequest('Bộ lọc không hợp lệ: "jql" phải là chuỗi.');
   const jql = typeof o.jql === "string" ? o.jql.trim() : "";
   if (jql.length > MAX_JQL_LENGTH) throw badRequest('Bộ lọc không hợp lệ: "jql" quá dài.');
@@ -64,8 +69,9 @@ export function validateSpec(raw: unknown): SavedFilterSpec {
     ...Object.fromEntries(LIST_FIELDS.map((f) => [f, list(o[f], f)])),
     jql,
     onlyOverdue: o.onlyOverdue === true,
+    onlySlaBreached: o.onlySlaBreached === true,
   } as SavedFilterSpec;
-  if (!spec.onlyOverdue && !spec.jql && LIST_FIELDS.every((f) => spec[f].length === 0)) {
+  if (!spec.onlyOverdue && !spec.onlySlaBreached && !spec.jql && LIST_FIELDS.every((f) => spec[f].length === 0)) {
     throw badRequest("Bộ lọc đang trống — hãy chọn ít nhất một điều kiện trước khi lưu.");
   }
   return spec;

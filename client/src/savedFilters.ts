@@ -25,6 +25,7 @@ export function toSavedSpec(f: TaskFilter, myAccountId: string): SavedFilterSpec
     sprints: sorted(f.sprints),
     jql: f.jql.trim(),
     onlyOverdue: f.onlyOverdue,
+    onlySlaBreached: f.onlySlaBreached,
   };
 }
 
@@ -45,6 +46,7 @@ export function fromSavedSpec(spec: SavedFilterSpec, myAccountId: string): TaskF
     sprints: new Set(spec.sprints ?? []),
     jql: spec.jql ?? "",
     onlyOverdue: spec.onlyOverdue,
+    onlySlaBreached: spec.onlySlaBreached === true,
   };
 }
 

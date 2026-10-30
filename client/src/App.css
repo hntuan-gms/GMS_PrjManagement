@@ -10462,3 +10462,188 @@ button.ts-entry-edit:hover:not(:disabled) {
     print-color-adjust: exact;
   }
 }
+
+/* ------------------------------------------------------------------ SLA */
+/* One chip for every place an SLA state shows (WBS column, task window). Colour follows
+   the state; the words always say it too, so colour is never the only signal. */
+.sla-chip {
+  display: inline-block;
+  max-width: 100%;
+  padding: 1px 7px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+  color: var(--color-text-secondary);
+  background: var(--color-surface);
+}
+.sla-chip.is-ok {
+  color: var(--color-primary);
+  background: var(--color-primary-light);
+  border-color: var(--color-primary-border);
+}
+.sla-chip.is-warn {
+  color: var(--color-warning-text);
+  background: var(--color-warning-light);
+  border-color: var(--color-warning-border);
+}
+.sla-chip.is-breached,
+.sla-chip.is-missed {
+  color: var(--color-danger);
+  background: var(--color-danger-light);
+  border-color: var(--color-danger-border);
+}
+.sla-chip.is-met {
+  color: var(--color-success);
+  background: var(--color-success-light);
+  border-color: var(--color-success-border);
+}
+.td-sla .td-value-text {
+  line-height: 1.5;
+}
+
+.sla-modal {
+  width: 720px;
+}
+.sla-note {
+  padding: 8px 12px;
+  border: 1px solid var(--color-warning-border);
+  border-radius: var(--radius-md);
+  background: var(--color-warning-light);
+  color: var(--color-warning-text);
+  font-size: 13px;
+}
+.sla-form {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.sla-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  font-size: 14px;
+}
+.sla-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+}
+.sla-section h3 {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--color-text-primary);
+}
+.sla-section .field-hint {
+  margin: 0;
+}
+.sla-targets {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 8px 16px;
+}
+.sla-target {
+  display: grid;
+  grid-template-columns: 1fr 84px auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--color-text-primary);
+}
+.sla-target small {
+  color: var(--color-text-muted);
+}
+.sla-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+.sla-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--color-text-primary);
+}
+.sla-periods {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+.sla-period {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+.sla-period > span:first-child {
+  width: 52px;
+}
+.sla-period input[type="time"] {
+  width: 120px;
+}
+.sla-remove,
+.sla-add {
+  border: 0;
+  background: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+}
+.sla-add {
+  color: var(--color-primary);
+  font-weight: 600;
+}
+.sla-remove:hover,
+.sla-add:hover {
+  background: var(--color-ghost-hover);
+}
+.sla-tz {
+  max-width: 240px;
+}
+.sla-holiday-add {
+  display: grid;
+  grid-template-columns: 160px 1fr auto;
+  gap: 8px;
+}
+.sla-holidays {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.sla-holidays li {
+  display: grid;
+  grid-template-columns: 96px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--color-text-primary);
+}
+.sla-holiday-date {
+  font-variant-numeric: tabular-nums;
+}
+.sla-muted {
+  color: var(--color-text-muted);
+  font-style: normal;
+}

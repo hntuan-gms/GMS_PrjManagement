@@ -47,8 +47,8 @@ The server **exits at boot** if `ATLASSIAN_CLIENT_ID`, `ATLASSIAN_CLIENT_SECRET`
 **Tests** come in two layers, and neither touches Jira or the database:
 
 ```bash
-cd server && npm test && npm run typecheck:test   # node:test via tsx: computeProgress (scope, baseline), ADF/mentions, KBKT import, saved-filter validation, structure/links/JQL/import (stage 2), assistant tools, parallel Jira read (by id, by creation time, rate-limit handling, in-flight sharing), response compression, paged lists
-cd client && npm test && npm run typecheck:test   # card options, skills matrix, capacity, resource columns/date presets/people filter, report compare/deep link, csv, taskFilter, mentions (the comment box's @Name round trip), baseline geometry, time zoom, WBS export, saved filters, stage-2 filters/undo/structure/import
+cd server && npm test && npm run typecheck:test   # node:test via tsx: computeProgress (scope, baseline), ADF/mentions, KBKT import, saved-filter validation, structure/links/JQL/import (stage 2), assistant tools, parallel Jira read (by id, by creation time, rate-limit handling, in-flight sharing), response compression, paged lists, SLA policy validation
+cd client && npm test && npm run typecheck:test   # card options, skills matrix, capacity, resource columns/date presets/people filter, report compare/deep link, csv, taskFilter, mentions (the comment box's @Name round trip), baseline geometry, time zoom, WBS export, saved filters, stage-2 filters/undo/structure/import, the SLA clock (working time, holidays, timezone, states)
 cd e2e && npm install && npm test                 # real client in Chrome vs a stand-in API; needs Chrome; takes the first free ports from 4000/5173 up
 ```
 
@@ -264,6 +264,19 @@ The chat's `sprint_status` tool returns the same computed facts.
 **Undo covers dragging a bar and the % handle, this session only** (`undo.ts`; button and Ctrl/Cmd+Z, never while typing or with a dialog open). It writes the old values back through the same PATCH and works out the next step from what the previous one left behind — restoring the dragged task makes the cascade pull its zero-slack successors back by itself, and those then need no write. Modal edits, bulk edits, status and assignee changes are deliberately not undoable: they are Jira writes with side effects (a transition can notify people).
 
 **Import reads CSV and Excel pasted cells, not .xlsx** (`csvImport.ts`, `ImportModal`, `TaskService.importTasks`; reading a real .xlsx would add a spreadsheet library). Columns are matched by header (Vietnamese or English), dates are day-first, Excel day-numbers work, and a parent is an existing key or `#N` — a row of the same sheet — so one sheet can carry a whole WBS. A row whose cell cannot be read is *named* and blocked, and so are its children; nothing is guessed. A long sheet is sent in pieces of 25 because one request must stay inside Cloud Run's 300 s, and `prepareChunk` rewrites each `#N` for the piece it lands in (an earlier piece's row → the key it became, a row in this piece → its place in this piece). The server cap is 200 rows and it returns `rowKeys` for exactly that.
+
+### SLA (Group 2 #20)
+
+**A deadline per priority, counted in working time.** A project's policy (`sla_settings`, migration 012; `server/src/sla.ts` validates, `slaStore.ts`, `routes/sla.ts`) gives each priority a number of working hours, names the issue types it covers (none = everything but Epics), and defines the calendar the clock runs on: working weekdays, 1–3 periods of the day (default 08:00–12:00, 13:00–17:00), holidays and a timezone. The clock starts at the issue's `created` and stops at `resolutiondate` — or, for a workflow that closes without a resolution, `statuscategorychangedate`; all three ride on the ordinary task search (`createdAt`/`resolvedAt` on `Task`, optional because tasks cached in the browser before them have neither — those just show no SLA). Nothing is written to Jira.
+
+**Computed once, in the browser** (`client/src/sla.ts`, pure, `nowMs` a parameter), the way `resourceAllocation.ts` owns the load: `ProjectWorkspace` builds one `computeSla` map (re-run every minute — the states move with the clock, not only with the tasks) and the WBS column and its CSV, the "Trễ SLA" toggle (`TaskFilter.onlySlaBreached` over `FilterContext.slaBreached`, like `jqlKeys`), the task window's read-only row and the report's two tiles all read it, so a chip and a count cannot disagree. There is no server mirror because nothing on the server shows an SLA. The report's SLA drill-down deliberately skips the leaf test the other tiles use (a Story with sub-tasks has its own deadline) so it lists what the Gantt toggle does; the tiles show only beside today's figures, since SLA is measured against now, not the report's date.
+
+Three choices that look optional and are not:
+- **`enabled` is false until someone switches it on, and `appliesFrom` starts at that day.** A policy applied to a project's history would mark every old issue "Trễ SLA" on day one.
+- **The timezone is in the policy, not the browser's.** "08:00–17:00" means one thing for the team; a viewer abroad must see the same deadline as everyone else.
+- **Only a project admin may save it** (the resource tab's rule: `listMembers().rolesReadable`, 403 `SLA_ADMIN_ONLY`); everyone reads it, and the dialog (project menu → "Cài đặt SLA…") is read-only for the rest. The targets are what the team commits to.
+
+Not built: a first-response metric, pausing the clock in a waiting status, notifications on breach, and feeding the holidays to the resource heatmap or the timesheet (they still use per-person leave).
 
 ### Timesheet
 

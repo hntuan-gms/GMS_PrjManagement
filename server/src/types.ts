@@ -66,6 +66,13 @@ export interface Task {
    * Jira Software.
    */
   sprint: SprintRef | null;
+  /**
+   * Jira datetimes (with offset) for the SLA clock. Optional because a task cached
+   * in the browser before they existed has neither; such a task simply shows no SLA.
+   */
+  createdAt?: string | null;
+  /** When the issue was resolved; null while it is open. */
+  resolvedAt?: string | null;
   jiraUrl: string;
 }
 
