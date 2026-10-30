@@ -62,6 +62,15 @@ export function matchTransition(key: string, transitions: JiraTransition[], want
   );
 }
 
+/** The headers Jira uses to say which limit was hit (names vary between its beta and final forms). */
+function describeRateLimit(headers: Headers): string {
+  const parts: string[] = [];
+  headers.forEach((value, name) => {
+    if (/^(beta-)?(ratelimit|x-ratelimit)|^retry-after$/i.test(name)) parts.push(`${name}=${value}`);
+  });
+  return parts.join(" ") || "(no rate-limit headers)";
+}
+
 export class JiraApiError extends Error {
   constructor(
     public readonly status: number,
@@ -162,6 +171,10 @@ export class JiraClient {
 
     if (res.status === 429) {
       const retryAfter = res.headers.get("retry-after") ?? undefined;
+      // Which quota said no: RateLimit-Reason is jira-quota-global-based (the app's pool across every site),
+      // jira-quota-tenant-based (this site's), jira-burst-based (per second, one endpoint) or
+      // jira-per-issue-on-write. Logged so a 429 in production says whose budget ran out.
+      console.warn(`[rate-limit] ${path.split("?")[0]} ${describeRateLimit(res.headers)}`);
       const attempt = (init as any).__rateLimitAttempt ?? 0;
       // A short Retry-After is a burst limit: waiting it out works. A long one (seen: 2439 s) is the hourly
       // quota, and waiting 5 s twice per request only delays the same refusal — say so at once.
