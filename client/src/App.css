@@ -54,6 +54,13 @@ body {
   font-size: 15px;
   color: var(--color-text-secondary);
 }
+/* Inside the app shell (the first load, under the header) it fills what is left rather than the window. */
+.app > .center-message {
+  flex: 1;
+  height: auto;
+  min-height: 0;
+}
+
 .center-message.error {
   color: var(--color-danger);
 }

@@ -7,7 +7,7 @@ import { EMPTY_TASK_FILTER, useTaskFilter } from "../taskFilter";
 import { toBoardFilter, toTaskFilter, type ViewFilterSpec } from "../viewFilter";
 import { makeEntry, pushEntry, undoSteps, type UndoEntry } from "../undo";
 import { addDays, buildResourceLoad, defaultWindow, todayIso } from "../resourceAllocation";
-import { loadTasksCache, saveTasksCache, tasksCacheKey } from "../tasksCache";
+import { loadBigTasksCache, loadTasksCache, saveTasksCache, tasksCacheKey } from "../tasksCache";
 import { dropViewCache, noteViewsStale, readViewCache, viewCacheScope, writeViewCache } from "../viewCache";
 import { warmBoardAndTimesheet, warmProgress } from "../warmViews";
 import { computeSla } from "../sla";
@@ -235,9 +235,26 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
     // The Báo cáo tab's numbers are computed from the same read of Jira as the tasks, which the server shares
     // between callers that ask together — so asking now costs nothing extra, and the tab opens already filled.
     void warmProgress(viewScope);
+    // A project too big for localStorage keeps its last copy in IndexedDB: read beside the network, it shows
+    // the plan at once if it wins (and the sync button turns until the fresh copy lands), and is dropped if
+    // the network was faster or something was edited in the meantime.
+    let fresh = false;
+    let bigShown = false;
+    if (!cached) {
+      void loadBigTasksCache(cacheKey).then((big) => {
+        if (!big || fresh || seqCounter.current !== seqAtStart) return;
+        firstTasks.current = big.tasks; // a saved copy, not an edit: it must not mark the warmed tabs stale
+        setTasks(big.tasks);
+        setUsers(big.users);
+        setLoading(false);
+        setShowingCache(true);
+        bigShown = true;
+      });
+    }
     let shown = false;
     try {
       const t = await api.listTasks();
+      fresh = true;
       // A drag or edit made while the old copy was showing has its own refresh coming;
       // this response was asked for before it and would put the old schedule back.
       if (seqCounter.current === seqAtStart) {
@@ -260,7 +277,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
       if (shown) {
         // The plan itself is fresh and on screen; only the member list is missing.
         setSyncError(`Chưa tải được danh sách thành viên (${message}).`);
-      } else if (cached) {
+      } else if (cached || bigShown) {
         // Keep working on what is shown, but say it may be out of date.
         setSyncError(`Chưa làm mới được dữ liệu (${message}) — đang hiện bản lưu lần trước.`);
       } else {
@@ -856,7 +873,34 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
     }
   }
 
-  if (loading) return <div className="center-message">Đang tải dữ liệu...</div>;
+  const toolbar = (
+      <Toolbar
+        session={session}
+        view={view}
+        onViewChange={setView}
+        overloadedPeople={overloadedPeople}
+        showResources={resourceAccess === "allowed"}
+        onAddTask={() => setCreating({})}
+        onSync={handleSync}
+        syncing={syncing}
+        refreshing={showingCache || loading}
+        lastSyncedAt={lastSyncedAt}
+        onSwitchProject={onSwitchProject}
+        onOpenSla={() => setSlaOpen(true)}
+        onLogout={onLogout}
+      />
+  );
+
+  // First load with nothing saved: the header is already there and its sync button turns, instead of a
+  // bare "loading" page that gave no sign anything was happening.
+  if (loading) {
+    return (
+      <div className="app">
+        {toolbar}
+        <div className="center-message">Đang tải dữ liệu...</div>
+      </div>
+    );
+  }
 
   if (loadError) {
     return (
@@ -881,21 +925,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
 
   return (
     <div className="app">
-      <Toolbar
-        session={session}
-        view={view}
-        onViewChange={setView}
-        overloadedPeople={overloadedPeople}
-        showResources={resourceAccess === "allowed"}
-        onAddTask={() => setCreating({})}
-        onSync={handleSync}
-        syncing={syncing}
-        refreshing={showingCache}
-        lastSyncedAt={lastSyncedAt}
-        onSwitchProject={onSwitchProject}
-        onOpenSla={() => setSlaOpen(true)}
-        onLogout={onLogout}
-      />
+      {toolbar}
 
       {syncError && (
         <div className="notice notice-error">

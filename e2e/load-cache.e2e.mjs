@@ -47,6 +47,18 @@ await step("khi bản mới về thì nút trở lại bình thường", async (
   await page.waitForFunction(() => [...document.querySelectorAll(".toolbar button")].some((b) => b.textContent.includes("Đồng bộ từ Jira")), null, { timeout: 6000 });
   await setDelay(0);
 });
+await step("chưa có bản lưu và máy chủ chậm: vẫn thấy header, nút đồng bộ xoay, chưa có bảng", async () => {
+  await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("gms.tasksCache.")).forEach((k) => localStorage.removeItem(k)));
+  await setDelay(2500);
+  await page.reload();
+  await page.waitForSelector(".center-message", { timeout: 3000 });
+  await page.waitForSelector(".toolbar", { timeout: 1500 });
+  assert((await page.locator(".wbs-row").count()) === 0, "chưa có dữ liệu mà đã có hàng");
+  assert((await syncButton().textContent()).includes("Đang cập nhật"), "nút không báo đang tải");
+  assert((await page.locator(".toolbar button .spin").count()) > 0, "nút đồng bộ không xoay");
+  await page.waitForSelector(".wbs-row", { timeout: 8000 });
+  await setDelay(0);
+});
 await step("danh sách việc không kèm mô tả", async () => {
   const list = await (await fetch(API + "/api/tasks")).json();
   assert(list.length > 0 && list.every((t) => !("description" in t)), "danh sách vẫn mang description");
@@ -67,6 +79,45 @@ await step("mở việc có mô tả: ô mô tả được điền sau khi tải
   const patch = (await log()).find((l) => l.m === "PATCH");
   assert.equal(patch.b.description, "Mô tả có sẵn");
   await page.waitForSelector(".modal", { state: "detached" });
+});
+
+console.log("\n== Dự án quá lớn cho localStorage: bản lưu nằm trong IndexedDB ==");
+const idbCount = () =>
+  page.evaluate(
+    () =>
+      new Promise((resolve) => {
+        const open = indexedDB.open("gms-cache", 1);
+        open.onerror = () => resolve(0);
+        open.onsuccess = () => {
+          const q = open.result.transaction("entries").objectStore("entries").count();
+          q.onsuccess = () => resolve(q.result);
+          q.onerror = () => resolve(0);
+        };
+      })
+  );
+await step("quá giới hạn: không có trong localStorage, có trong IndexedDB", async () => {
+  // A test seam: a tiny limit makes the demo project count as "too big".
+  await page.addInitScript(() => {
+    globalThis.__GMS_TASKS_CACHE_MAX__ = 1000;
+  });
+  await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("gms.tasksCache.")).forEach((k) => localStorage.removeItem(k)));
+  await page.reload();
+  await page.waitForSelector(".wbs-row");
+  for (let i = 0; i < 40 && (await idbCount()) === 0; i++) await page.waitForTimeout(100);
+  const ls = await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("gms.tasksCache.")));
+  assert.equal(ls.length, 0, "bản lưu lớn vẫn nằm trong localStorage: " + ls.join());
+  assert.equal(await idbCount(), 1);
+});
+await step("mở lại khi máy chủ chậm: bảng hiện ngay từ IndexedDB và nút xoay", async () => {
+  await setDelay(2500);
+  const started = Date.now();
+  await page.reload();
+  await page.waitForSelector(".wbs-row", { timeout: 2000 });
+  assert(Date.now() - started < 2300, "bảng hiện sau " + (Date.now() - started) + "ms, chưa nhanh hơn máy chủ");
+  assert((await syncButton().textContent()).includes("Đang cập nhật"), "nút không báo đang cập nhật");
+  assert((await page.locator(".toolbar button .spin").count()) > 0, "nút đồng bộ không xoay");
+  await page.waitForFunction(() => [...document.querySelectorAll(".toolbar button")].some((b) => b.textContent.includes("Đồng bộ từ Jira")), null, { timeout: 6000 });
+  await setDelay(0);
 });
 
 console.log(problems.length ? "\nLỗi trình duyệt:\n" + problems.join("\n") : "\nLỗi console/pageerror: không có");

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { clearTasksCache, loadTasksCache, saveTasksCache, tasksCacheKey } from "../src/tasksCache";
+import { clearTasksCache, loadBigTasksCache, loadTasksCache, saveTasksCache, tasksCacheKey } from "../src/tasksCache";
 import { task } from "./fixtures";
 
 /** A Storage that lives in a map, with the same surface the cache module uses. */
@@ -55,5 +55,53 @@ describe("tasks cache", () => {
     s.setItem("gms.taskFilter.c1.DEMO", "{}");
     clearTasksCache(s);
     assert.deepEqual([...s.map.keys()], ["gms.taskFilter.c1.DEMO"]);
+  });
+});
+
+describe("a project too big for localStorage goes to IndexedDB", () => {
+  function fakeIdb() {
+    const m = new Map<string, unknown>();
+    return {
+      m,
+      get: async <T,>(k: string) => (m.get(k) as T | undefined) ?? null,
+      put: async (k: string, v: unknown) => void m.set(k, v),
+      del: async (k: string) => void m.delete(k),
+      clear: async () => void m.clear(),
+    };
+  }
+  const key = tasksCacheKey("c1", "me", "AI");
+  const big = [task({ id: "AI-1", summary: "x".repeat(200) })];
+
+  it("over the limit: not in localStorage (and no stale small copy), but in IndexedDB, and read back", async () => {
+    const s = fakeStorage();
+    const idb = fakeIdb();
+    saveTasksCache(key, [task({ id: "AI-0", summary: "old" })], users, s, idb, 1_000_000);
+    saveTasksCache(key, big, users, s, idb, 100);
+    assert.equal(loadTasksCache(key, s), null, "the small copy must not outlive the new, bigger one");
+    assert.equal((await loadBigTasksCache(key, idb))?.tasks[0].id, "AI-1");
+  });
+
+  it("under the limit: localStorage only, and an older big copy is dropped", async () => {
+    const s = fakeStorage();
+    const idb = fakeIdb();
+    saveTasksCache(key, big, users, s, idb, 100);
+    saveTasksCache(key, [task({ id: "AI-2", summary: "s" })], users, s, idb, 1_000_000);
+    assert.equal(loadTasksCache(key, s)?.tasks[0].id, "AI-2");
+    assert.equal(await loadBigTasksCache(key, idb), null);
+  });
+
+  it("logout clears IndexedDB too; nothing malformed is trusted", async () => {
+    const s = fakeStorage();
+    const idb = fakeIdb();
+    saveTasksCache(key, big, users, s, idb, 100);
+    clearTasksCache(s, idb);
+    assert.equal(await loadBigTasksCache(key, idb), null);
+    idb.m.set(key, { tasks: "nope" });
+    assert.equal(await loadBigTasksCache(key, idb), null);
+  });
+
+  it("a failing IndexedDB is just no cache", async () => {
+    const broken = { get: async () => null, put: async () => { throw new Error("x"); }, del: async () => {}, clear: async () => {} };
+    assert.doesNotThrow(() => saveTasksCache(key, big, users, fakeStorage(), broken, 100));
   });
 });
