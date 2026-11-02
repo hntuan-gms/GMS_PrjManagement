@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   agileBoardFromCache,
+  compareBoardKeys,
   DAY_MS,
   isWholeProjectFilter,
   passesUnreleased,
@@ -41,6 +42,8 @@ const opts = {
   scrum: true,
   subQuery: "none" as const,
   released: new Map<string, boolean>(),
+  // "1" To Do and "3" Done are on the board's columns; anything else is not.
+  mappedStatusIds: new Set(["1", "3"]),
   nowMs: NOW,
   limit: 801,
   doneLimit: 500,
@@ -104,6 +107,11 @@ describe("the agile board from the copy", () => {
     // AI-3: done 40 days ago and in no open sprint. AI-5: an Epic. AI-6: long done.
     assert.deepEqual(issues.map((i) => i.key), ["AI-2", "AI-1", "AI-4"]);
   });
+  it("leaves out issues whose status no column maps, as the board API does", () => {
+    const open = { status: { id: "100", name: "OPEN", statusCategory: { key: "new" } } };
+    const { issues } = agileBoardFromCache([...copied, issue("AI-7", { [RANK]: "0|g", issuetype: { name: "Sub Bug" }, ...open })], opts);
+    assert.ok(!issues.some((i) => i.key === "AI-7"));
+  });
   it("keeps Epics on a Kanban board", () => {
     const { issues } = agileBoardFromCache(copied, { ...opts, scrum: false });
     assert.ok(issues.some((i) => i.key === "AI-5"));
@@ -121,6 +129,18 @@ describe("the agile board from the copy", () => {
     assert.equal(passesUnreleased(issue("AI-1", { fixVersions: [{ name: "1.0" }] }), released), false);
     assert.equal(passesUnreleased(issue("AI-1", { fixVersions: [{ name: "1.0" }, { name: "2.0" }] }), released), true);
     assert.equal(passesUnreleased(issue("AI-1", { fixVersions: [{ name: "archived" }] }), released), false);
+  });
+});
+
+describe("checking the copy against the board API", () => {
+  it("matches by key, and names what differs by type and status", () => {
+    const a = issue("AI-1");
+    const b = issue("AI-2", { issuetype: { name: "Sub Bug" }, status: { id: "100", name: "OPEN" } });
+    assert.equal(compareBoardKeys([a], [{ key: "AI-1" }]).equal, true);
+    const check = compareBoardKeys([a, b], [{ key: "AI-1" }, { key: "AI-9", fields: { issuetype: { name: "Task" }, status: { id: "1", name: "To Do" } } }]);
+    assert.equal(check.equal, false);
+    assert.match(check.summary, /copy only: 1 Sub Bug\/OPEN \(100\)/);
+    assert.match(check.summary, /API only: 1 Task\/To Do \(1\)/);
   });
 });
 

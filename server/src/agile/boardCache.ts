@@ -16,6 +16,13 @@
  *
  * Everything below is pure and mirrors JQL the board API used to run: BOARD_JQL and
  * RECENT_DONE_JQL in boardService.ts. Change both together.
+ *
+ * The board API also has rules of its own the JQL does not show — "an issue belongs to the board
+ * if its status is mapped to the board's column" is the documented one, and the first production
+ * read (704 cards from the copy, 68 from the API on AI) showed that guessing them is not safe. So
+ * the copy is never trusted on these rules alone: BoardService checks the copy's card list against
+ * the API's (keys only) once an hour per board, uses the copy only while they match, and logs the
+ * difference by type and status when they do not (`compareBoardKeys`).
  */
 
 export const DAY_MS = 86_400_000;
@@ -137,14 +144,18 @@ export function agileBoardFromCache(
     scrum: boolean;
     subQuery: "none" | "unreleased";
     released: Map<string, boolean>;
+    /** Statuses the board's columns map: an issue in any other status is not on the board. */
+    mappedStatusIds: Set<string>;
     nowMs: number;
     limit: number;
     doneLimit: number;
   }
 ): AgileFromCache {
   const byKey = new Map(copied.map((i) => [i.key, i]));
-  // "Epic issues do not belong to the scrum boards" — Jira's board API.
   const onThisBoard = copied
+    // "An issue belongs to the board if its status is mapped to the board's column" — Jira's board API.
+    .filter((i) => o.mappedStatusIds.has(String(i.fields?.status?.id ?? "")))
+    // "Epic issues do not belong to the scrum boards" — the same.
     .filter((i) => !(o.scrum && isEpic(i)))
     .filter((i) => o.subQuery === "none" || passesUnreleased(i, o.released))
     .map((i) => toBoardShape(i, o, byKey));
@@ -154,6 +165,33 @@ export function agileBoardFromCache(
     .sort((a, b) => resolvedMs(b) - resolvedMs(a))
     .slice(0, o.doneLimit);
   return { issues, recentDone };
+}
+
+export interface BoardKeyCheck {
+  equal: boolean;
+  /** "copy only: 440 Sub Bug/OPEN, …; API only: …" — what to look at when they differ. */
+  summary: string;
+}
+
+/** Whether the copy's cards are exactly the board API's (by key), and if not, which kinds differ. */
+export function compareBoardKeys(fromCopy: any[], fromApi: any[]): BoardKeyCheck {
+  const copyKeys = new Set(fromCopy.map((i) => String(i.key)));
+  const apiKeys = new Set(fromApi.map((i) => String(i.key)));
+  const copyOnly = fromCopy.filter((i) => !apiKeys.has(String(i.key)));
+  const apiOnly = fromApi.filter((i) => !copyKeys.has(String(i.key)));
+  if (copyOnly.length === 0 && apiOnly.length === 0) return { equal: true, summary: `${apiKeys.size} cards match` };
+  const kinds = (list: any[]) => {
+    const n = new Map<string, number>();
+    for (const i of list) {
+      const k = `${i.fields?.issuetype?.name ?? "?"}/${i.fields?.status?.name ?? "?"} (${i.fields?.status?.id ?? "?"})`;
+      n.set(k, (n.get(k) ?? 0) + 1);
+    }
+    return [...n].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, c]) => `${c} ${k}`).join(", ") || "none";
+  };
+  return {
+    equal: false,
+    summary: `copy ${copyKeys.size} vs API ${apiKeys.size}; copy only: ${kinds(copyOnly)}; API only: ${kinds(apiOnly)}`,
+  };
 }
 
 /** The status board's one read, from the copy. */

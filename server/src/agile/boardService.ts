@@ -3,7 +3,7 @@ import { getFlaggedFieldId, getRankFieldId } from "../fieldDiscovery.js";
 import { issueCacheEnabled } from "../issueCache.js";
 import { isRateLimited } from "../parallelSearch.js";
 import type { ProjectRead } from "../taskService.js";
-import { agileBoardFromCache, isWholeProjectFilter, statusBoardFromCache, subQueryRule } from "./boardCache.js";
+import { agileBoardFromCache, compareBoardKeys, isWholeProjectFilter, statusBoardFromCache, subQueryRule } from "./boardCache.js";
 import { badRequest } from "../errors.js";
 import { JiraApiError, type JiraClient } from "../jiraClient.js";
 import * as store from "../store.js";
@@ -52,6 +52,12 @@ const boardsCache = new Map<string, { at: number; boards: BoardSummary[] }>();
 /** A board's saved-filter JQL, per site and board: it decides whether the issue copy can stand in for the board API. */
 const filterJqlCache = new Map<string, { at: number; jql: string | null }>();
 const FILTER_TTL_MS = 10 * 60_000;
+/**
+ * Whether a board's cards from the copy matched the board API's when last checked (boardCache.ts):
+ * checked again after this long, a match or not. A check is one keys-only read of the board.
+ */
+const boardVerdicts = new Map<string, { at: number; ok: boolean }>();
+const VERIFY_TTL_MS = 60 * 60_000;
 
 /** Off only when BOARD_CACHE=off (or the issue copy itself is off): the board API is then read on every open. */
 function boardCacheEnabled(): boolean {
@@ -207,9 +213,13 @@ export class BoardService {
     ]);
 
     // The cards from the issue copy when it can stand in for the board API (boardCache.ts), else from the API.
-    let rawIssues: any[];
-    let recentDone: any[];
+    let rawIssues: any[] = [];
+    let recentDone: any[] = [];
+    let fromCopy = false;
     if (copy) {
+      const mappedStatusIds = new Set(
+        (config.columnConfig?.columns ?? []).flatMap((c) => (c.statuses ?? []).map((s) => String(s.id)))
+      );
       const shaped = agileBoardFromCache(copy.issues, {
         sprintFieldId: this.ctx.sprintFieldId ?? null,
         flaggedFieldId: copy.flaggedFieldId,
@@ -219,13 +229,32 @@ export class BoardService {
         scrum: hasSprints,
         subQuery: copy.subQuery,
         released: new Map(versions.map((v) => [v.name, v.released])),
+        mappedStatusIds,
         nowMs: Date.now(),
         limit: ISSUE_LIMIT + 1,
         doneLimit: 500,
       });
-      rawIssues = shaped.issues;
-      recentDone = shaped.recentDone;
-    } else {
+      // Trusted only while it matches the board API: checked once an hour per board, keys only.
+      const verdictKey = `${this.ctx.cloudId}|${board.id}`;
+      const verdict = boardVerdicts.get(verdictKey);
+      let ok = verdict?.ok ?? false;
+      if (!verdict || Date.now() - verdict.at > VERIFY_TTL_MS) {
+        const fromApi = await this.jira.getBoardIssues(board.id, BOARD_JQL, ["status", "issuetype"], ISSUE_LIMIT + 1);
+        const check = compareBoardKeys(shaped.issues, fromApi);
+        ok = check.equal;
+        boardVerdicts.set(verdictKey, { at: Date.now(), ok });
+        if (ok) console.log(`[board] ${this.ctx.projectKey} board ${board.id}: the issue copy matches the board API (${check.summary})`);
+        else console.warn(`[board] ${this.ctx.projectKey} board ${board.id}: the issue copy does NOT match the board API — ${check.summary}`);
+      }
+      if (ok) {
+        rawIssues = shaped.issues;
+        recentDone = shaped.recentDone;
+        fromCopy = true;
+      } else {
+        this.source = "board API (the copy did not match it at the last check)";
+      }
+    }
+    if (!fromCopy) {
       [rawIssues, recentDone] = await Promise.all([
         this.jira.getBoardIssues(board.id, BOARD_JQL, fields, ISSUE_LIMIT + 1),
         this.jira.getBoardIssues(
