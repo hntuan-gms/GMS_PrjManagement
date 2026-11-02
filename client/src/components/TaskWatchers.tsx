@@ -37,23 +37,28 @@ export default function TaskWatchers({ taskId }: { taskId: string }) {
     }
   }
 
+  const names = w?.listed ? w.watchers.map((x) => x.displayName) : [];
+
   return (
     <div className="field td-row">
       <span>Người theo dõi</span>
       <div className="watchers">
-        <button type="button" className={w?.isWatching ? "is-on" : ""} onClick={toggle} disabled={!w || busy} aria-pressed={!!w?.isWatching}>
+        <button
+          type="button"
+          className={w?.isWatching ? "is-on" : ""}
+          onClick={toggle}
+          disabled={!w || busy}
+          aria-pressed={!!w?.isWatching}
+          title={w ? (names.length > 0 ? names.join(", ") : w.listed ? undefined : "Jira không cho xem danh sách người theo dõi") : undefined}
+        >
           {w?.isWatching ? "✓ Đang theo dõi" : "Theo dõi"}
+          {w && ` (${w.count})`}
         </button>
-        {w && (
-          <span
-            className="muted"
-            title={w.listed ? w.watchers.map((x) => x.displayName).join(", ") : undefined}
-          >
-            {w.count} người{w.listed ? (w.watchers.length > 0 ? ": " + w.watchers.map((x) => x.displayName).join(", ") : "") : " (Jira không cho xem danh sách)"}
-          </span>
-        )}
         {!w && !error && <span className="muted">Đang tải…</span>}
       </div>
+      {/* Names on a line of their own, wrapping: beside the button they were cut to "1 n…". */}
+      {names.length > 0 && <small className="field-hint watchers-names">{names.join(", ")}</small>}
+      {w && !w.listed && <small className="field-hint">Jira không cho xem danh sách.</small>}
       {error && <small className="field-note is-error">{error}</small>}
     </div>
   );

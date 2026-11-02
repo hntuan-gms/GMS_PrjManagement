@@ -101,13 +101,15 @@ export default function TaskLinks({ task, allTasks, onCount }: Props) {
       <ul className="pred-list">
         {links.map((l) => (
           <li key={l.id}>
-            <i>{l.label}</i>{" "}
-            <a href={urlOf(l.key)} target="_blank" rel="noreferrer">
-              <b>{l.key}</b>
-            </a>{" "}
-            · {l.summary}
-            {l.status && <span className={`link-status is-${l.statusCategory}`}> [{l.status}]</span>}
-            <button className="link-btn" onClick={() => remove(l)} disabled={busy}>
+            <span className="pred-text">
+              <i>{l.label}</i>{" "}
+              <a href={urlOf(l.key)} target="_blank" rel="noreferrer">
+                <b>{l.key}</b>
+              </a>{" "}
+              · {l.summary}
+              {l.status && <span className={`link-status is-${l.statusCategory}`}> [{l.status}]</span>}
+            </span>
+            <button className="link-btn" onClick={() => remove(l)} disabled={busy} aria-label={`Gỡ liên kết ${l.key}`}>
               gỡ
             </button>
           </li>

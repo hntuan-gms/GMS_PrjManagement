@@ -103,7 +103,7 @@ await step("theo dõi / bỏ theo dõi chính mình", async () => {
   const box = page.locator(".modal .field:has(> span:text-is('Người theo dõi'))");
   await box.locator("button").click();
   await box.locator("button.is-on").waitFor();
-  assert((await box.textContent()).includes("2 người"));
+  assert.equal((await box.locator("button").textContent()).trim(), "✓ Đang theo dõi (2)");
   const put = (await log()).find((l) => l.m === "PUT" && l.p.endsWith("/watchers"));
   assert.deepEqual(put.b, { watching: true });
 });

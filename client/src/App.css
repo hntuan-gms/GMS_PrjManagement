@@ -1026,6 +1026,52 @@ button.menu-item > .icon {
   border-radius: var(--radius-md);
 }
 
+/* "+ Task mới": header and footer fixed, the form between them scrolls (same shape as .modal-detail). */
+.modal.modal-create {
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+  max-height: min(90vh, 880px);
+}
+.modal-create > .modal-header {
+  flex: none;
+  padding: 20px 24px 12px;
+}
+.mc-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+  padding: 4px 24px 16px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-strong) transparent;
+}
+.modal-create > .modal-footer {
+  flex: none;
+  margin: 0;
+  padding: 12px 24px;
+  background: var(--color-surface);
+}
+.mc-error {
+  flex: none;
+  margin: 0 24px 8px;
+}
+
+/* The text takes the row; "gỡ" sits at the far edge in a hit area bigger than its letters. */
+.pred-list li > .pred-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.pred-list li > .link-btn {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 3px 10px;
+  min-height: 24px;
+}
+
 .pred-list .muted {
   color: var(--color-text-muted);
   border: 1px dashed var(--color-border);

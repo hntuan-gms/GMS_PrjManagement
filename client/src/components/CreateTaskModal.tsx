@@ -248,7 +248,7 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate, initi
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div
-        className="modal"
+        className="modal modal-create"
         onClick={(e) => e.stopPropagation()}
         onPaste={(e) => {
           // A screenshot pasted anywhere in the form becomes an attachment;
@@ -271,6 +271,8 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate, initi
           </button>
         </div>
 
+        {/* Header and footer stay put; only this body scrolls, so "Huỷ" / "Tạo task" are always on screen. */}
+        <div className="mc-body">
         {/* Mode Switcher */}
         <div className="input-mode-header">
           <span className="field-label-text">
@@ -480,7 +482,9 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate, initi
           <AttachmentPicker value={attachments} onChange={setAttachments} />
         </div>
 
-        {error && <div className="modal-error">{error}</div>}
+        </div>
+
+        {error && <div className="modal-error mc-error">{error}</div>}
 
         <div className="modal-footer">
           <div className="footer-summary">

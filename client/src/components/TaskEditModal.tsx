@@ -479,8 +479,14 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
                   <ul className="pred-list">
                     {predecessors.map((p) => (
                       <li key={p.taskId}>
-                        <b>{p.taskId}</b> · {p.type} · lag {p.lagDays}d
-                        <button className="link-btn" onClick={() => setPredecessors(predecessors.filter((x) => x.taskId !== p.taskId))}>
+                        <span className="pred-text">
+                          <b>{p.taskId}</b> · {p.type} · lag {p.lagDays}d
+                        </span>
+                        <button
+                          className="link-btn"
+                          aria-label={`Gỡ phụ thuộc ${p.taskId}`}
+                          onClick={() => setPredecessors(predecessors.filter((x) => x.taskId !== p.taskId))}
+                        >
                           gỡ
                         </button>
                       </li>
