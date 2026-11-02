@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { ApiError, NetworkError, api } from "../api";
+import { ApiError, NetworkError, api, setJiraLimitedHandler } from "../api";
 import { computeOptimisticCascade } from "../dependencyCascade";
 import { EMPTY_FILTER, type BoardFilter } from "../boardModel";
 import { EMPTY_TASK_FILTER, useTaskFilter } from "../taskFilter";
@@ -77,6 +77,23 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
   const [syncError, setSyncError] = useState<string | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [overlayNoticeDismissed, setOverlayNoticeDismissed] = useState(false);
+  // Until when Jira said to come back, after an answer the server gave from its copy because Jira was
+  // refusing for rate (X-Jira-Limited). The data on screen may lag behind Jira until then.
+  const [jiraLimitedUntil, setJiraLimitedUntil] = useState<number | null>(null);
+  useEffect(() => {
+    setJiraLimitedHandler((seconds) => setJiraLimitedUntil(Date.now() + seconds * 1000));
+    return () => setJiraLimitedHandler(null);
+  }, []);
+  useEffect(() => {
+    if (jiraLimitedUntil === null) return;
+    const left = jiraLimitedUntil - Date.now();
+    if (left <= 0) {
+      setJiraLimitedUntil(null);
+      return;
+    }
+    const timer = setTimeout(() => setJiraLimitedUntil(null), left);
+    return () => clearTimeout(timer);
+  }, [jiraLimitedUntil]);
   // Capacity and absences. Held here rather than inside ResourceView so the
   // toolbar can badge overload without mounting the tab, and so switching tabs
   // does not refetch it.
@@ -941,6 +958,18 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
           <div className="notice notice-error">
             <span>{syncError}</span>
             <button className="link-btn" onClick={() => setSyncError(null)}>
+              Đóng
+            </button>
+          </div>
+        )}
+
+        {jiraLimitedUntil !== null && (
+          <div className="notice notice-warn" role="status">
+            <span>
+              Jira đang giới hạn số lượt truy cập của ứng dụng, nên đây là dữ liệu đã lưu và có thể chưa có thay đổi mới nhất.
+              Thao tác ghi lên Jira có thể bị từ chối trong khoảng {Math.max(1, Math.ceil((jiraLimitedUntil - Date.now()) / 60_000))} phút tới.
+            </span>
+            <button className="link-btn" onClick={() => setJiraLimitedUntil(null)}>
               Đóng
             </button>
           </div>

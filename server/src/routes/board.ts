@@ -21,8 +21,14 @@ export const boardRouter = Router();
 boardRouter.use(requireProject);
 
 export function boardServiceFor(req: Request): BoardService {
-  const { jira, session } = req.auth!;
-  return new BoardService(jira, { cloudId: session.cloudId, projectKey: session.projectKey! });
+  const { jira, session, sprintFieldId, taskService } = req.auth!;
+  return new BoardService(jira, {
+    cloudId: session.cloudId,
+    projectKey: session.projectKey!,
+    sprintFieldId,
+    // The cards come from the issue copy when it can stand in for the board API (agile/boardCache.ts).
+    readProject: taskService ? (extra) => taskService.projectIssues(false, extra) : undefined,
+  });
 }
 
 function intParam(raw: unknown, name: string): number {

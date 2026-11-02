@@ -8,7 +8,7 @@ import { kbktRouter } from "./kbkt.js";
 import { filtersRouter } from "./filters.js";
 import { slaRouter } from "./sla.js";
 import { calendarRouter } from "./calendar.js";
-import { requireAuth, requireProject, requireStaff } from "../auth/middleware.js";
+import { deferBackgroundWhenLow, requireAuth, requireProject, requireStaff } from "../auth/middleware.js";
 import { badRequest, notFound } from "../errors.js";
 import { TaskActivity } from "../taskActivity.js";
 import { TaskExtras } from "../taskExtras.js";
@@ -20,6 +20,8 @@ export const apiRouter = Router();
 // is protected by default. This matters because the Cloud Run service is publicly
 // invokable — this middleware is the only access control in front of Jira.
 apiRouter.use(requireAuth);
+// A tab warmed ahead of need waits while the Jira quota is nearly spent (jiraQuota.ts).
+apiRouter.use(deferBackgroundWhenLow);
 
 // Mounted after requireAuth so the planner inherits it rather than restating it.
 // requireStaff sits on the mount rather than on each AI route, for the same

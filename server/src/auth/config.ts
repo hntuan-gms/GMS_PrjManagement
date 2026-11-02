@@ -114,10 +114,21 @@ export function agileDeleteEnabled(): boolean {
   return agileEnabled() && /^(on|true|1|yes)$/i.test(process.env.JIRA_AGILE_DELETE?.trim() ?? "");
 }
 
+/**
+ * Jira dynamic webhooks (jiraWebhooks.ts). Registering needs `manage:jira-webhook`, and the same rule
+ * applies: enable it on both apps in the developer console first, then set JIRA_WEBHOOKS=on.
+ */
+export function webhooksEnabled(): boolean {
+  return /^(on|true|1|yes)$/i.test(process.env.JIRA_WEBHOOKS?.trim() ?? "");
+}
+
+const WEBHOOK_SCOPES = ["manage:jira-webhook"];
+
 /** Everything /authorize asks for. A function, not a constant, so it reads JIRA_AGILE after dotenv. */
 export function requestedScopes(): string[] {
-  if (!agileEnabled()) return BASE_SCOPES;
-  return [...BASE_SCOPES, ...AGILE_SCOPES, ...(agileDeleteEnabled() ? AGILE_DELETE_SCOPES : [])];
+  const webhooks = webhooksEnabled() ? WEBHOOK_SCOPES : [];
+  if (!agileEnabled()) return [...BASE_SCOPES, ...webhooks];
+  return [...BASE_SCOPES, ...AGILE_SCOPES, ...(agileDeleteEnabled() ? AGILE_DELETE_SCOPES : []), ...webhooks];
 }
 
 export const AUTHORIZE_URL = "https://auth.atlassian.com/authorize";

@@ -147,8 +147,8 @@ export function chunks<T>(items: T[], size: number): T[][] {
 
 export interface ProjectSearchResult {
   issues: any[];
-  /** "single" = one page held everything; "parallel" = one of the fast ways; "sequential" = the ordinary read after a way failed. */
-  mode: "single" | "parallel" | "sequential";
+  /** "single" = one page held everything; "parallel" = one of the fast ways; "sequential" = the ordinary read after a way failed; "cache" = issueCache.ts. */
+  mode: "single" | "parallel" | "sequential" | "cache";
   /** Requests made to read the issues themselves. */
   requests: number;
   /** Which fast way and where the time went, for the [perf] line. */

@@ -19,7 +19,10 @@
  * `source`, so the UI can tell the user which list they are looking at.
  *
  * Cached per (cloudId, projectKey, accountId): membership changes rarely, and
- * resolving it costs one call per role plus one per group.
+ * resolving it costs one call per role plus one per group. Five minutes in this
+ * instance's memory, and an hour in Postgres (project_member_cache, wired by
+ * index.ts through persistMembersIn) — the Jira quota is the app's, shared by every
+ * user, and a cold instance after each deploy used to pay the whole lookup again.
  */
 import type { JiraClient, JiraUserLike, RoleActor } from "./jiraClient.js";
 import { JiraApiError } from "./jiraClient.js";
@@ -92,6 +95,22 @@ export interface ProjectMembers {
 }
 
 type RolesResult = { ok: true; members: ProjectMembers } | { ok: false; fallback: MemberFallback };
+
+/** How long a resolved list is kept in Postgres. An "error" result is never stored there. */
+export const PERSIST_TTL_MS = 60 * 60 * 1000;
+
+/** Where resolved lists outlive the instance. Unset (tests, a script) means memory only. */
+export interface MemberPersistence {
+  get(cloudId: string, projectKey: string, accountId: string): Promise<ProjectMembers | null>;
+  put(cloudId: string, projectKey: string, accountId: string, value: ProjectMembers, ttlMs: number): Promise<void>;
+  dropProject(cloudId: string, projectKey: string): Promise<void>;
+}
+
+let persistence: MemberPersistence | null = null;
+
+export function persistMembersIn(p: MemberPersistence | null): void {
+  persistence = p;
+}
 
 const cache = new Map<string, { value: ProjectMembers; expiresAt: number }>();
 
@@ -317,11 +336,22 @@ export async function getProjectMembers(
   // lookup is one call per project role plus one per group: it used to run twice, side by side, and
   // take 3–10 s each on a cold instance. Concurrent callers now share the one run.
   return shareInflight(`members:${key}`, async () => {
+    // Another instance (or this one before a deploy) may have resolved it within the hour.
+    const stored = persistence ? await persistence.get(cloudId, projectKey, accountId).catch(() => null) : null;
+    if (stored) {
+      cache.set(key, { value: stored, expiresAt: Date.now() + TTL_MS });
+      return stored;
+    }
     const value = await lookupMembers(jira, projectKey);
     const now = Date.now();
     pruneExpired(now);
-    const ttl = value.fallback?.reason === "error" ? ERROR_TTL_MS : TTL_MS;
-    cache.set(key, { value, expiresAt: now + ttl });
+    const failed = value.fallback?.reason === "error";
+    cache.set(key, { value, expiresAt: now + (failed ? ERROR_TTL_MS : TTL_MS) });
+    if (persistence && !failed) {
+      await persistence.put(cloudId, projectKey, accountId, value, PERSIST_TTL_MS).catch((err) => {
+        console.warn(`[projectMembers] could not store the list for ${projectKey}: ${(err as Error)?.message ?? err}`);
+      });
+    }
     return value;
   });
 }
@@ -360,4 +390,5 @@ export function invalidateProjectMembers(cloudId: string, projectKey: string): v
   for (const key of cache.keys()) {
     if (key.startsWith(prefix)) cache.delete(key);
   }
+  void persistence?.dropProject(cloudId, projectKey).catch(() => {});
 }

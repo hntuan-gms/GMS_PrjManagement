@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { JiraApiError, type JiraClient } from "../src/jiraClient.js";
-import { getProjectMembers } from "../src/projectMembers.js";
+import { getProjectMembers, invalidateProjectMembers, persistMembersIn, type MemberPersistence, type ProjectMembers } from "../src/projectMembers.js";
 
 const roleUrl = (id: number) => `https://site.atlassian.net/rest/api/3/project/P/role/${id}`;
 
@@ -126,5 +126,37 @@ describe("getProjectMembers — roles and groups are asked for at once", () => {
     // And a later call is served from the cache.
     await getProjectMembers(jira, cloud, "P", account);
     assert.equal(calls.filter((c) => c === "roles").length, 1);
+  });
+});
+
+describe("getProjectMembers — kept in Postgres for an hour", () => {
+  it("a list resolved once is served from the store after a restart, without asking Jira", async () => {
+    const stored = new Map<string, ProjectMembers>();
+    const store: MemberPersistence = {
+      async get(c, p, a) {
+        return stored.get(`${c}|${p}|${a}`) ?? null;
+      },
+      async put(c, p, a, value) {
+        stored.set(`${c}|${p}|${a}`, value);
+      },
+      async dropProject() {},
+    };
+    persistMembersIn(store);
+    try {
+      const { jira, calls } = fakeJira({ roles: { Developers: 2 }, actors: { 2: [{ accountId: "u-anh", name: "Anh" }] } });
+      const { cloud, account } = ids();
+      await getProjectMembers(jira, cloud, "P", account);
+      assert.equal(stored.size, 1);
+
+      // Another instance: its memory is empty (dropped here; the store's dropProject is a no-op), the store is not.
+      invalidateProjectMembers(cloud, "P");
+      const other = fakeJira({ roles: {}, actors: {} });
+      const again = await getProjectMembers(other.jira, cloud, "P", account);
+      assert.ok(again.users.some((u) => u.displayName === "Anh"));
+      assert.equal(other.calls.length, 0, "served from the store");
+      assert.ok(calls.length > 0);
+    } finally {
+      persistMembersIn(null);
+    }
   });
 });

@@ -56,7 +56,9 @@ export function warmBoardAndTimesheet(scope: string, projectKey: string): Promis
   const boardId = readStoredBoardId(projectKey);
   const { from, to } = rangeOf("week", localToday());
   return Promise.all([
-    warm(scope, "board", String(boardId), () => api.getBoard(boardId)),
-    warm(scope, "timesheet", `${from}|${to}`, () => api.getTimesheet(from, to)),
+    // Marked as background: while the Jira quota is nearly spent the server turns these away, and each tab
+    // asks for itself when it is opened.
+    warm(scope, "board", String(boardId), () => api.getBoard(boardId, { background: true })),
+    warm(scope, "timesheet", `${from}|${to}`, () => api.getTimesheet(from, to, { background: true })),
   ]).then(() => undefined);
 }

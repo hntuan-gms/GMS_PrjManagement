@@ -28,7 +28,7 @@
   <body>
     <main>
       <h1>Chính sách bảo mật — GMS PrjManagement</h1>
-      <p class="updated">Cập nhật: 18/09/2026</p>
+      <p class="updated">Cập nhật: 02/11/2026</p>
 
       <p>
         GMS PrjManagement là công cụ nội bộ của Gimasys, dùng để lập kế hoạch và theo dõi
@@ -45,9 +45,14 @@
           <th>Thời gian</th>
         </tr>
         <tr>
-          <td>Refresh token của Atlassian, cloudId, địa chỉ site, accountId, tên hiển thị, ảnh đại diện, mã dự án đang chọn, và một cờ đúng/sai đánh dấu tài khoản nội bộ</td>
+          <td>cloudId, địa chỉ site, accountId, tên hiển thị, ảnh đại diện, mã dự án đang chọn, và một cờ đúng/sai đánh dấu tài khoản nội bộ</td>
           <td>Cookie đã mã hoá (AES-256-GCM) đặt trên trình duyệt của bạn, gắn cờ <code>HttpOnly</code></td>
           <td>Tối đa 30 ngày, hoặc đến khi bạn đăng xuất</td>
+        </tr>
+        <tr>
+          <td>Refresh token của Atlassian</td>
+          <td>Cơ sở dữ liệu PostgreSQL trên Google Cloud SQL, gắn theo cloudId và accountId</td>
+          <td>Đến khi bạn đăng xuất, hoặc khi Atlassian báo quyền truy cập đã bị thu hồi</td>
         </tr>
         <tr>
           <td>Access token của Atlassian</td>
@@ -56,8 +61,23 @@
         </tr>
         <tr>
           <td>Dữ liệu lịch trình: ngày bắt đầu, thời lượng, % hoàn thành, quan hệ phụ thuộc, baseline</td>
-          <td>Tệp trên máy chủ, gắn theo mã issue của Jira</td>
-          <td>Tạm thời — mất khi máy chủ được cập nhật</td>
+          <td>Cơ sở dữ liệu PostgreSQL trên Google Cloud SQL, gắn theo mã issue của Jira</td>
+          <td>Lâu dài, đến khi issue bị xoá</td>
+        </tr>
+        <tr>
+          <td>Bản sao nội dung issue: tiêu đề, mô tả, trạng thái, người phụ trách, ngày tháng, nhãn, sprint (xem mục 3)</td>
+          <td>Cơ sở dữ liệu PostgreSQL trên Google Cloud SQL</td>
+          <td>Lâu dài, đến khi issue bị xoá khỏi Jira</td>
+        </tr>
+        <tr>
+          <td>Danh sách mã issue mà tài khoản của bạn được xem trong từng dự án</td>
+          <td>Cơ sở dữ liệu PostgreSQL trên Google Cloud SQL, gắn theo accountId</td>
+          <td>Được làm mới mỗi lần bạn mở dự án</td>
+        </tr>
+        <tr>
+          <td>Danh sách thành viên dự án: tên hiển thị, ảnh đại diện, accountId (không có email)</td>
+          <td>Cơ sở dữ liệu PostgreSQL trên Google Cloud SQL</td>
+          <td>1 giờ, sau đó đọc lại từ Jira</td>
         </tr>
       </table>
 
@@ -78,11 +98,21 @@
 
       <h2>3. Nội dung Jira</h2>
       <p>
-        Ứng dụng <strong>không sao chép và không lưu trữ</strong> nội dung issue của bạn
-        (tiêu đề, mô tả, bình luận, tệp đính kèm, người phụ trách). Những dữ liệu này được
-        đọc trực tiếp từ Jira mỗi lần bạn mở trang và chỉ tồn tại trong bộ nhớ trong lúc xử lý
-        yêu cầu. Dữ liệu lịch trình nêu ở mục 1 chỉ gồm ngày tháng và con số, gắn với mã
-        issue — không chứa thông tin cá nhân.
+        Để giảm số lần gọi Jira, máy chủ lưu một bản sao các trường issue mà ứng dụng hiển thị
+        (tiêu đề, mô tả, trạng thái, người phụ trách, ngày tháng, nhãn, sprint) trong cơ sở dữ
+        liệu PostgreSQL trên Google Cloud SQL (khu vực <code>asia-southeast1</code>, Singapore).
+        Bình luận, lịch sử thay đổi và tệp đính kèm <strong>không</strong> được lưu — chúng vẫn
+        được đọc trực tiếp từ Jira.
+      </p>
+      <p>
+        Bản sao <strong>không quyết định ai được xem gì</strong>: mỗi lần bạn mở trang, ứng dụng
+        hỏi Jira bằng chính tài khoản của bạn những issue bạn có quyền xem, và chỉ hiển thị
+        những issue đó.
+      </p>
+      <p>
+        Bản sao được giữ cho đến khi issue bị xoá khỏi Jira. Jira luôn là nơi lưu bản gốc, nên
+        xoá bản sao bất cứ lúc nào cũng không làm mất dữ liệu. Dữ liệu lịch trình nêu ở mục 1
+        chỉ gồm ngày tháng và con số, gắn với mã issue.
       </p>
 
       <h2>4. Nhật ký hệ thống</h2>

@@ -9,6 +9,10 @@ import { migrate } from "./db/migrate.js";
 import { errorHandler } from "./errors.js";
 import { apiRouter } from "./routes/api.js";
 import { authRouter } from "./routes/auth.js";
+import { webhookRouter } from "./routes/webhooks.js";
+import { WEBHOOK_PATH } from "./jiraWebhooks.js";
+import { pgMemberCache } from "./memberCacheStore.js";
+import { persistMembersIn } from "./projectMembers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -26,6 +30,9 @@ try {
   console.error("\n[startup] Cannot start GMS PrjManagement:\n  " + (err as Error).message + "\n");
   process.exit(1);
 }
+
+// Member lists outlive the instance (an hour in Postgres): see projectMembers.ts.
+persistMembersIn(pgMemberCache);
 
 const app = express();
 
@@ -46,6 +53,8 @@ app.use((req, res, next) => (req.method === "POST" && req.path.replace(/\/+$/, "
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 app.use("/api/auth", authRouter);
+// Before the API router: Jira has no session, so this route checks Jira's signed token instead.
+app.use(WEBHOOK_PATH, webhookRouter);
 app.use("/api", apiRouter);
 app.use(errorHandler);
 

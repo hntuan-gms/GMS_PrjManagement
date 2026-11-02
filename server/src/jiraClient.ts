@@ -17,6 +17,16 @@ export interface JiraClientOptions {
   getAccessToken: () => Promise<string> | string;
   /** Invoked once on a 401 to force a refresh before a single retry. */
   onUnauthorized?: () => Promise<string | null>;
+  /**
+   * Called after every request that succeeded and was not a GET, before it returns — the issue
+   * cache marks what the write changed (issueCacheStore.applyWriteToCache). Must not throw.
+   */
+  onWrite?: (write: { method: string; path: string; body?: string }) => Promise<void> | void;
+  /**
+   * What Jira says about the app's quota (jiraQuota.ts): `near` when a response carries
+   * X-RateLimit-NearLimit, `limited` when a 429's Retry-After is too long to wait out.
+   */
+  onRateSignal?: (signal: { kind: "near" | "limited"; retryAfterSec?: number; reason: string | null }) => void;
 }
 
 export interface JiraTransition {
@@ -187,11 +197,25 @@ export class JiraClient {
         await sleep(waitMs);
         return this.request<T>(path, { ...init, __rateLimitAttempt: attempt + 1 } as RequestInit, isRetry);
       }
+      if (askedMs > RATE_LIMIT_MAX_WAIT_MS) {
+        this.opts.onRateSignal?.({ kind: "limited", retryAfterSec: askedMs / 1000, reason: res.headers.get("ratelimit-reason") });
+      }
       throw new JiraApiError(429, await res.text().catch(() => ""), retryAfter);
+    }
+    if (res.headers.get("x-ratelimit-nearlimit") === "true") {
+      this.opts.onRateSignal?.({ kind: "near", reason: res.headers.get("ratelimit-reason") });
     }
 
     if (!res.ok) {
       throw new JiraApiError(res.status, await res.text().catch(() => ""));
+    }
+    const method = (init.method ?? "GET").toUpperCase();
+    if (method !== "GET" && this.opts.onWrite) {
+      try {
+        await this.opts.onWrite({ method, path, body: typeof init.body === "string" ? init.body : undefined });
+      } catch (err) {
+        console.warn(`[jira] onWrite failed for ${method} ${path.split("?")[0]}: ${(err as Error)?.message ?? err}`);
+      }
     }
     if (res.status === 204) return undefined as T;
     const text = await res.text();
@@ -255,6 +279,50 @@ export class JiraClient {
       body: JSON.stringify({ jql }),
     });
     return typeof res?.count === "number" ? res.count : null;
+  }
+
+  /**
+   * Up to 100 issues by id or key, read like GET /issue rather than through the search index —
+   * which is what the issue cache needs right after a write the index may not have caught up with.
+   * Issues the user cannot see, or that no longer exist, are simply absent.
+   */
+  async bulkFetchIssues(idsOrKeys: string[], fields: string[]): Promise<any[]> {
+    if (idsOrKeys.length === 0) return [];
+    const res = await this.request<{ issues?: any[] }>(`/rest/api/3/issue/bulkfetch`, {
+      method: "POST",
+      body: JSON.stringify({ issueIdsOrKeys: idsOrKeys, fields }),
+    });
+    return res?.issues ?? [];
+  }
+
+  /** Dynamic webhooks (jiraWebhooks.ts). One result per webhook asked for, in order. */
+  async registerWebhooks(
+    url: string,
+    webhooks: Array<{ events: string[]; jqlFilter: string }>
+  ): Promise<Array<{ id: number | null; error: string | null }>> {
+    const res = await this.request<{ webhookRegistrationResult?: Array<{ createdWebhookId?: number; errors?: string[] }> }>(
+      `/rest/api/3/webhook`,
+      { method: "POST", body: JSON.stringify({ url, webhooks }) }
+    );
+    return (res?.webhookRegistrationResult ?? []).map((r) => ({
+      id: typeof r.createdWebhookId === "number" ? r.createdWebhookId : null,
+      error: r.errors?.join(" ") || null,
+    }));
+  }
+
+  /** Another 30 days for webhooks this user registered; returns Jira's new expiry, when it says. */
+  async refreshWebhooks(ids: number[]): Promise<string | null> {
+    const res = await this.request<{ expirationDate?: string }>(`/rest/api/3/webhook/refresh`, {
+      method: "PUT",
+      body: JSON.stringify({ webhookIds: ids }),
+    });
+    return res?.expirationDate ?? null;
+  }
+
+  /** A saved filter's JQL — what a board shows is a view over one. */
+  async getFilterJql(filterId: number | string): Promise<string | null> {
+    const res = await this.request<{ jql?: string }>(`/rest/api/3/filter/${encodeURIComponent(String(filterId))}`);
+    return typeof res?.jql === "string" ? res.jql : null;
   }
 
   /** `fields` narrows the response; omitted, Jira returns every navigable field. */
@@ -468,6 +536,9 @@ export class JiraClient {
     columnConfig?: { columns?: Array<{ name: string; statuses?: Array<{ id: string }>; min?: number; max?: number }>; constraintType?: string };
     estimation?: { type?: string; field?: { fieldId?: string; displayName?: string } };
     ranking?: { rankCustomFieldId?: number };
+    /** The saved filter the board is a view over, and a Kanban board's sub-filter. */
+    filter?: { id?: number | string };
+    subQuery?: { query?: string };
   }> {
     return this.request(`/rest/agile/1.0/board/${boardId}/configuration`);
   }

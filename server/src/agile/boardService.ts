@@ -1,5 +1,9 @@
 import { agileDeleteEnabled, agileEnabled } from "../auth/config.js";
-import { getFlaggedFieldId } from "../fieldDiscovery.js";
+import { getFlaggedFieldId, getRankFieldId } from "../fieldDiscovery.js";
+import { issueCacheEnabled } from "../issueCache.js";
+import { isRateLimited } from "../parallelSearch.js";
+import type { ProjectRead } from "../taskService.js";
+import { agileBoardFromCache, isWholeProjectFilter, statusBoardFromCache, subQueryRule } from "./boardCache.js";
 import { badRequest } from "../errors.js";
 import { JiraApiError, type JiraClient } from "../jiraClient.js";
 import * as store from "../store.js";
@@ -45,6 +49,14 @@ const BOARDS_TTL_MS = 5 * 60_000;
 const MOVE_CHUNK = 50;
 
 const boardsCache = new Map<string, { at: number; boards: BoardSummary[] }>();
+/** A board's saved-filter JQL, per site and board: it decides whether the issue copy can stand in for the board API. */
+const filterJqlCache = new Map<string, { at: number; jql: string | null }>();
+const FILTER_TTL_MS = 10 * 60_000;
+
+/** Off only when BOARD_CACHE=off (or the issue copy itself is off): the board API is then read on every open. */
+function boardCacheEnabled(): boolean {
+  return issueCacheEnabled() && process.env.BOARD_CACHE?.trim().toLowerCase() !== "off";
+}
 
 const FALLBACK_MESSAGES: Record<BoardFallback["reason"], string> = {
   disabled:
@@ -61,9 +73,19 @@ function category(key: string | undefined): StatusCategory {
 const isScopeRefusal = (err: unknown) => err instanceof JiraApiError && err.scopeProblem;
 
 export class BoardService {
+  /** Where this snapshot's cards came from, for the [perf] line. */
+  private source = "board API";
+
   constructor(
     private readonly jira: JiraClient,
-    private readonly ctx: { cloudId: string; projectKey: string }
+    private readonly ctx: {
+      cloudId: string;
+      projectKey: string;
+      /** The site's Sprint field: the copy rebuilds each card's sprint from it. */
+      sprintFieldId?: string | null;
+      /** The issue copy (TaskService.projectIssues), with the board's own fields added. Absent = the board API only. */
+      readProject?: (extraFields: string[]) => Promise<ProjectRead>;
+    }
   ) {}
 
   /* ------------------------------------------------------------------ reads */
@@ -114,7 +136,7 @@ export class BoardService {
     const snap = await this.readSnapshot(boardId);
     // Where a slow board load went, like the [perf] line listTasks writes.
     console.log(
-      `[perf] board ${this.ctx.projectKey}: ${snap.mode}, ${snap.issues.length} issues, ${snap.sprints.length} sprints, total ${Date.now() - t0}ms`
+      `[perf] board ${this.ctx.projectKey}: ${snap.mode}, ${snap.issues.length} issues, ${snap.sprints.length} sprints, from ${this.source}, total ${Date.now() - t0}ms`
     );
     return snap;
   }
@@ -174,21 +196,46 @@ export class BoardService {
     ];
     const hasSprints = board.type === "scrum";
 
-    const [rawIssues, openSprints, closedSprints, recentDone, quickFilters, versions] = await Promise.all([
-      this.jira.getBoardIssues(board.id, BOARD_JQL, fields, ISSUE_LIMIT + 1),
+    const [openSprints, closedSprints, quickFilters, versions, copy] = await Promise.all([
       hasSprints ? this.jira.listSprints(board.id, "active,future") : Promise.resolve([]),
       hasSprints ? this.jira.listSprints(board.id, "closed") : Promise.resolve([]),
-      this.jira.getBoardIssues(
-        board.id,
-        RECENT_DONE_JQL,
-        ["resolutiondate", "closedSprints", "sprint", ...(estimation ? [estimation.fieldId] : [])],
-        500
-      ),
       // Neither is worth failing the board over: without them the filter menu and the
       // Phiên bản panel are simply empty.
       this.jira.getBoardQuickFilters(board.id).then((list) => list.map(toQuickFilter)).catch(() => [] as QuickFilter[]),
       this.projectVersions(),
+      this.boardCopy(board, config, estimation),
     ]);
+
+    // The cards from the issue copy when it can stand in for the board API (boardCache.ts), else from the API.
+    let rawIssues: any[];
+    let recentDone: any[];
+    if (copy) {
+      const shaped = agileBoardFromCache(copy.issues, {
+        sprintFieldId: this.ctx.sprintFieldId ?? null,
+        flaggedFieldId: copy.flaggedFieldId,
+        openSprints: new Map(openSprints.map((s: any) => [Number(s.id), String(s.state)])),
+        closedSprintIds: new Set(closedSprints.map((s: any) => Number(s.id))),
+        rankFieldId: copy.rankFieldId,
+        scrum: hasSprints,
+        subQuery: copy.subQuery,
+        released: new Map(versions.map((v) => [v.name, v.released])),
+        nowMs: Date.now(),
+        limit: ISSUE_LIMIT + 1,
+        doneLimit: 500,
+      });
+      rawIssues = shaped.issues;
+      recentDone = shaped.recentDone;
+    } else {
+      [rawIssues, recentDone] = await Promise.all([
+        this.jira.getBoardIssues(board.id, BOARD_JQL, fields, ISSUE_LIMIT + 1),
+        this.jira.getBoardIssues(
+          board.id,
+          RECENT_DONE_JQL,
+          ["resolutiondate", "closedSprints", "sprint", ...(estimation ? [estimation.fieldId] : [])],
+          500
+        ),
+      ]);
+    }
 
     // Statuses the board shows that the project list didn't carry (a board can
     // span projects) still need a name for their column; the issues supply it.
@@ -249,6 +296,54 @@ export class BoardService {
     };
   }
 
+  /**
+   * The project's issues from the copy, when they are exactly what this board's API would list
+   * (see boardCache.ts for the conditions); null otherwise, with the reason kept for the [perf] line.
+   */
+  private async boardCopy(
+    board: BoardSummary,
+    config: Awaited<ReturnType<JiraClient["getBoardConfiguration"]>>,
+    estimation: BoardSnapshot["estimation"]
+  ): Promise<{ issues: any[]; rankFieldId: string | null; flaggedFieldId: string | null; subQuery: "none" | "unreleased" } | null> {
+    const no = (why: string) => {
+      this.source = `board API (${why})`;
+      return null;
+    };
+    if (!boardCacheEnabled() || !this.ctx.readProject) return no("copy off");
+    if (board.type === "scrum" && !this.ctx.sprintFieldId) return no("no Sprint field");
+    const subQuery = subQueryRule(config.subQuery?.query);
+    if (subQuery === "other") return no("board sub-filter");
+    const filterId = config.filter?.id;
+    if (filterId === undefined || filterId === null) return no("no board filter");
+    const jql = await this.filterJql(filterId);
+    if (!isWholeProjectFilter(jql, this.ctx.projectKey)) return no("board filter is not the whole project");
+
+    const rankFieldId = config.ranking?.rankCustomFieldId ? `customfield_${config.ranking.rankCustomFieldId}` : null;
+    const flaggedFieldId = await getFlaggedFieldId(this.jira, this.ctx.cloudId);
+    const extra = [rankFieldId, flaggedFieldId, estimation?.fieldId].filter((f): f is string => !!f);
+    let read: ProjectRead;
+    try {
+      read = await this.ctx.readProject(extra);
+    } catch (err) {
+      if (isRateLimited(err)) throw err;
+      return no(`copy failed: ${(err as Error)?.message ?? err}`.slice(0, 120));
+    }
+    if (read.mode !== "cache") return no("copy unavailable");
+    if (read.outdated) return no(`${read.outdated} cards still being read with the board's fields`);
+    this.source = "issue copy";
+    return { issues: read.issues, rankFieldId, flaggedFieldId, subQuery };
+  }
+
+  private async filterJql(filterId: number | string): Promise<string | null> {
+    const key = `${this.ctx.cloudId}|${filterId}`;
+    const hit = filterJqlCache.get(key);
+    if (hit && Date.now() - hit.at < FILTER_TTL_MS) return hit.jql;
+    // A filter the user cannot read is not a reason to fail the board: the board API is read instead.
+    const jql = await this.jira.getFilterJql(filterId).catch(() => null);
+    filterJqlCache.set(key, { at: Date.now(), jql });
+    return jql;
+  }
+
   private async projectVersions(): Promise<BoardVersion[]> {
     try {
       const raw = await this.jira.getProjectVersions(this.ctx.projectKey);
@@ -282,12 +377,32 @@ export class BoardService {
       "labels", "fixVersions", "resolutiondate", "updated",
     ];
     const base = `project = "${this.ctx.projectKey}" AND (statusCategory != Done OR resolutiondate >= -14d)`;
-    let raw: any[];
-    try {
-      raw = await this.jira.searchIssues(`${base} ORDER BY Rank ASC`, fields);
-    } catch (err) {
-      if (!(err instanceof JiraApiError) || err.status !== 400) throw err;
-      raw = await this.jira.searchIssues(`${base} ORDER BY created ASC`, fields);
+    // The status board is the project's own issues by definition, so the copy stands in once it holds the rank.
+    let raw: any[] | null = null;
+    if (boardCacheEnabled() && this.ctx.readProject) {
+      const rankFieldId = await getRankFieldId(this.jira, this.ctx.cloudId);
+      try {
+        const read = await this.ctx.readProject(rankFieldId ? [rankFieldId] : []);
+        if (read.mode === "cache" && !read.outdated) {
+          raw = statusBoardFromCache(read.issues, { rankFieldId, nowMs: Date.now() });
+          this.source = "issue copy";
+        } else {
+          this.source = `JQL (${read.mode !== "cache" ? "copy unavailable" : `${read.outdated} cards still being read with the rank`})`;
+        }
+      } catch (err) {
+        if (isRateLimited(err)) throw err;
+        this.source = "JQL (copy failed)";
+      }
+    } else {
+      this.source = "JQL";
+    }
+    if (!raw) {
+      try {
+        raw = await this.jira.searchIssues(`${base} ORDER BY Rank ASC`, fields);
+      } catch (err) {
+        if (!(err instanceof JiraApiError) || err.status !== 400) throw err;
+        raw = await this.jira.searchIssues(`${base} ORDER BY created ASC`, fields);
+      }
     }
 
     const order: StatusCategory[] = ["new", "indeterminate", "done"];

@@ -9,6 +9,8 @@ import { AtlassianAuthError } from "./atlassian.js";
 import { authRequired, noProjectSelected, projectNotAccessible, staffOnly } from "../errors.js";
 import { getSprintFieldId, getStartDateFieldId, startDateFieldOverride } from "../fieldDiscovery.js";
 import { JiraClient } from "../jiraClient.js";
+import { applyWriteToCache } from "../issueCacheStore.js";
+import { noteLimited, noteNearLimit, quotaView } from "../jiraQuota.js";
 import { TaskService } from "../taskService.js";
 import { clearAuthCookies } from "./cookies.js";
 import { deleteRefreshToken } from "./refreshTokenStore.js";
@@ -61,6 +63,13 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
         commitAccess(res, retry.access);
         return retry.accessToken;
       },
+      // Every write this user makes marks the issue cache, so the refresh after it is not stale.
+      onWrite: (write) => applyWriteToCache(session.cloudId, session.accountId, write),
+      // The app's quota is shared by everyone: what one request hears, every instance acts on.
+      onRateSignal: (signal) =>
+        signal.kind === "near"
+          ? noteNearLimit(session.cloudId, signal.reason)
+          : noteLimited(session.cloudId, signal.retryAfterSec ?? 0, signal.reason),
     });
 
     const startDateFieldId =
@@ -99,7 +108,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
  * session's. From here on `auth.session.projectKey` is that project for every route, so
  * two tabs on two projects never see each other's.
  */
-export async function requireProject(req: Request, _res: Response, next: NextFunction): Promise<void> {
+export async function requireProject(req: Request, res: Response, next: NextFunction): Promise<void> {
   const auth = req.auth;
   if (!auth) {
     next(authRequired());
@@ -120,10 +129,36 @@ export async function requireProject(req: Request, _res: Response, next: NextFun
       startDateFieldId: auth.startDateFieldId,
       sprintFieldId: auth.sprintFieldId,
     });
+    // Whatever this route answers from the issue copy because Jira refused for rate, the browser is told
+    // (X-Jira-Limited: seconds until Jira said to come back) so the page can say its data may lag.
+    const json = res.json.bind(res);
+    res.json = (body: unknown) => {
+      const sec = auth.taskService?.lastRead?.limitedForSec;
+      if (sec && !res.headersSent) res.setHeader("X-Jira-Limited", String(Math.ceil(sec)));
+      return json(body);
+    };
     next();
   } catch (err) {
     next(err);
   }
+}
+
+/**
+ * A request the browser makes ahead of need (`X-GMS-Background: 1` — a tab warmed before it is
+ * opened) is turned away while the Jira quota is nearly spent: the tab asks for itself when it is
+ * opened, and what is left of the quota goes to what people are actually doing.
+ */
+export async function deferBackgroundWhenLow(req: Request, res: Response, next: NextFunction): Promise<void> {
+  if (req.get("x-gms-background") !== "1" || !req.auth) {
+    next();
+    return;
+  }
+  const quota = await quotaView(req.auth.session.cloudId);
+  if (!quota.deferBackground) {
+    next();
+    return;
+  }
+  res.status(503).json({ error: "Jira sắp hết hạn mức truy cập; tab sẽ tải khi được mở.", code: "JIRA_BUDGET_DEFERRED" });
 }
 
 /**

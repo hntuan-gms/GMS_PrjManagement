@@ -126,3 +126,28 @@ export async function getFlaggedFieldId(jira: JiraClient, cloudId: string): Prom
 export function startDateFieldOverride(): string | null {
   return process.env.JIRA_START_DATE_FIELD_ID?.trim() || null;
 }
+
+const rankCache = new Map<string, { value: string | null; expiresAt: number }>();
+
+/**
+ * The site's Rank field (Jira Software's LexoRank, a string that sorts in board order), or null
+ * without Jira Software. The agile board names it in its configuration; the status board has no
+ * configuration to ask, so it is found here — what lets the issue copy order a board itself.
+ */
+export async function getRankFieldId(jira: JiraClient, cloudId: string): Promise<string | null> {
+  const hit = rankCache.get(cloudId);
+  if (hit && hit.expiresAt > Date.now()) return hit.value;
+  let value: string | null = null;
+  try {
+    const fields = await fieldsOf(jira, cloudId);
+    value =
+      fields.find((f) => f.schema?.custom === "com.pyxis.greenhopper.jira:gh-lexo-rank")?.id ??
+      fields.find((f) => f.custom && f.name?.toLowerCase() === "rank")?.id ??
+      null;
+  } catch (err) {
+    console.warn(`[fieldDiscovery] could not resolve Rank field for ${cloudId}:`, err);
+    return null;
+  }
+  rankCache.set(cloudId, { value, expiresAt: Date.now() + TTL_MS });
+  return value;
+}

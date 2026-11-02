@@ -159,6 +159,22 @@ function takePrefetched<T>(kind: "tasks" | "users"): Promise<T> | null {
 }
 
 let unauthorizedHandler: (() => void) | null = null;
+
+/**
+ * Told when an answer came from the server's copy of Jira because Jira is refusing for rate
+ * (the X-Jira-Limited header: seconds until Jira said to come back). The workspace shows a notice.
+ */
+let jiraLimitedHandler: ((seconds: number) => void) | null = null;
+
+export function setJiraLimitedHandler(fn: ((seconds: number) => void) | null): void {
+  jiraLimitedHandler = fn;
+}
+
+/**
+ * A request made ahead of need (a tab warmed before it is opened). The server turns it away while
+ * the Jira quota is nearly spent, and the tab then asks for itself when opened.
+ */
+const BACKGROUND: RequestInit = { headers: { "X-GMS-Background": "1" } };
 let notifiedUnauthorized = false;
 
 /**
@@ -197,6 +213,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   notifiedUnauthorized = false;
+  const limited = Number(res.headers.get("X-Jira-Limited"));
+  if (limited > 0) jiraLimitedHandler?.(limited);
   if (res.status === 204) return undefined as T;
   return res.json();
 }
@@ -349,9 +367,10 @@ export const api = {
     }),
 
   // Timesheet — Jira worklogs, read and written directly.
-  getTimesheet: (from: string, to: string) =>
+  getTimesheet: (from: string, to: string, opts?: { background?: boolean }) =>
     request<Timesheet>(
-      `/timesheet?from=${from}&to=${to}&tz=${-new Date().getTimezoneOffset()}`
+      `/timesheet?from=${from}&to=${to}&tz=${-new Date().getTimezoneOffset()}`,
+      opts?.background ? BACKGROUND : undefined
     ),
   logWork: (input: { issueKey: string; date: string; hours: number; comment?: string | null }) =>
     request<WorklogEntry>("/timesheet/worklogs", {
@@ -469,8 +488,8 @@ export const api = {
     request<void>(`/ai/plans/${encodeURIComponent(runId)}/discard`, { method: "POST" }),
 
   // Boards & sprints. Every call writes to Jira directly (see server/src/routes/board.ts).
-  getBoard: (boardId: number | null) =>
-    request<BoardSnapshot>(`/board${boardId ? `?boardId=${boardId}` : ""}`),
+  getBoard: (boardId: number | null, opts?: { background?: boolean }) =>
+    request<BoardSnapshot>(`/board${boardId ? `?boardId=${boardId}` : ""}`, opts?.background ? BACKGROUND : undefined),
   createBoard: (name: string, type: "scrum" | "kanban") =>
     request<{ id: number; name: string; type: string }>("/board/boards", {
       method: "POST",

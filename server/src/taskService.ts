@@ -1,6 +1,11 @@
 import { getProjectMembers, type ProjectMembers } from "./projectMembers.js";
 import { adfToText, textToAdf } from "./adf.js";
-import { searchProjectIssues, shareInflight } from "./parallelSearch.js";
+import { isRateLimited, searchProjectIssues, shareInflight, type ProjectSearchResult } from "./parallelSearch.js";
+import { cacheFields, issueCacheEnabled, readCachedProject } from "./issueCache.js";
+import { pgIssueCache } from "./issueCacheStore.js";
+import { quotaView } from "./jiraQuota.js";
+import { ensureProjectWebhook, LIVE_DELTA_INTERVAL_MS, webhookLive } from "./jiraWebhooks.js";
+import { loadAuthConfig } from "./auth/config.js";
 import { JiraApiError, matchTransition, type JiraClient } from "./jiraClient.js";
 import { describeField, fieldValue, fieldsNamedInAny, optionalTransitionFields, requiredTransitionFields, type JiraFieldMeta, type TransitionField } from "./transitionFields.js";
 import * as store from "./store.js";
@@ -130,7 +135,18 @@ export interface UpdateResult {
  * references, so this is free — and it means the access token can never go stale
  * inside a cached object, and one user's state can never leak into another's.
  */
+/** What a project read was, beyond its issues: whether Jira was refusing, and how complete the copy's field list is. */
+export type ProjectRead = ProjectSearchResult & {
+  /** Jira refused for rate and the issues are the copy's: seconds until it said to come back. */
+  limitedForSec?: number | null;
+  /** Visible issues not yet re-read with the current field list (0 = every field is there). */
+  outdated?: number;
+};
+
 export class TaskService {
+  /** Set by the last project read of this request, for the route to tell the browser (X-Jira-Limited). */
+  lastRead: ProjectRead | null = null;
+
   constructor(
     private readonly jira: JiraClient,
     private readonly ctx: TaskContext
@@ -161,19 +177,12 @@ export class TaskService {
    */
   async listTasks(opts: { description?: boolean } = {}): Promise<Task[]> {
     const t0 = Date.now();
-    const fields = this.searchFields(true).filter((f) => opts.description !== false || f !== "description");
     // The whole project's overlays in one read, and one write for whatever
     // reconciliation changed. Against the old JSON file a read and a write per
     // task were free; against Postgres they are a round trip each, so a 100-task
     // project would otherwise spend 200 of them inside a single page load.
     const [jiraRes, overlayRes] = await Promise.all([
-      // One read per (account, project, field set) at a time: the page asks for the task list
-      // and the progress figures together, and each used to walk the whole project on its own.
-      timed(() =>
-        shareInflight(`${this.ctx.cloudId}|${this.ctx.accountId}|${this.ctx.projectKey}|${fields.join(",")}`, () =>
-          searchProjectIssues(this.jira, this.ctx.projectKey, fields)
-        )
-      ),
+      timed(() => this.projectIssues(opts.description !== false)),
       timed(() => store.getProjectOverlays(this.ctx.cloudId, this.ctx.projectKey)),
     ]);
     const tReads = Date.now();
@@ -218,6 +227,60 @@ export class TaskService {
         `jira writes ${Date.now() - tPersist}ms (${toWriteJira.length}), total ${Date.now() - t0}ms`
     );
     return tasks;
+  }
+
+  /**
+   * Every issue of the project this user can see, oldest first: from the Postgres copy
+   * (issueCache.ts), which asks Jira only for this user's visible ids and what changed —
+   * or, if the copy cannot be used here, read whole from Jira as before. A rate limit is
+   * never answered by the whole read: that would spend more of the same exhausted quota.
+   *
+   * One read per (account, project, description or not) at a time: the page asks for the
+   * task list and the progress figures together, and each used to walk the whole project.
+   */
+  async projectIssues(description: boolean, extraFields: string[] = []): Promise<ProjectRead> {
+    const { cloudId, accountId, projectKey } = this.ctx;
+    let reason: string | undefined;
+    if (issueCacheEnabled()) {
+      try {
+        // Registration (JIRA_WEBHOOKS) runs on its own; a live webhook lets "what changed" be asked less often.
+        void ensureProjectWebhook(this.jira, { cloudId, projectKey, accountId, baseUrl: loadAuthConfig().appBaseUrl });
+        const [quota, live] = await Promise.all([quotaView(cloudId), webhookLive(cloudId, projectKey)]);
+        const read = await shareInflight(`cache|${cloudId}|${accountId}|${projectKey}|${description}|${extraFields.join(",")}`, () =>
+          readCachedProject(this.jira, pgIssueCache, {
+            cloudId,
+            projectKey,
+            accountId,
+            fields: cacheFields(this.searchFields(true)),
+            description,
+            extraFields,
+            quota,
+            deltaIntervalMs: live ? LIVE_DELTA_INTERVAL_MS : undefined,
+          })
+        );
+        const limitedForSec = read.rateLimited ? Number(read.rateLimited.retryAfter) || 60 : null;
+        if (read.rateLimited) console.warn(`[issueCache] ${projectKey}: Jira is rate limiting; served the copy (retry-after ${limitedForSec}s)`);
+        this.lastRead = {
+          issues: read.issues,
+          mode: "cache",
+          requests: read.requests,
+          detail: `${read.detail}${live ? ", webhook live" : ""}${quota.deferBackground ? ", quota low" : ""}`,
+          limitedForSec,
+          outdated: read.outdated,
+        };
+        return this.lastRead;
+      } catch (err) {
+        if (isRateLimited(err)) throw err;
+        reason = `cache unavailable: ${(err as Error)?.message ?? err}`.slice(0, 200);
+        console.warn(`[issueCache] ${projectKey}: reading Jira directly — ${reason}`);
+      }
+    }
+    const fields = this.searchFields(true).filter((f) => description || f !== "description");
+    const res = await shareInflight(`${cloudId}|${accountId}|${projectKey}|${fields.join(",")}`, () =>
+      searchProjectIssues(this.jira, projectKey, fields)
+    );
+    this.lastRead = reason ? { ...res, reason: res.reason ? `${reason}; ${res.reason}` : reason } : res;
+    return this.lastRead;
   }
 
   /** The description of one issue, as plain text — what the list leaves out. */
@@ -364,17 +427,13 @@ export class TaskService {
   }
 
   /**
-   * Refuses a move in the WBS (new parent / new type) that would corrupt it. One
-   * project-wide read of parent + type, which is the price of being able to see a
-   * loop — a rare edit, so not worth caching.
+   * Refuses a move in the WBS (new parent / new type) that would corrupt it. Needs
+   * the whole project's parent + type to see a loop; the issue copy supplies them.
    */
   private async assertStructure(id: string, input: TaskUpdateInput): Promise<void> {
     this.assertOwnKey(id);
     if (input.parentKey) this.assertOwnKey(input.parentKey);
-    const [issues, types] = await Promise.all([
-      this.jira.searchIssues(`project = ${this.ctx.projectKey}`, ["parent", "issuetype", "assignee"]),
-      this.listIssueTypes(),
-    ]);
+    const [{ issues }, types] = await Promise.all([this.projectIssues(false), this.listIssueTypes()]);
     const nodes: StructureNode[] = issues.map((i) => ({
       id: i.key,
       parentKey: i.fields?.parent?.key ?? null,
@@ -692,9 +751,10 @@ export class TaskService {
    * cascade touches does not, so any corruption picked up here stuck permanently.
    */
   private async cascadeSnapshot(): Promise<Task[]> {
-    const jql = `project = ${this.ctx.projectKey} ORDER BY created ASC`;
-    const [issues, overlays] = await Promise.all([
-      this.jira.searchIssues(jql, this.searchFields(false)),
+    // From the issue copy: the primary task's own write marked it stale, so it is re-read by
+    // id there, never from a search index that may not have caught up with it.
+    const [{ issues }, overlays] = await Promise.all([
+      this.projectIssues(false),
       store.getProjectOverlays(this.ctx.cloudId, this.ctx.projectKey),
     ]);
     return issues.map(
