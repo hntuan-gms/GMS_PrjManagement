@@ -3,7 +3,7 @@ import { api } from "../api";
 import { isAssignableType } from "../types";
 import type { BulkTaskCreateInput, BulkTaskCreateResult, IssueTypeName, JiraUser, Task } from "../types";
 import { filesFromClipboard, hasPending, NO_ATTACHMENTS, uploadPending, type PendingAttachments } from "../attachments";
-import { HOURS_PER_DAY, localToday, roundHours } from "../taskForm";
+import { endDateOf, HOURS_PER_DAY, localToday, roundHours, shortDate } from "../taskForm";
 import AttachmentPicker from "./AttachmentPicker";
 import DurationHint from "./DurationHint";
 import LabelsInput from "./LabelsInput";
@@ -117,6 +117,7 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate, initi
 
   const effectiveSummaries = getEffectiveSummaries();
   const taskCount = effectiveSummaries.length;
+  const endDate = endDateOf(startDate, durationDays);
 
   function handleTaskItemChange(index: number, value: string) {
     const updated = [...taskItems];
@@ -274,8 +275,8 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate, initi
         <div className="input-mode-header">
           <span className="field-label-text">
             Danh sách công việc{" "}
-            <span className="task-count-badge">
-              {taskCount > 0 ? `${taskCount} task` : "0 task"}
+            <span className={`task-count-badge${taskCount === 0 ? " is-empty" : ""}`} aria-live="polite">
+              {taskCount > 0 ? `${taskCount} task sẵn sàng` : "Chưa có task"}
             </span>
           </span>
           <div className="segmented-control mode-tabs">
@@ -318,15 +319,21 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate, initi
                         : "Nhập tên công việc tiếp theo..."
                     }
                   />
-                  <button
-                    type="button"
-                    className="task-remove-btn"
-                    onClick={() => handleRemoveTaskItem(index)}
-                    title="Xoá dòng này"
-                    aria-label="Xoá"
-                  >
-                    ✕
-                  </button>
+                  {/* A lone empty row has nothing to remove; the spacer keeps the input's width steady
+                      when the button appears with the first character typed. */}
+                  {taskItems.length > 1 || item.trim() ? (
+                    <button
+                      type="button"
+                      className="task-remove-btn"
+                      onClick={() => handleRemoveTaskItem(index)}
+                      title={taskItems.length > 1 ? "Xoá dòng này" : "Xoá nội dung"}
+                      aria-label={taskItems.length > 1 ? "Xoá dòng này" : "Xoá nội dung"}
+                    >
+                      ✕
+                    </button>
+                  ) : (
+                    <span className="task-remove-spacer" aria-hidden="true" />
+                  )}
                 </div>
               ))}
             </div>
@@ -353,9 +360,13 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate, initi
           </div>
         )}
 
-        {/* Common Settings for created tasks */}
+        {/* Everything below is one set of values stamped on every task named above. */}
+        <div className="form-section-label" role="separator">
+          <span>{taskCount > 1 ? "Thiết lập áp dụng chung" : "Thông tin chung"}</span>
+        </div>
+
         <label className="field">
-          <span className="field-label-text">Mô tả {taskCount > 1 ? "(áp dụng cho tất cả task)" : ""}</span>
+          <span className="field-label-text">Mô tả</span>
           <textarea
             rows={2}
             value={description}
@@ -405,6 +416,11 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate, initi
                 if (!estimateTouched && !Number.isInteger(n)) setEstimate(roundHours(n * HOURS_PER_DAY));
               }}
             />
+            {endDate && (
+              <small className="field-hint end-date-hint" title={`Kết thúc ngày ${shortDate(endDate)}`}>
+                → Kết thúc: <b>{shortDate(endDate, startDate)}</b>
+              </small>
+            )}
             <DurationHint days={durationDays} />
           </label>
           <label className="field">
@@ -421,6 +437,9 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate, initi
               }}
             />
           </label>
+        </div>
+
+        <div className="field-row field-row-2">
           <label className="field">
             <span className="field-label-text">Người phụ trách</span>
             {isAssignableType(issueType) ? (
@@ -438,9 +457,6 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate, initi
               </span>
             )}
           </label>
-        </div>
-
-        <div className="field-row">
           <label className="field">
             <span className="field-label-text">Độ ưu tiên</span>
             <select value={priority} onChange={(e) => setPriority(e.target.value)}>
@@ -452,16 +468,15 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate, initi
               ))}
             </select>
           </label>
-          <div className="field field-wide">
-            <span className="field-label-text">Nhãn {taskCount > 1 ? "(áp dụng cho tất cả task)" : ""}</span>
-            <LabelsInput value={labels} onChange={setLabels} suggestions={labelSuggestions} />
-          </div>
         </div>
 
         <div className="field">
-          <span className="field-label-text">
-            Đính kèm &amp; liên kết {taskCount > 1 ? "(gắn vào tất cả task)" : ""}
-          </span>
+          <span className="field-label-text">Nhãn</span>
+          <LabelsInput value={labels} onChange={setLabels} suggestions={labelSuggestions} />
+        </div>
+
+        <div className="field">
+          <span className="field-label-text">Đính kèm &amp; liên kết</span>
           <AttachmentPicker value={attachments} onChange={setAttachments} />
         </div>
 

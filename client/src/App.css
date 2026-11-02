@@ -803,6 +803,35 @@ button.menu-item > .icon {
   font-weight: 600;
   margin-left: 6px;
 }
+/* Nothing ready to create yet: same pill, no accent. */
+.task-count-badge.is-empty {
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+}
+
+/* Labels the block of fields that are shared by every task above it. */
+.form-section-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 2px 0 -4px;
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+.form-section-label::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--color-border);
+}
+
+.end-date-hint b {
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
 
 /* ==========================================================================
    Dynamic Task Items List (CreateTaskModal)
@@ -881,6 +910,12 @@ button.menu-item > .icon {
   cursor: pointer;
   flex-shrink: 0;
   transition: all var(--transition-fast);
+}
+
+.task-remove-spacer {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
 }
 
 .task-remove-btn:hover {
