@@ -73,12 +73,15 @@ export const resourcesAdminOnly = () =>
     "Trang Nguồn lực chỉ dành cho người có quyền Administer Projects trên dự án này."
   );
 
-/** SLA targets are what the team commits to, so only a project admin sets them (routes/sla.ts). */
-export const slaAdminOnly = () =>
+/**
+ * SLA targets are what the team commits to, and the working calendar changes everyone's numbers, so only a
+ * project admin sets either (routes/sla.ts, routes/calendar.ts). Same code; the message names what was refused.
+ */
+export const slaAdminOnly = (what = "cài đặt SLA") =>
   new AppError(
     403,
     "SLA_ADMIN_ONLY",
-    "Chỉ người có quyền Administer Projects trên dự án này mới sửa được cài đặt SLA."
+    `Chỉ người có quyền Administer Projects trên dự án này mới sửa được ${what}.`
   );
 
 export const badRequest = (message: string) => new AppError(400, "BAD_REQUEST", message);

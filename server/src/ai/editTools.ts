@@ -6,7 +6,8 @@ import type { ToolContext, ToolOutcome } from "./tools.js";
 import { applyMentions, mentionsToPlain, type ResolvedMention } from "./mentionText.js";
 import { DUPLICATE_THRESHOLD, findSimilarTasks } from "./similarity.js";
 import { buildTaskDigest } from "./taskDigest.js";
-import { addDays, findTaskIn, fold, ISO_DATE, resolvePerson, resolvePriority, str } from "./toolUtils.js";
+import { addDays, turnCalendar, findTaskIn, fold, ISO_DATE, resolvePerson, resolvePriority, str } from "./toolUtils.js";
+import { dayLabel, isWorkingDate } from "../workCalendar.js";
 import { resolveViewFilter } from "./viewFilter.js";
 
 /**
@@ -1078,21 +1079,25 @@ async function runTimesheet(args: Record<string, unknown>, ctx: ToolContext): Pr
   const from = str(args, "from") || weekStart(ctx.today);
   const to = str(args, "to") || addDays(weekStart(ctx.today), 6);
   if (!ISO_DATE.test(from) || !ISO_DATE.test(to)) return { response: { error: "from/to phải ở dạng YYYY-MM-DD." } };
-  const sheet = await ctx.timesheet.read(from, to, ctx.tzOffsetMinutes);
+  const [sheet, calendar] = await Promise.all([ctx.timesheet.read(from, to, ctx.tzOffsetMinutes), turnCalendar(ctx)]);
   const want = fold(str(args, "person"));
   const people = sheet.people.filter((p) => !want || fold(p.displayName).includes(want));
   // Working days in range that have passed (or are today) — the honest
-  // denominator for "should have logged by now".
+  // denominator for "should have logged by now". The project's calendar decides:
+  // a holiday is nobody's gap, a make-up Saturday is a working day.
   const days: string[] = [];
+  const holidays: Array<{ date: string; name: string }> = [];
   for (let d = from; d <= to; d = addDays(d, 1)) {
-    const wd = new Date(d + "T00:00:00Z").getUTCDay();
-    if (wd !== 0 && wd !== 6 && d <= ctx.today) days.push(d);
+    if (isWorkingDate(d, calendar)) {
+      if (d <= ctx.today) days.push(d);
+    } else if (calendar.holidays.has(d)) holidays.push({ date: d, name: dayLabel(d, calendar) });
   }
   return {
     response: {
       from,
       to,
       workingDaysSoFar: days.length,
+      ...(holidays.length > 0 ? { holidays } : {}),
       people: people.map((p) => {
         const mine = sheet.entries.filter((e) => e.authorAccountId === p.accountId);
         const byTask = new Map<string, number>();

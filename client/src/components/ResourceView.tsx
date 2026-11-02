@@ -27,6 +27,8 @@ import ResourceProfileDrawer from "./ResourceProfileDrawer";
 import ResourceUnassigned, { type DragState } from "./ResourceUnassigned";
 import SavedFilterMenu from "./SavedFilterMenu";
 import SkillMatrixView from "./SkillMatrixView";
+import { useWorkCalendar } from "./workCalendarContext";
+import { dayKind, dayLabel } from "../workCalendar";
 
 interface Props {
   tasks: Task[];
@@ -62,7 +64,8 @@ const LEGEND: Array<{ band: string; short: string; title: string }> = [
   {
     band: "off",
     short: "Ngày nghỉ",
-    title: "Cuối tuần hoặc ngày nghỉ phép (sọc xám). Sọc đỏ: có việc bị xếp vào ngày nghỉ — không ai làm được. Ô trống: chưa có việc.",
+    title:
+      "Cuối tuần, ngày lễ (theo Lịch làm việc của dự án) hoặc ngày nghỉ phép (sọc xám). Sọc đỏ: có việc bị xếp vào ngày nghỉ — không ai làm được. Ô trống: chưa có việc.",
   },
 ];
 
@@ -124,6 +127,8 @@ export default function ResourceView({
   // blank everyone else's rows here — so only the task facets apply.
   const taskFacets = useMemo<TaskFilter>(() => ({ ...filter, text: "", people: new Set() }), [filter]);
   const filtering = isTaskFiltering(taskFacets);
+  // The project's working calendar: a holiday has no capacity for anyone, a make-up Saturday has a day's.
+  const calendar = useWorkCalendar();
   const filteredTasks = useMemo(() => {
     if (!filtering) return tasks;
     const ctx = { today, epicOf: buildEpicIndex(tasks), jqlKeys };
@@ -143,8 +148,9 @@ export default function ResourceView({
         from: span.from,
         to: span.to,
         includeIdle: true,
+        calendar,
       }),
-    [filteredTasks, users, pool, span]
+    [filteredTasks, users, pool, span, calendar]
   );
 
   const granularity: Granularity = scale.granularity;
@@ -685,6 +691,7 @@ function HeatmapHeader({
   today: string;
   memberNote: ReactNode;
 }) {
+  const calendar = useWorkCalendar();
   const months: Array<{ label: MonthLabel; span: number }> = [];
   for (const { start } of spans) {
     // By month the columns are months themselves, so the band above them is the year.
@@ -713,17 +720,25 @@ function HeatmapHeader({
           Thành viên
           {memberNote}
         </div>
-        {spans.map(({ start, end }) => (
-          <div key={start} className={`rv-cell rv-head-cell ${today >= start && today <= end ? "is-today" : ""}`}
-            title={start === end ? formatDate(start) : `${formatDate(start)} → ${formatDate(end)}`}
-          >
-            {granularity === "week"
-              ? `${start.slice(8, 10)}/${start.slice(5, 7)}`
-              : granularity === "month"
-                ? `Thg ${Number(start.slice(5, 7))}`
-                : start.slice(8, 10)}
-          </div>
-        ))}
+        {spans.map(({ start, end }) => {
+          // A holiday is marked on its date, not by tinting the load cells: a yellow cell already means "<50%".
+          const holiday = start === end && dayKind(start, calendar) === "holiday" ? dayLabel(start, calendar) || "Ngày lễ" : null;
+          const holidays = start === end ? 0 : [...calendar.holidays.keys()].filter((d) => d >= start && d <= end).length;
+          const when = start === end ? formatDate(start) : `${formatDate(start)} → ${formatDate(end)}`;
+          return (
+            <div
+              key={start}
+              className={`rv-cell rv-head-cell ${today >= start && today <= end ? "is-today" : ""} ${holiday ? "is-holiday" : ""}`}
+              title={holiday ? `${when} · Ngày lễ: ${holiday}` : holidays > 0 ? `${when} · ${holidays} ngày lễ` : when}
+            >
+              {granularity === "week"
+                ? `${start.slice(8, 10)}/${start.slice(5, 7)}`
+                : granularity === "month"
+                  ? `Thg ${Number(start.slice(5, 7))}`
+                  : start.slice(8, 10)}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

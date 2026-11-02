@@ -1,5 +1,6 @@
 import type { ResourceAbsence, ResourceProfile } from "../resourceStore.js";
-import { eachDate, isWeekend } from "../workload.js";
+import { eachDate } from "../workload.js";
+import { DEFAULT_WORK_CALENDAR, isWorkingDate, type WorkCalendar } from "../workCalendar.js";
 import type { BoardIssue, BoardSnapshot, Sprint } from "./boardTypes.js";
 
 /**
@@ -10,6 +11,8 @@ import type { BoardIssue, BoardSnapshot, Sprint } from "./boardTypes.js";
  *
  * Pure. "Today" and the timezone come from the browser: a Jira sprint starts at
  * a datetime, and whether 17:00Z is Monday or Tuesday depends on where you are.
+ * Working days follow the project's calendar (workCalendar.ts: holidays off,
+ * make-up days worked); callers that pass none get Monday–Friday.
  */
 
 const DAY_MS = 86_400_000;
@@ -23,9 +26,9 @@ export function localDate(iso: string | null, offsetMinutes: number): string | n
   return new Date(t + offsetMinutes * 60_000).toISOString().slice(0, 10);
 }
 
-export function workingDays(from: string, to: string): string[] {
+export function workingDays(from: string, to: string, calendar: WorkCalendar = DEFAULT_WORK_CALENDAR): string[] {
   if (to < from) return [];
-  return eachDate(from, to).filter((d) => !isWeekend(d));
+  return eachDate(from, to).filter((d) => isWorkingDate(d, calendar));
 }
 
 export function addDays(iso: string, days: number): string {
@@ -88,14 +91,15 @@ export function sprintFacts(
   snapshot: BoardSnapshot,
   sprint: Sprint,
   today: string,
-  offsetMinutes: number
+  offsetMinutes: number,
+  calendar: WorkCalendar = DEFAULT_WORK_CALENDAR
 ): SprintFacts {
   const estimated = !!snapshot.estimation;
   const items = snapshot.issues.filter((i) => i.sprintId === sprint.id && !i.subtask);
   const start = localDate(sprint.startDate, offsetMinutes);
   const end = localDate(sprint.endDate, offsetMinutes);
 
-  const all = start && end ? workingDays(start, end) : [];
+  const all = start && end ? workingDays(start, end, calendar) : [];
   const elapsed = all.filter((d) => d < today).length;
   const total = all.length;
 
@@ -127,7 +131,7 @@ export function sprintFacts(
   const idleDays = (updated: string | null) => {
     const last = localDate(updated, offsetMinutes);
     // Working days since the last change, today included: touched Monday, asked Thursday → 3.
-    return last ? workingDays(addDays(last, 1), today).length : 0;
+    return last ? workingDays(addDays(last, 1), today, calendar).length : 0;
   };
 
   return {
@@ -156,7 +160,7 @@ export function sprintFacts(
 export interface Availability {
   accountId: string;
   name: string;
-  /** Working days in the window minus declared absences. */
+  /** Working days in the window (project calendar) minus declared absences. */
   days: number;
   hoursPerDay: number;
   /** days × hoursPerDay — what this person can give the window. */
@@ -170,9 +174,10 @@ export function availability(
   absences: ResourceAbsence[],
   from: string,
   to: string,
-  defaultHours: number
+  defaultHours: number,
+  calendar: WorkCalendar = DEFAULT_WORK_CALENDAR
 ): Availability[] {
-  const days = workingDays(from, to);
+  const days = workingDays(from, to, calendar);
   return members.map((m) => {
     const profile = profiles.find((p) => p.accountId === m.accountId);
     const away = absences.filter((a) => a.accountId === m.accountId);
@@ -196,7 +201,8 @@ export function plannedWindow(
   snapshot: BoardSnapshot,
   target: Sprint,
   today: string,
-  offsetMinutes: number
+  offsetMinutes: number,
+  calendar: WorkCalendar = DEFAULT_WORK_CALENDAR
 ): { start: string; end: string; lengthDays: number } {
   const own = { start: localDate(target.startDate, offsetMinutes), end: localDate(target.endDate, offsetMinutes) };
   if (own.start && own.end && own.end > own.start) {
@@ -212,6 +218,7 @@ export function plannedWindow(
   const active = snapshot.sprints.find((s) => s.state === "active");
   const activeEnd = localDate(active?.endDate ?? null, offsetMinutes);
   let start = activeEnd && activeEnd >= today ? addDays(activeEnd, 1) : today;
-  while (isWeekend(start)) start = addDays(start, 1);
+  // The first working day: past a weekend, and past a holiday too (a sprint does not start on Tết).
+  for (let i = 0; i < 60 && !isWorkingDate(start, calendar); i++) start = addDays(start, 1);
   return { start, end: addDays(start, lengthDays - 1), lengthDays };
 }

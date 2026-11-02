@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { burndown, localDate, shortDate, totalWeight, workingDaysLocal } from "../boardModel";
 import type { BoardIssue, BoardSnapshot, Sprint, SprintInsight } from "../types";
+import { useWorkCalendar } from "./workCalendarContext";
 
 /**
  * The active sprint at a glance, above the board: goal, time left, done vs
@@ -40,11 +41,12 @@ const CONFIDENCE: Record<"high" | "medium" | "low", string> = {
 };
 
 export default function SprintHeader(props: Props) {
+  const calendar = useWorkCalendar();
   const { sprint, snapshot, issues, today, unit, insight } = props;
   const [open, setOpen] = useState(true);
   const start = localDate(sprint.startDate);
   const end = localDate(sprint.endDate);
-  const days = start && end ? workingDaysLocal(start, end) : [];
+  const days = start && end ? workingDaysLocal(start, end, calendar) : [];
   const elapsed = days.filter((d) => d < today).length;
   const left = Math.max(0, days.length - elapsed);
   const overdue = !!end && end < today;
@@ -57,7 +59,7 @@ export default function SprintHeader(props: Props) {
   const pace = elapsed === 0 ? "start" : donePct >= elapsedPct + 10 ? "ahead" : donePct >= elapsedPct - 10 ? "ok" : "behind";
 
   // Cheap (one pass per sprint day), so not memoised.
-  const series = burndown(sprint, issues, snapshot, today);
+  const series = burndown(sprint, issues, snapshot, today, calendar);
 
   return (
     <div className="sh">

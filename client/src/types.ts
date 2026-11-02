@@ -1003,10 +1003,29 @@ export interface SavedFilter {
 }
 
 /**
+ * The project's working calendar (server/src/sla.ts, WorkCalendarSettings). Stored inside the SLA row but read
+ * by the heatmap, the timesheet and the sprint header too (workCalendar.ts); edited in its own dialog.
+ */
+export interface WorkCalendarSettings {
+  /** ISO weekdays, 1 = Monday … 7 = Sunday. */
+  workDays: number[];
+  /** Days off for everyone, one entry per date. */
+  holidays: Array<{ date: string; name: string }>;
+  /** Days worked although their weekday is off. Missing in a copy cached before the field existed. */
+  makeUpDays?: Array<{ date: string; name: string }>;
+}
+
+export interface WorkCalendarResponse {
+  calendar: Required<WorkCalendarSettings>;
+  /** Whether the signed-in user may change it (a project admin). */
+  canEdit: boolean;
+}
+
+/**
  * A project's SLA policy — server/src/sla.ts holds the same shape and the rules for
  * a valid one. Priorities and issue types by name, the way Task carries them.
  */
-export interface SlaSettings {
+export interface SlaSettings extends WorkCalendarSettings {
   enabled: boolean;
   /** Only issues created on or after this day (YYYY-MM-DD) are measured. */
   appliesFrom: string | null;
@@ -1016,11 +1035,8 @@ export interface SlaSettings {
   warnPercent: number;
   /** Issue types measured; empty = every type except Epic. */
   issueTypes: string[];
-  /** ISO weekdays, 1 = Monday … 7 = Sunday. */
-  workDays: number[];
   /** "HH:mm", ascending, not overlapping. */
   periods: Array<{ start: string; end: string }>;
-  holidays: Array<{ date: string; name: string }>;
   /** The calendar's timezone, minutes east of UTC (420 = UTC+7). */
   tzOffsetMinutes: number;
 }

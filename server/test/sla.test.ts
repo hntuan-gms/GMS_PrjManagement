@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { AppError } from "../src/errors.js";
-import { DEFAULT_SLA_SETTINGS, validateSlaSettings, withSlaDefaults } from "../src/sla.js";
+import { calendarOf, DEFAULT_SLA_SETTINGS, slaFieldsOf, validateCalendar, validateSlaSettings, withSlaDefaults } from "../src/sla.js";
 
 function rejects(raw: unknown, pattern: RegExp) {
   assert.throws(() => validateSlaSettings(raw), (e: unknown) => e instanceof AppError && e.status === 400 && pattern.test(e.message));
@@ -85,6 +85,46 @@ describe("validateSlaSettings", () => {
   });
 });
 
+describe("validateCalendar", () => {
+  const ok = { workDays: [1, 2, 3, 4, 5], holidays: [], makeUpDays: [] };
+  const refuses = (raw: unknown, pattern: RegExp) =>
+    assert.throws(() => validateCalendar(raw), (e: unknown) => e instanceof AppError && e.status === 400 && /^Lịch làm việc:/.test(e.message) && pattern.test(e.message));
+
+  it("keeps only the three calendar fields, sorted and de-duplicated", () => {
+    const out = validateCalendar({
+      ...ok,
+      makeUpDays: [
+        { date: "2027-02-20", name: "Làm bù" },
+        { date: "2027-01-30", name: " Làm bù Tết " },
+        { date: "2027-01-30", name: "trùng" },
+      ],
+      enabled: true,
+    });
+    assert.deepEqual(out, {
+      workDays: [1, 2, 3, 4, 5],
+      holidays: [],
+      makeUpDays: [
+        { date: "2027-01-30", name: "Làm bù Tết" },
+        { date: "2027-02-20", name: "Làm bù" },
+      ],
+    });
+  });
+
+  it("refuses a bad make-up day, and a day that is both a holiday and a make-up day", () => {
+    refuses({ ...ok, makeUpDays: [{ date: "2027-02-30", name: "x" }] }, /ngày làm bù/);
+    refuses({ ...ok, holidays: [{ date: "2027-02-06", name: "Tết" }], makeUpDays: [{ date: "2027-02-06", name: "x" }] }, /06\/02\/2027.*vừa là ngày lễ vừa là ngày làm bù/);
+    refuses({ ...ok, workDays: [] }, /ngày làm việc/);
+  });
+
+  it("splits a policy into its calendar and SLA parts without losing a field", () => {
+    const s = withSlaDefaults({ enabled: true, makeUpDays: [{ date: "2027-01-30", name: "Làm bù" }] });
+    assert.deepEqual(calendarOf(s), { workDays: s.workDays, holidays: s.holidays, makeUpDays: s.makeUpDays });
+    const sla = slaFieldsOf(s);
+    assert.equal("holidays" in sla || "workDays" in sla || "makeUpDays" in sla, false);
+    assert.deepEqual({ ...sla, ...calendarOf(s) }, s);
+  });
+});
+
 describe("withSlaDefaults", () => {
   it("no row means the defaults, switched off", () => {
     const d = withSlaDefaults(null);
@@ -99,5 +139,6 @@ describe("withSlaDefaults", () => {
     assert.equal(d.enabled, true);
     assert.deepEqual(d.workDays, [1, 2, 3, 4, 5, 6]);
     assert.deepEqual(d.periods, DEFAULT_SLA_SETTINGS.periods);
+    assert.deepEqual(d.makeUpDays, []);
   });
 });

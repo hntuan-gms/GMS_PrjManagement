@@ -4,6 +4,8 @@ import { availability, plannedWindow, sprintFacts, velocityStats } from "../agil
 import { estimateIssues, planSprint, sprintInsight } from "../ai/sprintAi.js";
 import { badRequest } from "../errors.js";
 import * as resources from "../resourceStore.js";
+import { getWorkCalendar } from "../slaStore.js";
+import { DEFAULT_WORK_CALENDAR } from "../workCalendar.js";
 import { boardServiceFor, clock } from "./board.js";
 
 /**
@@ -19,6 +21,12 @@ export const boardAiRouter = Router();
 
 boardAiRouter.use(requireProject);
 
+/** The project's working calendar; a failed read plans on Monday–Friday rather than failing the request. */
+function calendarFor(req: any) {
+  const { session } = req.auth!;
+  return getWorkCalendar(session.cloudId, session.projectKey!).catch(() => DEFAULT_WORK_CALENDAR);
+}
+
 async function agileSnapshot(req: any, boardId: number) {
   const service = boardServiceFor(req);
   const snapshot = await service.snapshot(boardId);
@@ -32,11 +40,11 @@ boardAiRouter.post("/plan", async (req, res, next) => {
   try {
     const { boardId, sprintId } = req.body ?? {};
     const { today, offset } = clock(req.body);
-    const { snapshot } = await agileSnapshot(req, Number(boardId));
+    const [{ snapshot }, calendar] = await Promise.all([agileSnapshot(req, Number(boardId)), calendarFor(req)]);
     const target = snapshot.sprints.find((s) => s.id === Number(sprintId));
     if (!target || target.state !== "future") throw badRequest("Chọn một sprint chưa bắt đầu để lập kế hoạch.");
 
-    const window = plannedWindow(snapshot, target, today, offset);
+    const window = plannedWindow(snapshot, target, today, offset, calendar);
     const { session, taskService } = req.auth!;
     // Best-effort, like the report's team list: without it the plan still works,
     // it just can't account for who is away.
@@ -45,7 +53,7 @@ boardAiRouter.post("/plan", async (req, res, next) => {
       resources.listProfiles(session.cloudId).catch(() => []),
       resources.listAbsences(session.cloudId).catch(() => []),
     ]);
-    const team = availability(members, profiles, absences, window.start, window.end, resources.DEFAULT_CAPACITY_HOURS);
+    const team = availability(members, profiles, absences, window.start, window.end, resources.DEFAULT_CAPACITY_HOURS, calendar);
 
     res.json(
       await planSprint({
@@ -86,10 +94,10 @@ boardAiRouter.post("/insight", async (req, res, next) => {
   try {
     const { boardId, sprintId } = req.body ?? {};
     const { today, offset } = clock(req.body);
-    const { snapshot } = await agileSnapshot(req, Number(boardId));
+    const [{ snapshot }, calendar] = await Promise.all([agileSnapshot(req, Number(boardId)), calendarFor(req)]);
     const sprint = snapshot.sprints.find((s) => s.id === Number(sprintId) && s.state === "active");
     if (!sprint) throw badRequest("Chỉ phân tích được sprint đang chạy.");
-    const facts = sprintFacts(snapshot, sprint, today, offset);
+    const facts = sprintFacts(snapshot, sprint, today, offset, calendar);
     res.json(await sprintInsight({ snapshot, facts, projectKey: req.auth!.session.projectKey! }));
   } catch (err) {
     next(err);

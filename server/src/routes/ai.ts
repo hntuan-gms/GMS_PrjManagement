@@ -12,6 +12,8 @@ import { streamChat, type ChatUsage } from "../ai/chat.js";
 import * as chatStore from "../ai/chatStore.js";
 import * as plans from "../ai/planStore.js";
 import * as resources from "../resourceStore.js";
+import { getWorkCalendar } from "../slaStore.js";
+import type { WorkCalendar } from "../workCalendar.js";
 import type { Predecessor } from "../types.js";
 import { boardAiRouter } from "./boardAi.js";
 import { boardServiceFor } from "./board.js";
@@ -262,6 +264,10 @@ aiRouter.post("/chat", requireProject, express.json({ limit: CHAT_BODY_LIMIT }),
         projectKey: session.projectKey!,
         accountId: session.accountId,
       }),
+      workCalendar: (() => {
+        let loaded: Promise<WorkCalendar> | null = null;
+        return () => (loaded ??= getWorkCalendar(session.cloudId, session.projectKey!));
+      })(),
       tzOffsetMinutes: (() => {
         const n = Number(body?.tzOffsetMinutes);
         return Number.isFinite(n) && Math.abs(n) <= 14 * 60 ? n : 0;

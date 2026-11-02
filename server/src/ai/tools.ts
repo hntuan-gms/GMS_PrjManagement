@@ -11,7 +11,7 @@ import { computeProgress, HEALTH_LABEL } from "../progress.js";
 import { EDIT_TOOLS, editLabelFor, runEditTool } from "./editTools.js";
 import { createProgressReport } from "./progressReport.js";
 import { DUPLICATE_THRESHOLD, findSimilarTasks } from "./similarity.js";
-import { addDays, ISO_DATE, resolvePerson, str } from "./toolUtils.js";
+import { addDays, turnCalendar, ISO_DATE, resolvePerson, str } from "./toolUtils.js";
 import type { ViewFilterEvent } from "./viewFilter.js";
 import { latestReport } from "./reportStore.js";
 import {
@@ -22,6 +22,7 @@ import {
   type Candidate,
   type PersonWorkload,
 } from "../workload.js";
+import type { WorkCalendar } from "../workCalendar.js";
 
 /**
  * What the assistant can actually do, beyond answering.
@@ -76,6 +77,11 @@ export interface ToolContext {
   timesheet: TimesheetService;
   /** Comments and change history of an issue — the task detail's reads and writes. */
   activity: TaskActivity;
+  /**
+   * The project's working calendar (holidays off, make-up days worked), loaded at most once per turn.
+   * Optional so a context built without a database (tests) plans on Monday–Friday.
+   */
+  workCalendar?: () => Promise<WorkCalendar>;
   /** Component / version option lists, issue links, watchers — what the task detail reads from Jira. */
   extras: TaskExtras;
 }
@@ -325,12 +331,13 @@ export function labelFor(name: string): string {
 
 async function workloadOf(ctx: ToolContext): Promise<Map<string, PersonWorkload>> {
   if (ctx.workload) return ctx.workload;
-  const [users, profiles, absences] = await Promise.all([
+  const [users, profiles, absences, calendar] = await Promise.all([
     ctx.taskService.listUsers(),
     resources.listProfiles(ctx.cloudId),
     resources.listAbsences(ctx.cloudId),
+    turnCalendar(ctx),
   ]);
-  ctx.workload = buildWorkload({ tasks: ctx.tasks, users, profiles, absences });
+  ctx.workload = buildWorkload({ tasks: ctx.tasks, users, profiles, absences, calendar });
   return ctx.workload;
 }
 
@@ -704,7 +711,7 @@ async function runSprintStatus(args: Record<string, unknown>, ctx: ToolContext):
     response: {
       board: snapshot.board,
       boards: snapshot.boards,
-      activeSprint: active ? sprintFacts(snapshot, active, ctx.today, ctx.tzOffsetMinutes) : null,
+      activeSprint: active ? sprintFacts(snapshot, active, ctx.today, ctx.tzOffsetMinutes, await turnCalendar(ctx)) : null,
       futureSprints: snapshot.sprints
         .filter((s) => s.state === "future")
         .map((s) => ({

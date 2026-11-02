@@ -2157,6 +2157,12 @@ button.infotip-btn.is-warn {
   color: var(--color-primary);
   font-weight: 700;
 }
+/* A holiday of the project's calendar: marked on its date column (the load cells below stay "Ngày nghỉ"). */
+.rv-head-cell.is-holiday {
+  color: var(--color-warning-text);
+  background: var(--color-warning-light);
+  box-shadow: inset 0 2px 0 var(--color-warning);
+}
 
 /* --- one person: the load row, and the tasks that make it up --- */
 .rv-block {
@@ -2460,6 +2466,11 @@ button.rv-profile-text:hover:not(:disabled) {
 }
 .rv-tl-off-absence {
   background: repeating-linear-gradient(45deg, #fef2f2, #fef2f2 4px, #fee2e2 4px, #fee2e2 8px);
+}
+/* A holiday of the project's calendar: off for everyone, so tinted apart from one person's leave. */
+.rv-tl-off-holiday {
+  background: var(--color-warning-light);
+  box-shadow: inset 0 2px 0 var(--color-warning-border);
 }
 
 .rv-tl-bar {
@@ -7359,6 +7370,11 @@ tr.is-selected .ts-person {
 .ts-grid .is-weekend {
   background: #f6f6f3;
 }
+/* A holiday of the project's calendar: shaded like a weekend, and marked so it does not read as one. */
+.ts-grid th.is-holiday {
+  background: var(--color-warning-light);
+  box-shadow: inset 0 2px 0 var(--color-warning-border);
+}
 .ts-cell.band-low {
   background: #e3eefc;
   color: #1d4f8f;
@@ -10734,4 +10750,34 @@ button.ts-entry-edit:hover:not(:disabled) {
 .sla-muted {
   color: var(--color-text-muted);
   font-style: normal;
+}
+
+/* "Lịch làm việc & ngày lễ" (WorkCalendarModal) — the SLA dialog's sections, with ranged entry rows. */
+.cal-modal .cal-section-first {
+  padding-top: 0;
+  border-top: 0;
+}
+.cal-add {
+  display: grid;
+  gap: 8px;
+  align-items: end;
+}
+.cal-add-range {
+  grid-template-columns: 150px 150px 1fr auto;
+}
+.cal-add-single {
+  grid-template-columns: 150px 1fr auto;
+}
+.cal-add .field {
+  min-width: 0;
+}
+.cal-add > button {
+  height: var(--control-h-form);
+}
+.cal-error {
+  font-size: 12.5px;
+  color: var(--color-warning-text);
+}
+.cal-list li {
+  grid-template-columns: 150px 1fr auto;
 }

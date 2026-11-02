@@ -23,6 +23,8 @@ interface Props {
   onSwitchProject: () => void;
   /** Opens the project's SLA policy (read-only for anyone but a project admin). */
   onOpenSla: () => void;
+  /** "Lịch làm việc & ngày lễ…" — the project's working calendar (WorkCalendarModal). */
+  onOpenCalendar: () => void;
   onLogout: () => void;
 }
 
@@ -48,6 +50,7 @@ export default function Toolbar({
   lastSyncedAt,
   onSwitchProject,
   onOpenSla,
+  onOpenCalendar,
   onLogout,
 }: Props) {
   // Jira avatar URLs behind the OAuth gateway need a bearer token and 403 as a
@@ -128,6 +131,18 @@ export default function Toolbar({
                 >
                   <Icon name="clock" />
                   Cài đặt SLA…
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="menu-item"
+                  onClick={() => {
+                    close();
+                    onOpenCalendar();
+                  }}
+                >
+                  <Icon name="calendar" />
+                  Lịch làm việc & ngày lễ…
                 </button>
               </>
             )}

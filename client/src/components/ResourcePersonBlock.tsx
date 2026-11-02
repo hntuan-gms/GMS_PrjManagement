@@ -74,6 +74,7 @@ export default function PersonBlock({
           end: d.date,
           taskIds: d.taskIds,
           isToday: d.date === today,
+          holiday: d.offReason === "holiday" ? d.offLabel || "Ngày lễ" : undefined,
         }));
 
   const bodyId = `rv-expand-${person.accountId}`;
@@ -181,7 +182,7 @@ function PersonTasks({
   // column is not a day off.
   const offBands = useMemo(() => {
     if (granularity !== "day") return [];
-    const bands: Array<{ start: number; length: number; reason: "weekend" | "absence" }> = [];
+    const bands: Array<{ start: number; length: number; reason: "weekend" | "holiday" | "absence" }> = [];
     person.days.forEach((day, i) => {
       if (!day.offReason) return;
       const last = bands[bands.length - 1];

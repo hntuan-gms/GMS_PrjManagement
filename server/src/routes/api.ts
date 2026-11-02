@@ -7,6 +7,7 @@ import { timesheetRouter } from "./timesheet.js";
 import { kbktRouter } from "./kbkt.js";
 import { filtersRouter } from "./filters.js";
 import { slaRouter } from "./sla.js";
+import { calendarRouter } from "./calendar.js";
 import { requireAuth, requireProject, requireStaff } from "../auth/middleware.js";
 import { badRequest, notFound } from "../errors.js";
 import { TaskActivity } from "../taskActivity.js";
@@ -32,6 +33,7 @@ apiRouter.use("/timesheet", timesheetRouter);
 apiRouter.use("/kbkt", kbktRouter);
 apiRouter.use("/filters", filtersRouter);
 apiRouter.use("/sla", slaRouter);
+apiRouter.use("/calendar", calendarRouter);
 
 // Jira's own default attachment limit is 10 MB; this only has to sit above it
 // and below Cloud Run's 32 MB request cap, so Jira's message is the one people see.

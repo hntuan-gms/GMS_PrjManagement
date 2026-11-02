@@ -6,6 +6,9 @@ import type { Session, Task, Timesheet, TimesheetPerson, WorklogEntry } from "..
 import { addDays, rangeOf, weekday, type TimesheetMode } from "../timesheetRange";
 import { isViewFresh, readViewCache, viewCacheScope, writeViewCache } from "../viewCache";
 import NumberInput from "./NumberInput";
+import { dayClass, expectation, isAway } from "../timesheetDays";
+import { dayLabel } from "../workCalendar";
+import { useWorkCalendar } from "./workCalendarContext";
 
 /**
  * Timesheet: hours each member logged in Jira, per day, against their capacity.
@@ -13,7 +16,8 @@ import NumberInput from "./NumberInput";
  * Everything shown is Jira's worklogs (server/src/timesheet.ts) — logging here
  * is logging in Jira, under the signed-in user's name, which is the only author
  * Jira will accept. Capacity and leave come from the Nguồn lực tab's profiles,
- * defaulting to a full working day.
+ * defaulting to a full working day; which days are worked comes from the project's
+ * calendar (holidays expect nothing, make-up days expect a day's work).
  */
 
 type Mode = TimesheetMode;
@@ -21,7 +25,6 @@ type Selection = { accountId: string; date: string | null } | null;
 
 const WEEKDAYS = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
 
-const isWeekend = (iso: string) => weekday(iso) === 0 || weekday(iso) === 6;
 const dm = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
 
 function eachDay(from: string, to: string): string[] {
@@ -39,7 +42,7 @@ function initials(name: string): string {
     .join("");
 }
 
-const away = (p: TimesheetPerson, d: string) => p.absences.some((a) => a.from <= d && d <= a.to);
+const away = (p: TimesheetPerson, d: string) => isAway(p, d);
 
 /** Sequential ramp over the share of a day's capacity; "over" is a state, not a darker blue. */
 function band(hours: number, capacity: number): "none" | "low" | "mid" | "full" | "over" {
@@ -63,6 +66,7 @@ export default function TimesheetView({
   onTasksChanged: () => void;
 }) {
   const today = localToday();
+  const calendar = useWorkCalendar();
   const [mode, setMode] = useState<Mode>("week");
   const [anchor, setAnchor] = useState(today);
   const { from, to } = rangeOf(mode, anchor);
@@ -127,24 +131,16 @@ export default function TimesheetView({
       cell.set(k, (cell.get(k) ?? 0) + e.hours);
       dayTotal.set(e.date, (dayTotal.get(e.date) ?? 0) + e.hours);
     }
-    // "Expected" counts only working days already reached: a Wednesday view of
-    // this week shouldn't call Thursday and Friday missing.
+    // "Expected" counts only working days already reached (timesheetDays.expectation): a Wednesday view of
+    // this week shouldn't call Thursday and Friday missing, nor a holiday anybody's gap.
     const rows = (sheet?.people ?? []).filter((p) => shown(p.accountId)).map((p) => {
-      let total = 0;
-      let expected = 0;
-      const missing: string[] = [];
-      for (const d of days) {
-        const h = cell.get(`${p.accountId}|${d}`) ?? 0;
-        total += h;
-        if (!isWeekend(d) && !away(p, d) && d <= today) {
-          expected += p.capacityHoursPerDay;
-          if (h === 0 && d < today) missing.push(d);
-        }
-      }
+      const hoursOn = (d: string) => cell.get(`${p.accountId}|${d}`) ?? 0;
+      const total = days.reduce((sum, d) => sum + hoursOn(d), 0);
+      const { expected, missing } = expectation(p, days, today, hoursOn, calendar);
       return { person: p, total: roundHours(total), expected, missing };
     });
     return { cell, dayTotal, rows };
-  }, [sheet, days, today, personFilter, me]);
+  }, [sheet, days, today, personFilter, me, calendar]);
 
   const totals = useMemo(() => {
     const logged = grid.rows.reduce((s, r) => s + r.total, 0);
@@ -291,7 +287,11 @@ export default function TimesheetView({
                 <tr>
                   <th className="ts-person-h">Thành viên</th>
                   {days.map((d) => (
-                    <th key={d} className={`${isWeekend(d) ? "is-weekend" : ""} ${d === today ? "is-today" : ""}`}>
+                    <th
+                      key={d}
+                      className={`${dayClass(d, calendar)} ${d === today ? "is-today" : ""}`}
+                      title={dayLabel(d, calendar) || undefined}
+                    >
                       <span className="ts-wd">{WEEKDAYS[weekday(d)]}</span>
                       <span className="ts-dd">{mode === "week" ? dm(d) : d.slice(8, 10)}</span>
                     </th>
@@ -319,7 +319,7 @@ export default function TimesheetView({
                       return (
                         <td
                           key={d}
-                          className={`ts-cell band-${b} ${isWeekend(d) ? "is-weekend" : ""} ${off ? "is-away" : ""} ${
+                          className={`ts-cell band-${b} ${dayClass(d, calendar)} ${off ? "is-away" : ""} ${
                             d === today ? "is-today" : ""
                           } ${selected ? "is-selected" : ""}`}
                           onClick={() => setSelection({ accountId: p.accountId, date: d })}
@@ -330,7 +330,7 @@ export default function TimesheetView({
                                 ? "Chưa ghi giờ"
                                 : h > 0
                                   ? `${h}h / ${p.capacityHoursPerDay}h${b === "over" ? " — vượt công suất" : ""}`
-                                  : undefined
+                                  : dayLabel(d, calendar) || undefined
                           }
                         >
                           {h > 0 ? (
@@ -360,7 +360,7 @@ export default function TimesheetView({
                 <tr>
                   <th className="ts-person">Cả nhóm</th>
                   {days.map((d) => (
-                    <td key={d} className={isWeekend(d) ? "is-weekend" : ""}>
+                    <td key={d} className={dayClass(d, calendar)}>
                       {roundHours(grid.dayTotal.get(d) ?? 0) || ""}
                     </td>
                   ))}

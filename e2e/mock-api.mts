@@ -8,7 +8,7 @@ import { parseWorkbook } from "../server/src/kbkt/parse.ts";
 import { DEFAULT_SETTINGS, validateSettings } from "../server/src/kbkt/settings.ts";
 import { AppError } from "../server/src/errors.ts";
 import { validateFilterInput } from "../server/src/savedFilters.ts";
-import { DEFAULT_SLA_SETTINGS, validateSlaSettings } from "../server/src/sla.ts";
+import { calendarOf, DEFAULT_SLA_SETTINGS, validateCalendar, validateSlaSettings } from "../server/src/sla.ts";
 import { KbktSync, type LogLine } from "../server/src/kbkt/sync.ts";
 import { XlsxFormatError } from "../server/src/kbkt/xlsx.ts";
 import { FakeJira } from "../server/test/kbktFakeJira.ts";
@@ -585,16 +585,35 @@ app.get("/api/kbkt/options", async (_q, r) => r.json({
 }));
 app.get("/api/kbkt/settings", (_q, r) => r.json(kbktSettings));
 
-// The SLA policy, through the real validator. The stand-in user is a project admin (canEdit).
+// The SLA policy, through the real validator. The stand-in user is a project admin (canEdit) unless
+// /api/__sla-canedit says otherwise. Like the server, the SLA dialog never writes the calendar fields.
 let sla = { settings: structuredClone(DEFAULT_SLA_SETTINGS), canEdit: true };
+const adminOnly = (res: express.Response) =>
+  res.status(403).json({ error: "Chỉ người có quyền Administer Projects trên dự án này mới sửa được.", code: "SLA_ADMIN_ONLY" });
 app.get("/api/sla/settings", (_q, r) => r.json(sla));
 app.put("/api/sla/settings", (req, res) => {
+  if (!sla.canEdit) return adminOnly(res);
   try {
-    sla = { settings: validateSlaSettings(req.body), canEdit: true };
+    sla = { settings: validateSlaSettings({ ...(req.body ?? {}), ...calendarOf(sla.settings) }), canEdit: true };
     res.json(sla);
   } catch (e) {
     res.status(e instanceof AppError ? e.status : 500).json({ error: (e as Error).message, code: e instanceof AppError ? e.code : undefined });
   }
+});
+// The project's working calendar (server/src/routes/calendar.ts): a slice of the same row.
+app.get("/api/calendar", (_q, r) => r.json({ calendar: calendarOf(sla.settings), canEdit: sla.canEdit }));
+app.put("/api/calendar", (req, res) => {
+  if (!sla.canEdit) return adminOnly(res);
+  try {
+    sla = { ...sla, settings: { ...sla.settings, ...validateCalendar(req.body) } };
+    res.json({ calendar: calendarOf(sla.settings), canEdit: true });
+  } catch (e) {
+    res.status(e instanceof AppError ? e.status : 500).json({ error: (e as Error).message, code: e instanceof AppError ? e.code : undefined });
+  }
+});
+app.post("/api/__sla-canedit", (req, r) => {
+  sla = { ...sla, canEdit: req.body?.canEdit !== false };
+  r.json({});
 });
 app.put("/api/kbkt/settings", (req, res) => { kbktSettings = validateSettings(req.body); res.json(kbktSettings); });
 const kbktRun = (req: express.Request) => {

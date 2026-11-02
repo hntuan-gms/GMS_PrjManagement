@@ -56,6 +56,12 @@ describe("workingMsBetween", () => {
     assert.equal(workingMsBetween(vn("2026-10-09T16:00"), vn("2026-10-13T09:00"), withHoliday), 2 * H);
   });
 
+  it("counts a make-up Saturday as a working day", () => {
+    // 2026-10-10 is a Saturday.
+    const withMakeUp = makeCalendar(policy({ makeUpDays: [{ date: "2026-10-10", name: "Làm bù" }] }));
+    assert.equal(workingMsBetween(vn("2026-10-09T16:00"), vn("2026-10-12T09:00"), withMakeUp), 10 * H);
+  });
+
   it("is zero for an empty or backward span", () => {
     assert.equal(workingMsBetween(vn("2026-10-05T10:00"), vn("2026-10-05T10:00"), cal), 0);
     assert.equal(workingMsBetween(vn("2026-10-05T14:00"), vn("2026-10-05T10:00"), cal), 0);

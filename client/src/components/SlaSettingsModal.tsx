@@ -4,23 +4,16 @@ import { todayIso } from "../resourceAllocation";
 import type { SlaSettings, SlaSettingsResponse } from "../types";
 import { useDialogs } from "./dialogContext";
 import NumberInput from "./NumberInput";
+import { describeWorkDays } from "../workCalendarForm";
 
 interface Props {
   /** The policy as last read; the dialog edits a copy. */
   current: SlaSettingsResponse;
   onClose: () => void;
   onSaved: (saved: SlaSettingsResponse) => void;
+  /** Closes this dialog (asking first if something changed) and opens "Lịch làm việc & ngày lễ…". */
+  onOpenCalendar: () => void;
 }
-
-const WEEKDAYS: Array<[number, string]> = [
-  [1, "T2"],
-  [2, "T3"],
-  [3, "T4"],
-  [4, "T5"],
-  [5, "T6"],
-  [6, "T7"],
-  [7, "CN"],
-];
 
 const OFFSETS = Array.from({ length: 27 }, (_, i) => i - 12);
 
@@ -31,16 +24,17 @@ function comparable(s: SlaSettings): string {
 
 /**
  * The project's SLA policy: how many working hours each priority may stay open, which
- * issue types count, and the working calendar the clock runs on. Anyone can open it;
- * only a project admin can save (the server checks again). One "Lưu" writes all of it.
+ * issue types count, and the hours of a working day the clock runs on. Which days are
+ * worked (weekdays, holidays, make-up days) is the project's calendar, shared with the
+ * resource tab, timesheet and sprints, and edited in WorkCalendarModal — shown here only
+ * as a summary. Anyone can open it; only a project admin can save (the server checks
+ * again, and never writes the calendar from this dialog).
  */
-export default function SlaSettingsModal({ current, onClose, onSaved }: Props) {
+export default function SlaSettingsModal({ current, onClose, onSaved, onOpenCalendar }: Props) {
   const { confirm } = useDialogs();
   const [draft, setDraft] = useState<SlaSettings>(() => structuredClone(current.settings));
   const [priorities, setPriorities] = useState<string[]>([]);
   const [issueTypes, setIssueTypes] = useState<string[]>([]);
-  const [holidayDate, setHolidayDate] = useState("");
-  const [holidayName, setHolidayName] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const modalRef = useRef<HTMLDivElement>(null);
@@ -88,20 +82,16 @@ export default function SlaSettingsModal({ current, onClose, onSaved }: Props) {
     return list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
   }
 
-  function addHoliday() {
-    if (!holidayDate) return;
-    patch({
-      holidays: [...draft.holidays.filter((h) => h.date !== holidayDate), { date: holidayDate, name: holidayName.trim() }].sort((a, b) =>
-        a.date.localeCompare(b.date)
-      ),
-    });
-    setHolidayDate("");
-    setHolidayName("");
+  async function confirmDiscard(): Promise<boolean> {
+    return !dirty || readOnly || (await confirm({ message: "Bỏ các thay đổi chưa lưu?", confirmLabel: "Bỏ thay đổi", cancelLabel: "Tiếp tục sửa", tone: "danger" }));
   }
 
   async function requestClose() {
-    if (dirty && !readOnly && !(await confirm({ message: "Bỏ các thay đổi chưa lưu?", confirmLabel: "Bỏ thay đổi", cancelLabel: "Tiếp tục sửa", tone: "danger" }))) return;
-    onClose();
+    if (await confirmDiscard()) onClose();
+  }
+
+  async function openCalendar() {
+    if (await confirmDiscard()) onOpenCalendar();
   }
 
   async function save() {
@@ -215,19 +205,14 @@ export default function SlaSettingsModal({ current, onClose, onSaved }: Props) {
           </section>
 
           <section className="sla-section">
-            <h3>Lịch làm việc</h3>
-            <div className="sla-checks" role="group" aria-label="Ngày làm việc trong tuần">
-              {WEEKDAYS.map(([d, label]) => (
-                <label key={d} className="sla-check">
-                  <input
-                    type="checkbox"
-                    checked={draft.workDays.includes(d)}
-                    onChange={() => patch({ workDays: toggle(draft.workDays, d).sort((a, b) => a - b) })}
-                  />
-                  {label}
-                </label>
-              ))}
-            </div>
+            <h3>Giờ làm việc</h3>
+            <p className="field-hint sla-calendar-summary">
+              Ngày làm việc: {describeWorkDays(draft.workDays)} · {draft.holidays.length} ngày lễ · {(draft.makeUpDays ?? []).length} ngày làm bù — theo
+              Lịch làm việc của dự án.{" "}
+              <button type="button" className="text-btn" onClick={() => void openCalendar()}>
+                Mở Lịch làm việc & ngày lễ…
+              </button>
+            </p>
             <div className="sla-periods">
               {draft.periods.map((p, i) => (
                 <div key={i} className="sla-period">
@@ -272,30 +257,6 @@ export default function SlaSettingsModal({ current, onClose, onSaved }: Props) {
             </label>
           </section>
 
-          <section className="sla-section">
-            <h3>Ngày lễ ({draft.holidays.length})</h3>
-            <p className="field-hint">Đồng hồ SLA dừng trong những ngày này.</p>
-            <div className="sla-holiday-add">
-              <input type="date" aria-label="Ngày lễ" value={holidayDate} onChange={(e) => setHolidayDate(e.target.value)} />
-              <input type="text" aria-label="Tên ngày lễ" placeholder="Tên (vd: Quốc khánh)" value={holidayName} onChange={(e) => setHolidayName(e.target.value)} />
-              <button type="button" onClick={addHoliday} disabled={!holidayDate}>
-                Thêm
-              </button>
-            </div>
-            {draft.holidays.length > 0 && (
-              <ul className="sla-holidays">
-                {draft.holidays.map((h) => (
-                  <li key={h.date}>
-                    <span className="sla-holiday-date">{h.date.split("-").reverse().join("/")}</span>
-                    <span>{h.name || <em className="sla-muted">không tên</em>}</span>
-                    <button type="button" className="sla-remove" aria-label={`Xoá ngày lễ ${h.date}`} onClick={() => patch({ holidays: draft.holidays.filter((x) => x.date !== h.date) })}>
-                      ✕
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
         </fieldset>
 
         {error && <div className="modal-error">{error}</div>}

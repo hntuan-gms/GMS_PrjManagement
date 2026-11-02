@@ -1,4 +1,5 @@
 import type { BoardIssue, BoardSnapshot, IssueTypeName, Sprint, SprintCapacityPerson } from "./types";
+import { DEFAULT_WORK_CALENDAR, isWorkingDate, type WorkCalendar } from "./workCalendar";
 
 /**
  * Pure helpers for the Bảng tab: dates, weights, filters, lanes, burndown.
@@ -29,15 +30,10 @@ export function addDaysLocal(iso: string, days: number): string {
   return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`;
 }
 
-export function isWeekendLocal(iso: string): boolean {
-  const [y, m, d] = iso.split("-").map(Number);
-  const day = new Date(y, m - 1, d).getDay();
-  return day === 0 || day === 6;
-}
-
-export function workingDaysLocal(from: string, to: string): string[] {
+/** The project's working days from `from` to `to` (workCalendar.ts: holidays off, make-up days worked). */
+export function workingDaysLocal(from: string, to: string, calendar: WorkCalendar = DEFAULT_WORK_CALENDAR): string[] {
   const out: string[] = [];
-  for (let d = from; d <= to; d = addDaysLocal(d, 1)) if (!isWeekendLocal(d)) out.push(d);
+  for (let d = from; d <= to; d = addDaysLocal(d, 1)) if (isWorkingDate(d, calendar)) out.push(d);
   return out;
 }
 
@@ -389,11 +385,17 @@ export interface BurndownPoint {
  * from the changelog, which the board API doesn't expose, so an issue added
  * mid-sprint shows as if it had been there from day one.
  */
-export function burndown(sprint: Sprint, issues: BoardIssue[], snapshot: BoardSnapshot, today: string): BurndownPoint[] {
+export function burndown(
+  sprint: Sprint,
+  issues: BoardIssue[],
+  snapshot: BoardSnapshot,
+  today: string,
+  calendar: WorkCalendar = DEFAULT_WORK_CALENDAR
+): BurndownPoint[] {
   const start = localDate(sprint.startDate);
   const end = localDate(sprint.endDate);
   if (!start || !end) return [];
-  const days = workingDaysLocal(start, end);
+  const days = workingDaysLocal(start, end, calendar);
   if (days.length === 0) return [];
   const scope = totalWeight(issues, snapshot);
   const doneBy = (day: string) =>
@@ -446,10 +448,10 @@ export function initials(name: string | null): string {
 }
 
 /** Working days since the last update, today included — the "stuck?" signal on in-progress cards. */
-export function idleDays(issue: BoardIssue, today: string): number {
+export function idleDays(issue: BoardIssue, today: string, calendar: WorkCalendar = DEFAULT_WORK_CALENDAR): number {
   const last = localDate(issue.updated);
   if (!last || last >= today) return 0;
-  return workingDaysLocal(addDaysLocal(last, 1), today).length;
+  return workingDaysLocal(addDaysLocal(last, 1), today, calendar).length;
 }
 
 /** The board this browser last chose for a project (null = none yet: the server picks the default). */

@@ -8,6 +8,7 @@ import IssueTypeIcon from "./IssueTypeIcon";
 import PriorityMark from "./PriorityMark";
 import QuickCreateOptions, { type QuickOptions } from "./QuickCreateOptions";
 import type { BoardColumn, BoardIssue, BoardSnapshot } from "../types";
+import { useWorkCalendar } from "./workCalendarContext";
 
 interface Props {
   snapshot: BoardSnapshot;
@@ -399,7 +400,8 @@ function Card({
   onDragOver: (e: DragEvent) => void;
 }) {
   const overdue = isOverdue(issue, today);
-  const idle = issue.statusCategory === "indeterminate" ? idleDays(issue, today) : 0;
+  const calendar = useWorkCalendar();
+  const idle = issue.statusCategory === "indeterminate" ? idleDays(issue, today, calendar) : 0;
   const blocked = issue.blockedBy.length > 0;
   const show = options.fields;
   const accent = cardAccent(issue, options.colorBy);

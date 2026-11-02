@@ -4,6 +4,8 @@ import { BoardService } from "../agile/boardService.js";
 import { availability, plannedWindow } from "../agile/sprintMetrics.js";
 import { badRequest } from "../errors.js";
 import * as resources from "../resourceStore.js";
+import { getWorkCalendar } from "../slaStore.js";
+import { DEFAULT_WORK_CALENDAR } from "../workCalendar.js";
 
 export const boardRouter = Router();
 
@@ -199,7 +201,8 @@ boardRouter.put("/issues/:key/estimate", async (req, res, next) => {
 });
 
 /**
- * Who can give how many hours to a sprint's window: working days minus declared leave, times each
+ * Who can give how many hours to a sprint's window: the project's working days (its calendar — holidays
+ * off, make-up days worked) minus declared leave, times each
  * person's hours a day. Not AI and not staff-only — it is capacity arithmetic over the same
  * `resource_profile`/`resource_absence` the timesheet already shows every project member.
  */
@@ -208,12 +211,15 @@ boardRouter.get("/sprints/:id/capacity", async (req, res, next) => {
     const sprintId = intParam(req.params.id, "sprint");
     const { today, offset } = clock({ today: req.query.today, tzOffsetMinutes: req.query.tz });
     const service = boardServiceFor(req);
-    const snapshot = await service.snapshot(intParam(req.query.boardId, "boardId"));
+    const { session, taskService } = req.auth!;
+    const [snapshot, calendar] = await Promise.all([
+      service.snapshot(intParam(req.query.boardId, "boardId")),
+      getWorkCalendar(session.cloudId, session.projectKey!).catch(() => DEFAULT_WORK_CALENDAR),
+    ]);
     const target = snapshot.sprints.find((s) => s.id === sprintId);
     if (snapshot.mode !== "agile" || !target) throw badRequest("Chỉ xem được năng lực của sprint đang chạy hoặc chưa bắt đầu.");
 
-    const window = plannedWindow(snapshot, target, today, offset);
-    const { session, taskService } = req.auth!;
+    const window = plannedWindow(snapshot, target, today, offset, calendar);
     const [members, profiles, absences] = await Promise.all([
       taskService!.listMembers().then((m) => m.users),
       resources.listProfiles(session.cloudId).catch(() => []),
@@ -221,7 +227,7 @@ boardRouter.get("/sprints/:id/capacity", async (req, res, next) => {
     ]);
     res.json({
       window,
-      team: availability(members, profiles, absences, window.start, window.end, resources.DEFAULT_CAPACITY_HOURS),
+      team: availability(members, profiles, absences, window.start, window.end, resources.DEFAULT_CAPACITY_HOURS, calendar),
     });
   } catch (err) {
     next(err);

@@ -1,5 +1,6 @@
 import { isAssignableType } from "./types";
 import type { JiraUser, ResourceAbsence, ResourceProfile, Task } from "./types";
+import { dayKind, dayLabel, DEFAULT_WORK_CALENDAR, type WorkCalendar } from "./workCalendar";
 
 /**
  * The allocation engine behind the "Nguồn lực" tab.
@@ -25,7 +26,7 @@ export type LoadBand = "free" | "light" | "healthy" | "over" | "off" | "off-viol
 
 export interface DayLoad {
   date: string;
-  /** Hours available: 0 on weekends and absence days. */
+  /** Hours available: 0 on days the project does not work (weekends, holidays) and absence days. */
   capacityHours: number;
   allocatedHours: number;
   /** allocated / capacity. 0 when there is no capacity — read `band` instead. */
@@ -33,7 +34,9 @@ export interface DayLoad {
   band: LoadBand;
   taskIds: string[];
   /** Why capacity is 0, for the tooltip. */
-  offReason: "weekend" | "absence" | null;
+  offReason: "weekend" | "holiday" | "absence" | null;
+  /** The holiday's name when offReason is "holiday". */
+  offLabel?: string;
 }
 
 export interface Overlap {
@@ -195,6 +198,11 @@ export interface LoadInput {
   to: string;
   /** Show everyone assignable, not only people currently holding work. */
   includeIdle?: boolean;
+  /**
+   * The project's working calendar (workCalendar.ts): which weekdays are worked, holidays, make-up days.
+   * Monday–Friday with no holidays when omitted. Mirrors server/src/workload.ts rule 1.
+   */
+  calendar?: WorkCalendar;
 }
 
 /**
@@ -208,6 +216,7 @@ export interface LoadInput {
  */
 export function buildResourceLoad(input: LoadInput): ResourceLoad {
   const defaultCapacity = input.defaultCapacityHours ?? DEFAULT_CAPACITY_HOURS;
+  const calendar = input.calendar ?? DEFAULT_WORK_CALENDAR;
   const dates = eachDate(input.from, input.to);
   const dateIndex = new Map(dates.map((d, i) => [d, i]));
 
@@ -271,9 +280,13 @@ export function buildResourceLoad(input: LoadInput): ResourceLoad {
       .slice()
       .sort((a, b) => (a.startDate ?? "").localeCompare(b.startDate ?? ""));
 
-    /** Is this a day the person can work, anywhere on the calendar? */
-    const isOffDay = (iso: string): "weekend" | "absence" | null => {
-      if (isWeekend(iso)) return "weekend";
+    /**
+     * Is this a day the person can work, anywhere on the calendar? The project's calendar first (a holiday
+     * is off for everyone, a make-up Saturday is worked), then the person's own leave.
+     */
+    const isOffDay = (iso: string): "weekend" | "holiday" | "absence" | null => {
+      const kind = dayKind(iso, calendar);
+      if (kind !== "work") return kind;
       for (const a of absences) if (iso >= a.from && iso <= a.to) return "absence";
       return null;
     };
@@ -288,6 +301,7 @@ export function buildResourceLoad(input: LoadInput): ResourceLoad {
         band: "free",
         taskIds: [],
         offReason,
+        ...(offReason === "holiday" ? { offLabel: dayLabel(date, calendar) } : {}),
       };
     });
 

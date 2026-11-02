@@ -1,5 +1,6 @@
 import { isAssignableType, type JiraUser, type Task } from "./types.js";
 import { DEFAULT_CAPACITY_HOURS, type ResourceAbsence, type ResourceProfile } from "./resourceStore.js";
+import { DEFAULT_WORK_CALENDAR, isWorkingDate, type WorkCalendar } from "./workCalendar.js";
 
 /**
  * How busy each person is, day by day — the server's half of the workload model.
@@ -12,7 +13,9 @@ import { DEFAULT_CAPACITY_HOURS, type ResourceAbsence, type ResourceProfile } fr
  * needed to answer "who should take this?", so the duplicated surface is the
  * three rules below and nothing else:
  *
- *   1. weekends and absence days have zero capacity;
+ *   1. days the project does not work (weekends and holidays in its working
+ *      calendar, workCalendar.ts — a make-up day is worked) and absence days
+ *      have zero capacity;
  *   2. a task's hours spread evenly across the working days in its own span;
  *   3. no estimate means one full working day, and a done task means nothing.
  *
@@ -35,16 +38,13 @@ export function eachDate(from: string, to: string): string[] {
   return out;
 }
 
-export function isWeekend(iso: string): boolean {
-  const day = new Date(toUtc(iso)).getUTCDay();
-  return day === 0 || day === 6;
-}
-
 export interface WorkloadInput {
   tasks: Task[];
   users: JiraUser[];
   profiles: ResourceProfile[];
   absences: ResourceAbsence[];
+  /** The project's working calendar; Monday–Friday with no holidays when omitted. */
+  calendar?: WorkCalendar;
 }
 
 export interface PersonWorkload {
@@ -83,6 +83,7 @@ export function buildWorkload(input: WorkloadInput): Map<string, PersonWorkload>
     absencesBy.set(a.accountId, [...(absencesBy.get(a.accountId) ?? []), a]);
   }
 
+  const calendar = input.calendar ?? DEFAULT_WORK_CALENDAR;
   const out = new Map<string, PersonWorkload>();
   for (const user of input.users) {
     const capacityHoursPerDay = profileBy.get(user.accountId)?.capacityHoursPerDay ?? DEFAULT_CAPACITY_HOURS;
@@ -93,7 +94,7 @@ export function buildWorkload(input: WorkloadInput): Map<string, PersonWorkload>
       capacityHoursPerDay,
       allocated: new Map(),
       taskIds: new Map(),
-      isOff: (iso) => isWeekend(iso) || away.some((a) => iso >= a.from && iso <= a.to),
+      isOff: (iso) => !isWorkingDate(iso, calendar) || away.some((a) => iso >= a.from && iso <= a.to),
       openTaskCount: 0,
     });
   }

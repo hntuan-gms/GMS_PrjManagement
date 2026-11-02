@@ -8,7 +8,25 @@ import { badRequest } from "./errors.js";
  *
  * Priorities and issue types are stored by name, the way Task carries them.
  */
-export interface SlaSettings {
+/**
+ * The project's working calendar: which days are worked. It is stored inside the SLA row (one row per
+ * project, sla_settings) but is not only the SLA's: the resource heatmap, the timesheet, sprint capacity
+ * and the assistant's workload all read it through workCalendar.ts, whether SLA is switched on or not.
+ * Edited in its own dialog (PUT /api/calendar); PUT /api/sla/settings never writes these three fields.
+ */
+export interface WorkCalendarSettings {
+  /** ISO weekdays that are working days, 1 = Monday … 7 = Sunday. */
+  workDays: number[];
+  /** Days off for everyone, one entry per date (a holiday of several days is several entries). */
+  holidays: Array<{ date: string; name: string }>;
+  /** Days worked although their weekday is not in workDays ("ngày làm bù", e.g. a Saturday before Tết). */
+  makeUpDays: Array<{ date: string; name: string }>;
+}
+
+/** The fields that belong to the calendar rather than to the SLA policy itself. */
+export const CALENDAR_KEYS = ["workDays", "holidays", "makeUpDays"] as const;
+
+export interface SlaSettings extends WorkCalendarSettings {
   /** Off until someone turns it on, so a project's old work never shows up as "late" by surprise. */
   enabled: boolean;
   /** Only issues created on or after this day (YYYY-MM-DD) are measured. */
@@ -19,11 +37,8 @@ export interface SlaSettings {
   warnPercent: number;
   /** Issue types measured; empty = every type except Epic. */
   issueTypes: string[];
-  /** ISO weekdays that are working days, 1 = Monday … 7 = Sunday. */
-  workDays: number[];
   /** Working periods of a day, "HH:mm", ascending and not overlapping. */
   periods: Array<{ start: string; end: string }>;
-  holidays: Array<{ date: string; name: string }>;
   /**
    * The calendar's timezone, minutes east of UTC. Fixed in the policy rather than
    * taken from each browser, so everyone sees the same deadline for the same issue.
@@ -49,6 +64,7 @@ export const DEFAULT_SLA_SETTINGS: SlaSettings = {
     { start: "13:00", end: "17:00" },
   ],
   holidays: [],
+  makeUpDays: [],
   tzOffsetMinutes: 420,
 };
 
@@ -59,6 +75,10 @@ const MAX_HOLIDAYS = 400;
 
 function fail(message: string): never {
   throw badRequest(`Cài đặt SLA: ${message}`);
+}
+
+function calendarFail(message: string): never {
+  throw badRequest(`Lịch làm việc: ${message}`);
 }
 
 function isRealDate(v: unknown): v is string {
@@ -105,11 +125,6 @@ export function validateSlaSettings(raw: unknown): SlaSettings {
 
   const issueTypes = [...new Set((Array.isArray(b.issueTypes) ? b.issueTypes : []).map((t: unknown) => name(t)).filter(Boolean))] as string[];
 
-  const workDays = [...new Set((Array.isArray(b.workDays) ? b.workDays : []).map(Number))]
-    .filter((d) => Number.isInteger(d) && d >= 1 && d <= 7)
-    .sort((x, y) => x - y);
-  if (workDays.length === 0) fail("cần ít nhất một ngày làm việc trong tuần.");
-
   const periods = (Array.isArray(b.periods) ? b.periods : []).map((p: any) => ({ start: String(p?.start ?? ""), end: String(p?.end ?? "") }));
   if (periods.length === 0 || periods.length > 3) fail("cần từ 1 đến 3 khung giờ làm việc.");
   for (const p of periods) {
@@ -123,13 +138,7 @@ export function validateSlaSettings(raw: unknown): SlaSettings {
     }
   }
 
-  const byDate = new Map<string, string>();
-  for (const h of Array.isArray(b.holidays) ? b.holidays : []) {
-    if (!isRealDate(h?.date)) fail(`ngày lễ "${String(h?.date ?? "")}" không hợp lệ.`);
-    if (!byDate.has(h.date)) byDate.set(h.date, name(h?.name));
-  }
-  if (byDate.size > MAX_HOLIDAYS) fail(`tối đa ${MAX_HOLIDAYS} ngày lễ.`);
-  const holidays = [...byDate].sort(([a], [b2]) => a.localeCompare(b2)).map(([date, n]) => ({ date, name: n }));
+  const calendar = validateCalendar(b, fail);
 
   const tz = b.tzOffsetMinutes == null ? DEFAULT_SLA_SETTINGS.tzOffsetMinutes : Number(b.tzOffsetMinutes);
   if (!Number.isInteger(tz) || tz < -720 || tz > 840) fail("múi giờ không hợp lệ.");
@@ -140,11 +149,53 @@ export function validateSlaSettings(raw: unknown): SlaSettings {
     targets,
     warnPercent: warn,
     issueTypes,
-    workDays,
+    workDays: calendar.workDays,
     periods,
-    holidays,
+    holidays: calendar.holidays,
+    makeUpDays: calendar.makeUpDays,
     tzOffsetMinutes: tz,
   };
+}
+
+function datedList(raw: unknown, what: string, onFail: (m: string) => never): Array<{ date: string; name: string }> {
+  const byDate = new Map<string, string>();
+  for (const h of Array.isArray(raw) ? raw : []) {
+    if (!isRealDate(h?.date)) onFail(`${what} "${String(h?.date ?? "")}" không hợp lệ.`);
+    if (!byDate.has(h.date)) byDate.set(h.date, name(h?.name));
+  }
+  if (byDate.size > MAX_HOLIDAYS) onFail(`tối đa ${MAX_HOLIDAYS} ${what}.`);
+  return [...byDate].sort(([a], [b2]) => a.localeCompare(b2)).map(([date, n]) => ({ date, name: n }));
+}
+
+/**
+ * The calendar part of a request body, or a 400 naming what is wrong. Shared by the SLA dialog's validation
+ * (which still accepts a whole policy) and PUT /api/calendar. A date cannot be both a holiday and a make-up day:
+ * which one wins would be a guess.
+ */
+export function validateCalendar(raw: unknown, onFail: (m: string) => never = calendarFail): WorkCalendarSettings {
+  const b = (raw ?? {}) as Record<string, any>;
+  const workDays = [...new Set((Array.isArray(b.workDays) ? b.workDays : []).map(Number))]
+    .filter((d) => Number.isInteger(d) && d >= 1 && d <= 7)
+    .sort((x, y) => x - y);
+  if (workDays.length === 0) onFail("cần ít nhất một ngày làm việc trong tuần.");
+  const holidays = datedList(b.holidays, "ngày lễ", onFail);
+  const makeUpDays = datedList(b.makeUpDays, "ngày làm bù", onFail);
+  const off = new Set(holidays.map((h) => h.date));
+  const clash = makeUpDays.find((m) => off.has(m.date));
+  if (clash) onFail(`ngày ${clash.date.split("-").reverse().join("/")} không thể vừa là ngày lễ vừa là ngày làm bù.`);
+  return { workDays, holidays, makeUpDays };
+}
+
+/** The calendar fields of a policy. */
+export function calendarOf(s: SlaSettings): WorkCalendarSettings {
+  return { workDays: s.workDays, holidays: s.holidays, makeUpDays: s.makeUpDays };
+}
+
+/** The SLA fields of a policy, i.e. everything PUT /api/sla/settings may write. */
+export function slaFieldsOf(s: SlaSettings): Omit<SlaSettings, (typeof CALENDAR_KEYS)[number]> {
+  const out: Record<string, unknown> = { ...s };
+  for (const k of CALENDAR_KEYS) delete out[k];
+  return out as Omit<SlaSettings, (typeof CALENDAR_KEYS)[number]>;
 }
 
 /** A stored row over the defaults, so a field added later has a value for projects saved before it. */
@@ -160,6 +211,7 @@ export function withSlaDefaults(stored: Partial<SlaSettings> | null | undefined)
     workDays: stored.workDays ?? d.workDays,
     periods: stored.periods ?? d.periods,
     holidays: stored.holidays ?? d.holidays,
+    makeUpDays: stored.makeUpDays ?? d.makeUpDays,
     tzOffsetMinutes: stored.tzOffsetMinutes ?? d.tzOffsetMinutes,
   };
 }

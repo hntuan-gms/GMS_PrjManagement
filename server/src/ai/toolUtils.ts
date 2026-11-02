@@ -1,4 +1,5 @@
 import type { JiraUser, Task } from "../types.js";
+import { DEFAULT_WORK_CALENDAR, type WorkCalendar } from "../workCalendar.js";
 
 /**
  * Small helpers every chat tool needs — argument reading, date shifting, and
@@ -13,6 +14,11 @@ export function addDays(iso: string, days: number): string {
 }
 
 export const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** The project's working calendar for this turn (ToolContext.workCalendar); Monday–Friday when none can be read. */
+export async function turnCalendar(ctx: { workCalendar?: () => Promise<WorkCalendar> }): Promise<WorkCalendar> {
+  return (await ctx.workCalendar?.().catch(() => null)) ?? DEFAULT_WORK_CALENDAR;
+}
 
 export function str(args: Record<string, unknown>, key: string): string {
   return String(args[key] ?? "").trim();

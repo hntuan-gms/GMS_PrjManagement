@@ -34,6 +34,8 @@ export interface SlaCalendar {
   tzMs: number;
   workDays: Set<number>;
   holidays: Set<string>;
+  /** Make-up days (worked although their weekday is off) — the project calendar's rule, workCalendar.ts. */
+  makeUpDays: Set<string>;
   /** Minutes after local midnight, ascending. */
   periods: Array<[number, number]>;
   /** Working minutes in one working day. */
@@ -53,6 +55,7 @@ export function makeCalendar(s: SlaSettings): SlaCalendar {
     tzMs: s.tzOffsetMinutes * 60_000,
     workDays: new Set(s.workDays),
     holidays: new Set(s.holidays.map((h) => h.date)),
+    makeUpDays: new Set((s.makeUpDays ?? []).map((m) => m.date)),
     periods,
     dayMinutes: periods.reduce((sum, [a, b]) => sum + (b - a), 0),
   };
@@ -68,11 +71,14 @@ export function localDateOf(ms: number, cal: SlaCalendar): string {
   return new Date(dayIndexOf(ms, cal) * DAY_MS).toISOString().slice(0, 10);
 }
 
+/** Same rule as workCalendar.dayKind: a make-up day is worked, a holiday is not, the rest follows the weekday. */
 function isWorkingDay(day: number, cal: SlaCalendar): boolean {
+  const iso = new Date(day * DAY_MS).toISOString().slice(0, 10);
+  if (cal.makeUpDays.has(iso)) return true;
+  if (cal.holidays.has(iso)) return false;
   // 1970-01-01 was a Thursday (ISO weekday 4).
   const isoWeekday = (((day + 3) % 7) + 7) % 7 + 1;
-  if (!cal.workDays.has(isoWeekday)) return false;
-  return !cal.holidays.has(new Date(day * DAY_MS).toISOString().slice(0, 10));
+  return cal.workDays.has(isoWeekday);
 }
 
 /** Working periods of one day as UTC instants. */

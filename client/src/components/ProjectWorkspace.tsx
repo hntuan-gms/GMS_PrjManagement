@@ -11,6 +11,7 @@ import { loadBigTasksCache, loadTasksCache, saveTasksCache, tasksCacheKey } from
 import { dropViewCache, noteViewsStale, readViewCache, viewCacheScope, writeViewCache } from "../viewCache";
 import { warmBoardAndTimesheet, warmProgress } from "../warmViews";
 import { computeSla } from "../sla";
+import { toWorkCalendar } from "../workCalendar";
 import type {
   BulkTaskCreateResult,
   DependencyType,
@@ -37,6 +38,8 @@ import ProgressReportView from "./ProgressReportView";
 import ResourceView from "./ResourceView";
 import TaskEditModal from "./TaskEditModal";
 import SlaSettingsModal from "./SlaSettingsModal";
+import WorkCalendarModal from "./WorkCalendarModal";
+import { WorkCalendarContext } from "./workCalendarContext";
 import { Icon } from "./Icons";
 import BulkStatusMenu from "./BulkStatusMenu";
 import { useDialogs } from "./dialogContext";
@@ -332,6 +335,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
   // means no SLA is shown, never a broken workspace.
   const [sla, setSla] = useState<SlaSettingsResponse | null>(() => readViewCache<SlaSettingsResponse>(viewScope, "sla", "") ?? null);
   const [slaOpen, setSlaOpen] = useState(false);
+  const [calendarOpen, setCalendarOpen] = useState(false);
   useEffect(() => {
     let alive = true;
     api.getSlaSettings().then(
@@ -353,6 +357,9 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
     return () => window.clearInterval(id);
   }, []);
   const slaById = useMemo(() => computeSla(tasks, sla?.settings ?? null, nowMs), [tasks, sla, nowMs]);
+  // The project's working calendar lives in the same row as the SLA policy (and is read by everyone the same
+  // way). Until it arrives, Monday–Friday: exactly what every view assumed before there was a calendar.
+  const workCalendar = useMemo(() => toWorkCalendar(sla?.settings ?? null), [sla]);
   const slaView = useMemo(
     () => (sla?.settings.enabled ? { settings: sla.settings, byId: slaById, nowMs } : null),
     [sla, slaById, nowMs]
@@ -373,8 +380,9 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
       defaultCapacityHours: pool?.defaultCapacityHours,
       from: span.from,
       to: span.to,
+      calendar: workCalendar,
     }).overloadedPeople;
-  }, [tasks, users, pool]);
+  }, [tasks, users, pool, workCalendar]);
 
   // Esc backs out one layer at a time: closes the edit modal if one is open
   // (matching its own Esc-to-close, if it has one, but this is the fallback),
@@ -437,14 +445,14 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
       if (e.key.toLowerCase() !== "z" || !(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
       const el = e.target as HTMLElement | null;
       if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable)) return;
-      if (editingTask || creating || reviewRunId || importing || importingKbkt || slaOpen) return;
+      if (editingTask || creating || reviewRunId || importing || importingKbkt || slaOpen || calendarOpen) return;
       if (view !== "gantt") return;
       e.preventDefault();
       void undoRef.current();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [editingTask, creating, reviewRunId, importing, importingKbkt, slaOpen, view]);
+  }, [editingTask, creating, reviewRunId, importing, importingKbkt, slaOpen, calendarOpen, view]);
 
   async function handleSync() {
     setSyncing(true);
@@ -887,6 +895,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
         lastSyncedAt={lastSyncedAt}
         onSwitchProject={onSwitchProject}
         onOpenSla={() => setSlaOpen(true)}
+        onOpenCalendar={() => setCalendarOpen(true)}
         onLogout={onLogout}
       />
   );
@@ -924,306 +933,339 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
   }
 
   return (
-    <div className="app">
-      {toolbar}
+    <WorkCalendarContext.Provider value={workCalendar}>
+      <div className="app">
+        {toolbar}
 
-      {syncError && (
-        <div className="notice notice-error">
-          <span>{syncError}</span>
-          <button className="link-btn" onClick={() => setSyncError(null)}>
-            Đóng
-          </button>
-        </div>
-      )}
-
-      {session.overlayEphemeral && !overlayNoticeDismissed && (
-        <div className="notice notice-warn">
-          <span>{OVERLAY_WARNING}</span>
-          <button className="link-btn" onClick={() => setOverlayNoticeDismissed(true)}>
-            Đã hiểu
-          </button>
-        </div>
-      )}
-
-      {/* Floats over the bottom of the chart instead of taking a row of its own: out of the
-          flow, so selecting never moves the page. It used to be a strip that appeared on
-          selection, which pushed the table down between the two clicks of a double-click,
-          so the second landed on another row. It must not cover the toolbar either — a
-          single click selects, so it is on screen most of the time. */}
-      {selectedIds.size > 0 && view === "gantt" && (
-        <div className="selection-bar" role="region" aria-label="Thao tác hàng loạt">
-          <span className="selection-count">
-            Đã chọn <strong>{selectedIds.size}</strong> công việc
-          </span>
-          <button onClick={() => setSelectedIds(new Set())}>Bỏ chọn</button>
-          <select
-            className="selection-select"
-            value=""
-            disabled={deleting || bulkBusy !== null}
-            onChange={(e) => {
-              const v = e.target.value;
-              if (v) handleBulkAssign(v === "__none__" ? null : v);
-            }}
-            aria-label="Gán người phụ trách cho các công việc đã chọn"
-          >
-            <option value="">Gán cho…</option>
-            <option value="__none__">— Bỏ gán —</option>
-            {users.map((u) => (
-              <option key={u.accountId} value={u.accountId}>
-                {u.displayName}
-              </option>
-            ))}
-          </select>
-          <BulkStatusMenu
-            tasks={selectedTasks()}
-            disabled={deleting || bulkBusy !== null}
-            onApply={(statusName, ids, values) => void handleBulkStatus(statusName, ids, values)}
-          />
-          <select
-            className="selection-select"
-            value=""
-            disabled={deleting || bulkBusy !== null}
-            onChange={(e) => {
-              const v = e.target.value;
-              if (v === "save" || v === "clear") handleBulkBaseline(v);
-            }}
-            aria-label="Lưu hoặc xoá baseline của các công việc đã chọn"
-            title="Baseline là lịch đã chốt để so với lịch hiện tại trên Gantt"
-          >
-            <option value="">Baseline…</option>
-            <option value="save">Lưu baseline = lịch hiện tại</option>
-            <option value="clear">Xoá baseline</option>
-          </select>
-          <span className="selection-shift">
-            <button
-              disabled={deleting || bulkBusy !== null}
-              onClick={() => handleBulkShift(-shiftDays)}
-              aria-label="Dời lùi lại"
-              title="Dời ngày bắt đầu lùi lại (giữ nguyên thời lượng)"
-            >
-              <Icon name="chevronLeft" size={14} />
+        {syncError && (
+          <div className="notice notice-error">
+            <span>{syncError}</span>
+            <button className="link-btn" onClick={() => setSyncError(null)}>
+              Đóng
             </button>
-            <input
-              type="number"
-              min={1}
-              max={365}
-              value={shiftDays}
-              onChange={(e) => setShiftDays(Math.max(1, Math.min(365, Math.floor(Number(e.target.value)) || 1)))}
-              aria-label="Số ngày dời"
+          </div>
+        )}
+
+        {session.overlayEphemeral && !overlayNoticeDismissed && (
+          <div className="notice notice-warn">
+            <span>{OVERLAY_WARNING}</span>
+            <button className="link-btn" onClick={() => setOverlayNoticeDismissed(true)}>
+              Đã hiểu
+            </button>
+          </div>
+        )}
+
+        {/* Floats over the bottom of the chart instead of taking a row of its own: out of the
+            flow, so selecting never moves the page. It used to be a strip that appeared on
+            selection, which pushed the table down between the two clicks of a double-click,
+            so the second landed on another row. It must not cover the toolbar either — a
+            single click selects, so it is on screen most of the time. */}
+        {selectedIds.size > 0 && view === "gantt" && (
+          <div className="selection-bar" role="region" aria-label="Thao tác hàng loạt">
+            <span className="selection-count">
+              Đã chọn <strong>{selectedIds.size}</strong> công việc
+            </span>
+            <button onClick={() => setSelectedIds(new Set())}>Bỏ chọn</button>
+            <select
+              className="selection-select"
+              value=""
+              disabled={deleting || bulkBusy !== null}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v) handleBulkAssign(v === "__none__" ? null : v);
+              }}
+              aria-label="Gán người phụ trách cho các công việc đã chọn"
+            >
+              <option value="">Gán cho…</option>
+              <option value="__none__">— Bỏ gán —</option>
+              {users.map((u) => (
+                <option key={u.accountId} value={u.accountId}>
+                  {u.displayName}
+                </option>
+              ))}
+            </select>
+            <BulkStatusMenu
+              tasks={selectedTasks()}
+              disabled={deleting || bulkBusy !== null}
+              onApply={(statusName, ids, values) => void handleBulkStatus(statusName, ids, values)}
             />
-            <span>ngày</span>
-            <button
+            <select
+              className="selection-select"
+              value=""
               disabled={deleting || bulkBusy !== null}
-              onClick={() => handleBulkShift(shiftDays)}
-              aria-label="Dời tiến tới"
-              title="Dời ngày bắt đầu tiến tới (giữ nguyên thời lượng)"
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === "save" || v === "clear") handleBulkBaseline(v);
+              }}
+              aria-label="Lưu hoặc xoá baseline của các công việc đã chọn"
+              title="Baseline là lịch đã chốt để so với lịch hiện tại trên Gantt"
             >
-              <Icon name="chevronRight" size={14} />
+              <option value="">Baseline…</option>
+              <option value="save">Lưu baseline = lịch hiện tại</option>
+              <option value="clear">Xoá baseline</option>
+            </select>
+            <span className="selection-shift">
+              <button
+                disabled={deleting || bulkBusy !== null}
+                onClick={() => handleBulkShift(-shiftDays)}
+                aria-label="Dời lùi lại"
+                title="Dời ngày bắt đầu lùi lại (giữ nguyên thời lượng)"
+              >
+                <Icon name="chevronLeft" size={14} />
+              </button>
+              <input
+                type="number"
+                min={1}
+                max={365}
+                value={shiftDays}
+                onChange={(e) => setShiftDays(Math.max(1, Math.min(365, Math.floor(Number(e.target.value)) || 1)))}
+                aria-label="Số ngày dời"
+              />
+              <span>ngày</span>
+              <button
+                disabled={deleting || bulkBusy !== null}
+                onClick={() => handleBulkShift(shiftDays)}
+                aria-label="Dời tiến tới"
+                title="Dời ngày bắt đầu tiến tới (giữ nguyên thời lượng)"
+              >
+                <Icon name="chevronRight" size={14} />
+              </button>
+            </span>
+            <button className="danger" onClick={handleDeleteSelected} disabled={deleting || bulkBusy !== null}>
+              {deleting ? "Đang xoá..." : `Xoá ${selectedIds.size} công việc`}
             </button>
-          </span>
-          <button className="danger" onClick={handleDeleteSelected} disabled={deleting || bulkBusy !== null}>
-            {deleting ? "Đang xoá..." : `Xoá ${selectedIds.size} công việc`}
-          </button>
-          {bulkBusy && <span className="selection-hint">{bulkBusy}</span>}
+            {bulkBusy && <span className="selection-hint">{bulkBusy}</span>}
+          </div>
+        )}
+
+        {bulkNeeds && (
+          <TransitionFieldsDialog
+            title={`Chuyển ${bulkNeeds.ids.length} việc sang “${bulkNeeds.statusName}”`}
+            message={bulkNeeds.reason ?? "Quy trình Jira yêu cầu nhập thông tin này trước khi chuyển."}
+            fields={bulkNeeds.fields}
+            applyLabel="Chuyển"
+            onCancel={() => setBulkNeeds(null)}
+            onApply={(values) => {
+              const { statusName, ids } = bulkNeeds;
+              setBulkNeeds(null);
+              void handleBulkStatus(statusName, ids, values);
+            }}
+          />
+        )}
+
+        <div className="app-body">
+          {/* Gated on access as well as on the selected view, so nothing can
+              leave a refused user looking at the resource tab. The access check
+              applies to that tab only — the report tab is open to everyone. */}
+          {view === "gantt" || (view === "resource" && resourceAccess !== "allowed") ? (
+            <GanttView
+              tasks={tasks}
+              collapsed={collapsed}
+              onToggleCollapse={toggleCollapse}
+              selectedId={selectedId}
+              onSelect={handleSelect}
+              selectedIds={selectedIds}
+              filter={taskFilter}
+              onFilterChange={setTaskFilter}
+              myAccountId={session.user.accountId}
+              today={todayIso()}
+              onSetCollapsed={(ids) => setCollapsed(new Set(ids))}
+              onOpenEdit={setEditingTask}
+              onScheduleChange={handleScheduleChange}
+              onProgressChange={handleProgressChange}
+              onAddDependency={handleAddDependency}
+              onEditDependency={handleEditDependency}
+              onDeleteDependency={handleDeleteDependency}
+              versions={versions}
+              jqlKeys={jqlKeys}
+              sla={slaView}
+              jql={{ state: jqlState, onRun: runJql, onClear: () => setTaskFilter({ ...taskFilter, jql: "" }) }}
+              undo={{ label: undoing ? null : (undoStack.at(-1)?.label ?? null), onUndo: () => void undo() }}
+              onOpenImport={() => setImporting(true)}
+              onImportKbkt={() => setImportingKbkt(true)}
+            />
+          ) : view === "timesheet" ? (
+            <TimesheetView session={session} tasks={tasks} onOpenEdit={setEditingTask} onTasksChanged={refreshTasks} />
+          ) : view === "board" ? (
+            <BoardView
+              session={session}
+              tasks={tasks}
+              users={users}
+              onOpenEdit={setEditingTask}
+              onTasksChanged={refreshTasks}
+              incomingFilter={chatBoardFilter}
+              onIncomingFilterTaken={() => setChatBoardFilter(null)}
+              refreshing={showingCache}
+            />
+          ) : view === "resource" ? (
+            <ResourceView
+              tasks={tasks}
+              users={users}
+              pool={pool}
+              poolError={poolError}
+              onPoolChange={setPool}
+              onAssign={handleAssign}
+              onOpenEdit={setEditingTask}
+              filter={taskFilter}
+              onFilterChange={setTaskFilter}
+              myAccountId={session.user.accountId}
+              jqlKeys={jqlKeys}
+            />
+          ) : (
+            <ProgressReportView
+              projectKey={session.project?.key ?? ""}
+              tasks={tasks}
+              focusReportId={focusReportId}
+              canGenerate={session.staff}
+              onOpenEdit={setEditingTask}
+              cacheScope={viewCacheScope(session.site.cloudId, session.user.accountId, session.project?.key ?? "")}
+              refreshing={showingCache}
+              sla={slaView}
+            />
+          )}
         </div>
-      )}
 
-      {bulkNeeds && (
-        <TransitionFieldsDialog
-          title={`Chuyển ${bulkNeeds.ids.length} việc sang “${bulkNeeds.statusName}”`}
-          message={bulkNeeds.reason ?? "Quy trình Jira yêu cầu nhập thông tin này trước khi chuyển."}
-          fields={bulkNeeds.fields}
-          applyLabel="Chuyển"
-          onCancel={() => setBulkNeeds(null)}
-          onApply={(values) => {
-            const { statusName, ids } = bulkNeeds;
-            setBulkNeeds(null);
-            void handleBulkStatus(statusName, ids, values);
-          }}
-        />
-      )}
-
-      <div className="app-body">
-        {/* Gated on access as well as on the selected view, so nothing can
-            leave a refused user looking at the resource tab. The access check
-            applies to that tab only — the report tab is open to everyone. */}
-        {view === "gantt" || (view === "resource" && resourceAccess !== "allowed") ? (
-          <GanttView
+        {importing && (
+          <ImportModal
             tasks={tasks}
-            collapsed={collapsed}
-            onToggleCollapse={toggleCollapse}
-            selectedId={selectedId}
-            onSelect={handleSelect}
-            selectedIds={selectedIds}
-            filter={taskFilter}
-            onFilterChange={setTaskFilter}
-            myAccountId={session.user.accountId}
-            today={todayIso()}
-            onSetCollapsed={(ids) => setCollapsed(new Set(ids))}
-            onOpenEdit={setEditingTask}
-            onScheduleChange={handleScheduleChange}
-            onProgressChange={handleProgressChange}
-            onAddDependency={handleAddDependency}
-            onEditDependency={handleEditDependency}
-            onDeleteDependency={handleDeleteDependency}
-            versions={versions}
-            jqlKeys={jqlKeys}
-            sla={slaView}
-            jql={{ state: jqlState, onRun: runJql, onClear: () => setTaskFilter({ ...taskFilter, jql: "" }) }}
-            undo={{ label: undoing ? null : (undoStack.at(-1)?.label ?? null), onUndo: () => void undo() }}
-            onOpenImport={() => setImporting(true)}
-            onImportKbkt={() => setImportingKbkt(true)}
+            onClose={() => setImporting(false)}
+            onImported={async () => {
+              await refreshTasks();
+            }}
           />
-        ) : view === "timesheet" ? (
-          <TimesheetView session={session} tasks={tasks} onOpenEdit={setEditingTask} onTasksChanged={refreshTasks} />
-        ) : view === "board" ? (
-          <BoardView
-            session={session}
+        )}
+
+        {editingTask && (
+          <TaskEditModal
+            // Every field in the form starts from this task, so a different task (opened from
+            // an issue key in the chat while this one is up) must be a fresh form, not the
+            // old one with the new task's title in the header.
+            key={editingTask.id}
+            task={editingTask}
+            allTasks={tasks}
+            users={users}
+            sla={slaView ? { result: slaView.byId.get(editingTask.id) ?? null, settings: slaView.settings, nowMs: slaView.nowMs } : null}
+            onClose={() => setEditingTask(null)}
+            onSave={async (patch) => {
+              const seq = nextSeq();
+              const updated = await api.updateTask(editingTask.id, patch);
+              setTasks((prev) => applyTaskUpdate(prev, updated, seq));
+            }}
+            onDelete={async () => {
+              await api.deleteTask(editingTask.id);
+              await refreshTasks();
+            }}
+            onWorkLogged={refreshTasks}
+            myAccountId={session.user.accountId}
+            onAddSubtask={(parent) => {
+              setEditingTask(null);
+              setCreating({ parentId: parent.id });
+            }}
+          />
+        )}
+
+        {/* Hidden for guests rather than disabled: /api/ai/* 403s for them, and a
+            visible assistant that always errors is worse than no assistant. */}
+        {session.staff && (
+          <ChatDock
+            // Per account AND project: a conversation belongs to the person who
+            // started it, and two people sharing one browser must not continue
+            // each other's chat (the server enforces the same, see ownsSession).
+            storageKey={`gms.chat.${session.site.cloudId}.${session.user.accountId}.${session.project?.key ?? ""}`}
+            onOpenPlan={setReviewRunId}
+            onOpenReport={(id) => {
+              setFocusReportId(id);
+              setView("report");
+            }}
+            onProjectChanged={refreshTasks}
+            onApplyFilter={applyChatFilter}
+            knownKeys={taskKeys}
+            onOpenIssue={(key) => {
+              const task = tasks.find((t) => t.id === key);
+              if (task) setEditingTask(task);
+            }}
+          />
+        )}
+
+        {reviewRunId && (
+          <PlanReviewModal
+            runId={reviewRunId}
+            users={users}
+            onClose={() => setReviewRunId(null)}
+            onApplied={refreshTasks}
+          />
+        )}
+
+        {slaOpen && sla && (
+          <SlaSettingsModal
+            current={sla}
+            onClose={() => setSlaOpen(false)}
+            onSaved={(r) => {
+              setSla(r);
+              writeViewCache(viewScope, "sla", "", r);
+            }}
+            onOpenCalendar={() => {
+              setSlaOpen(false);
+              setCalendarOpen(true);
+            }}
+          />
+        )}
+
+        {calendarOpen && (
+          <WorkCalendarModal
+            initial={sla?.settings ?? null}
+            canEdit={sla?.canEdit ?? false}
+            onClose={() => setCalendarOpen(false)}
+            onSaved={(calendar) => {
+              // The calendar is a slice of the SLA row: fold it into the copy every view reads, so the heatmap,
+              // timesheet, sprint header and SLA chips all move on this render. What the tabs fetched ahead was
+              // computed on the old calendar (sprint capacity), so it is stale now.
+              noteViewsStale(viewScope);
+              if (sla) {
+                const next = { ...sla, settings: { ...sla.settings, ...calendar } };
+                setSla(next);
+                writeViewCache(viewScope, "sla", "", next);
+              } else {
+                api.getSlaSettings().then(
+                  (r) => {
+                    setSla(r);
+                    writeViewCache(viewScope, "sla", "", r);
+                  },
+                  () => undefined
+                );
+              }
+            }}
+          />
+        )}
+
+        {importingKbkt && session.project && (
+          <KbktImportModal
+            projectKey={session.project.key}
+            onClose={() => setImportingKbkt(false)}
+            onApplied={refreshTasks}
+          />
+        )}
+
+        {creating && (
+          <CreateTaskModal
             tasks={tasks}
             users={users}
-            onOpenEdit={setEditingTask}
-            onTasksChanged={refreshTasks}
-            incomingFilter={chatBoardFilter}
-            onIncomingFilterTaken={() => setChatBoardFilter(null)}
-            refreshing={showingCache}
-          />
-        ) : view === "resource" ? (
-          <ResourceView
-            tasks={tasks}
-            users={users}
-            pool={pool}
-            poolError={poolError}
-            onPoolChange={setPool}
-            onAssign={handleAssign}
-            onOpenEdit={setEditingTask}
-            filter={taskFilter}
-            onFilterChange={setTaskFilter}
-            myAccountId={session.user.accountId}
-            jqlKeys={jqlKeys}
-          />
-        ) : (
-          <ProgressReportView
-            projectKey={session.project?.key ?? ""}
-            tasks={tasks}
-            focusReportId={focusReportId}
-            canGenerate={session.staff}
-            onOpenEdit={setEditingTask}
-            cacheScope={viewCacheScope(session.site.cloudId, session.user.accountId, session.project?.key ?? "")}
-            refreshing={showingCache}
-            sla={slaView}
+            initialParentId={creating.parentId}
+            onClose={() => setCreating(false)}
+            onCreate={async (input): Promise<BulkTaskCreateResult> => {
+              // One path for one task or many: a field-by-field copy into createTask
+              // once silently dropped the estimate, and the bulk route also reports
+              // half-stuck fields as warnings.
+              const res = await api.createTasksBulk(input);
+              if (res.created.length > 0) await refreshTasks();
+              // A single task that failed outright reads as a form error, so what was
+              // typed stays in the form to be fixed and sent again.
+              if (input.summaries.length === 1 && res.errors.length === 1) throw new Error(res.errors[0].message);
+              return res;
+            }}
           />
         )}
       </div>
-
-      {importing && (
-        <ImportModal
-          tasks={tasks}
-          onClose={() => setImporting(false)}
-          onImported={async () => {
-            await refreshTasks();
-          }}
-        />
-      )}
-
-      {editingTask && (
-        <TaskEditModal
-          // Every field in the form starts from this task, so a different task (opened from
-          // an issue key in the chat while this one is up) must be a fresh form, not the
-          // old one with the new task's title in the header.
-          key={editingTask.id}
-          task={editingTask}
-          allTasks={tasks}
-          users={users}
-          sla={slaView ? { result: slaView.byId.get(editingTask.id) ?? null, settings: slaView.settings, nowMs: slaView.nowMs } : null}
-          onClose={() => setEditingTask(null)}
-          onSave={async (patch) => {
-            const seq = nextSeq();
-            const updated = await api.updateTask(editingTask.id, patch);
-            setTasks((prev) => applyTaskUpdate(prev, updated, seq));
-          }}
-          onDelete={async () => {
-            await api.deleteTask(editingTask.id);
-            await refreshTasks();
-          }}
-          onWorkLogged={refreshTasks}
-          myAccountId={session.user.accountId}
-          onAddSubtask={(parent) => {
-            setEditingTask(null);
-            setCreating({ parentId: parent.id });
-          }}
-        />
-      )}
-
-      {/* Hidden for guests rather than disabled: /api/ai/* 403s for them, and a
-          visible assistant that always errors is worse than no assistant. */}
-      {session.staff && (
-        <ChatDock
-          // Per account AND project: a conversation belongs to the person who
-          // started it, and two people sharing one browser must not continue
-          // each other's chat (the server enforces the same, see ownsSession).
-          storageKey={`gms.chat.${session.site.cloudId}.${session.user.accountId}.${session.project?.key ?? ""}`}
-          onOpenPlan={setReviewRunId}
-          onOpenReport={(id) => {
-            setFocusReportId(id);
-            setView("report");
-          }}
-          onProjectChanged={refreshTasks}
-          onApplyFilter={applyChatFilter}
-          knownKeys={taskKeys}
-          onOpenIssue={(key) => {
-            const task = tasks.find((t) => t.id === key);
-            if (task) setEditingTask(task);
-          }}
-        />
-      )}
-
-      {reviewRunId && (
-        <PlanReviewModal
-          runId={reviewRunId}
-          users={users}
-          onClose={() => setReviewRunId(null)}
-          onApplied={refreshTasks}
-        />
-      )}
-
-      {slaOpen && sla && (
-        <SlaSettingsModal
-          current={sla}
-          onClose={() => setSlaOpen(false)}
-          onSaved={(r) => {
-            setSla(r);
-            writeViewCache(viewScope, "sla", "", r);
-          }}
-        />
-      )}
-
-      {importingKbkt && session.project && (
-        <KbktImportModal
-          projectKey={session.project.key}
-          onClose={() => setImportingKbkt(false)}
-          onApplied={refreshTasks}
-        />
-      )}
-
-      {creating && (
-        <CreateTaskModal
-          tasks={tasks}
-          users={users}
-          initialParentId={creating.parentId}
-          onClose={() => setCreating(false)}
-          onCreate={async (input): Promise<BulkTaskCreateResult> => {
-            // One path for one task or many: a field-by-field copy into createTask
-            // once silently dropped the estimate, and the bulk route also reports
-            // half-stuck fields as warnings.
-            const res = await api.createTasksBulk(input);
-            if (res.created.length > 0) await refreshTasks();
-            // A single task that failed outright reads as a form error, so what was
-            // typed stays in the form to be fixed and sent again.
-            if (input.summaries.length === 1 && res.errors.length === 1) throw new Error(res.errors[0].message);
-            return res;
-          }}
-        />
-      )}
-    </div>
+    </WorkCalendarContext.Provider>
   );
 }

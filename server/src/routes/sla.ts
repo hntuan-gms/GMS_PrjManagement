@@ -1,8 +1,8 @@
 import { Router } from "express";
 import { requireProject } from "../auth/middleware.js";
 import { slaAdminOnly } from "../errors.js";
-import { validateSlaSettings } from "../sla.js";
-import { getSlaSettings, saveSlaSettings } from "../slaStore.js";
+import { calendarOf, slaFieldsOf, validateSlaSettings } from "../sla.js";
+import { getSlaSettings, patchSlaSettings } from "../slaStore.js";
 
 export const slaRouter = Router();
 
@@ -39,8 +39,13 @@ slaRouter.put("/settings", async (req, res, next) => {
   try {
     const members = await taskService!.listMembers();
     if (!members.rolesReadable) throw slaAdminOnly();
-    const settings = validateSlaSettings(req.body);
-    res.json({ settings: await saveSlaSettings(session.cloudId, session.projectKey!, session.accountId, settings), canEdit: true });
+    // The calendar fields (working weekdays, holidays, make-up days) belong to the calendar dialog
+    // (routes/calendar.ts): whatever this body says about them is replaced by what is stored, and only
+    // the SLA's own fields are written, so a dialog opened before a holiday was added cannot remove it.
+    const stored = await getSlaSettings(session.cloudId, session.projectKey!);
+    const settings = validateSlaSettings({ ...(req.body ?? {}), ...calendarOf(stored) });
+    const saved = await patchSlaSettings(session.cloudId, session.projectKey!, session.accountId, slaFieldsOf(settings));
+    res.json({ settings: saved, canEdit: true });
   } catch (err) {
     next(err);
   }

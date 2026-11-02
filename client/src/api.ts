@@ -47,6 +47,8 @@ import type {
   KbktSettings,
   SlaSettings,
   SlaSettingsResponse,
+  WorkCalendarResponse,
+  WorkCalendarSettings,
   KbktStreamEvent,
   SavedFilter,
   SavedFilterSpec,
@@ -421,6 +423,10 @@ export const api = {
   getSlaSettings: () => request<SlaSettingsResponse>("/sla/settings"),
   saveSlaSettings: (settings: SlaSettings) =>
     request<SlaSettingsResponse>("/sla/settings", { method: "PUT", body: JSON.stringify(settings) }),
+  // The project's working calendar (weekdays, holidays, make-up days) — stored with SLA, edited on its own.
+  getWorkCalendar: () => request<WorkCalendarResponse>("/calendar"),
+  saveWorkCalendar: (calendar: Required<WorkCalendarSettings>) =>
+    request<WorkCalendarResponse>("/calendar", { method: "PUT", body: JSON.stringify(calendar) }),
   getKbktSettings: () => request<KbktSettings>("/kbkt/settings"),
   saveKbktSettings: (settings: KbktSettings) =>
     request<KbktSettings>("/kbkt/settings", { method: "PUT", body: JSON.stringify(settings) }),

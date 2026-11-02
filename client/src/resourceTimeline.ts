@@ -18,6 +18,7 @@ export function formatDate(iso: string): string {
 /**
  * What a heatmap cell says when hovered. A day nobody can work on says so instead of "0h / 0h (0%)",
  * which reads as a bug; work that was nonetheless put on such a day is the one thing worth adding.
+ * A holiday of the project's calendar is named ("Ngày lễ: Tết Nguyên đán") rather than called a day off.
  */
 export function cellTooltip(c: {
   start: string;
@@ -26,11 +27,14 @@ export function cellTooltip(c: {
   capacity: number;
   ratio: number;
   taskIds: string[];
+  /** The holiday's name, for a single day that is one. */
+  holiday?: string;
 }): string {
   const when = c.start === c.end ? formatDate(c.start) : `${formatDate(c.start)} → ${formatDate(c.end)}`;
+  const off = c.holiday ? `Ngày lễ: ${c.holiday}` : "Ngày nghỉ";
   const head =
     c.capacity <= 0
-      ? `${when} · Ngày nghỉ${c.allocated > 0 ? ` · ${c.allocated}h việc bị xếp vào ngày nghỉ` : ""}`
+      ? `${when} · ${off}${c.allocated > 0 ? ` · ${c.allocated}h việc bị xếp vào ngày nghỉ` : ""}`
       : `${when} · ${c.allocated}h / ${c.capacity}h (${pct(c.ratio)})`;
   const ids = [...new Set(c.taskIds)];
   return ids.length > 0 ? `${head}\n${ids.join(", ")}` : head;
