@@ -230,6 +230,39 @@ apiRouter.post("/tasks/bulk", requireProject, async (req, res, next) => {
   }
 });
 
+/**
+ * Change the issue type of existing issues (Jira's Move — the edit call cannot
+ * cross workflows). `preview: true` writes nothing and returns the plan with the
+ * status each issue would land in; without it the move runs. `statusMap` is
+ * source status id → target status id, for a landing the person chose.
+ */
+apiRouter.post("/tasks/change-type", requireProject, async (req, res, next) => {
+  try {
+    const body = (req.body ?? {}) as { keys?: unknown; issueType?: unknown; statusMap?: unknown; preview?: unknown };
+    const keys = Array.isArray(body.keys) ? body.keys.map(String) : [];
+    const issueType = typeof body.issueType === "string" ? body.issueType.trim() : "";
+    if (keys.length === 0 || !issueType) {
+      next(badRequest("Cần chọn công việc và loại issue mới."));
+      return;
+    }
+    const svc = req.auth!.taskService!;
+    if (body.preview === true) {
+      const { plan, targetStatuses } = await svc.previewTypeChange(keys, issueType);
+      res.json({ plan, targetStatuses });
+      return;
+    }
+    const statusMap: Record<string, string> = {};
+    if (body.statusMap && typeof body.statusMap === "object") {
+      for (const [from, to] of Object.entries(body.statusMap as Record<string, unknown>)) {
+        if (typeof to === "string") statusMap[from] = to;
+      }
+    }
+    res.json(await svc.changeIssueType(keys, issueType, statusMap));
+  } catch (err) {
+    next(err);
+  }
+});
+
 apiRouter.patch("/tasks/:id", requireProject, async (req, res, next) => {
   try {
     const input = req.body as TaskUpdateInput;

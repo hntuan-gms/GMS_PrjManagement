@@ -566,6 +566,18 @@ export function writeEffect(method: string, path: string, body?: string): WriteE
     effect.created = true;
     return effect;
   }
+  if (verb === "POST" && p === "/rest/api/3/bulk/issues/move") {
+    // A move changes type, status and sometimes fields: mark every named issue so
+    // the next load re-reads it by id. The caller renews this once the task ends.
+    const mappings = parsed()?.targetToSourcesMapping;
+    if (mappings && typeof mappings === "object") {
+      for (const m of Object.values<any>(mappings)) {
+        const ids: unknown = m?.issueIdsOrKeys;
+        if (Array.isArray(ids)) effect.stale.push(...ids.map(String).filter((k) => ISSUE_KEY.test(k) || ISSUE_ID.test(k)));
+      }
+    }
+    return effect;
+  }
   const issue = p.match(/^\/rest\/api\/[23]\/issue\/([^/]+)(\/.*)?$/);
   if (issue) {
     const key = decodeURIComponent(issue[1]);

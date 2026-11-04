@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { runTool, type ToolContext } from "../src/ai/tools.js";
 import { resolvePriority } from "../src/ai/toolUtils.js";
+import { planTypeMove } from "../src/issueTypeMove.js";
 import { countMatching, resolveViewFilter } from "../src/ai/viewFilter.js";
 import type { JiraUser, Task } from "../src/types.js";
 import { task } from "./fixtures.js";
@@ -28,7 +29,12 @@ const project = (): Task[] => [
 ];
 
 function makeCtx(tasks: Task[] = project()) {
-  const calls = { updates: [] as Array<{ id: string; input: Record<string, unknown> }>, comments: [] as Array<{ id: string; text: string }>, created: [] as unknown[] };
+  const calls = {
+    updates: [] as Array<{ id: string; input: Record<string, unknown> }>,
+    comments: [] as Array<{ id: string; text: string }>,
+    created: [] as unknown[],
+    moves: [] as Array<{ keys: string[]; typeName: string }>,
+  };
   const ctx = {
     cloudId: "c",
     projectKey: "P",
@@ -48,6 +54,19 @@ function makeCtx(tasks: Task[] = project()) {
       createTask: async (input: { summary: string; issueType: string }) => {
         calls.created.push(input);
         return task({ id: "P-99", summary: input.summary, issueType: input.issueType as Task["issueType"] });
+      },
+      // The real service reads Jira; the planning rule itself is planTypeMove's and tested on its own.
+      previewTypeChange: async (keys: string[], typeName: string) => {
+        const sources = keys.map((k) => {
+          const t = tasks.find((x) => x.id === k)!;
+          return { key: k, id: k, summary: t.summary, typeName: t.issueType, subtask: t.issueType === "Sub-task", statusId: t.statusName, statusName: t.statusName, statusCategory: t.statusCategory, hasAssignee: !!t.assigneeAccountId };
+        });
+        const target = [{ id: "To Do", name: "To Do", category: "new" }, { id: "Closed", name: "Closed", category: "done" }];
+        return { plan: planTypeMove(sources, { id: "10100", name: typeName, subtask: false }, target), sources, targetStatuses: target };
+      },
+      changeIssueType: async (keys: string[], typeName: string) => {
+        calls.moves.push({ keys, typeName });
+        return { moved: keys, failed: [], alreadyThere: [], refused: [] };
       },
     },
     extras: {
@@ -372,13 +391,43 @@ describe("components, versions, parent and type via update_task / search_tasks (
     assert.ok("error" in (await run("update_task", { taskId: "P-3", parentKey: "ZZ-9" }, ctx)).response);
   });
 
-  it("changes the type only when it is different", async () => {
+  it("update_task no longer changes the type: the edit call cannot cross workflows, change_issue_type can", async () => {
     const { ctx, calls } = makeCtx();
-    await run("update_task", { taskId: "P-3", issueType: "Bug" }, ctx);
-    assert.equal(calls.updates[0].input.issueType, "Bug");
-    const same = await run("update_task", { taskId: "P-3", issueType: "task" }, ctx);
+    const res = await run("update_task", { taskId: "P-3", issueType: "Bug" }, ctx);
+    assert.equal(calls.updates.length, 0);
+    assert.match(String((res.response as { error: string }).error), /change_issue_type/);
+    // Naming the type it already has is not a change and is not an error.
+    await run("update_task", { taskId: "P-3", issueType: "task", priority: "High" }, ctx);
     assert.equal(calls.updates.length, 1);
-    assert.ok("error" in same.response);
+  });
+
+  it("change_issue_type moves straight away when no status has to change", async () => {
+    const { ctx, calls } = makeCtx([task({ id: "P-3", summary: "x", statusName: "To Do", statusCategory: "new" })]);
+    const res = await run("change_issue_type", { taskIds: ["p-3"], issueType: "Issue" }, ctx);
+    assert.deepEqual(calls.moves, [{ keys: ["P-3"], typeName: "Issue" }]);
+    assert.deepEqual((res.response as { moved: string[] }).moved, ["P-3"]);
+    assert.equal(ctx.tasks[0].issueType, "Issue");
+    assert.equal(ctx.mutated, true);
+  });
+
+  it("change_issue_type never moves a Done issue unconfirmed: it shows where its status would land", async () => {
+    const { ctx, calls } = makeCtx([task({ id: "P-3", summary: "x", statusName: "Done", statusCategory: "done" })]);
+    const first = await run("change_issue_type", { taskIds: ["P-3"], issueType: "Issue" }, ctx);
+    assert.equal(calls.moves.length, 0);
+    const r = first.response as { needsConfirmation: boolean; statusWillChange: Array<{ from: string; to: string }> };
+    assert.equal(r.needsConfirmation, true);
+    assert.deepEqual(r.statusWillChange.map((s) => [s.from, s.to]), [["Done", "Closed"]]);
+    assert.equal(ctx.mutated, false);
+
+    await run("change_issue_type", { taskIds: ["P-3"], issueType: "Issue", confirmed: true }, ctx);
+    assert.equal(calls.moves.length, 1);
+  });
+
+  it("change_issue_type reports a key that is not in the project instead of guessing", async () => {
+    const { ctx, calls } = makeCtx();
+    const res = await run("change_issue_type", { taskIds: ["ZZ-9"], issueType: "Issue" }, ctx);
+    assert.ok("error" in res.response);
+    assert.equal(calls.moves.length, 0);
   });
 
   it("search_tasks finds by component and by version", async () => {

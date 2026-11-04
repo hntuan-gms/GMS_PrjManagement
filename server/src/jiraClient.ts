@@ -155,6 +155,19 @@ const RATE_LIMIT_MAX_WAIT_MS = 5000;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** `GET /bulk/queue/{taskId}`: where a bulk operation stands (kept by Jira for 14 days). */
+export interface BulkProgress {
+  taskId: string;
+  status: "ENQUEUED" | "RUNNING" | "COMPLETE" | "FAILED" | "CANCEL_REQUESTED" | "CANCELLED" | "DEAD";
+  progressPercent?: number;
+  /** Issue ids the operation succeeded for. */
+  processedAccessibleIssues?: number[];
+  /** Issue id → why it failed (free text, not a fixed list). */
+  failedAccessibleIssues?: Record<string, string[]>;
+  invalidOrInaccessibleIssueCount?: number;
+  totalIssueCount?: number;
+}
+
 export class JiraClient {
   constructor(private readonly opts: JiraClientOptions) {}
 
@@ -480,8 +493,38 @@ export class JiraClient {
   /** Every status each issue type of the project can be in — the status board's columns. */
   async getProjectStatuses(
     projectKey: string
-  ): Promise<Array<{ name: string; statuses: Array<{ id: string; name: string; statusCategory?: { key: string } }> }>> {
+  ): Promise<Array<{ id?: string; name: string; subtask?: boolean; statuses: Array<{ id: string; name: string; statusCategory?: { key: string } }> }>> {
     return this.request(`/rest/api/3/project/${encodeURIComponent(projectKey)}/statuses`);
+  }
+
+  /**
+   * Jira's "Move" (the only way to change an issue's type across workflows):
+   * `POST /bulk/issues/move`, asynchronous — answers a task id, not a result.
+   * Needs only `write:jira-work` (already requested) but the user must hold the
+   * *Global bulk change* permission, which many people lack: that arrives here as
+   * a refusal whose text `JiraApiError.summary` carries.
+   */
+  async submitBulkMove(payload: Record<string, unknown>): Promise<{ taskId: string }> {
+    return this.request(`/rest/api/3/bulk/issues/move`, { method: "POST", body: JSON.stringify(payload) });
+  }
+
+  async getBulkProgress(taskId: string): Promise<BulkProgress> {
+    return this.request(`/rest/api/3/bulk/queue/${encodeURIComponent(taskId)}`);
+  }
+
+  /**
+   * Tells the issue copy that the issues named in a move payload have now really
+   * changed. The submit call marks them when it is accepted, but the move runs
+   * afterwards: a re-read in between would store the old type and clear the mark,
+   * so the mark is renewed once the task has finished.
+   */
+  async notifyBulkMoveDone(payload: Record<string, unknown>): Promise<void> {
+    if (!this.opts.onWrite) return;
+    try {
+      await this.opts.onWrite({ method: "POST", path: "/rest/api/3/bulk/issues/move", body: JSON.stringify(payload) });
+    } catch (err) {
+      console.warn(`[jira] onWrite failed for bulk move: ${(err as Error)?.message ?? err}`);
+    }
   }
 
   /* ---------------------------------------------------------------------------

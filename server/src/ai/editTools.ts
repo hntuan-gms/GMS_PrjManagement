@@ -7,6 +7,7 @@ import { applyMentions, mentionsToPlain, type ResolvedMention } from "./mentionT
 import { DUPLICATE_THRESHOLD, findSimilarTasks } from "./similarity.js";
 import { buildTaskDigest } from "./taskDigest.js";
 import { addDays, turnCalendar, findTaskIn, fold, ISO_DATE, resolvePerson, resolvePriority, str } from "./toolUtils.js";
+import { unmappable } from "../issueTypeMove.js";
 import { dayLabel, isWorkingDate } from "../workCalendar.js";
 import { resolveViewFilter } from "./viewFilter.js";
 
@@ -119,7 +120,6 @@ const UPDATE_TASK: FunctionDeclaration = {
         type: Type.STRING,
         description: "Move the task under this parent (an Epic or Story key). 'none' takes it off its parent. Refused if it would make a loop.",
       },
-      issueType: { type: Type.STRING, description: "Change the issue type (Task, Story, Bug…). Jira may refuse if the workflows differ." },
       estimateHours: {
         type: Type.NUMBER,
         description: "Jira Original estimate in hours ('ước lượng 12 tiếng', '1.5 ngày công' = 12). > 0.",
@@ -221,6 +221,25 @@ const DELETE_TASK: FunctionDeclaration = {
       confirmed: { type: Type.BOOLEAN },
     },
     required: ["taskId"],
+  },
+};
+
+const CHANGE_ISSUE_TYPE: FunctionDeclaration = {
+  name: "change_issue_type",
+  description:
+    "Change the issue type of one or more tasks (Task → Issue, Story → Bug…) using Jira's Move, which works " +
+    "even when the two types have different workflows (update_task cannot). Same project only. If an issue's " +
+    "current status does not exist in the new type's workflow, the result comes back with needsConfirmation " +
+    "and the status each would land in: tell the user in plain words and call again with confirmed=true ONLY " +
+    "after they agree. The user needs Jira's 'Global bulk change' permission; if Jira says they lack it, say so.",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      taskIds: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Issue keys, e.g. ['GMSPM-48','GMSPM-76']." },
+      issueType: { type: Type.STRING, description: "The new type, as this project names it (see the issue types in the prompt)." },
+      confirmed: { type: Type.BOOLEAN },
+    },
+    required: ["taskIds", "issueType"],
   },
 };
 
@@ -401,6 +420,7 @@ export const EDIT_TOOLS: FunctionDeclaration[] = [
   REMOVE_DEPENDENCY,
   SET_BASELINE,
   DELETE_TASK,
+  CHANGE_ISSUE_TYPE,
   MOVE_TO_SPRINT,
   SET_ESTIMATE,
   SPRINT_ACTION,
@@ -412,6 +432,7 @@ const LABELS: Record<string, string> = {
   get_task: "Đang xem chi tiết công việc...",
   search_tasks: "Đang tìm công việc...",
   update_task: "Đang cập nhật công việc trên Jira...",
+  change_issue_type: "Đang đổi loại công việc trên Jira...",
   add_dependency: "Đang nối phụ thuộc...",
   remove_dependency: "Đang gỡ phụ thuộc...",
   set_baseline: "Đang lưu baseline...",
@@ -453,6 +474,8 @@ export async function runEditTool(
       return runSetBaseline(args, ctx);
     case "delete_task":
       return runDeleteTask(args, ctx);
+    case "change_issue_type":
+      return runChangeIssueType(args, ctx);
     case "move_to_sprint":
       return runMoveToSprint(args, ctx);
     case "set_estimate":
@@ -728,7 +751,11 @@ async function runUpdateTask(args: Record<string, unknown>, ctx: ToolContext): P
       input.parentKey = parent.id;
     }
   }
-  if (str(args, "issueType") && fold(str(args, "issueType")) !== fold(t.issueType)) input.issueType = str(args, "issueType");
+  if (str(args, "issueType") && fold(str(args, "issueType")) !== fold(t.issueType)) {
+    // The edit call cannot change a type across workflows (Jira: "The issue type
+    // selected is invalid"); change_issue_type uses Jira's Move, which can.
+    return { response: { error: "Đổi loại công việc phải dùng công cụ change_issue_type, không dùng update_task." } };
+  }
 
   // Schedule: resolved to (start, duration) — the pair updateTask and the
   // cascade work in — whichever way the user put it.
@@ -902,6 +929,71 @@ async function runDeleteTask(args: Record<string, unknown>, ctx: ToolContext): P
   ctx.mutated = true;
   ctx.tasks = ctx.tasks.filter((x) => x.id !== t.id && x.wbsParentId !== t.id);
   return { response: { deleted: t.id, summary: t.summary } };
+}
+
+async function runChangeIssueType(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolOutcome> {
+  const raw = Array.isArray(args.taskIds) ? args.taskIds.map(String) : [];
+  const issueType = str(args, "issueType");
+  if (raw.length === 0 || !issueType) return { response: { error: "Cần taskIds và issueType." } };
+  const tasks: Task[] = [];
+  for (const id of raw) {
+    const t = findTaskIn(ctx.tasks, id);
+    if (!t) return notFound(id);
+    tasks.push(t);
+  }
+  const keys = tasks.map((t) => t.id);
+
+  const { plan } = await ctx.taskService.previewTypeChange(keys, issueType);
+  if (plan.movable.length === 0) {
+    return {
+      response: {
+        nothingToDo: true,
+        ...(plan.alreadyThere.length > 0 ? { alreadyThatType: plan.alreadyThere } : {}),
+        ...(plan.refused.length > 0 ? { refused: plan.refused } : {}),
+      },
+    };
+  }
+  const stuck = unmappable(plan);
+  if (stuck.length > 0) {
+    return {
+      response: {
+        error: `Workflow của "${plan.target.name}" không có trạng thái nào tương ứng với ${stuck.map((p) => `"${p.fromStatusName}"`).join(", ")}; không đổi tự động được — hướng dẫn người dùng dùng Move trên Jira.`,
+      },
+    };
+  }
+  if (plan.statusProposals.length > 0 && args.confirmed !== true) {
+    // Enforced here, not only asked of the model: a move that changes a status
+    // never runs unconfirmed.
+    return {
+      response: {
+        needsConfirmation: true,
+        willMoveTo: plan.target.name,
+        willMove: plan.movable,
+        statusWillChange: plan.statusProposals.map((p) => ({ from: p.fromStatusName, to: p.toStatusName, issues: p.keys })),
+        ...(plan.alreadyThere.length > 0 ? { alreadyThatType: plan.alreadyThere } : {}),
+        ...(plan.refused.length > 0 ? { refused: plan.refused } : {}),
+        instruction:
+          "Nói rõ cho người dùng: loại mới có workflow khác nên trạng thái của các việc trên sẽ đổi như trong statusWillChange. Hỏi xác nhận; chỉ gọi lại với confirmed=true khi họ đồng ý.",
+      },
+    };
+  }
+
+  const result = await ctx.taskService.changeIssueType(keys, issueType);
+  if (result.moved.length > 0) {
+    ctx.mutated = true;
+    const moved = new Set(result.moved);
+    ctx.tasks = ctx.tasks.map((t) => (moved.has(t.id) ? { ...t, issueType: plan.target.name as Task["issueType"] } : t));
+  }
+  return {
+    response: {
+      movedTo: plan.target.name,
+      moved: result.moved,
+      ...(result.failed.length > 0 ? { failed: result.failed } : {}),
+      ...(result.alreadyThere.length > 0 ? { alreadyThatType: result.alreadyThere } : {}),
+      ...(result.refused.length > 0 ? { refused: result.refused } : {}),
+      ...(plan.statusProposals.length > 0 ? { statusChanged: plan.statusProposals.map((p) => ({ from: p.fromStatusName, to: p.toStatusName, issues: p.keys })) } : {}),
+    },
+  };
 }
 
 /* -------------------------------------------------------------------------- */

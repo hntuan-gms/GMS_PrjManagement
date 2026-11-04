@@ -11,6 +11,7 @@ import { describeField, fieldValue, fieldsNamedInAny, optionalTransitionFields, 
 import * as store from "./store.js";
 import { isAssignableType } from "./types.js";
 import { checkStructure, type StructureNode } from "./structure.js";
+import { buildMovePayload, planTypeMove, unmappable, type MoveSource, type TargetStatus, type TypeMovePlan } from "./issueTypeMove.js";
 import { resolvePerson, resolvePriority } from "./ai/toolUtils.js";
 import { AppError, badRequest } from "./errors.js";
 import type {
@@ -1006,6 +1007,104 @@ export class TaskService {
   async listIssueTypes(): Promise<Array<{ name: string; subtask: boolean }>> {
     const types = await this.jira.getProjectIssueTypes(this.ctx.projectKey);
     return types.map((t) => ({ name: t.name, subtask: t.subtask }));
+  }
+
+  /**
+   * What changing these issues to `typeName` would do, read from Jira and
+   * decided by `planTypeMove`; nothing is written. The caller shows the
+   * `statusProposals` to the person before `changeIssueType`.
+   */
+  async previewTypeChange(keys: string[], typeName: string): Promise<{ plan: TypeMovePlan; sources: MoveSource[]; targetStatuses: TargetStatus[] }> {
+    const unique = [...new Set(keys.map((k) => k.trim().toUpperCase()).filter(Boolean))];
+    if (unique.length === 0) throw badRequest("Chưa chọn công việc nào.");
+    if (unique.length > 100) throw badRequest("Mỗi lần đổi loại tối đa 100 công việc.");
+    for (const k of unique) this.assertOwnKey(k);
+
+    const [types, statusesByType, issues] = await Promise.all([
+      this.jira.getProjectIssueTypes(this.ctx.projectKey),
+      this.jira.getProjectStatuses(this.ctx.projectKey),
+      Promise.all(unique.map((k) => this.jira.getIssue(k, ["summary", "issuetype", "status", "assignee"]))),
+    ]);
+    const wanted = typeName.trim().toLowerCase();
+    const target = types.find((t) => t.name.toLowerCase() === wanted);
+    if (!target) {
+      throw badRequest(`Dự án ${this.ctx.projectKey} không có loại "${typeName}". Các loại có: ${types.map((t) => t.name).join(", ")}.`);
+    }
+    const forType = statusesByType.find((t) => t.id === target.id);
+    const targetStatuses: TargetStatus[] = (forType?.statuses ?? []).map((s) => ({
+      id: s.id,
+      name: s.name,
+      category: s.statusCategory?.key ?? "",
+    }));
+    const sources: MoveSource[] = issues.map((i: any) => ({
+      key: i.key,
+      id: String(i.id),
+      summary: i.fields?.summary ?? "",
+      typeName: i.fields?.issuetype?.name ?? "",
+      subtask: !!i.fields?.issuetype?.subtask,
+      statusId: String(i.fields?.status?.id ?? ""),
+      statusName: i.fields?.status?.name ?? "",
+      statusCategory: i.fields?.status?.statusCategory?.key ?? "",
+      hasAssignee: !!i.fields?.assignee,
+    }));
+    return { plan: planTypeMove(sources, { id: target.id, name: target.name, subtask: target.subtask }, targetStatuses), sources, targetStatuses };
+  }
+
+  /**
+   * Changes the issue type through Jira's Move (see issueTypeMove.ts for why the
+   * edit call cannot). Same project only, so keys — and the overlay rows keyed by
+   * them — stay as they are. `statusMap` (source status id → target status id)
+   * replaces the proposed landing status; without it the proposal is used, so a
+   * caller that wants the person to choose must show `previewTypeChange` first.
+   * Waits for Jira's asynchronous task, up to ~60 s.
+   */
+  async changeIssueType(
+    keys: string[],
+    typeName: string,
+    statusMap: Record<string, string> = {}
+  ): Promise<{ moved: string[]; failed: Array<{ key: string; reason: string }>; alreadyThere: string[]; refused: Array<{ key: string; reason: string }> }> {
+    const { plan, sources, targetStatuses } = await this.previewTypeChange(keys, typeName);
+    const result = { moved: [] as string[], failed: [] as Array<{ key: string; reason: string }>, alreadyThere: plan.alreadyThere, refused: plan.refused };
+    if (plan.movable.length === 0) return result;
+
+    const validTargets = new Set(targetStatuses.map((s) => s.id));
+    for (const to of Object.values(statusMap)) {
+      if (!validTargets.has(to)) throw badRequest("Trạng thái đích không thuộc workflow của loại việc mới.");
+    }
+    const stuck = unmappable(plan).filter((p) => !statusMap[p.fromStatusId]);
+    if (stuck.length > 0) {
+      throw badRequest(
+        `Workflow của "${plan.target.name}" không có trạng thái nào tương ứng với: ${stuck.map((p) => `"${p.fromStatusName}"`).join(", ")}. Hãy chọn trạng thái đích.`
+      );
+    }
+
+    const payload = buildMovePayload(this.ctx.projectKey, plan, statusMap);
+    const { taskId } = await this.jira.submitBulkMove(payload);
+    const keyById = new Map(sources.map((s) => [s.id, s.key]));
+
+    const deadline = Date.now() + 60_000;
+    let progress = await this.jira.getBulkProgress(taskId);
+    for (let wait = 500; !["COMPLETE", "FAILED", "CANCELLED", "DEAD"].includes(progress.status); wait = Math.min(wait * 1.5, 3000)) {
+      if (Date.now() > deadline) {
+        await this.jira.notifyBulkMoveDone(payload);
+        throw new AppError(504, "JIRA_UPSTREAM", "Jira vẫn đang xử lý việc đổi loại. Chờ một lúc rồi tải lại để xem kết quả.");
+      }
+      await new Promise((r) => setTimeout(r, wait));
+      progress = await this.jira.getBulkProgress(taskId);
+    }
+    await this.jira.notifyBulkMoveDone(payload);
+
+    for (const id of progress.processedAccessibleIssues ?? []) {
+      const key = keyById.get(String(id));
+      if (key) result.moved.push(key);
+    }
+    for (const [id, reasons] of Object.entries(progress.failedAccessibleIssues ?? {})) {
+      result.failed.push({ key: keyById.get(id) ?? id, reason: reasons.join(" ") });
+    }
+    if (progress.status !== "COMPLETE" && result.moved.length === 0 && result.failed.length === 0) {
+      result.failed.push(...plan.movable.map((key) => ({ key, reason: `Jira báo tác vụ ở trạng thái ${progress.status}.` })));
+    }
+    return result;
   }
 
   /**
