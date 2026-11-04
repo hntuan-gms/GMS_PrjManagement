@@ -2,6 +2,7 @@ import { FunctionCallingConfigMode, GoogleGenAI, type Content, type Part } from 
 import { computeProgress, progressHeadline } from "../progress.js";
 import type { JiraUser, Task } from "../types.js";
 import { activeModel } from "./planner.js";
+import { toolFailureMessage } from "./toolError.js";
 import { TOOLS, labelFor, runTool, type ToolContext } from "./tools.js";
 import type { ViewFilterSpec } from "./viewFilter.js";
 
@@ -365,8 +366,11 @@ export async function* streamChat(
           // assign_task failed, it can explain or try someone else, whereas a
           // silently dropped tool result makes it narrate a success that never
           // happened.
-          const message = (err as Error).message;
-          yield { type: "error", message };
+          // No `error` event for the user: the model explains the failure in its
+          // answer, and the raw "Jira API error 400" box said nothing they could
+          // act on. Jira's own reason goes to the model instead (toolError.ts).
+          const message = toolFailureMessage(err);
+          console.warn(`[ai] tool ${call.name} failed: ${message}`);
           responseParts.push({ functionResponse: { name: call.name, response: { error: message } } });
         }
       }
