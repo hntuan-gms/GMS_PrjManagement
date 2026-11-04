@@ -81,6 +81,30 @@ function describeRateLimit(headers: Headers): string {
   return parts.join(" ") || "(no rate-limit headers)";
 }
 
+/**
+ * Every human sentence in a Jira error body. The platform API answers
+ * `{errorMessages: [...], errors: {field: "…"}}`, but the bulk endpoints answer
+ * `{errors: [{message, elementErrors: {…}}]}` — an array of objects, which the
+ * object-values reading turned into "[object Object]" (a 403 on bulk move hid
+ * its reason that way). Anything that is not text is walked, never printed.
+ */
+function collectMessages(node: unknown, depth = 0): string[] {
+  if (depth > 8 || node == null) return [];
+  if (typeof node === "string") return node.trim() ? [node.trim()] : [];
+  if (Array.isArray(node)) return node.flatMap((n) => collectMessages(n, depth + 1));
+  if (typeof node === "object") {
+    const o = node as Record<string, unknown>;
+    // `message` is the sentence itself; the rest are containers of more of them.
+    if (typeof o.message === "string" && o.message.trim()) return [o.message.trim()];
+    return ["errorMessages", "errors", "elementErrors"].flatMap((k) =>
+      k === "errors" && o.errors && typeof o.errors === "object" && !Array.isArray(o.errors)
+        ? Object.values(o.errors as Record<string, unknown>).flatMap((v) => collectMessages(v, depth + 1))
+        : collectMessages(o[k], depth + 1)
+    );
+  }
+  return [];
+}
+
 export class JiraApiError extends Error {
   constructor(
     public readonly status: number,
@@ -119,12 +143,7 @@ export class JiraApiError extends Error {
   /** Jira's own message, extracted from errorMessages/errors, for showing to users. */
   get summary(): string {
     try {
-      const parsed = JSON.parse(this.body);
-      const messages: string[] = [
-        ...(Array.isArray(parsed.errorMessages) ? parsed.errorMessages : []),
-        ...(parsed.errors && typeof parsed.errors === "object" ? Object.values<string>(parsed.errors) : []),
-      ];
-      return messages.join(" ").trim();
+      return collectMessages(JSON.parse(this.body)).join(" ").trim();
     } catch {
       return "";
     }
