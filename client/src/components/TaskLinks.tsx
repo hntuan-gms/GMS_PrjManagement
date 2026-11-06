@@ -142,9 +142,6 @@ export default function TaskLinks({ task, allTasks, onCount }: Props) {
           </button>
         </div>
       )}
-      <small className="field-note">
-        Chỉ để tham khảo — liên kết Jira không dời lịch. Muốn việc này chờ việc kia, dùng “Phụ thuộc lịch” bên trên.
-      </small>
       {error && <small className="field-note is-error">{error}</small>}
     </div>
   );

@@ -71,7 +71,7 @@ export default function AttachmentPicker({
         }}
       >
         <span>
-          Kéo thả tệp / ảnh vào đây, dán ảnh bằng <kbd>Ctrl</kbd>+<kbd>V</kbd>, hoặc{" "}
+          Thả tệp, dán ảnh, hoặc{" "}
           <button type="button" className="text-btn" onClick={() => inputRef.current?.click()}>
             chọn tệp
           </button>

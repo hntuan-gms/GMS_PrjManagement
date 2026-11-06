@@ -757,7 +757,7 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
             >
               {({ close }) => (
                 <div className="bd-info-body">
-                  <p>Board này là Kanban nên không có Sprint — Jira chỉ gắn sprint với board Scrum.</p>
+                  <p>Board Kanban không có sprint.</p>
                   <button
                     type="button"
                     className="text-btn"
@@ -879,7 +879,7 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
           Jira không chạy được bộ lọc nhanh nên chưa lọc: {quickError}
         </div>
       )}
-      {snapshot.truncated && <div className="bd-fallback">Board có quá nhiều việc — chỉ hiển thị 800 việc đầu theo thứ hạng.</div>}
+      {snapshot.truncated && <div className="bd-fallback">Chỉ hiện 800 việc đầu theo thứ hạng.</div>}
       {notice && (
         <div className="notice notice-error bd-notice">
           <span>{notice}</span>
@@ -1042,7 +1042,6 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
         (scrum && !activeSprint ? (
           <div className="bd-empty">
             <b>Chưa có sprint nào đang chạy.</b>
-            <p>Lên kế hoạch ở Backlog rồi bắt đầu sprint — AI có thể chọn việc giúp bạn.</p>
             <button className="primary" onClick={() => setView("backlog")}>Mở Backlog</button>
           </div>
         ) : (

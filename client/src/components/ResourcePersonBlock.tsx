@@ -110,13 +110,17 @@ export default function PersonBlock({
               <b>{person.displayName}</b>
               <small>
                 {person.role ? `${person.role} · ` : ""}
-                {person.capacityHoursPerDay}h/ngày · {person.tasks.length} việc
+                {/* More than 12 h a day is almost certainly a typo in the profile, not a person. */}
+                <span className={person.capacityHoursPerDay > 12 ? "rv-cap-odd" : undefined} title={person.capacityHoursPerDay > 12 ? "Kiểm tra lại số giờ/ngày trong hồ sơ" : undefined}>
+                  {person.capacityHoursPerDay}h/ngày
+                </span>{" "}
+                · {person.tasks.length} việc
               </small>
             </span>
           </button>
           {person.overloadedDays > 0 && (
             <span className="rv-badge-over" title={`${person.overloadedDays} ngày quá tải`}>
-              {person.overloadedDays}
+              {person.overloadedDays} ngày
             </span>
           )}
           <button
@@ -279,7 +283,7 @@ function PersonTasks({
                     aria-label={`Chuyển ${task.id} cho người khác`}
                   >
                     <option value="">Chuyển…</option>
-                    <option value="__none__">— Bỏ gán —</option>
+                    <option value="__none__">Bỏ gán</option>
                     {members
                       .filter((m) => m.accountId !== person.accountId)
                       .map((m) => (

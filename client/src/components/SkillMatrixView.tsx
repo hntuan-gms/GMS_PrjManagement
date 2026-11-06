@@ -83,7 +83,7 @@ export default function SkillMatrixView({ users, profiles, onProfileSaved }: Pro
 
       {matrix.columns.length === 0 ? (
         <div className="empty-state">
-          Chưa có kỹ năng nào. Thêm một cột ở trên rồi bấm vào ô của người có kỹ năng đó — trợ lý AI sẽ dùng thông tin này khi gợi ý người làm.
+          Chưa có kỹ năng nào.
         </div>
       ) : (
         <div className="sm-scroll">

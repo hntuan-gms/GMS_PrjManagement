@@ -72,9 +72,9 @@ await step("khung giờ chồng nhau bị máy chủ từ chối, hộp thoại 
 });
 
 console.log("\n== SLA: Gantt ==");
-await step("cột 'Trạng thái SLA': trễ / đúng hạn / còn hạn / không áp dụng", async () => {
+await step("cột 'SLA': trễ / đúng hạn / còn hạn / không áp dụng", async () => {
   await openDisplay(page);
-  await page.locator(".col-chooser-item", { hasText: "Trạng thái SLA" }).click();
+  await page.locator(".col-chooser-item", { hasText: /^SLA$/ }).click();
   await page.keyboard.press("Escape");
   const cell = (key) => row(key).locator(".wbs-cell-sla");
   await cell("DEMO-3").locator(".sla-chip.is-breached").waitFor();

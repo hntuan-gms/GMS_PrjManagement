@@ -40,10 +40,10 @@ const OUTLOOK: Record<"on_time" | "at_risk" | "late", { label: string; icon: str
   late: { label: "Nhiều khả năng trễ", icon: "✕", tone: "crit" },
 };
 
-const CONFIDENCE: Record<"high" | "medium" | "low", { label: string; dots: number }> = {
-  high: { label: "Độ tin cậy cao", dots: 3 },
-  medium: { label: "Độ tin cậy vừa", dots: 2 },
-  low: { label: "Độ tin cậy thấp", dots: 1 },
+const CONFIDENCE: Record<"high" | "medium" | "low", { label: string }> = {
+  high: { label: "tin cậy cao" },
+  medium: { label: "tin cậy vừa" },
+  low: { label: "tin cậy thấp" },
 };
 
 const SEVERITY: Record<"high" | "medium" | "low", { label: string; icon: string }> = {
@@ -232,7 +232,9 @@ export default function AiBrief({
         {error && <div className="ai-error">{error}</div>}
         {drifted && (
           <div className="ai-drift">
-            Viết ngày {fmtDate(report.asOf)} khi dự án ở {report.actualPct}% — nay là {live!.actualPct}%.
+            {/* Only name the percentage when it actually moved: "58% → 58%" reads as a mistake. */}
+            Viết ngày {fmtDate(report.asOf)}
+            {Math.abs(report.actualPct - live!.actualPct) >= 0.1 ? `, khi dự án ở ${report.actualPct}%. Nay ${live!.actualPct}%.` : "."}
             {canGenerate && " Phân tích lại để cập nhật."}
           </div>
         )}
@@ -245,16 +247,8 @@ export default function AiBrief({
               <span className="ai-outlook-icon" aria-hidden="true">
                 {OUTLOOK[outlook.verdict].icon}
               </span>
-              <div>
-                <span className="ai-outlook-kicker">Dự báo của AI</span>
-                <b>{OUTLOOK[outlook.verdict].label}</b>
-              </div>
-              <span className="ai-confidence" title={CONFIDENCE[outlook.confidence].label}>
-                {[1, 2, 3].map((d) => (
-                  <i key={d} className={d <= CONFIDENCE[outlook.confidence].dots ? "on" : ""} />
-                ))}
-                <span>{CONFIDENCE[outlook.confidence].label}</span>
-              </span>
+              <b>{OUTLOOK[outlook.verdict].label}</b>
+              <span className="ai-confidence">{CONFIDENCE[outlook.confidence].label}</span>
             </div>
             <p>{outlook.reasoning}</p>
             {disagrees && (
@@ -267,7 +261,7 @@ export default function AiBrief({
 
         {insights.length > 0 && (
           <section className="ai-section">
-            <h3>Vấn đề cốt lõi</h3>
+            <h3>Vấn đề</h3>
             <ul className="ai-list">
               {insights.map((it, i) => {
                 const id = `ins-${i}`;
@@ -297,7 +291,7 @@ export default function AiBrief({
 
         {n.recommendations.length > 0 && (
           <section className="ai-section">
-            <h3>Giải pháp đề xuất</h3>
+            <h3>Đề xuất</h3>
             <ol className="ai-list ai-recs">
               {n.recommendations.map((r, i) => {
                 const id = `rec-${i}`;

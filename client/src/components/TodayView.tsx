@@ -228,11 +228,16 @@ export default function TodayView({ session, tasks, today, capacityHours, onOpen
                   task,
                   <>
                     {due(task)}
-                    <span className="today-waiters">
-                      →{" "}
-                      {waiters
-                        .map((w) => `${firstName(w.assigneeName)} chờ (${w.task.id}${w.slipDaysIfLate > 0 ? `, trễ ${w.slipDaysIfLate}n nếu bạn trễ` : ""})`)
-                        .join(" · ")}
+                    <span
+                      className="today-waiters"
+                      title={
+                        waiters
+                          .filter((w) => w.slipDaysIfLate > 0)
+                          .map((w) => `${w.task.id} trễ ${w.slipDaysIfLate} ngày nếu việc này trễ`)
+                          .join("\n") || undefined
+                      }
+                    >
+                      {waiters.map((w) => `${firstName(w.assigneeName)} chờ`).join(", ")}
                     </span>
                   </>
                 )
@@ -272,7 +277,7 @@ export default function TodayView({ session, tasks, today, capacityHours, onOpen
             <input
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              placeholder="Thêm việc cho hôm nay… (có thể gõ 3n, !cao, ^DEMO-2)"
+              placeholder="Thêm việc cho hôm nay…"
               aria-label="Thêm việc cho hôm nay"
             />
           </form>

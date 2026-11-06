@@ -88,7 +88,7 @@ const REPORT_SCHEMA = {
   properties: {
     headline: {
       type: Type.STRING,
-      description: "Một câu ≤ 20 từ: điều quan trọng nhất người quản lý cần biết hôm nay — một nhận định, không phải một con số.",
+      description: "Một câu ≤ 14 từ: điều quan trọng nhất người quản lý cần biết hôm nay. Một nhận định, không phải một con số.",
     },
     summary: {
       type: Type.STRING,
@@ -203,6 +203,9 @@ function prompt(
     "5. Ưu tiên: now = hôm nay/ngày mai, this_week = trong tuần, later = sau đó.",
     "6. Nếu dữ liệu thiếu (việc chưa có ngày, chưa có baseline, chưa gán người) làm suy luận kém chắc chắn, hạ confidence và nêu một insight loại data.",
     "7. Không bịa điểm tích cực. Mỗi ý tối đa 2 câu. Tổng thể phải đọc được trong 1 phút.",
+    "8. Giọng văn như ghi chú họp của người trong nhóm: câu ngắn, chủ ngữ là việc hoặc người, động từ cụ thể (trễ, chặn, chưa có người). " +
+      "KHÔNG dùng từ cảm xúc hay phóng đại: tê liệt, chặn đứng, nghiêm trọng, trầm trọng, khủng hoảng, báo động, dứt điểm, kích hoạt, then chốt, cốt lõi. " +
+      "KHÔNG dùng dấu gạch dài (—). Không lặp lại cùng một ý (ví dụ số ngày trễ) ở headline, outlook và summary: mỗi ý nói một lần.",
     "",
     "XU HƯỚNG:",
     trend,

@@ -105,7 +105,7 @@ export function VelocityChart({ points, unit, byCount }: { points: VelocityPoint
         <line className="ag-avg-line" x1={PAD.left} x2={W - PAD.right} y1={y(avg)} y2={y(avg)} />
       </svg>
       <p className="pr-muted ag-note">
-        Chỉ tính phần <b>đã hoàn thành</b> trong khoảng thời gian của từng sprint; “cam kết” ban đầu cần báo cáo sprint — xem tab Sprint.
+        Chỉ tính việc đã xong trong từng sprint.
       </p>
     </div>
   );
@@ -209,7 +209,7 @@ export function ControlChart({ report, metric }: { report: FlowReport["control"]
         items={[
           { className: "ag-key-dot", label: "Một việc đã xong" },
           { className: "pr-key-actual", label: "Trung bình trượt (5 việc)" },
-          { className: "ag-key-avg", label: "P85 — 85% việc xong trong ngần này" },
+          { className: "ag-key-avg", label: "P85" },
         ]}
       />
       <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`${metric === "cycle" ? "Cycle time" : "Lead time"}: trung bình ${stats.mean} ngày, P85 ${stats.p85} ngày`}>

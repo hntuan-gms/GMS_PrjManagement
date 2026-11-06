@@ -218,7 +218,7 @@ export default function AgileReports({ cacheScope, projectKey, issueLink }: Prop
               {flow?.data && (
                 <>
                   {flow.data.truncated && (
-                    <div className="bd-fallback">Dự án có hơn 1000 việc nên chỉ đọc 1000 việc mới tạo nhất — số liệu có thể thiếu việc cũ còn mở.</div>
+                    <div className="bd-fallback">Chỉ tính 1000 việc mới nhất.</div>
                   )}
                   {tab === "cfd" && (
                     <>

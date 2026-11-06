@@ -1,3 +1,4 @@
+import { isDroppedStatus } from "../droppedStatus";
 import type { Task } from "../types";
 
 const LABEL: Record<Task["statusCategory"], string> = {
@@ -12,17 +13,30 @@ const LABEL: Record<Task["statusCategory"], string> = {
  * The workflow's own status name ("In-Progress", "Pending"…) is shown beside it by the caller —
  * names differ per site and cannot be translated safely (BUG-05), the category can.
  */
+
 export default function StatusGlyph({
   category,
   percent = 0,
   size = 14,
   title,
+  name,
 }: {
   category: Task["statusCategory"];
   percent?: number;
   size?: number;
   title?: string;
+  /** The workflow status name, so a cancelled item is not drawn as finished. */
+  name?: string;
 }) {
+  if (category === "done" && isDroppedStatus(name)) {
+    return (
+      <svg className="status-glyph sg-dropped" width={size} height={size} viewBox="0 0 14 14" role="img" aria-label={title ?? name}>
+        <title>{title ?? name}</title>
+        <circle cx={7} cy={7} r={5.25} className="sg-ring" />
+        <path d="M3.4 10.6l7.2-7.2" className="sg-slash" />
+      </svg>
+    );
+  }
   const r = 5.25;
   const c = 7;
   let inner = null;

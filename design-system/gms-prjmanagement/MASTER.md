@@ -117,6 +117,20 @@ Mỗi họ tín hiệu có 5 bậc: `-wash` (nền) · `-soft` · `-line` (viề
 - Màu làm tín hiệu duy nhất; vàng cho tin tốt; chữ nhạt hơn `--ink-3`.
 - Tiêu đề viết hoa toàn bộ; bóng đổ trên thẻ khi nghỉ; bo góc > 12px.
 - `transition: all`; hiệu ứng trên thao tác bàn phím lặp lại; hover làm lệch bố cục.
+- Cỡ chữ ngoài thang `--font-size-*` (không 12.5px, 10.5px…).
+
+### Chữ trên màn hình: ít, ngắn, không giải thích
+
+Giao diện không được trông như máy viết (đánh giá 2026-11-06: chữ thừa là dấu hiệu rõ nhất).
+
+- Nhãn thay cho câu. Không có đoạn giải thích dưới công tắc, ô nhập hay màn trống; chi tiết, nếu cần, ở bảng `?` hoặc `title`.
+- Không dấu gạch dài (—) trong chuỗi hiển thị; dùng dấu chấm, phẩy hoặc `·`. (`—` đứng một mình cho ô trống thì được.)
+- Không song ngữ trong ngoặc ("Nhãn (labels)"), không "(hiện tại)". Số đếm bằng 0 thì ẩn.
+- Không nói một ý hai lần trên cùng màn (tiêu đề, huy hiệu và thẻ cùng nói "chậm 34 ngày").
+- Không ví dụ bịa (`DEMO-2` trong dự án GPM), không câu hỏi mẫu trong ngoặc kép ở màn trống của trợ lý.
+- Tooltip là tên và phím tắt, không phải đoạn hướng dẫn.
+- Không thẻ viền trái màu, không donut trang trí: con số là thứ được đọc, một thanh ngang là đủ.
+- Văn do AI viết (Nhịp dự án) theo cùng luật: prompt cấm từ phóng đại và dấu gạch dài (`server/src/ai/report.ts`, quy tắc 8).
 
 ## 6. Checklist trước khi giao
 

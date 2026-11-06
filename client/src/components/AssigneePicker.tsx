@@ -30,7 +30,7 @@ export default function AssigneePicker({ issueType, accountId, name, members, on
   );
   if (!onAssign || !isAssignableType(issueType)) return avatar;
   return (
-    <span className="bd-assignee" title={`${name ?? "Chưa gán"} — bấm để đổi người phụ trách`} onClick={(e) => e.stopPropagation()}>
+    <span className="bd-assignee" title={name ?? "Chưa gán"} onClick={(e) => e.stopPropagation()}>
       {avatar}
       <select
         value={accountId ?? ""}
@@ -38,7 +38,7 @@ export default function AssigneePicker({ issueType, accountId, name, members, on
         onChange={(e) => onAssign(e.target.value || null)}
         draggable={false}
       >
-        <option value="">— Chưa gán —</option>
+        <option value="">Chưa gán</option>
         {accountId && !members.some((m) => m.accountId === accountId) && <option value={accountId}>{name}</option>}
         {members.map((m) => (
           <option key={m.accountId} value={m.accountId}>

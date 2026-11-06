@@ -364,7 +364,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
         setSyncError(`Chưa tải được danh sách thành viên (${message}).`);
       } else if (cached || bigShown) {
         // Keep working on what is shown, but say it may be out of date.
-        setSyncError(`Chưa làm mới được dữ liệu (${message}) — đang hiện bản lưu lần trước.`);
+        setSyncError(`Chưa đọc lại được Jira (${message}). Đang hiện bản lưu trước.`);
       } else {
         setLoadError({ message, network: e instanceof NetworkError });
       }
@@ -1144,17 +1144,17 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
       aliases: "bieu mau form nhieu viec dinh kem",
       run: () => setCreating({}),
     },
-    { id: "go-today", label: "Đi tới Hôm nay", group: "Thường dùng", icon: "sun", keys: "G H", run: () => go("today") },
+    { id: "go-today", label: "Hôm nay", group: "Thường dùng", icon: "sun", keys: "G H", run: () => go("today") },
     ...LENSES.filter((l) => l.id !== "resource" || resourceAccess === "allowed").map<Command>((l) => ({
       id: `lens-${l.id}`,
-      label: `Đi tới ${l.label}`,
+      label: l.label,
       group: "Đi tới",
       icon: l.id === "gantt" ? "plan" : l.id === "board" ? "board" : l.id === "resource" ? "users" : "pulse",
       keys: l.key,
       aliases: l.id === "gantt" ? "gantt wbs" : l.id === "report" ? "bao cao" : l.id === "resource" ? "nguon luc" : "kanban sprint",
       run: () => go(l.id),
     })),
-    { id: "go-time", label: "Đi tới Giờ làm", group: "Đi tới", icon: "clock", keys: "G T", aliases: "cham cong timesheet", run: () => go("timesheet") },
+    { id: "go-time", label: "Giờ làm", group: "Đi tới", icon: "clock", keys: "G T", aliases: "cham cong timesheet", run: () => go("timesheet") },
     ...(selectedIds.size > 0
       ? [
           {
@@ -1356,8 +1356,10 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
             flow, so selecting never moves the page. It used to be a strip that appeared on
             selection, which pushed the table down between the two clicks of a double-click,
             so the second landed on another row. It must not cover the toolbar either — a
-            single click selects, so it is on screen most of the time. */}
-        {selectedIds.size > 0 && view === "gantt" && (
+            single click selects, so it is on screen most of the time. Hidden while the detail
+            panel is open: that panel is the task being worked on, and the bar squeezed behind it
+            wrapped to three rows. */}
+        {selectedIds.size > 0 && view === "gantt" && !editingTask && (
           <div className="selection-bar" role="region" aria-label="Thao tác hàng loạt">
             <span className="selection-count">
               Đã chọn <strong>{selectedIds.size}</strong> công việc
@@ -1374,7 +1376,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
               aria-label="Gán người phụ trách cho các công việc đã chọn"
             >
               <option value="">Gán cho…</option>
-              <option value="__none__">— Bỏ gán —</option>
+              <option value="__none__">Bỏ gán</option>
               {users.map((u) => (
                 <option key={u.accountId} value={u.accountId}>
                   {u.displayName}

@@ -28,7 +28,7 @@
   background: var(--son);
   color: var(--on-son);
   font-weight: 700;
-  font-size: 15px;
+  font-size: var(--font-size-lead);
   letter-spacing: -0.02em;
 }
 .rail-mark:hover:not(:disabled) {
@@ -90,7 +90,7 @@ button.rail-btn.is-active::before {
   border-radius: var(--radius-md);
   background: var(--ink);
   color: var(--on-strong);
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   font-weight: 500;
   pointer-events: none;
   z-index: 60;
@@ -127,7 +127,7 @@ button.rail-avatar {
   display: block;
   color: var(--ink-3);
   font-weight: 400;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 .seg-group.menu-seg {
   display: flex;
@@ -164,7 +164,7 @@ button.project-switch {
   color: var(--ink);
 }
 .project-switch .proj-name {
-  font-size: 14px;
+  font-size: var(--font-size-lg);
   font-weight: 600;
   letter-spacing: -0.005em;
 }
@@ -174,7 +174,7 @@ button.project-switch {
   color: var(--ink-3);
   font-family: var(--font-mono);
   font-weight: 500;
-  font-size: 11.5px;
+  font-size: var(--font-size-sm);
 }
 .project-switch .caret {
   color: var(--ink-4);
@@ -189,7 +189,7 @@ button.project-switch {
 .lens-tabs button {
   position: relative;
   padding: 0 10px;
-  font-size: 13.5px;
+  font-size: var(--font-size-lg);
   font-weight: 500;
   color: var(--ink-3);
   border-bottom: 2px solid transparent;
@@ -208,7 +208,7 @@ button.project-switch {
   min-width: 16px;
   height: 16px;
   margin-left: 5px;
-  font-size: 10.5px;
+  font-size: var(--font-size-xs);
   background: var(--risk);
 }
 
@@ -224,7 +224,7 @@ button.sync-indicator {
   border: none;
   background: transparent;
   color: var(--ink-3);
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   font-weight: 500;
 }
 button.sync-indicator:hover:not(:disabled) {
@@ -281,7 +281,7 @@ button.cmdk-trigger {
   background: var(--sunken);
   color: var(--ink-3);
   font-weight: 400;
-  font-size: 12.5px;
+  font-size: var(--font-size-md);
 }
 button.cmdk-trigger:hover:not(:disabled) {
   border-color: var(--line-strong);
@@ -305,7 +305,7 @@ kbd {
   background: var(--raised);
   color: var(--ink-3);
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: var(--font-size-xs);
   font-weight: 500;
   line-height: 1;
 }
@@ -392,7 +392,7 @@ button.cmdk-mode {
   padding: 0 8px;
   border: none;
   background: var(--sunken);
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 .cmdk-list {
   flex: 1;
@@ -401,7 +401,7 @@ button.cmdk-mode {
 }
 .cmdk-group {
   padding: 8px 10px 4px;
-  font-size: 11.5px;
+  font-size: var(--font-size-sm);
   font-weight: 500;
   color: var(--ink-3);
 }
@@ -413,7 +413,7 @@ button.cmdk-mode {
   padding: 6px 10px;
   border-radius: var(--radius-md);
   color: var(--ink-2);
-  font-size: 13.5px;
+  font-size: var(--font-size-lg);
   cursor: pointer;
 }
 .cmdk-row.is-active {
@@ -434,12 +434,12 @@ button.cmdk-mode {
 .cmdk-key {
   flex: none;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   color: var(--ink-3);
 }
 .cmdk-meta {
   flex: none;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   color: var(--ink-3);
 }
 .cmdk-create-body {
@@ -463,7 +463,7 @@ button.cmdk-mode {
   border-radius: var(--radius-sm);
   background: var(--sunken);
   color: var(--ink-2);
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   animation: chip-in var(--d-1) var(--e-out);
 }
 .qa-chip.qa-assignee {
@@ -493,7 +493,7 @@ button.cmdk-mode {
 .cmdk-empty {
   padding: 18px 12px;
   color: var(--ink-3);
-  font-size: 13px;
+  font-size: var(--font-size-md);
   line-height: 1.6;
 }
 .cmdk-foot {
@@ -503,7 +503,7 @@ button.cmdk-mode {
   border-top: 1px solid var(--line);
   background: var(--sheet);
   color: var(--ink-3);
-  font-size: 11.5px;
+  font-size: var(--font-size-sm);
 }
 .cmdk-foot span {
   display: inline-flex;
@@ -539,7 +539,7 @@ button.cmdk-mode {
 }
 .muted {
   color: var(--ink-3);
-  font-size: 12.5px;
+  font-size: var(--font-size-md);
 }
 .shortcut-grid {
   columns: 3 240px;
@@ -551,7 +551,7 @@ button.cmdk-mode {
 }
 .shortcut-grid h3 {
   margin: 0 0 6px;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   font-weight: 600;
   color: var(--ink-3);
 }
@@ -564,7 +564,7 @@ button.cmdk-mode {
   gap: 10px;
   padding: 4px 0;
   border-bottom: 1px solid var(--line);
-  font-size: 13px;
+  font-size: var(--font-size-md);
 }
 .shortcut-row dt {
   color: var(--ink-2);
@@ -597,7 +597,7 @@ button.cmdk-mode {
   border-radius: var(--radius-lg);
   background: var(--ink);
   color: var(--on-strong);
-  font-size: 13px;
+  font-size: var(--font-size-md);
   box-shadow: var(--shadow-lg);
   animation: toast-in var(--d-3) var(--e-out);
   transform: scale(calc(1 - var(--toast-depth, 0) * 0.02));
@@ -685,4 +685,35 @@ button.icon-btn:hover:not(:disabled) {
 /* The bulk bar owns the bottom edge while it is up: toasts stack above it instead of covering it. */
 body:has(.selection-bar) .toaster {
   bottom: 84px;
+}
+/* Cancelled / rejected: closed, but not delivered (StatusGlyph isDroppedStatus). */
+.sg-dropped .sg-ring {
+  stroke: var(--ink-4);
+}
+.sg-dropped .sg-slash {
+  stroke: var(--ink-4);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
+/* Phone width: keep the lenses reachable. The project name, the sync label and the fake search
+   box (the rail has Tìm) give way; the lenses scroll sideways if they still do not fit. */
+@media (max-width: 640px) {
+  .toolbar {
+    gap: 8px;
+  }
+  .toolbar .proj-name,
+  .toolbar .sync-text,
+  .toolbar .cmdk-trigger {
+    display: none;
+  }
+  .toolbar-left {
+    min-width: 0;
+    flex: 1;
+  }
+  .lens-tabs {
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
 }

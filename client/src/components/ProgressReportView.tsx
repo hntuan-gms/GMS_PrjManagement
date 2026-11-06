@@ -4,7 +4,7 @@ import { api } from "../api";
 import { computeCriticalPath } from "../criticalPath";
 import { todayIso } from "../resourceAllocation";
 import { csvName, downloadCsv } from "../csv";
-import { isAssignableType, type Health, type JiraUser, type ProgressMetrics, type ProgressOverview, type ProgressReport, type ProgressScope, type Task } from "../types";
+import { isAssignableType, type JiraUser, type ProgressMetrics, type ProgressOverview, type ProgressReport, type ProgressScope, type Task } from "../types";
 import { isViewFresh, readViewCache, writeViewCache } from "../viewCache";
 import { overviewParams } from "../warmViews";
 import { buildReportLink } from "../deepLink";
@@ -54,12 +54,6 @@ interface Props {
  *   graph — causes, forecast, owned actions — on its own surface so it is never
  *   mistaken for a measured number.
  */
-
-const HEALTH: Record<Health, { label: string; icon: string }> = {
-  on_track: { label: "Đúng tiến độ", icon: "✓" },
-  at_risk: { label: "Có rủi ro", icon: "!" },
-  off_track: { label: "Chậm tiến độ", icon: "✕" },
-};
 
 /** What a drill-down shows. Resolved against live `tasks`, so it is never capped like the metric lists. */
 type Drill =
@@ -312,35 +306,28 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
           <div>
             <h2>Nhịp dự án</h2>
             <span className="pr-sub">
-              Tính trực tiếp từ Jira · {fmtDate(m.asOf)} · {m.counts.total} công việc
+              {fmtDate(m.asOf)} · {m.counts.total} việc
             </span>
           </div>
+          {/* The verdict is the pulse sentence below; a coloured badge beside it said it twice. */}
           <div className="pr-header-tools">
+            <button className="text-btn" onClick={() => setShowReasons((v) => !v)} aria-expanded={showReasons}>
+              {showReasons ? "Ẩn lý do" : "Vì sao?"}
+            </button>
             {overview.history.length >= 2 && (
-              <button onClick={() => setComparing(true)} title="Đặt hai báo cáo AI cạnh nhau để xem điều gì đã đổi">
-                So sánh báo cáo
+              <button className="text-btn" onClick={() => setComparing(true)}>
+                So sánh
               </button>
             )}
             {report && (
-              <button onClick={() => void copyLink(report.id)} title="Sao chép liên kết mở thẳng báo cáo AI đang xem">
+              <button className="text-btn" onClick={() => void copyLink(report.id)}>
                 Sao chép liên kết
               </button>
             )}
-            <button onClick={() => window.print()} title="In trang này hoặc lưu thành PDF (chọn “Lưu thành PDF” ở hộp thoại in)">
-              In / Lưu PDF
+            <button className="text-btn" onClick={() => window.print()} title="In hoặc lưu PDF">
+              In
             </button>
           </div>
-          <button
-            className={`pr-status pr-status-${m.health}`}
-            onClick={() => setShowReasons((v) => !v)}
-            aria-expanded={showReasons}
-          >
-            <span className="pr-status-icon" aria-hidden="true">
-              {HEALTH[m.health].icon}
-            </span>
-            {HEALTH[m.health].label}
-            <span className="pr-status-why">{showReasons ? "Ẩn lý do" : "Vì sao?"}</span>
-          </button>
         </header>
         <PulseBlock metrics={m} tasks={tasks} users={users ?? []} onOpenEdit={onOpenEdit} onAssign={onAssign} onOpenResources={onOpenResources} />
         {linkNote && (
@@ -529,7 +516,7 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
             />
           ) : (
             <p className="pr-muted">
-              Mỗi ngày có người mở trang này, số đo của dự án được lưu lại một lần. Cần ít nhất 2 ngày để vẽ xu hướng — các ngày trước khi tính năng này có thì không có số.
+              Cần ít nhất 2 ngày số đo.
             </p>
           )}
         </section>
@@ -898,28 +885,32 @@ function PulseBlock({
       {head.detail && <p className="pulse-detail">{head.detail}</p>}
       {shown.length > 0 && (
         <>
-          <div className="pulse-decisions">
+          {/* Rows, not cards: three bordered cards with a coloured edge each is the stock dashboard
+              look, and a decision reads faster as one line with its action at the end. */}
+          <ul className="pulse-decisions">
             {shown.map((d) => {
               const first = d.action.taskId ?? d.taskIds[0];
               const severe = d.kind === "late-blocking" || d.kind === "unassigned-critical";
               return (
-                <article key={keyOf(d)} className={`pulse-card ${severe ? "is-bad" : "is-watch"}`}>
-                  <h3>{d.title}</h3>
-                  <p>{d.body}</p>
+                <li key={keyOf(d)} className={`pulse-row ${severe ? "is-bad" : "is-watch"}`}>
+                  <div className="pulse-row-text">
+                    <h3>{d.title}</h3>
+                    <p>{d.body}</p>
+                  </div>
                   <div className="pulse-actions">
-                    <button type="button" className="primary" onClick={() => void act(d)}>
-                      {d.action.label}
-                    </button>
                     {d.action.kind !== "open" && first && byId.get(first) && (
-                      <button type="button" onClick={() => onOpenEdit(byId.get(first)!)}>
+                      <button type="button" className="text-btn" onClick={() => onOpenEdit(byId.get(first)!)}>
                         Mở {first}
                       </button>
                     )}
+                    <button type="button" onClick={() => void act(d)}>
+                      {d.action.label}
+                    </button>
                   </div>
-                </article>
+                </li>
               );
             })}
-          </div>
+          </ul>
         </>
       )}
     </section>

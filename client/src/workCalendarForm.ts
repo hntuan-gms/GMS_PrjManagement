@@ -93,7 +93,7 @@ export function formatRange(from: string, to: string): string {
 /** Why a make-up day would change nothing, or null when it is a real one. */
 export function makeUpDayWarning(date: string, workDays: number[], holidays: DatedEntry[]): string | null {
   if (!date) return null;
-  if (holidays.some((h) => h.date === date)) return "Ngày này đang là ngày lễ — xoá ngày lễ trước nếu muốn làm bù.";
+  if (holidays.some((h) => h.date === date)) return "Ngày này đang là ngày lễ.";
   if (workDays.includes(isoWeekday(date))) return "Ngày này vốn đã là ngày làm việc, không cần đánh dấu làm bù.";
   return null;
 }

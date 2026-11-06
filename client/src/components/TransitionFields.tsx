@@ -31,7 +31,7 @@ export function TransitionFieldsForm({ fields, values, onChange, jiraUrl }: Form
             <textarea rows={3} value={values[f.id] ?? ""} onChange={(e) => set(f.id, e.target.value)} />
           ) : f.kind === "select" ? (
             <select value={values[f.id] ?? ""} onChange={(e) => set(f.id, e.target.value)}>
-              <option value="">— Chọn —</option>
+              <option value="">Chọn…</option>
               {(f.options ?? []).map((o) => (
                 <option key={o.id} value={o.id}>
                   {o.label}

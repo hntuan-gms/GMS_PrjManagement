@@ -295,7 +295,12 @@ export function pulseDecisions(
       rank: 4,
       decision: {
         kind: "overdue",
-        title: lateAlone.length === 1 ? `${worst.task.id} trễ ${worst.daysLate} ngày` : `${lateAlone.length} việc quá hạn`,
+        // "khác" when the blocking ones already have their row: "51 việc quá hạn" under a headline
+        // that counted 55 read as a wrong number.
+        title:
+          lateAlone.length === 1
+            ? `${worst.task.id} trễ ${worst.daysLate} ngày`
+            : `${lateAlone.length} việc quá hạn${lateAlone.length < late.length ? " khác" : ""}`,
         body: lateAlone.length === 1 ? `${worst.task.summary} · ${owner}.` : `Lâu nhất: ${worst.task.id} trễ ${worst.daysLate} ngày (${owner}).`,
         taskIds: lateAlone.map((l) => l.task.id),
         action: { kind: "open", label: `Mở ${worst.task.id}`, taskId: worst.task.id },

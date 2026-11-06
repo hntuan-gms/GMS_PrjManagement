@@ -115,7 +115,7 @@ await step("pill KPI: Tất cả / Có việc / Đang quá tải kèm số, Mứ
 await step("chú giải rút gọn: 4 mục, không có 'Trống', mô tả đầy đủ nằm trong tooltip", async () => {
   const items = await page.locator(".rv-legend-item").allTextContents();
   assert.deepEqual(items.map((t) => t.trim()), ["<50%", "50–100%", ">100%", "Ngày nghỉ"]);
-  assert.ok((await page.locator(".rv-legend-item").first().getAttribute("title")).includes("Nhẹ tải"));
+  assert.ok((await page.locator(".rv-legend-item").first().getAttribute("title")).includes("Dưới 50%"));
 });
 await step("bấm pill 'Có việc' chỉ còn người có việc; 'Tất cả' trả lại đủ", async () => {
   const n = async (label) => Number((await page.locator(".rv-pill", { hasText: label }).first().innerText()).match(/\((\d+)\)/)[1]);

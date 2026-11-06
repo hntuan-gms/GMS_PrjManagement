@@ -301,7 +301,7 @@ export default function TaskDiscussion({ taskId, members, myAccountId }: Props) 
     <div className="field td">
       <div className="td-tabs" role="tablist">
         <button role="tab" aria-selected={tab === "comments"} className={tab === "comments" ? "active" : ""} onClick={() => setTab("comments")}>
-          Bình luận{comments ? ` (${comments.length})` : ""}
+          Bình luận{comments && comments.length > 0 ? ` (${comments.length})` : ""}
         </button>
         <button role="tab" aria-selected={tab === "activity"} className={tab === "activity" ? "active" : ""} onClick={() => setTab("activity")}>
           Lịch sử thay đổi

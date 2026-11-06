@@ -207,7 +207,7 @@ export default function BacklogView(props: Props) {
               · {totalWeight(issues.filter((i) => selected.has(i.key)), snapshot)} {unit}
             </span>
           )}
-          <span className="bd-muted">— kéo để chuyển cả nhóm, hoặc:</span>
+          <span className="bd-muted">·</span>
           <select
             className="bl-bulk-assign"
             value=""
@@ -217,7 +217,7 @@ export default function BacklogView(props: Props) {
             }}
           >
             <option value="">Gán cho…</option>
-            <option value="__none__">— Bỏ gán —</option>
+            <option value="__none__">Bỏ gán</option>
             {props.members.map((m) => (
               <option key={m.accountId} value={m.accountId}>
                 {m.displayName}
@@ -475,7 +475,7 @@ export default function BacklogView(props: Props) {
                           ) : (
                             <button
                               className={`bd-est bl-est ${issue.estimate === null ? "is-empty" : ""}`}
-                              title={`${snapshot.estimation.name} — bấm để sửa`}
+                              title={snapshot.estimation.name}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setEditing(issue.key);
@@ -501,7 +501,7 @@ export default function BacklogView(props: Props) {
                     <input
                       autoFocus
                       value={draft}
-                      placeholder="Tên công việc — Enter để tạo, Esc để đóng"
+                      placeholder="Tên công việc"
                       onChange={(e) => setDraft(e.target.value)}
                       onKeyDown={(e) => {
                         if (e.key === "Enter") submitDraft(section.id);

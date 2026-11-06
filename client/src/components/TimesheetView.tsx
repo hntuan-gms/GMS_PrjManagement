@@ -261,7 +261,7 @@ export default function TimesheetView({
               <span className="ts-tile-label">Đã ghi</span>
               <b className="ts-tile-value">{totals.logged}h</b>
               <span className="ts-tile-sub">
-                {pct !== null ? `${pct}% so với ${totals.expected}h kỳ vọng đến hôm nay` : "Chưa tới ngày làm việc nào"}
+                {pct !== null ? `${pct}% / ${totals.expected}h` : "Chưa tới ngày làm việc nào"}
               </span>
             </div>
             <div className={`ts-tile ${totals.withGaps > 0 ? "is-warn" : ""}`}>
@@ -270,7 +270,6 @@ export default function TimesheetView({
                 {totals.withGaps > 0 && <span aria-hidden="true">● </span>}
                 {totals.withGaps} người
               </b>
-              <span className="ts-tile-sub">Ngày làm việc đã qua (trước hôm nay), không nghỉ, chưa có giờ</span>
             </div>
             <div className={`ts-tile ${totals.overDays > 0 ? "is-over" : ""}`}>
               <span className="ts-tile-label">Vượt công suất</span>
@@ -278,7 +277,6 @@ export default function TimesheetView({
                 {totals.overDays > 0 && <span aria-hidden="true">▲ </span>}
                 {totals.overDays} ngày-người
               </b>
-              <span className="ts-tile-sub">Ghi nhiều hơn số giờ/ngày của người đó</span>
             </div>
           </div>
 
@@ -330,7 +328,7 @@ export default function TimesheetView({
                               : gap
                                 ? "Chưa ghi giờ"
                                 : h > 0
-                                  ? `${h}h / ${p.capacityHoursPerDay}h${b === "over" ? " — vượt công suất" : ""}`
+                                  ? `${h}h / ${p.capacityHoursPerDay}h${b === "over" ? ", vượt công suất" : ""}`
                                   : dayLabel(d, calendar) || undefined
                           }
                         >
@@ -379,7 +377,7 @@ export default function TimesheetView({
             <span><i className="band-full" /> đủ ngày</span>
             <span><i className="band-over" />▲ vượt công suất</span>
             <span><span className="ts-gap">●</span> ngày làm việc chưa ghi</span>
-            <span><span className="ts-away">Nghỉ</span> nghỉ phép (tab Nguồn lực)</span>
+            <span><span className="ts-away">Nghỉ</span> nghỉ phép</span>
           </div>
 
           {detail && (
@@ -563,7 +561,7 @@ function LogWorkModal({
           <span>Ghi chú</span>
           <textarea rows={2} value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Đã làm gì (không bắt buộc)" />
         </label>
-        <p className="bd-muted">Giờ được ghi lên Jira dưới tên của bạn — Jira không cho ghi hộ người khác.</p>
+        <p className="bd-muted">Giờ ghi dưới tên bạn.</p>
         {error && <div className="modal-error">{error}</div>}
         <div className="modal-footer">
           <span className="bd-spacer" />

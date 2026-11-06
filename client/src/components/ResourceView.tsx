@@ -61,7 +61,7 @@ const GRANULARITIES: Array<{ value: Granularity; label: string }> = [
 ];
 
 const LEGEND: Array<{ band: string; short: string; title: string }> = [
-  { band: "light", short: "<50%", title: "Nhẹ tải: dưới 50% công suất — còn chỗ nhận thêm việc" },
+  { band: "light", short: "<50%", title: "Dưới 50% công suất" },
   { band: "healthy", short: "50–100%", title: "Hợp lý: từ 50% đến 100% công suất" },
   { band: "over", short: ">100%", title: "Quá tải: trên 100% công suất" },
   {
@@ -517,7 +517,7 @@ export default function ResourceView({
               aria-expanded={unassignedOpen}
               aria-controls={unassignedId}
               onClick={() => setUnassignedOpen((v) => !v)}
-              title="Danh sách việc chưa có người phụ trách — kéo một việc thả lên thành viên để gán"
+              title="Việc chưa có người phụ trách"
             >
               <Icon name="alert" size={13} />
               {load.unassigned.length} công việc chưa gán
@@ -644,8 +644,7 @@ function MemberSourceTip({ pool, count }: { pool: ResourcePool | null; count: nu
         {pool.memberSkippedGroups > 0 && (
           <>
             {" "}
-            Chỉ gồm người được thêm trực tiếp vào vai trò — {pool.memberSkippedGroups} nhóm trong vai trò không đọc được
-            thành viên nên chưa được tính.
+            Chưa tính {pool.memberSkippedGroups} nhóm không đọc được thành viên.
           </>
         )}
       </InfoTip>
@@ -653,8 +652,8 @@ function MemberSourceTip({ pool, count }: { pool: ResourcePool | null; count: nu
   }
 
   return (
-    <InfoTip label="Danh sách thành viên có thể rộng hơn đội thật — xem lý do" tone="warn">
-      {count} người, lấy từ danh sách <b>có thể được giao việc</b> — {fallbackReasonText(pool)} Danh sách này thường rộng hơn
+    <InfoTip label="Danh sách thành viên có thể rộng hơn đội thật" tone="warn">
+      {count} người, lấy từ danh sách <b>có thể được giao việc</b>. {fallbackReasonText(pool)} Danh sách này thường rộng hơn
       đội thật.
       {pool.memberTruncated && " Jira đã cắt ở 100 người, có thể còn thiếu."}
     </InfoTip>

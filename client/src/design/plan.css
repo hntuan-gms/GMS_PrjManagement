@@ -18,7 +18,7 @@
   border-color: transparent;
   background: transparent;
   color: var(--ink-2);
-  font-size: 12.5px;
+  font-size: var(--font-size-md);
 }
 .tf-bar .tf-btn:hover:not(:disabled),
 .tf-bar button.tb-btn:hover:not(:disabled) {
@@ -58,7 +58,7 @@
   background: var(--sunken);
 }
 .tf-bar .seg-group button {
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 .seg-group button.active,
 .seg-group button.active:hover:not(:disabled) {
@@ -75,14 +75,14 @@
   border-bottom: 1px solid var(--line);
   border-right: 1px solid var(--line);
   color: var(--ink-3);
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   font-weight: 500;
   letter-spacing: 0;
 }
 .wbs-row {
   border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
   border-right: 1px solid var(--line);
-  font-size: 13px;
+  font-size: var(--font-size-md);
   background: var(--sheet);
   transition: background-color var(--d-1) linear;
 }
@@ -107,7 +107,7 @@
 .wbs-col-key {
   width: var(--wbs-key-w, 64px);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   font-weight: 400;
   text-overflow: clip;
 }
@@ -145,7 +145,7 @@
   padding: 0;
   border-radius: 0;
   background: none;
-  font-size: 12.5px;
+  font-size: var(--font-size-md);
   font-weight: 400;
   color: var(--ink-2);
 }
@@ -181,7 +181,7 @@
   background: var(--sunken);
   box-shadow: inset 0 0 0 1px var(--line);
   color: var(--ink-2);
-  font-size: 10px;
+  font-size: var(--font-size-xs);
   font-weight: 600;
 }
 .wbs-none {
@@ -193,7 +193,7 @@
   gap: 4px;
 }
 .wbs-col-extra {
-  font-size: 12.5px;
+  font-size: var(--font-size-md);
   color: var(--ink-2);
 }
 .wbs-col-extra.is-right,
@@ -202,7 +202,7 @@
 .wbs-cell-estimate,
 .wbs-cell-spent {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 .wbs-overdue {
   color: var(--risk-text);
@@ -289,7 +289,7 @@
   border: none;
   background: transparent;
   box-shadow: none;
-  font-size: 13px;
+  font-size: var(--font-size-md);
 }
 .wbs-add input:focus-visible {
   outline: none;
@@ -318,7 +318,7 @@
 }
 .baseline-bar.is-late {
   fill: var(--risk);
-  fill-opacity: 0.55;
+  fill-opacity: 0.3;
 }
 
 /* Cells edited in place (Người, Trạng thái): a hint of a control on hover, nothing at rest. */
@@ -359,7 +359,7 @@
   min-height: 30px;
   padding: 4px 8px;
   border-radius: var(--radius-sm);
-  font-size: 13px;
+  font-size: var(--font-size-md);
   color: var(--ink-2);
   cursor: pointer;
 }
@@ -375,12 +375,12 @@
   white-space: nowrap;
 }
 .cell-picker-hint {
-  font-size: 11.5px;
+  font-size: var(--font-size-sm);
   color: var(--ink-3);
 }
 .cell-picker-empty {
   padding: 10px 8px;
-  font-size: 12.5px;
+  font-size: var(--font-size-md);
   color: var(--ink-3);
 }
 
@@ -401,7 +401,7 @@
   border-radius: var(--radius-md);
   background: var(--risk-wash);
   color: var(--risk-text);
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 .dep-violation button {
   height: 26px;
@@ -420,7 +420,7 @@
   padding: 4px 12px 4px 14px;
   background: var(--warn-wash);
   border-bottom: 1px solid var(--warn-line);
-  font-size: 12.5px;
+  font-size: var(--font-size-md);
   color: var(--warn-text);
   z-index: 6;
 }
@@ -430,7 +430,7 @@
   background: var(--warn);
   color: var(--on-strong);
   font-weight: 700;
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 .draft-text b {
   color: var(--ink);
@@ -489,7 +489,7 @@ button.draft-item:hover:not(:disabled) {
 }
 .draft-key {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   color: var(--ink-3);
 }
 .draft-sum {
@@ -500,10 +500,10 @@ button.draft-item:hover:not(:disabled) {
 }
 .draft-dates {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 .draft-kind {
-  font-size: 11.5px;
+  font-size: var(--font-size-sm);
   color: var(--ink-3);
 }
 .draft-kind.is-edited {
@@ -520,4 +520,27 @@ button.draft-item:hover:not(:disabled) {
 /* The plan frame says "draft" too. */
 body:has(.draft-bar) .gantt-body {
   box-shadow: inset 2px 0 0 var(--warn);
+}
+/* The name truncates with an ellipsis; on the flex parent text-overflow did nothing and the
+   name was cut mid-letter ("Kien Quoc Di"). */
+.wbs-person-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* One task without a date is a note, not an alarm: quiet text, the icon carries the warning. */
+.tf-bar .tf-btn.warning-pill {
+  background: transparent;
+  border-color: transparent;
+  color: var(--ink-2);
+}
+.tf-bar .tf-btn.warning-pill svg {
+  color: var(--warn);
+}
+.tf-bar .tf-btn.warning-pill:hover:not(:disabled),
+.tf-bar .tf-btn.warning-pill.is-open {
+  background: var(--sunken);
+  border-color: transparent;
+  color: var(--ink);
 }

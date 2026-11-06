@@ -157,7 +157,7 @@ await step("không có banner xanh; có ⓘ giải thích và nút tạo board S
   assert.equal(await page.locator(".bd-fallback").count(), 0, "banner chiếm chiều cao");
   await page.getByRole("button", { name: "Vì sao board này không có Sprint?" }).click();
   const text = await page.textContent(".bd-info-body");
-  assert.ok(text.includes("không có Sprint") && text.includes("Tạo board Scrum"));
+  assert.ok(/không có sprint/i.test(text) && text.includes("Tạo board Scrum"), text);
   await page.keyboard.press("Escape");
 });
 

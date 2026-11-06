@@ -38,23 +38,23 @@
 }
 .peek-panel .td-header .modal-id {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--font-size-md);
   font-weight: 500;
   color: var(--ink-2);
 }
 .peek-panel .td-header .wbs-status {
-  font-size: 12.5px;
+  font-size: var(--font-size-md);
 }
 .peek-panel .modal-jira-link {
   color: var(--ink-3);
-  font-size: 12.5px;
+  font-size: var(--font-size-md);
 }
 .peek-panel .td-dirty {
   padding: 2px 8px;
   border-radius: var(--radius-full);
   background: var(--warn-wash);
   color: var(--warn-text);
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   font-weight: 500;
 }
 .peek-panel .td-body {
@@ -76,7 +76,7 @@
   background: transparent;
 }
 .peek-panel .td-group-title {
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   font-weight: 500;
   letter-spacing: 0;
   text-transform: none;
@@ -164,7 +164,7 @@
   width: 100%;
   padding-right: 30px;
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: var(--font-size-md);
 }
 .date-field.is-bad input[type="text"] {
   border-color: var(--risk);

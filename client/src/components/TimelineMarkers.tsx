@@ -93,7 +93,8 @@ export default function TimelineMarkers({ bodyEl, rows, ranges, versions, showRe
         const ghost = ghosts?.get(t.id);
         const gx1 = ghost ? dateX(refs, ghost.start) : null;
         const gx2 = ghost ? dateX(refs, ghost.end) : null;
-        const by = rect.y + rect.height - 2;
+        // Below the bar, in the gap: at the bar edge it ran through the descenders of the label (ậ, g, y).
+        const by = rect.y + rect.height + 4;
         return (
           <g key={t.id}>
             {ghost && gx1 !== null && gx2 !== null && (

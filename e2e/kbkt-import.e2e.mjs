@@ -112,7 +112,7 @@ await step("áp dụng → xác nhận, ghi đúng 1 file, nhật ký chạy d�
   await confirmation.waitFor();
   confirmationText = await confirmation.textContent();
   await confirmation.locator("button.primary").click();
-  await card("_v2.xlsx").locator(".kb-notice-ok", { hasText: /Xong — Story DEMO-\d+/ }).waitFor();
+  await card("_v2.xlsx").locator(".kb-notice-ok", { hasText: /Xong: DEMO-\d+/ }).waitFor();
   assert.ok(confirmationText.includes("tạo 10 issue"), confirmationText);
   const applied = await posts("/api/kbkt/apply");
   assert.equal(applied.length, 1);
@@ -161,7 +161,7 @@ await step("áp dụng → mọi test case và lỗi nằm dưới DEMO-50; DEMO
   await confirmation.waitFor();
   confirmationText = await confirmation.textContent();
   await confirmation.locator("button.primary").click();
-  await card("_v2.xlsx").locator(".kb-notice-ok", { hasText: "Xong — Story DEMO-50." }).waitFor();
+  await card("_v2.xlsx").locator(".kb-notice-ok", { hasText: "Xong: DEMO-50" }).waitFor();
   const issues = await (await fetch(API + "/api/__kbkt/issues")).json();
   const subs = issues.filter((i) => i.labels.some((l) => /^(tc|bug)-/.test(l)));
   assert.equal(subs.length, 9);

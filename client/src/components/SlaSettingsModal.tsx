@@ -207,8 +207,7 @@ export default function SlaSettingsModal({ current, onClose, onSaved, onOpenCale
           <section className="sla-section">
             <h3>Giờ làm việc</h3>
             <p className="field-hint sla-calendar-summary">
-              Ngày làm việc: {describeWorkDays(draft.workDays)} · {draft.holidays.length} ngày lễ · {(draft.makeUpDays ?? []).length} ngày làm bù — theo
-              Lịch làm việc của dự án.{" "}
+              Ngày làm việc: {describeWorkDays(draft.workDays)} · {draft.holidays.length} ngày lễ · {(draft.makeUpDays ?? []).length} ngày làm bù.{" "}
               <button type="button" className="text-btn" onClick={() => void openCalendar()}>
                 Mở Lịch làm việc & ngày lễ…
               </button>

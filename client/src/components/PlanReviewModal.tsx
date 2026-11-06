@@ -155,8 +155,7 @@ export default function PlanReviewModal({ runId, users, onClose, onApplied }: Pr
             {result.errors.length > 0 && (
               <div className="notice notice-warn">
                 <div>
-                  <strong>{result.errors.length} dòng lỗi</strong> — các dòng còn lại đã tạo xong, kế hoạch
-                  vẫn giữ để bạn thử lại:
+                  <strong>{result.errors.length} dòng lỗi.</strong> Các dòng khác đã tạo xong:
                   <ul>
                     {result.errors.map((e, i) => (
                       <li key={i}>
@@ -275,7 +274,7 @@ export default function PlanReviewModal({ runId, users, onClose, onApplied }: Pr
                           disabled={!!item.appliedIssueKey || !isAssignableType(item.issueType)}
                           onChange={(e) => patchItem(item.id, { assigneeAccountId: e.target.value || null })}
                         >
-                          <option value="">— chưa gán —</option>
+                          <option value="">Chưa gán</option>
                           {users.map((u) => (
                             <option key={u.accountId} value={u.accountId}>
                               {u.displayName}

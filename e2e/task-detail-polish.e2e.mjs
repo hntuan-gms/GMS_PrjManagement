@@ -51,7 +51,8 @@ console.log("\n== Các thẻ bên trái ==");
 await openTask();
 await step("số đếm nằm ở tiêu đề thẻ; không còn nhãn lặp và ô 'Không có'", async () => {
   assert.equal(await hint("Đính kèm"), "2");
-  assert.equal(await hint("Phụ thuộc lịch"), "0");
+  // A zero count is not shown: the empty section already says so.
+  assert.equal(await section("Phụ thuộc lịch").locator(".td-section-hint").count(), 0);
   assert.equal(await hint("Liên kết Jira"), "1");
   const text = await page.locator(".td-main").innerText();
   for (const gone of ["Phụ thuộc (predecessors)", "Liên kết Jira (issue links)", "Không có"]) assert.ok(!text.includes(gone), `còn "${gone}"`);
@@ -123,9 +124,9 @@ await step("thẻ bình luận không còn tiêu đề gập lặp lại; nút g
   const box = await page.locator(".td-box").boundingBox();
   assert.ok(empty.y < box.y, "câu 'chưa có bình luận' nằm dưới ô nhập");
 });
-await step("câu hướng dẫn của Liên kết Jira nói đúng chiều: Phụ thuộc lịch nằm bên trên", async () => {
+await step("Liên kết Jira không kèm đoạn hướng dẫn: tên thẻ đã phân biệt nó với Phụ thuộc lịch", async () => {
   const text = await page.locator(".td-main").innerText();
-  assert.ok(text.includes("“Phụ thuộc lịch” bên trên") && !text.includes("bên dưới"), text.slice(0, 80));
+  assert.ok(!text.includes("Chỉ để tham khảo"), text.slice(0, 80));
 });
 
 console.log("\n== Thanh bên ==");

@@ -199,7 +199,7 @@ export default function KbktImportModal({ projectKey, onClose, onApplied }: Prop
                     checking: false,
                     mode: "own",
                     story: null,
-                    note: `Tên file trỏ tới ${key} nhưng ${key} không có trong dự án (hoặc không phải Story) — dùng Story riêng của file. Chọn "Story có sẵn" để đưa vào Story khác.`,
+                    note: `Tên file trỏ tới ${key} nhưng ${key} không có trong dự án hoặc không phải Story. Dùng Story riêng của file.`,
                   }
           )
         );
@@ -289,7 +289,7 @@ export default function KbktImportModal({ projectKey, onClose, onApplied }: Prop
           }
         } catch (err) {
           if ((err as Error).name === "AbortError") {
-            patch(e.id, (x) => ({ ...x, applyError: "Đã dừng. Phần đã ghi vẫn giữ — áp dụng lại cùng file sẽ làm tiếp phần còn lại." }));
+            patch(e.id, (x) => ({ ...x, applyError: "Đã dừng. Áp dụng lại cùng file để làm tiếp." }));
             break;
           }
           patch(e.id, (x) => ({ ...x, applyError: errorText(err, "Không ghi được lên Jira.") }));
@@ -362,10 +362,10 @@ export default function KbktImportModal({ projectKey, onClose, onApplied }: Prop
                 setEntries(invalidate());
               }}
             >
-              <option value="">— Giữ Epic của lần nhập trước —</option>
+              <option value="">Giữ Epic lần trước</option>
               {options?.epics.map((ep) => (
                 <option key={ep.key} value={ep.key}>
-                  {ep.key} — {ep.summary}
+                  {ep.key} · {ep.summary}
                 </option>
               ))}
             </select>
@@ -458,7 +458,7 @@ export default function KbktImportModal({ projectKey, onClose, onApplied }: Prop
                   {e.note && <p className="kb-muted">{e.note}</p>}
                   {e.foreignKey && e.mode === "own" && (
                     <p className="kb-muted">
-                      Tên file trỏ tới {e.foreignKey}, thuộc dự án khác — sẽ tạo Story mới trong {projectKey}. Muốn dùng{" "}
+                      Tên file trỏ tới {e.foreignKey}, thuộc dự án khác. Sẽ tạo Story mới trong {projectKey}. Muốn dùng{" "}
                       {e.foreignKey} thì chuyển sang dự án đó rồi nhập lại.
                     </p>
                   )}
@@ -466,7 +466,7 @@ export default function KbktImportModal({ projectKey, onClose, onApplied }: Prop
                   {e.previewError && <div className="modal-error">{e.previewError}</div>}
                   {winner && (
                     <div className="notice notice-warn">
-                      Bản cũ của {e.preview?.code} — bỏ qua, dùng {winner}.
+                      Bản cũ của {e.preview?.code}, dùng {winner}.
                     </div>
                   )}
 
@@ -500,7 +500,7 @@ export default function KbktImportModal({ projectKey, onClose, onApplied }: Prop
                     <>
                       {e.result ? (
                         <div className={`notice ${e.result.storyKey ? "kb-notice-ok" : "notice-error"}`}>
-                          {e.result.storyKey ? `Xong — Story ${e.result.storyKey}.` : "Dừng vì lỗi, xem chi tiết."}
+                          {e.result.storyKey ? `Xong: ${e.result.storyKey}` : "Dừng vì lỗi, xem chi tiết."}
                         </div>
                       ) : (
                         !e.applyError && <p className="kb-muted">Đang ghi lên Jira… ({e.log.length})</p>
@@ -610,7 +610,7 @@ function StoryPicker({
     return (
       <div className="kb-picked">
         <span>
-          <strong>{value.key}</strong> — {value.summary || "(không có tên)"}
+          <strong>{value.key}</strong> · {value.summary || "(không có tên)"}
           {value.type && (
             <span className="kb-muted">
               {" "}
@@ -816,14 +816,14 @@ function SettingsForm({
             </div>
             {fields.length === 0 ? (
               <p className="kb-muted">
-                Màn hình tạo {draft.issueTypes[kind]} không có trường nào điền được từ file — mọi nội dung để trong Mô tả.
+                Màn hình tạo {draft.issueTypes[kind]} không có trường nào điền được. Mọi nội dung để trong Mô tả.
               </p>
             ) : (
               <div className="kb-grid">
                 {options.fieldSources[kind].map((source) => {
                   const value = map[source.key] ?? "";
                   const list = [
-                    { value: "", label: "— Trong Mô tả —" },
+                    { value: "", label: "Trong Mô tả" },
                     ...fields.map((f) => ({ value: f.id, label: f.name })),
                   ];
                   if (value && !fields.some((f) => f.id === value)) {

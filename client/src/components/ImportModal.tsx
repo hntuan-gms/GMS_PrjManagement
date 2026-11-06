@@ -157,7 +157,7 @@ export default function ImportModal({ tasks, onClose, onImported }: Props) {
                   .map((p, i) => (
                     <li key={i}>
                       <b>Dòng {p.row}</b>
-                      {p.summary ? ` · ${p.summary.slice(0, 50)}` : ""} — {p.message}
+                      {p.summary ? ` · ${p.summary.slice(0, 50)}` : ""}: {p.message}
                     </li>
                   ))}
               </ul>
@@ -206,7 +206,7 @@ export default function ImportModal({ tasks, onClose, onImported }: Props) {
                     <label key={i} className="field">
                       <span>{headers[i] || `Cột ${i + 1}`}</span>
                       <select value={mapping[i] ?? ""} onChange={(e) => setField(i, e.target.value as ImportField | "")}>
-                        <option value="">— Bỏ qua —</option>
+                        <option value="">Bỏ qua</option>
                         {FIELD_ORDER.map((f) => (
                           <option key={f} value={f}>
                             {FIELD_LABELS[f]}
@@ -255,7 +255,7 @@ export default function ImportModal({ tasks, onClose, onImported }: Props) {
                     <p className="field-note">
                       {built.length} dòng · {ok} sẽ được tạo
                       {bad.length > 0 ? ` · ${bad.length} dòng có lỗi sẽ bị bỏ qua (và các việc con của chúng)` : ""}.
-                      {tooMany ? ` Tối đa ${MAX_ROWS} dòng mỗi lần — hãy chia nhỏ.` : ""} Mã dự án: {tasks[0]?.id.split("-")[0] ?? "—"}.
+                      {tooMany ? ` Tối đa ${MAX_ROWS} dòng mỗi lần.` : ""} Mã dự án: {tasks[0]?.id.split("-")[0] ?? "—"}.
                     </p>
                   </>
                 )}

@@ -56,10 +56,10 @@ interface SelectedEdge {
 }
 
 const TYPE_LABELS: Record<DependencyType, string> = {
-  FS: "FS — Kết thúc ▸ Bắt đầu",
-  SS: "SS — Bắt đầu ▸ Bắt đầu",
-  FF: "FF — Kết thúc ▸ Kết thúc",
-  SF: "SF — Bắt đầu ▸ Kết thúc",
+  FS: "FS · Kết thúc → Bắt đầu",
+  SS: "SS · Bắt đầu → Bắt đầu",
+  FF: "FF · Kết thúc → Kết thúc",
+  SF: "SF · Bắt đầu → Kết thúc",
 };
 
 const POPOVER_WIDTH = 248;

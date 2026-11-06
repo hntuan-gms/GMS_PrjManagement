@@ -192,8 +192,7 @@ export function CreateBoardModal({
           <input value={name} onChange={(e) => setName(e.target.value)} />
         </label>
         <p className="bd-muted">
-          Board sẽ hiển thị toàn bộ công việc của dự án {projectKey}. Board hiện có vẫn giữ nguyên — một dự án có thể có
-          cả Kanban lẫn Scrum.
+          Board mới gồm mọi việc của {projectKey}. Board hiện có giữ nguyên.
         </p>
         {error && <div className="modal-error">{error}</div>}
         <div className="modal-footer">
@@ -391,7 +390,7 @@ export function SprintPlanModal({
         {proposal && !loading && (
           <>
             <label className="field">
-              <span>Mục tiêu sprint (AI đề xuất — sửa được)</span>
+              <span>Mục tiêu sprint</span>
               <input value={goalText} onChange={(e) => setGoal(e.target.value)} />
             </label>
             {proposal.rationale && <p className="bd-plan-rationale">{proposal.rationale}</p>}
@@ -402,7 +401,7 @@ export function SprintPlanModal({
                   {weight} {unit}
                 </b>
                 <span className="bd-muted">
-                  {budget !== null ? `/ vận tốc trung bình ${budget} ${unit}` : "— chưa có lịch sử vận tốc"}
+                  {budget !== null ? `/ vận tốc trung bình ${budget} ${unit}` : "· chưa có vận tốc"}
                   {existing.length > 0 && ` · gồm ${existing.length} việc đã có trong sprint`}
                 </span>
               </div>

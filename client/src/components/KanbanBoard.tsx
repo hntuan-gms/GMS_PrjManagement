@@ -435,7 +435,7 @@ function Card({
         className={`bd-card-flag ${issue.flagged ? "is-on" : ""}`}
         aria-pressed={issue.flagged}
         aria-label={issue.flagged ? `Bỏ cờ ${issue.key}` : `Gắn cờ ${issue.key}`}
-        title={issue.flagged ? "Bỏ cờ" : "Gắn cờ — báo việc này đang vướng"}
+        title={issue.flagged ? "Bỏ cờ" : "Gắn cờ"}
         onClick={(e) => {
           e.stopPropagation();
           onFlag();

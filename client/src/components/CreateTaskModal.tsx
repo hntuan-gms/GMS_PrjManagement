@@ -392,7 +392,7 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate, initi
           <label className="field">
             <span className="field-label-text">Thuộc task cha (WBS)</span>
             <select value={wbsParentId} onChange={(e) => setWbsParentId(e.target.value)}>
-              <option value="">— Cấp cao nhất (Không có) —</option>
+              <option value="">Không có</option>
               {tasks.map((t) => (
                 <option key={t.id} value={t.id}>
                   {t.id} · {t.summary.slice(0, 40)}
@@ -447,7 +447,7 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate, initi
             <span className="field-label-text">Người phụ trách</span>
             {isAssignableType(issueType) ? (
               <select value={assigneeAccountId} onChange={(e) => setAssigneeAccountId(e.target.value)}>
-                <option value="">— Chưa gán —</option>
+                <option value="">Chưa gán</option>
                 {users.map((u) => (
                   <option key={u.accountId} value={u.accountId}>
                     {u.displayName}
@@ -456,14 +456,14 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate, initi
               </select>
             ) : (
               <span className="field-note">
-                Epic không gán người phụ trách — hãy gán cho các công việc con.
+                Epic không có người phụ trách.
               </span>
             )}
           </label>
           <label className="field">
             <span className="field-label-text">Độ ưu tiên</span>
             <select value={priority} onChange={(e) => setPriority(e.target.value)}>
-              <option value="">— Mặc định của dự án —</option>
+              <option value="">Mặc định</option>
               {priorityOptions.map((p) => (
                 <option key={p} value={p}>
                   {p}

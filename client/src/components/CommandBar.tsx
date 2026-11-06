@@ -178,7 +178,7 @@ export default function CommandBar({ tasks, commands, initialMode = "command", o
       const t = row.task;
       body = (
         <div {...common}>
-          <StatusGlyph category={t.statusCategory} percent={t.percentComplete} />
+          <StatusGlyph category={t.statusCategory} percent={t.percentComplete} name={t.statusName} />
           <span className="cmdk-key">{t.id}</span>
           <span className="cmdk-label">{t.summary}</span>
           <span className="cmdk-meta">{t.assigneeName ?? ""}</span>
@@ -241,7 +241,7 @@ export default function CommandBar({ tasks, commands, initialMode = "command", o
             }}
             placeholder={
               mode === "create"
-                ? "Tên việc… @người t6 3n !cao ^DEMO-2 sau DEMO-5 #nhãn"
+                ? "Tên việc… @người t6 3n !cao #nhãn"
                 : "Tìm việc, chạy lệnh, tạo việc (+…) hoặc hỏi trợ lý…"
             }
             spellCheck={false}
@@ -269,7 +269,7 @@ export default function CommandBar({ tasks, commands, initialMode = "command", o
           {rows.length === 0 ? (
             <div className="cmdk-empty">
               {mode === "create"
-                ? "Gõ tên việc. Có thể thêm @người, ngày (mai, t6, 15/11), 3n, 4h, !cao, ^DEMO-2, sau DEMO-5, #nhãn."
+                ? "Gõ tên việc."
                 : "Không có gì khớp."}
             </div>
           ) : (

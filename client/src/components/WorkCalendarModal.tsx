@@ -174,7 +174,7 @@ export default function WorkCalendarModal({ initial, canEdit: canEditHint, onClo
               Lịch làm việc & ngày lễ
             </span>
             <p className="modal-subtitle">
-              Dùng chung cho cả dự án: tải công việc ở tab Nguồn lực, giờ kỳ vọng ở Chấm công, năng lực và burndown của sprint, trợ lý AI và đồng hồ SLA.
+              Dùng chung cho cả dự án.
             </p>
           </div>
           <button className="modal-close" onClick={() => void requestClose()} aria-label="Đóng" title="Đóng">
@@ -246,7 +246,7 @@ export default function WorkCalendarModal({ initial, canEdit: canEditHint, onClo
 
           <section className="sla-section">
             <h3>Ngày làm bù ({draft.makeUpDays.length})</h3>
-            <p className="field-hint">Ngày cuối tuần vẫn đi làm (vd: làm bù trước Tết) — tính như một ngày làm việc bình thường.</p>
+            <p className="field-hint">Cuối tuần vẫn đi làm.</p>
             <div className="cal-add cal-add-single">
               <label className="field">
                 <span>Ngày</span>

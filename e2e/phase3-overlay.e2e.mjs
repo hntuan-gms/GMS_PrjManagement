@@ -133,7 +133,7 @@ const menuBtn = () => page.locator(".gantt-wrap .sf-select > .tf-btn");
 await step("chưa chọn điều kiện → không cho lưu; thấy bộ lọc người khác chia sẻ", async () => {
   await menuBtn().click();
   await page.waitForSelector(".sf-menu");
-  assert.ok((await page.textContent(".sf-form")).includes("Chọn ít nhất một điều kiện"));
+  assert.ok((await page.textContent(".sf-form")).includes("Chọn một điều kiện"));
   const shared = await page.$$eval(".sf-item", (r) => r.map((x) => x.textContent));
   assert.ok(shared.some((t) => t.includes("Việc gấp của nhóm") && t.includes("Nguyễn Anh")), shared.join("|"));
   await page.keyboard.press("Escape");

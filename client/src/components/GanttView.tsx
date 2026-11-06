@@ -201,7 +201,7 @@ function SwitchRow({
 }: {
   icon: IconName;
   label: string;
-  hint: string;
+  hint?: string;
   checked: boolean;
   onChange: (next: boolean) => void;
 }) {
@@ -210,7 +210,7 @@ function SwitchRow({
       <Icon name={icon} />
       <span className="switch-text">
         <span className="switch-label">{label}</span>
-        <span className="switch-hint">{hint}</span>
+        {hint && <span className="switch-hint">{hint}</span>}
       </span>
       <input type="checkbox" role="switch" className="switch" checked={checked} onChange={(e) => onChange(e.target.checked)} />
     </label>
@@ -285,15 +285,15 @@ const spanDays = (r: { start: string; end: string }) =>
   Math.round((Date.parse(r.end + "T00:00:00Z") - Date.parse(r.start + "T00:00:00Z")) / DAY_MS) + 1;
 
 const COLUMNS: ColumnDef[] = [
-  { id: "type", label: "Loại", long: "Loại issue", width: 70, cell: (t) => t.issueType },
+  { id: "type", label: "Loại", long: "Loại", width: 70, cell: (t) => t.issueType },
   {
     id: "status",
     label: "Trạng thái",
-    long: "Trạng thái Jira",
+    long: "Trạng thái",
     width: 112,
     cell: (t) => (
       <span className={`wbs-status is-${t.statusCategory}`} title={t.statusName}>
-        <StatusGlyph category={t.statusCategory} percent={t.percentComplete} />
+        <StatusGlyph category={t.statusCategory} percent={t.percentComplete} name={t.statusName} />
         <span className="wbs-status-name">{t.statusName}</span>
       </span>
     ),
@@ -308,21 +308,21 @@ const COLUMNS: ColumnDef[] = [
   {
     id: "labels",
     label: "Nhãn",
-    long: "Nhãn (labels)",
+    long: "Nhãn",
     width: 110,
     cell: (t) => (t.labels.length > 0 ? <span title={t.labels.join(", ")}>{t.labels.join(", ")}</span> : "—"),
   },
   {
     id: "components",
     label: "Thành phần",
-    long: "Thành phần (components)",
+    long: "Thành phần",
     width: 110,
     cell: (t) => (t.components.length > 0 ? <span title={t.components.join(", ")}>{t.components.join(", ")}</span> : "—"),
   },
   {
     id: "versions",
     label: "Phiên bản",
-    long: "Phiên bản (fix versions)",
+    long: "Phiên bản",
     width: 100,
     cell: (t) => (t.fixVersions.length > 0 ? <span title={t.fixVersions.join(", ")}>{t.fixVersions.join(", ")}</span> : "—"),
   },
@@ -344,7 +344,7 @@ const COLUMNS: ColumnDef[] = [
           <span className="wbs-avatar" aria-hidden="true">
             {initialsOf(t.assigneeName)}
           </span>
-          {t.assigneeName}
+          <span className="wbs-person-name">{t.assigneeName}</span>
         </span>
       ) : (
         <span className="wbs-none">—</span>
@@ -360,7 +360,7 @@ const COLUMNS: ColumnDef[] = [
     // so a red date and a filter hit always agree.
     cell: (t, r, today) =>
       isOverdueTask(t, today) ? (
-        <span className="wbs-overdue" title={`Quá hạn — hạn ${dm(t.dueDate)}, chưa xong`}>
+        <span className="wbs-overdue" title={`Quá hạn ${dm(t.dueDate)}`}>
           {dm(r?.end ?? t.dueDate)}
         </span>
       ) : (
@@ -370,13 +370,13 @@ const COLUMNS: ColumnDef[] = [
   {
     id: "sla",
     label: "SLA",
-    long: "Trạng thái SLA",
+    long: "SLA",
     width: 104,
     cell: (t, _r, _today, sla) => {
       const r = sla?.byId.get(t.id);
       if (!sla || !r) return "—";
       return (
-        <span className={`sla-chip is-${r.state}`} title={`${SLA_STATE_LABEL[r.state]} — ${slaSentence(r, sla.settings, sla.nowMs)}`}>
+        <span className={`sla-chip is-${r.state}`} title={`${SLA_STATE_LABEL[r.state]}. ${slaSentence(r, sla.settings, sla.nowMs)}`}>
           {slaShortText(r, sla.settings)}
         </span>
       );
@@ -385,16 +385,16 @@ const COLUMNS: ColumnDef[] = [
   {
     id: "duration",
     label: "T.lượng",
-    long: "Thời lượng (ngày)",
+    long: "Thời lượng",
     width: 66,
     align: "right",
     cell: (t, r) => `${r ? spanDays(r) : t.durationDays}d`,
   },
-  { id: "estimate", label: "Ước lượng", long: "Ước lượng (Original estimate)", width: 76, align: "right", cell: (t) => hours(t.estimateHours) },
+  { id: "estimate", label: "Ước lượng", long: "Ước lượng", width: 76, align: "right", cell: (t) => hours(t.estimateHours) },
   {
     id: "spent",
     label: "Đã ghi",
-    long: "Giờ đã ghi (worklog)",
+    long: "Giờ đã ghi",
     width: 66,
     align: "right",
     cell: (t) =>
@@ -406,7 +406,7 @@ const COLUMNS: ColumnDef[] = [
         hours(t.spentHours)
       ),
   },
-  { id: "pct", label: "%", long: "% hoàn thành", width: 48, align: "right", cell: (t) => `${t.percentComplete}%` },
+  { id: "pct", label: "%", long: "% hoàn thành", width: 48, align: "right", cell: (t) => (t.percentComplete > 0 ? `${t.percentComplete}%` : "") },
 ];
 
 /** The same value a column shows, as plain data for a spreadsheet. */
@@ -434,7 +434,7 @@ function csvValue(id: ColumnId, t: Task, r: { start: string; end: string } | und
       return r?.end ?? t.dueDate;
     case "sla": {
       const res = sla?.byId.get(t.id);
-      return res && sla ? `${SLA_STATE_LABEL[res.state]} — ${slaSentence(res, sla.settings, sla.nowMs)}` : "";
+      return res && sla ? `${SLA_STATE_LABEL[res.state]}. ${slaSentence(res, sla.settings, sla.nowMs)}` : "";
     }
     case "duration":
       return r ? spanDays(r) : t.durationDays;
@@ -628,7 +628,7 @@ function AddRow({ top, width, parent, onCreate }: { top: number; width: number; 
             (e.target as HTMLInputElement).blur();
           }
         }}
-        placeholder={asChild && parent ? `Việc con của ${parent.id}… (Shift Tab để bỏ)` : "Thêm việc… (gõ @người t6 3n !cao sau DEMO-5)"}
+        placeholder={asChild && parent ? `Việc con của ${parent.id}… (Shift Tab để bỏ)` : "Thêm việc…"}
         aria-label="Thêm việc"
       />
       <kbd>Enter</kbd>
@@ -1015,6 +1015,13 @@ export default function GanttView({
     () => new Set(rows.filter((r) => r.hasChildren && r.task.issueType === "Epic").map((r) => r.task.id)),
     [rows]
   );
+  // An Epic with children is drawn as a bracket in the gap under its label, where its baseline strip
+  // would also go; a container has no plan of its own worth a second line there.
+  const shownBaselines = useMemo(() => {
+    const m = new Map(baselines);
+    for (const id of bracketIds) m.delete(id);
+    return m;
+  }, [baselines, bracketIds]);
   const allGanttTasks = useMemo(() => {
     const palette = readPalette();
     // Category order is stable and meaningful: people by name, Epics in WBS order — never a hash.
@@ -1274,7 +1281,7 @@ export default function GanttView({
             {priorityTone(task.priority) === "high" || priorityTone(task.priority) === "low" ? <PriorityMark priority={task.priority} /> : null}
             <span className={hasChildren ? "wbs-summary wbs-summary-parent" : "wbs-summary"}>
               {isMilestone(task) && (
-                <span className="wbs-milestone" title="Mốc (nhãn milestone)" aria-hidden="true">
+                <span className="wbs-milestone" title="Mốc" aria-hidden="true">
                   ◆{" "}
                 </span>
               )}
@@ -1345,7 +1352,7 @@ export default function GanttView({
                 className={`tf-btn${filter.onlySlaBreached ? " is-on" : ""}`}
                 aria-pressed={filter.onlySlaBreached}
                 onClick={() => onFilterChange({ ...filter, onlySlaBreached: !filter.onlySlaBreached })}
-                title="Việc chưa xong đã quá thời hạn SLA (tính theo giờ làm việc)"
+                title="Quá hạn SLA"
               >
                 <Icon name="clock" size={14} />
                 Trễ SLA{slaBreached ? ` (${slaBreached.size})` : ""}
@@ -1356,7 +1363,7 @@ export default function GanttView({
               className="tf-btn warning-pill"
               role="menu"
               menuLabel="Công việc chưa có ngày"
-              title="Công việc chưa có ngày bắt đầu nên không có thanh trên biểu đồ"
+              title="Việc chưa có ngày bắt đầu"
               label={
                 <>
                   <Icon name="alert" size={14} />
@@ -1366,7 +1373,7 @@ export default function GanttView({
             >
               {({ close }) => (
                 <>
-                  <div className="menu-heading">Bấm để đặt ngày</div>
+                  <div className="menu-heading">Chưa có ngày</div>
                   <div className="menu-scroll">
                     {unscheduled.map((t) => (
                       <button
@@ -1405,7 +1412,7 @@ export default function GanttView({
               ))}
             </div>
             <span className="tb-today">
-              <button type="button" className="tb-btn" onClick={goToToday} title="Cuộn biểu đồ tới ngày hôm nay">
+              <button type="button" className="tb-btn" onClick={goToToday} title="Hôm nay (T)">
                 Hôm nay
               </button>
               {todayNote && (
@@ -1421,7 +1428,7 @@ export default function GanttView({
               onClick={undo.onUndo}
               disabled={!undo.label}
               aria-label="Hoàn tác"
-              title={undo.label ? `Hoàn tác: ${undo.label} (Ctrl+Z)` : "Hoàn tác — chưa có thao tác kéo thả nào trong phiên này"}
+              title={undo.label ? `Hoàn tác: ${undo.label} (Ctrl+Z)` : "Hoàn tác (Ctrl+Z)"}
             >
               <Icon name="undo" />
             </button>
@@ -1431,7 +1438,7 @@ export default function GanttView({
               onClick={() => onSetCollapsed(parentIds)}
               disabled={parentIds.length === 0}
               aria-label="Thu gọn tất cả nhóm"
-              title="Thu gọn mọi nhóm công việc"
+              title="Thu gọn tất cả"
             >
               <Icon name="collapseAll" />
             </button>
@@ -1441,7 +1448,7 @@ export default function GanttView({
               onClick={() => onSetCollapsed([])}
               disabled={collapsed.size === 0}
               aria-label="Mở rộng tất cả nhóm"
-              title="Mở rộng mọi nhóm công việc"
+              title="Mở rộng tất cả"
             >
               <Icon name="expandAll" />
             </button>
@@ -1452,7 +1459,7 @@ export default function GanttView({
               ariaLabel="Hiển thị"
               menuLabel="Tuỳ chọn hiển thị"
               menuClassName="view-menu"
-              title="Đường găng, mũi tên phụ thuộc, baseline và các cột của bảng WBS"
+              title="Hiển thị"
               label={
                 <>
                   <Icon name="eye" />
@@ -1460,7 +1467,7 @@ export default function GanttView({
                 </>
               }
             >
-              <div className="menu-heading">Tô màu thanh theo</div>
+              <div className="menu-heading">Tô màu theo</div>
               <div className="seg-group view-colorby" role="group" aria-label="Tô màu thanh theo">
                 {(Object.keys(COLOR_BY_LABEL) as BarColorBy[]).map((k) => (
                   <button
@@ -1481,21 +1488,18 @@ export default function GanttView({
               <SwitchRow
                 icon="critical"
                 label="Đường găng"
-                hint="Chuỗi việc quyết định ngày hoàn thành — trễ một việc trong chuỗi là trễ cả dự án."
                 checked={showCriticalPath}
                 onChange={setShowCriticalPath}
               />
               <SwitchRow
                 icon="link"
                 label="Phụ thuộc"
-                hint="Mũi tên FS/SS/FF/SF giữa các việc. Kéo từ đầu hoặc đuôi một thanh sang thanh khác để nối."
                 checked={showDependencies}
                 onChange={setShowDependencies}
               />
               <SwitchRow
                 icon="layers"
                 label="Baseline"
-                hint="Thanh mờ dưới mỗi thanh: lịch đã chốt (đỏ = kết thúc muộn hơn). Lưu baseline bằng ô Baseline… trên thanh chọn."
                 checked={showBaseline}
                 onChange={(next) => {
                   setShowBaseline(next);
@@ -1503,7 +1507,7 @@ export default function GanttView({
                 }}
               />
               <div className="menu-sep" role="separator" />
-              <div className="menu-heading">Cột bảng WBS ({columns.length})</div>
+              <div className="menu-heading">Cột</div>
               <div className="col-grid">
                 {COLUMNS.map((c) => (
                   <label key={c.id} className="col-chooser-item">
@@ -1543,7 +1547,7 @@ export default function GanttView({
               ariaLabel="Nhập / Xuất"
               menuLabel="Nhập / Xuất"
               menuClassName="io-menu"
-              title="Nhập công việc từ CSV / Excel / KBKT, hoặc xuất bảng WBS ra CSV"
+              title="Nhập / Xuất"
               label={
                 <>
                   <Icon name="importExport" />
@@ -1762,7 +1766,7 @@ export default function GanttView({
                   bodyEl={bodyEl}
                   rows={rowTasks}
                   ranges={ranges}
-                  baselines={baselines}
+                  baselines={shownBaselines}
                   measureKey={measureKey}
                   pxPerDay={columnWidth / DAYS_PER_COLUMN[viewMode]}
                 />

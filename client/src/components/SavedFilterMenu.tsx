@@ -155,7 +155,7 @@ export default function SavedFilterMenu({ filter, onApply, myAccountId }: Props)
                   className="text-btn"
                   disabled={busy}
                   onClick={() => void run(() => api.updateSavedFilter(f.id, { shared: !f.shared }))}
-                  title={f.shared ? "Đang chia sẻ với cả dự án — bấm để chỉ mình tôi thấy" : "Chỉ mình tôi thấy — bấm để chia sẻ với cả dự án"}
+                  title={f.shared ? "Đang chia sẻ với cả dự án" : "Chỉ mình tôi thấy"}
                 >
                   <Icon name={f.shared ? "users" : "lock"} size={12} />
                   {f.shared ? "Chia sẻ" : "Riêng tư"}
@@ -216,7 +216,7 @@ export default function SavedFilterMenu({ filter, onApply, myAccountId }: Props)
                 </button>
               </>
             ) : (
-              <span className="tf-empty">Chọn ít nhất một điều kiện lọc để lưu thành bộ lọc.</span>
+              <span className="tf-empty">Chọn một điều kiện lọc trước.</span>
             )}
           </div>
         </div>

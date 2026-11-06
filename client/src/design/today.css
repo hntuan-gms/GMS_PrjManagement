@@ -27,7 +27,7 @@
 .today-date {
   margin: 0 0 6px;
   color: var(--ink-3);
-  font-size: 13px;
+  font-size: var(--font-size-md);
   font-weight: 500;
 }
 .today-greeting {
@@ -51,13 +51,13 @@
   text-align: right;
 }
 .today-counts dt {
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   color: var(--ink-3);
 }
 .today-counts dd {
   margin: 0;
   font-family: var(--font-mono);
-  font-size: 22px;
+  font-size: var(--font-size-page);
   font-weight: 500;
   color: var(--ink);
 }
@@ -72,7 +72,7 @@
   margin: 0 0 6px;
   padding-bottom: 6px;
   border-bottom: 1px solid var(--line);
-  font-size: 13px;
+  font-size: var(--font-size-md);
   font-weight: 600;
   color: var(--ink-2);
 }
@@ -121,7 +121,7 @@
   flex: none;
   min-width: 64px;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   color: var(--ink-3);
 }
 .today-title {
@@ -130,7 +130,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 14px;
+  font-size: var(--font-size-lg);
   color: var(--ink);
 }
 .today-meta {
@@ -142,7 +142,7 @@
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  font-size: 12.5px;
+  font-size: var(--font-size-md);
   color: var(--ink-3);
 }
 .today-waiters {
@@ -207,7 +207,7 @@ button.today-check.is-on:disabled {
 }
 .today-day-label {
   padding-top: 10px;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   font-weight: 500;
   color: var(--ink-3);
 }
@@ -230,7 +230,7 @@ button.today-check.is-on:disabled {
   border: none;
   background: transparent;
   padding: 0;
-  font-size: 14px;
+  font-size: var(--font-size-lg);
   box-shadow: none;
 }
 .today-add input:focus-visible {
@@ -239,7 +239,7 @@ button.today-check.is-on:disabled {
 .today-empty {
   padding: 24px 0;
   color: var(--ink-3);
-  font-size: 14px;
+  font-size: var(--font-size-lg);
   line-height: 1.8;
 }
 .today-log-strip {
@@ -256,7 +256,7 @@ button.today-check.is-on:disabled {
   border-radius: var(--radius-lg);
   background: var(--raised);
   box-shadow: var(--shadow-md);
-  font-size: 13px;
+  font-size: var(--font-size-md);
   color: var(--ink-2);
 }
 .today-log-strip > span {
@@ -319,7 +319,7 @@ button.today-check.is-on:disabled {
   justify-content: space-between;
   padding: 12px 16px 12px 20px;
   border-top: 1px solid var(--line);
-  font-size: 13px;
+  font-size: var(--font-size-md);
   color: var(--ink-2);
 }
 .log-rows {
@@ -340,13 +340,13 @@ button.today-check.is-on:disabled {
 .log-title {
   flex: 1;
   min-width: 0;
-  font-size: 13.5px;
+  font-size: var(--font-size-lg);
   color: var(--ink);
 }
 .log-title small {
   display: block;
   color: var(--ink-3);
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 .log-hours {
   display: flex;
@@ -361,12 +361,61 @@ button.today-check.is-on:disabled {
 }
 .log-note {
   margin: 14px 0 0;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   color: var(--ink-3);
   line-height: 1.6;
 }
 @media (prefers-reduced-motion: reduce) {
   .side-sheet {
     animation: none;
+  }
+}
+
+/* Phone width: the row stacks (title on its own line, key and meta under it) instead of
+   squeezing every title to one letter. */
+@media (max-width: 640px) {
+  .today-head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .today-row {
+    display: grid;
+    grid-template-columns: auto auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "glyph title title check"
+      "glyph key meta check";
+    column-gap: 8px;
+    row-gap: 2px;
+    padding: 6px;
+  }
+  .today-row > .status-glyph {
+    grid-area: glyph;
+    align-self: start;
+    margin-top: 3px;
+  }
+  .today-key {
+    grid-area: key;
+    min-width: 0;
+  }
+  .today-title {
+    grid-area: title;
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+  .today-meta {
+    grid-area: meta;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: left;
+    max-width: none;
+  }
+  .today-row > .today-check {
+    grid-area: check;
   }
 }

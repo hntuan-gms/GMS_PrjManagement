@@ -227,8 +227,8 @@ await step("xu hướng theo ngày vẽ được từ số đo đã lưu, không
   assert.ok((await page.textContent(".progress-view")).includes("Xu hướng theo ngày"));
   assert.ok((await page.locator(".pr-trend svg").first().getAttribute("aria-label")).includes("3 ngày"));
 });
-await step("có nút In / Lưu PDF (không có 'So sánh' khi chưa đủ 2 báo cáo AI)", async () => {
-  assert.ok(await page.locator(".pr-header-tools button", { hasText: "In / Lưu PDF" }).count());
+await step("có nút In (không có 'So sánh' khi chưa đủ 2 báo cáo AI)", async () => {
+  assert.ok(await page.locator(".pr-header-tools").getByRole("button", { name: "In", exact: true }).count());
   assert.equal(await page.locator(".pr-header-tools button", { hasText: "So sánh" }).count(), 0);
 });
 await step("Agile → Vận tốc: 3 cột + đường trung bình", async () => {

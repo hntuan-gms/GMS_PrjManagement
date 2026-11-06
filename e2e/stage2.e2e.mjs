@@ -75,10 +75,10 @@ await step("việc cha chỉ gồm việc hợp lệ: không có chính nó và 
   assert(opts.includes("DEMO-1") && opts.includes("DEMO-2"), opts.join());
   assert(!opts.includes("DEMO-5"), "không được tự làm cha của mình");
 });
-await step("issue link của Jira hiện cạnh phụ thuộc, có chiều đúng và ghi chú không dời lịch", async () => {
+await step("issue link của Jira hiện cạnh phụ thuộc, có chiều đúng, không kèm đoạn giải thích", async () => {
   const text = await page.locator(".modal .td-section", { has: page.locator(".td-section-title", { hasText: "Liên kết Jira" }) }).textContent();
   assert(text.includes("is blocked by") && text.includes("DEMO-3"), text);
-  assert(text.includes("không dời lịch"));
+  assert(!text.includes("Chỉ để tham khảo"), "còn đoạn giải thích dưới Liên kết Jira");
 });
 await step("thêm liên kết 'relates to' DEMO-7, rồi gỡ", async () => {
   const box = page.locator(".modal .td-section", { has: page.locator(".td-section-title", { hasText: "Liên kết Jira" }) });
@@ -143,7 +143,7 @@ await step("lọc theo thành phần / phiên bản / sprint", async () => {
 });
 await step("cột Sprint, Thành phần, Phiên bản chọn được và có dữ liệu", async () => {
   await openDisplay(page);
-  for (const name of ["Sprint", "Thành phần (components)", "Phiên bản (fix versions)"]) {
+  for (const name of ["Sprint", "Thành phần", "Phiên bản"]) {
     await page.locator(".col-chooser-item", { hasText: name }).locator("input").check();
   }
   const row = (await rowsText()).find((t) => t.includes("DEMO-5"));

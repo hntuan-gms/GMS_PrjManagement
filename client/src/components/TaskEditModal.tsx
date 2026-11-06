@@ -55,7 +55,8 @@ function Section({ title, hint, children }: { title: string; hint?: ReactNode; c
       <summary>
         <Icon name="chevronRight" size={14} className="td-section-caret" />
         <span className="td-section-title">{title}</span>
-        {hint !== undefined && <span className="td-section-hint">{hint}</span>}
+        {/* A zero count says nothing the empty section below does not. */}
+        {hint !== undefined && hint !== 0 && hint !== "0" && <span className="td-section-hint">{hint}</span>}
       </summary>
       <div className="td-section-body">{children}</div>
     </details>
@@ -406,7 +407,7 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
             {task.id}
           </span>
           <span className={`wbs-status is-${task.statusCategory}`} title="Trạng thái hiện tại trên Jira">
-            <StatusGlyph category={task.statusCategory} percent={task.percentComplete} />
+            <StatusGlyph category={task.statusCategory} percent={task.percentComplete} name={task.statusName} />
             <span className="wbs-status-name">{task.statusName}</span>
           </span>
           <a href={task.jiraUrl} target="_blank" rel="noreferrer" className="modal-jira-link">
@@ -448,7 +449,7 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
                 spellCheck={false}
                 value={description}
                 disabled={!descriptionLoaded}
-                placeholder={descriptionLoaded ? "Thêm mô tả…" : descriptionError ? "Không tải được mô tả — chưa sửa được ở đây." : "Đang tải mô tả…"}
+                placeholder={descriptionLoaded ? "Thêm mô tả…" : descriptionError ? "Không tải được mô tả" : "Đang tải mô tả…"}
                 onChange={(e) => {
                   setDescription(e.target.value);
                   setDescriptionTouched(true);
@@ -544,7 +545,7 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
                   disabled={!transitions}
                 >
                   <option value="">
-                    {transitions ? `${task.statusName} (hiện tại)` : transitionsError ? "Không tải được" : "Đang tải..."}
+                    {transitions ? task.statusName : transitionsError ? "Không tải được" : "Đang tải..."}
                   </option>
                   {reachable.map((t) => (
                     <option key={t.id} value={t.id}>
@@ -577,7 +578,7 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
                 <span>Người phụ trách</span>
                 {isAssignableType(task.issueType) ? (
                   <select value={assigneeAccountId} onChange={(e) => setAssigneeAccountId(e.target.value)}>
-                    <option value="">— Chưa gán —</option>
+                    <option value="">Chưa gán</option>
                     {users.map((u) => (
                       <option key={u.accountId} value={u.accountId}>
                         {u.displayName}
@@ -585,7 +586,7 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
                     ))}
                   </select>
                 ) : (
-                  <span className="field-note">Epic không gán người phụ trách — hãy gán cho các công việc con.</span>
+                  <span className="field-note">Epic không có người phụ trách.</span>
                 )}
               </label>
               <TaskWatchers taskId={task.id} />
@@ -684,7 +685,7 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
                 <label className="field td-row">
                   <span>Độ ưu tiên</span>
                   <select value={priority} onChange={(e) => setPriority(e.target.value)}>
-                    {priority === "" && <option value="">— Không rõ —</option>}
+                    {priority === "" && <option value="">Không rõ</option>}
                     {/* The task's own priority stays selectable even if the site list
                         failed to load or no longer defines it. */}
                     {priority !== "" && !priorityOptions.includes(priority) && <option value={priority}>{priority}</option>}
@@ -736,7 +737,7 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
                 <label className="field td-row is-wide">
                   <span>Việc cha</span>
                   <select value={effectiveParent} disabled={isEpicType} onChange={(e) => setParentKey(e.target.value)}>
-                    <option value="">{subtaskPicked ? "— Chọn việc cha —" : "— Không có —"}</option>
+                    <option value="">{subtaskPicked ? "Chọn việc cha" : "Không có"}</option>
                     {/* The current parent stays selectable even if it is not a valid choice any more. */}
                     {effectiveParent && !parents.some((p) => p.id === effectiveParent) && <option value={effectiveParent}>{effectiveParent}</option>}
                     {parents.map((p) => (

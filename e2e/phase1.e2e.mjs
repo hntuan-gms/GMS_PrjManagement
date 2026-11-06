@@ -310,7 +310,7 @@ await step("lọc theo người → số công việc khớp đúng máy chủ",
   await page.locator(".pr-filter", { hasText: "Người phụ trách" }).locator("select").selectOption({ label: "Nguyễn Anh" });
   const want = (await mock("/api/progress?asOf=" + localToday() + "&assignee=anh")).metrics.counts.total;
   assert.ok(want < all, "dữ liệu thử không đủ để phân biệt");
-  await page.waitForFunction((w) => document.querySelector(".pr-sub")?.textContent.includes(w + " công việc"), want);
+  await page.waitForFunction((w) => document.querySelector(".pr-sub")?.textContent.includes(w + " việc"), want);
   assert.ok((await page.textContent(".rv-notice")).includes("một phần"));
 });
 await step("đặt lại bộ lọc", async () => {

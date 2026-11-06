@@ -435,7 +435,17 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
   if (!open) return null;
 
   return (
-    <div className="chat-dock">
+    <div
+      className="chat-dock"
+      onKeyDown={(e) => {
+        // Esc closes the dock like every other layer. Renaming and editing stop their own Esc
+        // first, and stopping it here keeps it from also clearing the plan's selection behind.
+        if (e.key === "Escape" && !e.defaultPrevented) {
+          e.stopPropagation();
+          setOpen(false);
+        }
+      }}
+    >
       <div className="chat-dock-header">
         <button
           className={`chat-session-btn ${showSessions ? "is-open" : ""}`}
@@ -556,12 +566,7 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
       <div className="chat-messages" ref={scrollRef}>
         {messages.length === 0 && !live && (
           <div className="chat-empty">
-            <p>Hỏi về tiến độ, hoặc bảo tôi lập kế hoạch.</p>
-            <ul>
-              <li>"Dự án đang trễ những task nào?"</li>
-              <li>"Ai đang nhận nhiều việc nhất?"</li>
-              <li>"Lập kế hoạch làm app bán hàng Flutter, backend FastAPI, 2 tháng"</li>
-            </ul>
+            <p>Hỏi về dự án, hoặc nhờ lập kế hoạch.</p>
           </div>
         )}
 

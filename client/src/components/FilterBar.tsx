@@ -358,7 +358,7 @@ export default function FilterBar({
                   onOpenChange={setJqlOpen}
                   menuLabel="Lọc bằng JQL"
                   menuClassName="tf-jql-menu"
-                  title="Lọc bằng JQL — Jira tự chạy câu truy vấn và chỉ trả những việc bạn được xem"
+                  title="Lọc bằng JQL"
                   label="JQL"
                 >
                   <form
@@ -415,7 +415,7 @@ export default function FilterBar({
               className={`tf-btn${mine ? " is-on" : ""}`}
               aria-pressed={mine}
               onClick={() => onChange({ ...filter, people: toggled(filter.people, myAccountId) })}
-              title="Chỉ các công việc giao cho tôi"
+              title="Việc của tôi"
             >
               <Icon name="user" size={14} />
               Của tôi
@@ -441,7 +441,7 @@ export default function FilterBar({
               active={activeCount > 0}
               menuLabel="Bộ lọc"
               menuClassName="tf-menu tf-filter-menu"
-              title="Lọc theo người phụ trách, trạng thái, loại, Epic, nhãn, ưu tiên…"
+              title="Bộ lọc"
               label={
                 <>
                   <Icon name="plus" size={14} />
