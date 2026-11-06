@@ -4,6 +4,9 @@ import {
   columnSpans,
   currentPreset,
   filterPeople,
+  sortPeople,
+  PEOPLE_SORT_LABEL,
+  type PeopleSort,
   pct,
   peopleCounts,
   placeBar,
@@ -158,14 +161,30 @@ export default function ResourceView({
   const counts = useMemo(() => peopleCounts(load.people), [load.people]);
   const utilisation = load.people.length > 0 ? load.people.reduce((n, p) => n + p.utilisation, 0) / load.people.length : 0;
 
+  const [peopleSort, setPeopleSortState] = useState<PeopleSort>(() => {
+    try {
+      const v = localStorage.getItem("gms.rv.sort");
+      return v && v in PEOPLE_SORT_LABEL ? (v as PeopleSort) : "load";
+    } catch {
+      return "load";
+    }
+  });
+  const setPeopleSort = (v: PeopleSort) => {
+    setPeopleSortState(v);
+    try {
+      localStorage.setItem("gms.rv.sort", v);
+    } catch {
+      /* private mode */
+    }
+  };
   const visiblePeople = useMemo(() => {
-    const base = filterPeople(load.people, peopleView);
+    const base = sortPeople(filterPeople(load.people, peopleView), peopleSort);
     const needle = query.trim().toLowerCase();
     if (!needle) return base;
     return base.filter(
       (p) => p.displayName.toLowerCase().includes(needle) || (p.role ?? "").toLowerCase().includes(needle)
     );
-  }, [load.people, peopleView, query]);
+  }, [load.people, peopleView, query, peopleSort]);
 
   const profilePerson = load.people.find((p) => p.accountId === profileId) ?? null;
 
@@ -478,8 +497,18 @@ export default function ResourceView({
                 </button>
               ))}
             </div>
+            <label className="rv-sort">
+              <span>Sắp</span>
+              <select value={peopleSort} onChange={(e) => setPeopleSort(e.target.value as PeopleSort)} aria-label="Sắp xếp thành viên">
+                {(Object.keys(PEOPLE_SORT_LABEL) as PeopleSort[]).map((k) => (
+                  <option key={k} value={k}>
+                    {PEOPLE_SORT_LABEL[k]}
+                  </option>
+                ))}
+              </select>
+            </label>
             <span className="rv-kpi-stat" title="Giờ đã giao chia cho giờ khả dụng, trung bình trên mọi thành viên trong khoảng đang xem">
-              Hiệu suất TB: <b>{pct(utilisation)}</b>
+              Mức sử dụng: <b>{pct(utilisation)}</b>
             </span>
             <button
               ref={unassignedBtn}
@@ -498,7 +527,9 @@ export default function ResourceView({
             <div className="rv-legend" role="group" aria-label="Chú giải màu">
               {LEGEND.map((l) => (
                 <span key={l.band} className="rv-legend-item" title={l.title}>
-                  <i className={`rv-swatch band-${l.band}`} />
+                  <i className={`rv-swatch band-${l.band}`}>
+                    <span className="rv-sky" aria-hidden="true" />
+                  </i>
                   {l.short}
                 </span>
               ))}

@@ -1,6 +1,6 @@
-// The decluttered header and the one-row Gantt toolbar: project switcher, underline tabs,
-// account menu, panels instead of rows of buttons, filter chips, and a selection bar that
-// moves nothing. Behaviour of the client against the stand-in API.
+// The shell (rail + 44px header with lenses, sync indicator, Ctrl K) and the one-row Gantt
+// toolbar: panels instead of rows of buttons, filter chips, and a selection bar that moves
+// nothing. The keyboard layer (Ctrl K, C, 1-4, ?) is checked here too. Behaviour of the client against the stand-in API.
 import assert from "node:assert/strict";
 import { chromium } from "playwright-core";
 import { displaySwitch, ioAction, openDisplay, pickFacet } from "./toolbar.mjs";
@@ -26,14 +26,29 @@ const box = (selector) => page.locator(selector).first().boundingBox();
 await page.goto(process.env.E2E_APP ?? "http://localhost:5173/");
 await page.waitForSelector(".wbs-row");
 
-console.log("\n== Header ==");
-await step("không còn nút 'Đổi dự án' và 'Đăng xuất' rời; chỉ một nút đặc là 'Task mới'", async () => {
-  const labels = await page.$$eval(".toolbar > .toolbar-right > button, .toolbar-left > button", (b) => b.map((x) => x.textContent.trim()));
-  assert.ok(!labels.some((t) => t === "Đổi dự án" || t === "Đăng xuất"), labels.join("|"));
-  const solid = await page.$$eval(".toolbar button.primary", (b) => b.map((x) => x.textContent.trim()));
-  assert.deepEqual(solid, ["Task mới"]);
+console.log("\n== Khung: thanh bên + header ==");
+await step("header 44px, không có nút đặc nào; 'Tạo việc' nằm trên thanh bên", async () => {
+  assert.equal(Math.round((await box(".toolbar")).height), 44);
+  assert.equal(await page.locator(".toolbar button.primary").count(), 0, "header không được có nút đặc");
+  assert.equal(await page.locator(".app-rail button[aria-label='Tạo việc']").count(), 1);
+  const labels = await page.$$eval(".toolbar button", (b) => b.map((x) => x.textContent.trim()));
+  assert.ok(!labels.some((t) => t === "Đổi dự án" || t === "Đăng xuất" || t.includes("Đồng bộ từ Jira")), labels.join("|"));
 });
-await step("huy hiệu dự án là menu đổi dự án; Esc đóng và trả tiêu điểm", async () => {
+await step("bốn lăng kính dạng chữ; lăng kính hiện tại có aria-current và gạch mực", async () => {
+  const labels = (await page.locator(".lens-tabs button").allTextContents()).map((t) => t.replace(/\d+.*$/, "").trim());
+  assert.deepEqual(labels, ["Kế hoạch", "Bảng", "Nhân lực", "Nhịp dự án"]);
+  const current = page.locator(".lens-tabs button[aria-current=page]");
+  assert.equal((await current.textContent()).trim(), "Kế hoạch");
+  assert.notEqual(await current.evaluate((el) => getComputedStyle(el).borderBottomColor), "rgba(0, 0, 0, 0)");
+  const idle = await page.locator(".lens-tabs button:not(.active)").first().evaluate((el) => getComputedStyle(el).borderBottomColor);
+  assert.equal(idle, "rgba(0, 0, 0, 0)");
+});
+await step("chỉ báo đồng bộ thay nút 'Đồng bộ từ Jira'; bấm thì đọc lại", async () => {
+  await page.waitForFunction(() => document.querySelector(".sync-indicator")?.textContent.includes("Khớp Jira"));
+  await page.locator(".sync-indicator").click();
+  await page.waitForFunction(() => document.querySelector(".sync-indicator")?.textContent.includes("Khớp Jira"));
+});
+await step("tên dự án là menu đổi dự án; Esc đóng và trả tiêu điểm", async () => {
   const trigger = page.locator(".project-switch");
   await trigger.click();
   assert.equal(await trigger.getAttribute("aria-expanded"), "true");
@@ -50,22 +65,47 @@ await step("'Đổi dự án…' mở bộ chọn dự án", async () => {
   await page.click(".modal-close");
   await page.waitForSelector(".wbs-row");
 });
-await step("tab dạng gạch chân: tab hiện tại có aria-current và gạch màu chính", async () => {
-  const current = page.locator(".toolbar-tabs button[aria-current=page]");
-  assert.equal((await current.textContent()).trim(), "Gantt / WBS");
-  const bar = await current.evaluate((el) => getComputedStyle(el).borderBottomColor);
-  assert.notEqual(bar, "rgba(0, 0, 0, 0)");
-  const idle = await page.locator(".toolbar-tabs button:not(.active)").first().evaluate((el) => getComputedStyle(el).borderBottomColor);
-  assert.equal(idle, "rgba(0, 0, 0, 0)");
-});
-await step("avatar mở menu tài khoản có 'Đăng xuất'", async () => {
-  await page.locator(".hd-avatar").click();
+await step("avatar trên thanh bên mở menu tài khoản: Giao diện, Mật độ, Đăng xuất", async () => {
+  await page.locator(".rail-avatar").click();
   assert.ok(await page.locator("[role=menuitem]", { hasText: "Đăng xuất" }).isVisible());
+  assert.equal(await page.locator(".rail-menu button", { hasText: "Tối" }).count(), 1);
+  assert.equal(await page.locator(".rail-menu button", { hasText: "Gọn" }).count(), 1);
   await page.keyboard.press("Escape");
 });
-await step("điều khiển header cao 36px", async () => {
-  for (const sel of [".project-switch", ".toolbar button.primary", ".hd-avatar"]) {
-    assert.equal(Math.round((await box(sel)).height), 36, sel);
+await step("Ctrl K mở ô lệnh, tìm được việc theo chữ không dấu; Esc đóng", async () => {
+  await page.keyboard.press("Control+k");
+  await page.waitForSelector(".cmdk input");
+  await page.keyboard.type("dung api");
+  await page.waitForFunction(() => [...document.querySelectorAll(".cmdk-row")].some((r) => r.textContent.includes("DEMO-6")));
+  await page.keyboard.press("Escape");
+  assert.equal(await page.locator(".cmdk").count(), 0);
+});
+await step("C mở ô tạo việc và tô các phần nhận ra được (@người, ngày, !ưu tiên)", async () => {
+  await page.locator(".gantt-body").click({ position: { x: 900, y: 700 } });
+  await page.keyboard.press("c");
+  await page.waitForSelector(".cmdk input");
+  await page.keyboard.type("Viết hướng dẫn @chi mai 2n !cao");
+  await page.waitForSelector(".cmdk-create .qa-chip");
+  const chips = await page.locator(".cmdk-create .qa-chip").allTextContents();
+  assert.ok(chips.length >= 3, chips.join("|"));
+  assert.ok((await page.textContent(".cmdk-create")).includes("Viết hướng dẫn"));
+  await page.keyboard.press("Escape");
+});
+await step("phím 2 sang Bảng, 1 về Kế hoạch; ? mở bảng phím tắt", async () => {
+  await page.keyboard.press("2");
+  await page.waitForFunction(() => document.querySelector(".lens-tabs button[aria-current=page]")?.textContent.includes("Bảng"));
+  await page.keyboard.press("1");
+  await page.waitForSelector(".wbs-row");
+  await page.keyboard.press("?");
+  await page.waitForSelector(".shortcut-sheet");
+  assert.ok((await page.textContent(".shortcut-sheet")).includes("Ctrl"));
+  await page.keyboard.press("Escape");
+  assert.equal(await page.locator(".shortcut-sheet").count(), 0);
+});
+await step("điều khiển header cao 28–30px", async () => {
+  for (const sel of [".project-switch", ".cmdk-trigger"]) {
+    const h = Math.round((await box(sel)).height);
+    assert.ok(h >= 28 && h <= 30, `${sel} cao ${h}`);
   }
 });
 
@@ -80,9 +120,9 @@ await step("không còn dải hướng dẫn tĩnh; có nút ? mở bảng thao 
 });
 await step("một hàng ở 1500px, điều khiển cao 32px, không tràn", async () => {
   const bar = await box(".gantt-toolbar");
-  assert.ok(bar.height <= 49, "toolbar cao " + bar.height);
+  assert.ok(bar.height <= 41, "toolbar cao " + bar.height);
   for (const sel of [".tf-search", ".tf-add", ".seg-group", ".gantt-toolbar .tb-btn"]) {
-    assert.equal(Math.round((await box(sel)).height), 32, sel);
+    assert.equal(Math.round((await box(sel)).height), 28, sel);
   }
   const overflow = await page.$eval(".gantt-toolbar", (el) => el.scrollWidth - el.clientWidth);
   assert.ok(overflow <= 1, "tràn " + overflow);

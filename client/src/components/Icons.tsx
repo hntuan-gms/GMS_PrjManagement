@@ -38,7 +38,21 @@ export type IconName =
   | "clock"
   | "calendar"
   | "grip"
-  | "edit";
+  | "edit"
+  | "sun"
+  | "moon"
+  | "monitor"
+  | "plan"
+  | "board"
+  | "pulse"
+  | "chat"
+  | "settings"
+  | "keyboard"
+  | "dot"
+  | "send"
+  | "pin"
+  | "filter"
+  | "more";
 
 /** One outline family (24 grid, 2px stroke) so the header and toolbar read as a set.
  * Inline rather than an icon package: a few dozen paths isn't worth a dependency, and
@@ -267,6 +281,59 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M13.5 6.5l4 4" />
     </>
   ),
+  sun: (
+    <>
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4 6 18M18 6l1.4-1.4" />
+    </>
+  ),
+  moon: <path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z" />,
+  monitor: (
+    <>
+      <rect x="3" y="4" width="18" height="12" rx="2" />
+      <path d="M8 20h8M12 16v4" />
+    </>
+  ),
+  plan: (
+    <>
+      <path d="M4 6h9" />
+      <path d="M8 12h11" />
+      <path d="M6 18h7" />
+    </>
+  ),
+  board: (
+    <>
+      <rect x="3.5" y="4" width="5" height="16" rx="1.5" />
+      <rect x="10.5" y="4" width="5" height="10" rx="1.5" />
+      <rect x="17.5" y="4" width="3" height="13" rx="1.5" />
+    </>
+  ),
+  pulse: <path d="M3 12h4l2.5-6 5 12 2.5-6H21" />,
+  chat: <path d="M20 15a2 2 0 0 1-2 2H8l-4 3.5V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2Z" />,
+  settings: (
+    <>
+      <path d="M4 7h10M18 7h2M4 17h4M12 17h8" />
+      <circle cx="16" cy="7" r="2" />
+      <circle cx="10" cy="17" r="2" />
+    </>
+  ),
+  keyboard: (
+    <>
+      <rect x="2.5" y="6" width="19" height="12" rx="2" />
+      <path d="M6.5 10h.01M10 10h.01M13.5 10h.01M17 10h.01M7.5 14h9" />
+    </>
+  ),
+  dot: <circle cx="12" cy="12" r="3" fill="currentColor" stroke="none" />,
+  send: <path d="M5 12h13M13 6l6 6-6 6" />,
+  pin: <path d="M9 4h6l-1 5 3 3H7l3-3-1-5ZM12 15v5" />,
+  filter: <path d="M4 6h16M7 12h10M10 18h4" />,
+  more: (
+    <>
+      <path d="M6 12h.01" />
+      <path d="M12 12h.01" />
+      <path d="M18 12h.01" />
+    </>
+  ),
 };
 
 /** Decorative by default (`aria-hidden`): every icon here sits beside visible text or
@@ -280,7 +347,7 @@ export function Icon({ name, size = 16, className }: { name: IconName; size?: nu
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth="1.75"
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"

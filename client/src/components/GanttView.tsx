@@ -8,8 +8,11 @@ import { axisSentinels, isWindowed, windowEnd, windowRows, windowStartFor } from
 import { csvName, downloadCsv, type CsvCell } from "../csv";
 import { computeCriticalPath } from "../criticalPath";
 import { resolveBaselines } from "../baselineGeometry";
-import { orderByWbs, resolveRanges, toGanttTasks, type OrderedTask } from "../ganttMapping";
-import type { DependencyType, ProjectVersion, Task } from "../types";
+import { orderByWbs, resolveRanges, toGanttTasks, type BarColorBy, type OrderedTask } from "../ganttMapping";
+import { readPalette, withAlpha } from "../themeColors";
+import { useAppearance } from "../useAppearance";
+import { ROW_HEIGHTS, getDensity } from "../theme";
+import { isAssignableType, type DependencyType, type JiraUser, type ProjectVersion, type Task, type TaskTransition } from "../types";
 import { isMilestone } from "../timelineGeometry";
 import { zoomByWheel } from "../timeZoom";
 import { SLA_STATE_LABEL, slaIds, slaSentence, slaShortText, type SlaView } from "../sla";
@@ -17,6 +20,11 @@ import { overlayCsvCells, overlayCsvHeader } from "../wbsExport";
 import BaselineOverlay from "./BaselineOverlay";
 import DependencyOverlay from "./DependencyOverlay";
 import IssueTypeIcon from "./IssueTypeIcon";
+import CellPicker, { type PickItem } from "./CellPicker";
+import { api } from "../api";
+import PriorityMark from "./PriorityMark";
+import StatusGlyph from "./StatusGlyph";
+import { priorityTone } from "../boardModel";
 import { Icon, type IconName } from "./Icons";
 import Popover from "./Popover";
 import SavedFilterMenu from "./SavedFilterMenu";
@@ -25,11 +33,33 @@ import SavedFilterMenu from "./SavedFilterMenu";
 // bars get an unambiguous red-orange, everything else is dimmed to grey so the
 // chain reads clearly without fighting the normal status/type colour coding
 // (which already uses red for Bug and would otherwise be ambiguous with "critical").
-const CRITICAL_STYLES = { backgroundColor: "#e35d4f", progressColor: "#a3271b", backgroundSelectedColor: "#c94a3d" };
-const DIMMED_STYLES = { backgroundColor: "#e7e7ec", progressColor: "#b7b7c0", backgroundSelectedColor: "#d5d5db" };
 
-const ROW_HEIGHT = 42;
-const HEADER_HEIGHT = 46;
+/**
+ * Row height follows the density setting (theme.ts). A module-level value because the
+ * module-level list components (WbsListTable) and the window maths read it; GanttView
+ * re-assigns it from useAppearance before its children render, so a density change
+ * re-renders everything at the new height.
+ */
+let ROW_HEIGHT = ROW_HEIGHTS[getDensity()];
+
+const COLOR_BY_KEY = "gms.gantt.colorBy";
+const COLOR_BY_LABEL: Record<BarColorBy, string> = { status: "Trạng thái", person: "Người", epic: "Epic", none: "Không" };
+function loadColorBy(): BarColorBy {
+  try {
+    const v = localStorage.getItem(COLOR_BY_KEY);
+    return v === "person" || v === "epic" || v === "none" ? v : "status";
+  } catch {
+    return "status";
+  }
+}
+function saveColorBy(v: BarColorBy) {
+  try {
+    localStorage.setItem(COLOR_BY_KEY, v);
+  } catch {
+    /* private mode */
+  }
+}
+const HEADER_HEIGHT = 40;
 // Each WBS level steps in by this much; a fixed-width expander slot (reserved even
 // on leaf rows, see .wbs-expander-slot) keeps every level's icon aligned under its
 // parent's text rather than under the parent's own expander arrow.
@@ -261,9 +291,20 @@ const COLUMNS: ColumnDef[] = [
     label: "Trạng thái",
     long: "Trạng thái Jira",
     width: 112,
-    cell: (t) => <span className={`wbs-status is-${t.statusCategory}`}>{t.statusName}</span>,
+    cell: (t) => (
+      <span className={`wbs-status is-${t.statusCategory}`} title={t.statusName}>
+        <StatusGlyph category={t.statusCategory} percent={t.percentComplete} />
+        <span className="wbs-status-name">{t.statusName}</span>
+      </span>
+    ),
   },
-  { id: "priority", label: "Ưu tiên", long: "Độ ưu tiên", width: 76, cell: (t) => t.priority ?? "—" },
+  {
+    id: "priority",
+    label: "Ưu tiên",
+    long: "Độ ưu tiên",
+    width: 76,
+    cell: (t) => (t.priority ? <span className="wbs-prio"><PriorityMark priority={t.priority} /> {t.priority}</span> : "—"),
+  },
   {
     id: "labels",
     label: "Nhãn",
@@ -292,7 +333,23 @@ const COLUMNS: ColumnDef[] = [
     width: 96,
     cell: (t) => (t.sprint ? <span title={`${t.sprint.name} (${t.sprint.state})`}>{t.sprint.name}</span> : "—"),
   },
-  { id: "assignee", label: "Phụ trách", long: "Người phụ trách", width: 110, cell: (t) => t.assigneeName ?? "—" },
+  {
+    id: "assignee",
+    label: "Người",
+    long: "Người phụ trách",
+    width: 120,
+    cell: (t) =>
+      t.assigneeName ? (
+        <span className="wbs-person" title={t.assigneeName}>
+          <span className="wbs-avatar" aria-hidden="true">
+            {initialsOf(t.assigneeName)}
+          </span>
+          {t.assigneeName}
+        </span>
+      ) : (
+        <span className="wbs-none">—</span>
+      ),
+  },
   { id: "start", label: "Bắt đầu", long: "Ngày bắt đầu", width: 76, cell: (t, r) => dm(r?.start ?? t.startDate) },
   {
     id: "due",
@@ -392,9 +449,16 @@ function csvValue(id: ColumnId, t: Task, r: { start: string; end: string } | und
 
 // What a person scanning a plan reads first: what kind of work, where it stands, how urgent,
 // who has it, how far along. The rest (dates, estimates, labels…) is a tick away in "Hiển thị".
-const DEFAULT_COLUMNS: ColumnId[] = ["type", "status", "priority", "assignee", "pct"];
+// Type is the icon beside the name and priority a mark beside it when it is not the ordinary one,
+// so neither needs a column of its own (plan §6.1.2): a column of "Medium" was 180px of nothing.
+const DEFAULT_COLUMNS: ColumnId[] = ["status", "assignee", "pct"];
+
+function initialsOf(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  return (parts.at(-1)?.[0] ?? "").toUpperCase();
+}
 const COLUMNS_KEY = "gms.gantt.columns";
-const KEY_COL_WIDTH = 75;
+const KEY_COL_WIDTH = 64;
 const MIN_NAME_WIDTH = 180;
 
 function loadColumns(): ColumnId[] {
@@ -502,6 +566,14 @@ interface Props {
   onOpenImport: () => void;
   /** Opens the KBKT test-case workbook import — beside "Xuất CSV": import next to export. */
   onImportKbkt: () => void;
+  /** "+ Thêm việc" under the last row: one sentence (quickAdd syntax) → one task. */
+  onQuickCreate?: (text: string) => Promise<void>;
+  /** In-place editing of the Người / Trạng thái cells (plan §6.1.4). */
+  users?: JiraUser[];
+  onAssign?: (taskId: string, accountId: string | null) => void;
+  onTransition?: (task: Task, transitionId: string, toStatusName: string) => void;
+  /** Bản nháp: the plan before the draft began; changed bars get a dashed ghost of where they were. */
+  draftBase?: Task[] | null;
 }
 
 function toIso(d: Date): string {
@@ -512,6 +584,56 @@ function toIso(d: Date): string {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
+}
+
+/**
+ * The empty row under the plan (plan §6.1.4): type a name — with quick-add tokens if you like —
+ * and Enter makes it. Tab first makes it a child of the selected row ("^KEY").
+ */
+function AddRow({ top, width, parent, onCreate }: { top: number; width: number; parent: Task | null; onCreate: (text: string) => Promise<void> }) {
+  const [text, setText] = useState("");
+  const [asChild, setAsChild] = useState(false);
+  const [busy, setBusy] = useState(false);
+  return (
+    <form
+      className="wbs-add"
+      style={{ top, width }}
+      onSubmit={async (e) => {
+        e.preventDefault();
+        const t = text.trim();
+        if (!t || busy) return;
+        setBusy(true);
+        try {
+          await onCreate(asChild && parent ? `${t} ^${parent.id}` : t);
+          setText("");
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      <Icon name="plus" size={14} />
+      <input
+        value={text}
+        disabled={busy}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Tab" && parent && !e.shiftKey && !asChild) {
+            e.preventDefault();
+            setAsChild(true);
+          } else if (e.key === "Tab" && e.shiftKey && asChild) {
+            e.preventDefault();
+            setAsChild(false);
+          } else if (e.key === "Escape") {
+            setText("");
+            (e.target as HTMLInputElement).blur();
+          }
+        }}
+        placeholder={asChild && parent ? `Việc con của ${parent.id}… (Shift Tab để bỏ)` : "Thêm việc… (gõ @người t6 3n !cao sau DEMO-5)"}
+        aria-label="Thêm việc"
+      />
+      <kbd>Enter</kbd>
+    </form>
+  );
 }
 
 export default function GanttView({
@@ -539,6 +661,11 @@ export default function GanttView({
   undo,
   onOpenImport,
   onImportKbkt,
+  onQuickCreate,
+  users,
+  onAssign,
+  onTransition,
+  draftBase,
 }: Props) {
   // The one zoom variable everything else derives from — see pickScale.
   const [pixelsPerDay, setPixelsPerDay] = useState(DEFAULT_PIXELS_PER_DAY[ViewMode.Week]);
@@ -547,6 +674,11 @@ export default function GanttView({
   const [showCriticalPath, setShowCriticalPath] = useState(false);
   const [showDependencies, setShowDependencies] = useState(true);
   const [showBaseline, setShowBaseline] = useState(loadShowBaseline);
+  const [colorBy, setColorBy] = useState<BarColorBy>(loadColorBy);
+  const appearance = useAppearance();
+  ROW_HEIGHT = ROW_HEIGHTS[appearance.density];
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const chartPalette = useMemo(() => readPalette(), [appearance.theme]);
   // gantt-task-react scrolls to `viewDate` whenever its value changes. The
   // nonce nudges the millisecond so pressing "Hôm nay" again — after scrolling
   // away — is a different value and scrolls again; a day column can't tell.
@@ -601,7 +733,14 @@ export default function GanttView({
   // always wins over that default once set.
   // Wide enough for the chosen columns plus a readable name — more columns
   // push the divider right rather than squeezing the task names to nothing.
-  const neededListWidth = KEY_COL_WIDTH + MIN_NAME_WIDTH + columnsWidth;
+  // A key cut to "DEMO-10…" is useless — every key differs exactly in the cut part. The column is
+  // as wide as the project's longest key in the mono face (≈7.3px a character at 12px).
+  const keyColWidth = useMemo(() => {
+    let longest = 0;
+    for (const t of tasks) longest = Math.max(longest, t.id.length);
+    return Math.max(KEY_COL_WIDTH, Math.ceil(longest * 7.3) + 18);
+  }, [tasks]);
+  const neededListWidth = keyColWidth + MIN_NAME_WIDTH + columnsWidth;
   // Just what the chosen columns and a readable name need, so the divider sits well to the left
   // and the chart gets the rest. It used to start at half the window whatever the columns were.
   const defaultListWidth = neededListWidth + 60;
@@ -860,14 +999,56 @@ export default function GanttView({
       },
     [byId]
   );
+  // Where each bar was before the draft, for the ones the draft moved.
+  const draftGhosts = useMemo(() => {
+    if (!draftBase) return undefined;
+    const m = new Map<string, { start: string; end: string }>();
+    for (const b of draftBase) {
+      const now = byId.get(b.id);
+      if (now && b.startDate && b.dueDate && (now.startDate !== b.startDate || now.dueDate !== b.dueDate)) {
+        m.set(b.id, { start: b.startDate, end: b.dueDate });
+      }
+    }
+    return m;
+  }, [draftBase, byId]);
+  const bracketIds = useMemo(
+    () => new Set(rows.filter((r) => r.hasChildren && r.task.issueType === "Epic").map((r) => r.task.id)),
+    [rows]
+  );
   const allGanttTasks = useMemo(() => {
-    const base = toGanttTasks(rows, ranges);
+    const palette = readPalette();
+    // Category order is stable and meaningful: people by name, Epics in WBS order — never a hash.
+    const people = [...new Set(rows.map((r) => r.task.assigneeName).filter((n): n is string => !!n))].sort((a, b) => a.localeCompare(b, "vi"));
+    const personIndex = new Map(people.map((n, i) => [n, i]));
+    const epicIndex = new Map(rows.filter((r) => r.task.issueType === "Epic").map((r, i) => [r.task.id, i]));
+    const byIdLocal = new Map(rows.map((r) => [r.task.id, r.task]));
+    const epicOf = (t: Task): string | null => {
+      let cur: Task | undefined = t;
+      for (let i = 0; cur && i < 8; i++) {
+        if (cur.issueType === "Epic") return cur.id;
+        cur = cur.wbsParentId ? byIdLocal.get(cur.wbsParentId) : undefined;
+      }
+      return null;
+    };
+    const base = toGanttTasks(rows, ranges, {
+      colorBy,
+      palette,
+      today,
+      categoryOf: (t) => {
+        if (colorBy === "person") return t.assigneeName ? (personIndex.get(t.assigneeName) ?? null) : null;
+        const e = epicOf(t);
+        return e ? (epicIndex.get(e) ?? null) : null;
+      },
+    });
     if (!showCriticalPath) return base;
-    return base.map((t) => ({
-      ...t,
-      styles: criticalIds.has(t.id) ? CRITICAL_STYLES : DIMMED_STYLES,
-    }));
-  }, [rows, ranges, showCriticalPath, criticalIds]);
+    // Critical path: the chain that sets the end date is drawn in son ("this is what decides
+    // the date"), everything else steps back to the quietest tone.
+    const crit = { backgroundColor: palette.sonWash, backgroundSelectedColor: palette.sonWash, progressColor: palette.son, progressSelectedColor: palette.son };
+    const dim = { backgroundColor: palette.sunken, backgroundSelectedColor: palette.line, progressColor: palette.lineStrong, progressSelectedColor: palette.lineStrong };
+    return base.map((t) => ({ ...t, styles: criticalIds.has(t.id) ? crit : dim }));
+    // appearance.theme: re-read the palette when the theme flips.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, ranges, showCriticalPath, criticalIds, colorBy, today, appearance.theme]);
 
   // Month view's axis is short: gantt-task-react ends it at the start of the year after the
   // last task's end, so a project inside one year draws a handful of columns and leaves the
@@ -887,6 +1068,67 @@ export default function GanttView({
     const available = bodySize.width - listWidth - 24;
     return Math.max(scale.columnWidth, Math.floor(available / columns));
   }, [viewMode, allGanttTasks, scale.columnWidth, bodySize.width, listWidth]);
+
+  /* ---- in-place cell editing: Người and Trạng thái ---- */
+  const [cellEdit, setCellEdit] = useState<{ task: Task; kind: "assignee" | "status"; rect: DOMRect } | null>(null);
+  const [cellTransitions, setCellTransitions] = useState<TaskTransition[] | null>(null);
+  const openCellEditor = (task: Task, kind: "assignee" | "status", rect: DOMRect) => {
+    setCellEdit({ task, kind, rect });
+    setCellTransitions(null);
+    if (kind === "status") {
+      api.getTaskTransitions(task.id).then(setCellTransitions, () => setCellTransitions([]));
+    }
+  };
+  const cellItems: PickItem[] | null = !cellEdit
+    ? null
+    : cellEdit.kind === "assignee"
+      ? [
+          { id: "__none__", label: "Bỏ giao", hint: cellEdit.task.assigneeAccountId ? undefined : "hiện tại" },
+          ...(users ?? []).map((u) => ({
+            id: u.accountId,
+            label: u.displayName,
+            lead: (
+              <span className="wbs-avatar" aria-hidden="true">
+                {initialsOf(u.displayName)}
+              </span>
+            ),
+            hint: u.accountId === cellEdit.task.assigneeAccountId ? "hiện tại" : u.accountId === myAccountId ? "bạn" : undefined,
+          })),
+        ]
+      : cellTransitions === null
+        ? null
+        : cellTransitions
+            .filter((t) => t.toStatusName !== cellEdit.task.statusName)
+            .map((t) => ({
+              id: t.id,
+              label: t.toStatusName,
+              lead: <StatusGlyph category={t.toCategory} />,
+              hint: t.fields.some((f) => !f.optional) ? "cần nhập thêm" : t.name !== t.toStatusName ? t.name : undefined,
+            }));
+  const cellEditor = cellEdit && (
+    <CellPicker
+      anchor={cellEdit.rect}
+      items={cellItems}
+      loading={cellEdit.kind === "status" && cellTransitions === null}
+      placeholder={cellEdit.kind === "assignee" ? `Giao ${cellEdit.task.id} cho…` : `Chuyển ${cellEdit.task.id} sang…`}
+      onClose={() => setCellEdit(null)}
+      onPick={(it) => {
+        const { task, kind } = cellEdit;
+        setCellEdit(null);
+        if (kind === "assignee") onAssign?.(task.id, it.id === "__none__" ? null : it.id);
+        else onTransition?.(task, it.id, it.label);
+      }}
+    />
+  );
+
+  // "T" anywhere in the workspace (ProjectWorkspace's keyboard layer) scrolls the chart to today.
+  const goToTodayRef = useRef(goToToday);
+  goToTodayRef.current = goToToday;
+  useEffect(() => {
+    const onToday = () => goToTodayRef.current();
+    window.addEventListener("gms:gantt-today", onToday);
+    return () => window.removeEventListener("gms:gantt-today", onToday);
+  }, []);
 
   /* ---- a big list is drawn a window at a time (ganttWindow.ts) ---- */
   const windowed = isWindowed(rows.length);
@@ -1029,6 +1271,7 @@ export default function GanttView({
               )}
             </span>
             <IssueTypeIcon type={task.issueType} />
+            {priorityTone(task.priority) === "high" || priorityTone(task.priority) === "low" ? <PriorityMark priority={task.priority} /> : null}
             <span className={hasChildren ? "wbs-summary wbs-summary-parent" : "wbs-summary"}>
               {isMilestone(task) && (
                 <span className="wbs-milestone" title="Mốc (nhãn milestone)" aria-hidden="true">
@@ -1038,20 +1281,37 @@ export default function GanttView({
               {task.summary}
             </span>
           </div>
-          {columns.map((c) => (
-            <div
-              key={c.id}
-              className={`wbs-col wbs-col-extra wbs-cell-${c.id} ${c.align === "right" ? "is-right" : ""}`}
-              style={{ width: c.width }}
-            >
-              {c.cell(task, ranges.get(task.id), today, sla)}
-            </div>
-          ))}
+          {columns.map((c) => {
+            const editable = (c.id === "assignee" && onAssign && isAssignableType(task.issueType)) || (c.id === "status" && onTransition);
+            return (
+              <div
+                key={c.id}
+                className={`wbs-col wbs-col-extra wbs-cell-${c.id} ${c.align === "right" ? "is-right" : ""}${editable ? " is-editable" : ""}`}
+                style={{ width: c.width }}
+                title={editable ? (c.id === "assignee" ? "Bấm để giao người" : "Bấm để đổi trạng thái") : undefined}
+                onClick={
+                  editable
+                    ? (e) => {
+                        e.stopPropagation();
+                        openCellEditor(task, c.id as "assignee" | "status", (e.currentTarget as HTMLElement).getBoundingClientRect());
+                      }
+                    : undefined
+                }
+                // A double-click still opens the task (the row's handler — CLAUDE.md: double-click
+                // anywhere on a row must open it); the picker its first click opened goes away.
+                onDoubleClick={editable ? () => setCellEdit(null) : undefined}
+              >
+                {c.cell(task, ranges.get(task.id), today, sla)}
+              </div>
+            );
+          })}
         </div>
       ))}
     </div>
     ),
-    [rows, matchIds, selectedIds, selectedId, showCriticalPath, criticalIds, listWidth, columns, collapsed, ranges, today, sla, onSelect, onOpenEdit, onToggleCollapse]
+    // openCellEditor only sets state; onAssign/onTransition decide whether a cell is editable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rows, matchIds, selectedIds, selectedId, showCriticalPath, criticalIds, listWidth, columns, collapsed, ranges, today, sla, onSelect, onOpenEdit, onToggleCollapse, onAssign, onTransition]
   );
   const table = useMemo(() => (windowed ? null : buildTable(rows)), [windowed, buildTable, rows]);
   const rowIndex = useMemo(() => (windowed ? new Map(rows.map((r, i) => [r.task.id, i])) : null), [windowed, rows]);
@@ -1200,6 +1460,23 @@ export default function GanttView({
                 </>
               }
             >
+              <div className="menu-heading">Tô màu thanh theo</div>
+              <div className="seg-group view-colorby" role="group" aria-label="Tô màu thanh theo">
+                {(Object.keys(COLOR_BY_LABEL) as BarColorBy[]).map((k) => (
+                  <button
+                    key={k}
+                    type="button"
+                    className={colorBy === k ? "active" : ""}
+                    aria-pressed={colorBy === k}
+                    onClick={() => {
+                      setColorBy(k);
+                      saveColorBy(k);
+                    }}
+                  >
+                    {COLOR_BY_LABEL[k]}
+                  </button>
+                ))}
+              </div>
               <div className="menu-heading">Biểu đồ</div>
               <SwitchRow
                 icon="critical"
@@ -1374,7 +1651,7 @@ export default function GanttView({
           ResizeObserver attaches to bodyRef once on mount, so unmounting this node
           when a query matches nothing would leave the observer bound to a detached
           element and freeze bodySize once the query was cleared again. */}
-      <div className="gantt-body" ref={bodyRef}>
+      <div className="gantt-body" ref={bodyRef} style={{ "--wbs-key-w": `${keyColWidth}px` } as React.CSSProperties}>
         {rows.length === 0 ? (
           <div className="empty-state">
             {matchIds?.size === 0
@@ -1401,6 +1678,13 @@ export default function GanttView({
                 locale="vi"
                 rowHeight={ROW_HEIGHT}
                 headerHeight={HEADER_HEIGHT}
+                barFill={60}
+                barCornerRadius={3}
+                handleWidth={6}
+                fontFamily="var(--font-sans)"
+                fontSize="12px"
+                todayColor={withAlpha(chartPalette.son, chartPalette.dark ? 0.08 : 0.05)}
+                arrowColor={chartPalette.ink4}
                 ganttHeight={ganttHeight}
                 listCellWidth={`${listWidth}px`}
                 columnWidth={columnWidth}
@@ -1440,6 +1724,15 @@ export default function GanttView({
                 style={{ left: listWidth }}
                 onMouseDown={startDrag}
               />
+              {cellEditor}
+              {onQuickCreate && !windowed && HEADER_HEIGHT + (rows.length + 1) * ROW_HEIGHT < bodySize.height && (
+                <AddRow
+                  top={HEADER_HEIGHT + rows.length * ROW_HEIGHT}
+                  width={listWidth}
+                  parent={selectedId ? (byId.get(selectedId) ?? null) : null}
+                  onCreate={onQuickCreate}
+                />
+              )}
               <TimelineMarkers
                 bodyEl={bodyEl}
                 rows={rowTasks}
@@ -1447,6 +1740,9 @@ export default function GanttView({
                 versions={versions}
                 showReleases
                 measureKey={measureKey}
+                today={today}
+                bracketIds={bracketIds}
+                ghosts={draftGhosts}
               />
               <DependencyOverlay
                 bodyEl={bodyEl}
@@ -1456,6 +1752,10 @@ export default function GanttView({
                 onAddDependency={onAddDependency}
                 onEditDependency={onEditDependency}
                 onDeleteDependency={onDeleteDependency}
+                onFixViolation={(id, start) => {
+                  const t = byId.get(id);
+                  if (t) onScheduleChange(id, start, Math.max(1, t.durationDays));
+                }}
               />
               {showBaseline && (
                 <BaselineOverlay

@@ -29,6 +29,12 @@ interface Props {
   /** This project's issue keys — those in a reply become buttons that open the task. */
   knownKeys?: Set<string>;
   onOpenIssue?: (key: string) => void;
+  /**
+   * Opens the panel from outside (the rail's Trợ lý button, Ctrl K → "Hỏi trợ lý"). A new nonce
+   * is a new request; `text`, when given, is asked at once. There is no floating pill any more:
+   * closed, the assistant takes no room on the plan.
+   */
+  openRequest?: { nonce: number; text?: string } | null;
 }
 
 /** A turn being streamed right now — not yet in the persisted transcript. */
@@ -125,7 +131,7 @@ function formatTokens(n: number): string {
  * real answer can be ten seconds away when the model is thinking or building a
  * plan, and an empty panel for that long reads as a hang.
  */
-export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProjectChanged, onApplyFilter, knownKeys, onOpenIssue }: Props) {
+export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProjectChanged, onApplyFilter, knownKeys, onOpenIssue, openRequest }: Props) {
   const dialogs = useDialogs();
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -246,6 +252,16 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, live]);
+
+  const askRef = useRef<(text: string) => void>(() => {});
+  const lastNonce = useRef<number | null>(null);
+  useEffect(() => {
+    if (!openRequest || openRequest.nonce === lastNonce.current) return;
+    lastNonce.current = openRequest.nonce;
+    setOpen(true);
+    const text = openRequest.text?.trim();
+    if (text) askRef.current(text);
+  }, [openRequest]);
 
   async function send() {
     const text = input.trim();
@@ -412,15 +428,11 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
     setLive(null);
   }
 
-  if (!open) {
-    return (
-      <button className="chat-pill" onClick={() => setOpen(true)} title="Trợ lý dự án">
-        <span className="chat-pill-dot" />
-        Trợ lý dự án
-        {usage && <span className="chat-pill-tokens">{formatTokens(usage.totalTokens)}</span>}
-      </button>
-    );
-  }
+  askRef.current = (text: string) => {
+    void ask(text);
+  };
+
+  if (!open) return null;
 
   return (
     <div className="chat-dock">
@@ -783,18 +795,8 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
         )}
       </div>
 
-      {/* Token spend sits on the dock's own edge, always visible while chatting
-          rather than hidden behind a settings screen nobody opens. */}
-      <button className="chat-token-strip" onClick={() => setShowUsage((v) => !v)}>
-        <span>
-          Phiên: <b>{formatTokens(usage?.totalTokens ?? 0)}</b> token
-          {usage?.cost && <b className="chat-token-cost"> · {formatMoney(usage.cost)}</b>}
-        </span>
-        <span className="chat-token-breakdown">
-          vào {formatTokens(usage?.promptTokens ?? 0)} · ra {formatTokens(usage?.outputTokens ?? 0)} · nghĩ{" "}
-          {formatTokens(usage?.thoughtTokens ?? 0)}
-        </span>
-      </button>
+      {/* Token counts are not shown on the dock's edge any more (developer telemetry in front of
+          every user); they are one click away in the header's "Thống kê" panel. */}
     </div>
   );
 }

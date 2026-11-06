@@ -1,110 +1,216 @@
 /* ==========================================================================
-   Design tokens — one source of truth, three layers.
+   Design tokens — "Giấy & Son" (paper & vermilion). One source of truth, three layers.
 
-     1. Primitive  raw values with no opinion (a blue, a radius step, a duration)
-     2. Semantic   what a value is FOR (primary, border, surface, danger)
+     1. Primitive  raw values with no opinion (a paper tone, an ink tone, a radius step)
+     2. Semantic   what a value is FOR (surface, border, primary, danger, status)
      3. Component  how one kind of control uses the semantic layer (a field, a menu, a dialog)
 
    Components and App.css reference layers 2 and 3 only. Never write a raw hex in a rule:
-   add a token here, or change the one that already says what you mean.
+   add a token here, or change the one that already says what you mean
+   (client/test/noRawColors.test.ts fails the build otherwise).
+
+   The idea, so a new rule can be judged against it: the frame is paper and ink and steps
+   back; colour is a SIGNAL — status, risk, "now" — and is rare. The one signature colour is
+   son (vermilion), and it means "now / mine": the today line, an unread dot, the work I am
+   doing. Primary actions are ink, not blue. Purple only ever marks "this came from AI".
+   See docs/plans/2026-11-06-tai-thiet-giao-dien.md §4 and design-system/…/MASTER.md.
    ========================================================================== */
 :root {
   color-scheme: light;
 
   /* ---------------------------------------------------------------- 1. Primitive */
-  --slate-50: #f8fafc;
-  --slate-100: #f1f5f9;
-  --slate-200: #e2e8f0;
-  --slate-300: #cbd5e1;
-  --slate-400: #94a3b8;
-  --slate-500: #64748b;
-  --slate-600: #475569;
-  --slate-900: #0f172a;
-  --blue-50: #eff6ff;
-  --blue-100: #dbeafe;
-  --blue-300: #93c5fd;
-  --blue-500: #3b82f6;
-  --blue-600: #2563eb;
-  --blue-700: #1d4ed8;
-  --red-50: #fef2f2;
-  --red-200: #fecaca;
-  --red-600: #dc2626;
-  --red-700: #b91c1c;
-  --green-50: #ecfdf5;
-  --green-200: #a7f3d0;
-  --green-600: #16a34a;
-  --amber-50: #fffbeb;
-  --amber-200: #fde68a;
-  --amber-600: #d97706;
-  --amber-800: #92400e;
+  /* Paper and ink: warm neutrals. Elevation is told by lightness, not by shadows. */
+  --paper: #f6f5f1;
+  --sheet: #fcfbf9;
+  --raised: #ffffff;
+  --sunken: #efede8;
+  --line: #e6e3dc;
+  --line-strong: #d3cec4;
+  --line-stronger: #b5afa4;
+  --ink: #1d1c1a;
+  --ink-2: #55524c;
+  /* 4.8:1 on --sheet — the lightest tone allowed for text. */
+  --ink-3: #6f6b64;
+  /* Decoration only (icons, rules). Never text. */
+  --ink-4: #a29d94;
+  /* Text and icons sitting on a strong fill (an ink button, a risk badge). Flips in dark mode. */
+  --on-strong: #ffffff;
+
+  /* Son — the signature. "Now" and "mine" only. */
+  --son: #e0531f;
+  --son-wash: #fcebe3;
+  --son-text: #a83a10;
+  /* Text on a son fill — white in both themes. */
+  --on-son: #ffffff;
+
+  /* Signal families: wash (background) · soft (hover / fill) · line (border) · solid (icon, bar) · text (AA on wash). */
+  --info: #2a6fdb;
+  --info-wash: #ebf1fc;
+  --info-soft: #d6e3f8;
+  --info-line: #a9c4ef;
+  --info-text: #1d4fa3;
+
+  --ok: #2f8a5b;
+  --ok-wash: #e8f4ec;
+  --ok-soft: #cfe7d8;
+  --ok-line: #9acbae;
+  --ok-text: #1f6b43;
+
+  --warn: #b7791f;
+  --warn-wash: #fbf3e2;
+  --warn-soft: #f4e2bb;
+  --warn-line: #e2c17e;
+  --warn-text: #7f5210;
+
+  --risk: #c2334d;
+  --risk-wash: #fbe9ec;
+  --risk-soft: #f5ccd4;
+  --risk-line: #e8a1ae;
+  --risk-text: #9c2238;
+
+  --ai: #6b5bb5;
+  --ai-wash: #f1eff9;
+  --ai-line: #cbc4e8;
+  --ai-text: #4f4196;
+
+  /* Legacy primitive names, kept so the few rules that still name them follow the new palette. */
+  --slate-50: var(--paper);
+  --slate-100: var(--sunken);
+  --slate-200: var(--line);
+  --slate-300: var(--line-strong);
+  --slate-400: var(--line-stronger);
+  --slate-500: var(--ink-3);
+  --slate-600: var(--ink-2);
+  --slate-900: var(--ink);
+  --blue-50: var(--info-wash);
+  --blue-100: var(--info-soft);
+  --blue-300: var(--info-line);
+  --blue-500: var(--info);
+  --blue-600: var(--info);
+  --blue-700: var(--info-text);
+  --red-50: var(--risk-wash);
+  --red-200: var(--risk-line);
+  --red-600: var(--risk);
+  --red-700: var(--risk-text);
+  --green-50: var(--ok-wash);
+  --green-200: var(--ok-line);
+  --green-600: var(--ok);
+  --amber-50: var(--warn-wash);
+  --amber-200: var(--warn-line);
+  --amber-600: var(--warn);
+  --amber-800: var(--warn-text);
 
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
   --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
 
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
+  /* Small radii on purpose: rounded-everything is the template look. A child is never rounder than its parent. */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
   --radius-full: 9999px;
 
-  --font-size-xs: 11.5px;
-  --font-size-sm: 12.5px;
+  --font-sans: "Be Vietnam Pro", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  /* Be Vietnam Pro has no tabular figures, so anything that must line up in a column (keys, %, hours,
+     dates in a grid, KPI numbers) is set in the mono face. */
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
   --font-size-md: 13px;
   --font-size-lg: 14px;
-  --font-size-title: 17px;
+  --font-size-lead: 15px;
+  --font-size-title: 18px;
+  --font-size-page: 20px;
+  --font-size-display: 30px;
 
-  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -4px rgba(0, 0, 0, 0.04);
-  --shadow-modal: 0 20px 25px -5px rgba(0, 0, 0, 0.12), 0 8px 10px -6px rgba(0, 0, 0, 0.08);
+  /* Only floating layers cast a shadow. Planes are told apart by lightness. */
+  --shadow-sm: 0 1px 0 rgb(29 28 26 / 0.04);
+  --shadow-md: 0 1px 0 rgb(29 28 26 / 0.04), 0 4px 12px -4px rgb(30 25 15 / 0.12);
+  --shadow-lg: 0 1px 0 rgb(29 28 26 / 0.04), 0 8px 24px -6px rgb(30 25 15 / 0.16);
+  --shadow-modal: 0 1px 0 rgb(29 28 26 / 0.05), 0 18px 48px -12px rgb(30 25 15 / 0.28);
+  --shadow-float: var(--shadow-lg);
 
-  --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
-  --transition-normal: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  /* Motion. Keyboard-driven and 50×-a-day actions get none (--d-0); see plan §8. */
+  --d-0: 0ms;
+  --d-1: 90ms;
+  --d-2: 150ms;
+  --d-3: 220ms;
+  --d-4: 320ms;
+  --e-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --e-move: cubic-bezier(0.2, 0, 0, 1);
+  --e-in: cubic-bezier(0.3, 0, 0.8, 0.15);
+  --transition-fast: var(--d-1) var(--e-out);
+  --transition-normal: var(--d-2) var(--e-out);
 
-  /* Stacking: a floating tool card (resource tab's unassigned list) sits above the page but under every popover,
-     so a filter menu opened over it is not hidden; a popover above that, a modal above a popover, a confirmation above a modal. */
+  /* Stacking: a floating tool card sits above the page but under every popover; the peek panel above
+     the page; a popover above that, a modal above a popover, a confirmation above a modal, toasts on top. */
   --z-float: 40;
+  --z-peek: 45;
   --z-popover: 50;
   --z-modal: 50;
+  --z-command: 70;
   --z-dialog: 80;
+  --z-toast: 90;
 
   /* ----------------------------------------------------------------- 2. Semantic */
-  --color-bg: var(--slate-50);
-  --color-surface: #ffffff;
-  --color-border: var(--slate-200);
-  --color-border-hover: var(--slate-300);
-  --color-border-strong: var(--slate-400);
-  --color-ghost-hover: var(--slate-100);
-  --color-text-primary: var(--slate-900);
-  --color-text-secondary: var(--slate-600);
-  /* 4.76:1 on white — the lightest text that still passes AA. */
-  --color-text-muted: var(--slate-500);
-  --color-primary: var(--blue-600);
-  --color-primary-hover: var(--blue-700);
-  --color-primary-light: var(--blue-50);
-  --color-primary-border: var(--blue-300);
-  --color-focus: var(--blue-500);
-  --color-danger: var(--red-600);
-  --color-danger-hover: var(--red-700);
-  --color-danger-light: var(--red-50);
-  --color-danger-border: var(--red-200);
-  --color-success: var(--green-600);
-  --color-success-light: var(--green-50);
-  --color-success-border: var(--green-200);
-  --color-warning: var(--amber-600);
-  --color-warning-light: var(--amber-50);
-  --color-warning-border: var(--amber-200);
+  --color-bg: var(--paper);
+  --color-surface: var(--raised);
+  --color-sheet: var(--sheet);
+  --color-sunken: var(--sunken);
+  --color-border: var(--line);
+  --color-border-hover: var(--line-strong);
+  --color-border-strong: var(--line-stronger);
+  --color-ghost-hover: var(--sunken);
+  --color-text-primary: var(--ink);
+  --color-text-secondary: var(--ink-2);
+  --color-text-muted: var(--ink-3);
+  --color-text-faint: var(--ink-4);
+  --color-on-strong: var(--on-strong);
+  /* Primary is ink: the data carries the colour, the frame does not. */
+  --color-primary: var(--ink);
+  --color-primary-hover: var(--ink-2);
+  /* "Selected / active" tint — a quiet blue wash, the same one a selected row uses. */
+  --color-primary-light: var(--info-wash);
+  --color-primary-border: var(--info-line);
+  --color-link: var(--info-text);
+  --color-focus: var(--info);
+  --color-select: var(--info-wash);
+  --color-now: var(--son);
+  --color-now-wash: var(--son-wash);
+  --color-danger: var(--risk);
+  --color-danger-hover: var(--risk-text);
+  --color-danger-light: var(--risk-wash);
+  --color-danger-border: var(--risk-line);
+  --color-success: var(--ok);
+  --color-success-light: var(--ok-wash);
+  --color-success-border: var(--ok-line);
+  --color-warning: var(--warn);
+  --color-warning-light: var(--warn-wash);
+  --color-warning-border: var(--warn-line);
   /* --color-warning is too light to read as text (3:1); this is 4.5:1+ on --color-warning-light. */
-  --color-warning-text: var(--amber-800);
-  --color-overlay: rgba(15, 23, 42, 0.45);
+  --color-warning-text: var(--warn-text);
+  --color-ai: var(--ai);
+  --color-overlay: rgb(20 18 15 / 0.32);
 
-  --header-h: 52px;
-  --toolbar-h: 48px;
-  --control-h-header: 36px;
-  --control-h: 32px;
+  /* Status category glyphs (○ ◑ ●), never a filled pill. */
+  --st-todo: var(--ink-4);
+  --st-doing: var(--info);
+  --st-done: var(--ok);
+
+  --header-h: 44px;
+  --rail-w: 48px;
+  --toolbar-h: 40px;
+  --control-h-header: 30px;
+  --control-h: 30px;
+
+  /* Row height follows the density setting (html[data-density]); GanttView reads the same numbers. */
+  --row-h: 32px;
 
   /* ---------------------------------------------------------------- 3. Component */
   /* Field: input, select, textarea. */
@@ -113,34 +219,106 @@
   --control-border: var(--color-border-hover);
   --control-border-hover: var(--color-border-strong);
   --control-border-focus: var(--color-focus);
-  --control-ring: 0 0 0 3px rgba(59, 130, 246, 0.15);
+  --control-ring: 0 0 0 3px color-mix(in srgb, var(--info) 18%, transparent);
   --control-radius: var(--radius-md);
   --control-px: 10px;
   --control-placeholder: var(--color-text-muted);
-  --control-font-size: var(--font-size-sm);
-  --control-disabled-bg: var(--color-bg);
+  --control-font-size: var(--font-size-md);
+  --control-disabled-bg: var(--sunken);
   /* The same field at form size: inside a window or dialog, where fields are read and filled
      rather than scanned in a toolbar. One height for every one-line field, whatever its kind. */
-  --control-h-form: 36px;
-  --control-px-form: 12px;
+  --control-h-form: 34px;
+  --control-px-form: 10px;
   --control-font-size-form: var(--font-size-md);
 
   /* Menu and popover panel: also the list a <select> opens. */
-  --menu-bg: var(--color-surface);
-  --menu-border: var(--color-border);
-  --menu-radius: var(--radius-md);
+  --menu-bg: var(--raised);
+  --menu-border: var(--line);
+  --menu-radius: var(--radius-lg);
   --menu-shadow: var(--shadow-lg);
   --menu-padding: 4px;
   --menu-item-px: 10px;
-  --menu-item-py: 7px;
+  --menu-item-py: 6px;
   --menu-item-radius: var(--radius-sm);
-  --menu-item-hover: var(--color-ghost-hover);
-  --menu-item-selected-bg: var(--color-primary-light);
-  --menu-item-selected-fg: var(--color-primary);
+  --menu-item-hover: var(--sunken);
+  --menu-item-selected-bg: var(--info-wash);
+  --menu-item-selected-fg: var(--info-text);
 
   /* Dialog: a confirmation or a question put to the person, in the app's own voice. */
   --dialog-w: 420px;
   --dialog-radius: var(--radius-xl);
   --dialog-shadow: var(--shadow-modal);
   --dialog-padding: 20px;
+}
+
+html[data-density="compact"] {
+  --row-h: 28px;
+}
+html[data-density="comfortable"] {
+  --row-h: 40px;
+}
+
+/* Dark: the same roles, re-lit. Set by the inline script in index.html from the saved choice or the OS. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --paper: #121211;
+  --sheet: #181816;
+  --raised: #211f1d;
+  --sunken: #0e0e0d;
+  --line: #2b2926;
+  --line-strong: #3b3833;
+  --line-stronger: #57534c;
+  --ink: #edebe6;
+  --ink-2: #bdb8ae;
+  --ink-3: #9a958b;
+  --ink-4: #6b665e;
+  --on-strong: #121211;
+
+  --son: #f26b38;
+  --son-wash: #3a2016;
+  --son-text: #f79a74;
+
+  --info: #5b93ea;
+  --info-wash: #1a2436;
+  --info-soft: #22314d;
+  --info-line: #34548a;
+  --info-text: #9dbff4;
+
+  --ok: #4fae7c;
+  --ok-wash: #15261d;
+  --ok-soft: #1c3527;
+  --ok-line: #2e5a42;
+  --ok-text: #8fd3ad;
+
+  --warn: #d39a3f;
+  --warn-wash: #2b2214;
+  --warn-soft: #3b2e19;
+  --warn-line: #6a4f22;
+  --warn-text: #e8c07a;
+
+  --risk: #e5576f;
+  --risk-wash: #33181d;
+  --risk-soft: #4a1f27;
+  --risk-line: #7a3240;
+  --risk-text: #f39aaa;
+
+  --ai: #9d8fe0;
+  --ai-wash: #221f33;
+  --ai-line: #423a6b;
+  --ai-text: #c3b9f2;
+
+  --color-overlay: rgb(0 0 0 / 0.5);
+  --shadow-sm: 0 1px 0 rgb(0 0 0 / 0.3);
+  --shadow-md: 0 0 0 1px rgb(255 255 255 / 0.04), 0 4px 12px -4px rgb(0 0 0 / 0.5);
+  --shadow-lg: 0 0 0 1px rgb(255 255 255 / 0.05), 0 8px 24px -6px rgb(0 0 0 / 0.6);
+  --shadow-modal: 0 0 0 1px rgb(255 255 255 / 0.06), 0 18px 48px -12px rgb(0 0 0 / 0.7);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --d-1: 0ms;
+    --d-2: 60ms;
+    --d-3: 90ms;
+    --d-4: 90ms;
+  }
 }

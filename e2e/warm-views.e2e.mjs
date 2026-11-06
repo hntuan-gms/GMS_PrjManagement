@@ -44,11 +44,11 @@ await step("Bảng hiện thẻ ngay, không có request mới", async () => {
   await page.waitForSelector(".bd-card", { timeout: 1000 });
 });
 await step("Chấm công hiện bảng ngay, không có request mới", async () => {
-  await tab("Chấm công");
+  await page.locator("[data-view=timesheet]").click();
   await page.waitForSelector(".ts-wrap .ts-grid tbody tr", { timeout: 1000 });
 });
 await step("Báo cáo hiện số liệu ngay, không có request mới", async () => {
-  await tab("Báo cáo");
+  await tab("Nhịp dự án");
   await page.waitForSelector(".pr-loading", { state: "detached", timeout: 1000 });
 });
 await step("cả ba tab không gọi thêm API nào", async () => {
@@ -58,9 +58,9 @@ await step("cả ba tab không gọi thêm API nào", async () => {
 
 console.log("\n== Việc đổi thì hỏi lại ==");
 await step("sau khi đồng bộ, mở lại Bảng thì hỏi lại", async () => {
-  await tab("Gantt");
-  await page.getByRole("button", { name: /Đồng bộ từ Jira/ }).click();
-  await page.waitForFunction(() => [...document.querySelectorAll(".toolbar button")].some((b) => b.textContent.includes("Đồng bộ từ Jira")));
+  await tab("Kế hoạch");
+  await page.locator(".sync-indicator").click();
+  await page.waitForFunction(() => document.querySelector(".sync-indicator")?.textContent.includes("Khớp Jira"));
   const boardBefore = counts.board;
   await tab("Bảng");
   await page.waitForSelector(".bd-card");

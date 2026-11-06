@@ -1,0 +1,523 @@
+/* ==========================================================================
+   Kế hoạch (Gantt / WBS) and the shared filter bar — "Giấy & Son" (plan §6.1).
+   Loaded after App.css: rules here replace the old pills, zebra and boxes.
+   ========================================================================== */
+
+/* ---- The filter bar: one quiet row on the sheet, 28px controls. ---- */
+.tf-bar {
+  min-height: var(--toolbar-h);
+  padding: 5px 12px;
+  background: var(--sheet);
+  border-bottom: 1px solid var(--line);
+}
+.tf-bar .tf-btn,
+.tf-bar .tf-select > .tf-btn,
+.tf-bar button.tb-btn {
+  height: 28px;
+  padding: 0 9px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: 12.5px;
+}
+.tf-bar .tf-btn:hover:not(:disabled),
+.tf-bar button.tb-btn:hover:not(:disabled) {
+  background: var(--sunken);
+  border-color: transparent;
+  color: var(--ink);
+}
+/* A switched-on quick filter is ink — the one thing in the bar that says "this is narrowing what you see". */
+.tf-bar .tf-btn.is-on,
+.tf-bar .tf-btn.is-on:hover:not(:disabled) {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--on-strong);
+}
+.tf-bar .tf-btn.warning-pill {
+  background: var(--warn-wash);
+  border-color: transparent;
+  color: var(--warn-text);
+}
+.tf-bar .tf-btn.warning-pill:hover:not(:disabled),
+.tf-bar .tf-btn.warning-pill.is-open {
+  background: var(--warn-soft);
+  border-color: transparent;
+  color: var(--warn-text);
+}
+.tf-bar .tf-search {
+  height: 28px;
+  border-color: transparent;
+  background: var(--sunken);
+}
+.tf-bar .tf-search:focus-within {
+  border-color: var(--line-strong);
+  background: var(--raised);
+}
+.tf-bar .seg-group {
+  height: 28px;
+  background: var(--sunken);
+}
+.tf-bar .seg-group button {
+  font-size: 12px;
+}
+.seg-group button.active,
+.seg-group button.active:hover:not(:disabled) {
+  background: var(--raised);
+  box-shadow: 0 0 0 1px var(--line);
+}
+.seg-group button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--raised) 60%, transparent);
+}
+
+/* ---- WBS table ---- */
+.wbs-header {
+  background: var(--sheet);
+  border-bottom: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+  color: var(--ink-3);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+.wbs-row {
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  border-right: 1px solid var(--line);
+  font-size: 13px;
+  background: var(--sheet);
+  transition: background-color var(--d-1) linear;
+}
+.wbs-row:hover {
+  background: var(--sunken);
+}
+.wbs-row-selected,
+.wbs-row-selected:hover {
+  background: var(--info-wash) !important;
+  box-shadow: inset 2px 0 0 var(--info);
+}
+.wbs-row-match {
+  background: var(--warn-wash) !important;
+}
+.wbs-row-critical {
+  border-left: none;
+  box-shadow: inset 2px 0 0 var(--son);
+}
+.wbs-row-critical .wbs-col-key {
+  padding-left: 8px;
+}
+.wbs-col-key {
+  width: var(--wbs-key-w, 64px);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 400;
+  text-overflow: clip;
+}
+.wbs-col-key a {
+  color: var(--ink-3);
+}
+.wbs-row:hover .wbs-col-key a,
+.wbs-row-selected .wbs-col-key a {
+  color: var(--ink-2);
+}
+.wbs-summary {
+  color: var(--ink);
+}
+.wbs-summary-parent {
+  font-weight: 600;
+}
+.wbs-col-name {
+  gap: 7px;
+}
+.wbs-col-name .bd-prio {
+  flex: none;
+  display: inline-flex;
+}
+.expander {
+  color: var(--ink-3);
+  transition: transform var(--d-2) var(--e-move);
+}
+
+/* Status: the glyph carries it; the workflow's own name follows, quiet. */
+.wbs-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  font-size: 12.5px;
+  font-weight: 400;
+  color: var(--ink-2);
+}
+.wbs-status.is-indeterminate,
+.wbs-status.is-done {
+  background: none;
+  color: var(--ink-2);
+}
+.wbs-status.is-done .wbs-status-name {
+  color: var(--ink-3);
+}
+.wbs-status-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wbs-person {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ink-2);
+}
+.wbs-avatar {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--ink-2);
+  font-size: 10px;
+  font-weight: 600;
+}
+.wbs-none {
+  color: var(--ink-4);
+}
+.wbs-prio {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.wbs-col-extra {
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+.wbs-col-extra.is-right,
+.wbs-cell-pct,
+.wbs-cell-duration,
+.wbs-cell-estimate,
+.wbs-cell-spent {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.wbs-overdue {
+  color: var(--risk-text);
+  font-weight: 500;
+}
+
+/* Priority marks: shape first, colour confirms. */
+.bd-prio-high {
+  color: var(--risk);
+}
+.bd-prio-mid {
+  color: var(--ink-4);
+}
+.bd-prio-low {
+  color: var(--info);
+}
+
+/* ---- The bulk bar: a raised pill at the bottom, never in the flow (CLAUDE.md: double-click). ---- */
+.selection-bar {
+  bottom: 24px;
+  gap: 6px;
+  padding: 6px 8px 6px 14px;
+  min-height: 0;
+  background: var(--raised);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-modal);
+  animation: selbar-in var(--d-2) var(--e-out);
+}
+.selection-count {
+  font-weight: 500;
+  color: var(--ink-2);
+}
+.selection-count strong {
+  color: var(--ink);
+  font-family: var(--font-mono);
+}
+.selection-bar button {
+  height: 30px;
+}
+@keyframes selbar-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+/* ---- Chart pane ---- */
+.gantt-body {
+  background: var(--sheet);
+}
+.gantt-divider {
+  background: var(--line);
+}
+
+/* "+ Thêm việc" under the last row (GanttView): type a sentence, Enter creates it. */
+.wbs-add {
+  position: absolute;
+  left: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--row-h);
+  padding: 0 10px 0 calc(var(--wbs-key-w, 64px) + 8px);
+  color: var(--ink-4);
+  border-right: 1px solid var(--line);
+  background: var(--sheet);
+}
+.wbs-add:focus-within {
+  color: var(--ink-2);
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.wbs-add input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  font-size: 13px;
+}
+.wbs-add input:focus-visible {
+  outline: none;
+}
+.wbs-add kbd {
+  opacity: 0;
+  transition: opacity var(--d-1) linear;
+}
+.wbs-add:focus-within kbd {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .selection-bar {
+    animation: none;
+  }
+}
+
+/* Baseline strips: loud only when the work has moved off its baseline. */
+.baseline-bar {
+  fill: var(--ink-3);
+  fill-opacity: 0.4;
+}
+.baseline-bar.is-on-plan {
+  fill-opacity: 0.12;
+}
+.baseline-bar.is-late {
+  fill: var(--risk);
+  fill-opacity: 0.55;
+}
+
+/* Cells edited in place (Người, Trạng thái): a hint of a control on hover, nothing at rest. */
+.wbs-col-extra.is-editable {
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+.wbs-row:hover .wbs-col-extra.is-editable:hover {
+  background: color-mix(in srgb, var(--raised) 70%, transparent);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.cell-picker {
+  position: fixed;
+  z-index: var(--z-popover);
+  width: 248px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--raised);
+  box-shadow: var(--shadow-lg);
+  animation: chip-in var(--d-2) var(--e-out);
+}
+.cell-picker input {
+  width: 100%;
+  height: 30px;
+  margin-bottom: 4px;
+  border-color: transparent;
+  background: var(--sunken);
+}
+.cell-picker-list {
+  max-height: 280px;
+  overflow-y: auto;
+}
+.cell-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.cell-picker-item.is-active {
+  background: var(--sunken);
+  color: var(--ink);
+}
+.cell-picker-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cell-picker-hint {
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+.cell-picker-empty {
+  padding: 10px 8px;
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+
+/* A link the plan breaks (successor starts before the link allows): dashed risk, never colour alone. */
+.dep-arrow-violated .dep-arrow-line {
+  stroke: var(--risk);
+  stroke-dasharray: 4 3;
+  stroke-width: 1.6;
+}
+.dep-arrow-violated polygon {
+  fill: var(--risk);
+}
+.dep-violation {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-md);
+  background: var(--risk-wash);
+  color: var(--risk-text);
+  font-size: 12px;
+}
+.dep-violation button {
+  height: 26px;
+  padding: 0 10px;
+  margin-left: auto;
+}
+
+/* ---- Bản nháp kế hoạch ---- */
+.draft-bar {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 4px 12px 4px 14px;
+  background: var(--warn-wash);
+  border-bottom: 1px solid var(--warn-line);
+  font-size: 12.5px;
+  color: var(--warn-text);
+  z-index: 6;
+}
+.draft-tag {
+  padding: 1px 7px;
+  border-radius: var(--radius-sm);
+  background: var(--warn);
+  color: var(--on-strong);
+  font-weight: 700;
+  font-size: 11px;
+}
+.draft-text b {
+  color: var(--ink);
+}
+.draft-text b.is-later {
+  color: var(--risk-text);
+}
+.draft-text b.is-earlier {
+  color: var(--ok-text);
+}
+button.draft-link {
+  height: 24px;
+  padding: 0 6px;
+  border: none;
+  background: transparent;
+  color: var(--warn-text);
+  text-decoration: underline;
+}
+.draft-spacer {
+  flex: 1;
+}
+.draft-bar > button:not(.draft-link) {
+  height: 28px;
+}
+.draft-list {
+  position: absolute;
+  top: 100%;
+  left: 12px;
+  width: min(720px, calc(100% - 24px));
+  max-height: 320px;
+  overflow-y: auto;
+  margin-top: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--raised);
+  box-shadow: var(--shadow-lg);
+  animation: chip-in var(--d-2) var(--e-out);
+}
+button.draft-item {
+  display: grid;
+  grid-template-columns: 76px 1fr auto auto;
+  gap: 10px;
+  width: 100%;
+  height: auto;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  text-align: left;
+  font-weight: 400;
+  color: var(--ink-2);
+}
+button.draft-item:hover:not(:disabled) {
+  border: none;
+  background: var(--sunken);
+}
+.draft-key {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.draft-sum {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+}
+.draft-dates {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.draft-kind {
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+.draft-kind.is-edited {
+  color: var(--warn-text);
+  font-weight: 600;
+}
+/* Where a moved bar was before the draft. */
+.draft-ghost {
+  fill: none;
+  stroke: var(--warn);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+}
+/* The plan frame says "draft" too. */
+body:has(.draft-bar) .gantt-body {
+  box-shadow: inset 2px 0 0 var(--warn);
+}

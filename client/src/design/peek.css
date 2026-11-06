@@ -1,0 +1,212 @@
+/* ==========================================================================
+   The task panel (TaskEditModal as a peek, plan §6.2), every other window, and DateField.
+   ========================================================================== */
+
+/* ---- Peek: slides in from the right, no dimmer — the plan stays visible and usable. ---- */
+.peek-layer {
+  position: fixed;
+  inset: 0 0 0 auto;
+  z-index: var(--z-peek);
+  width: min(920px, 64vw);
+  display: flex;
+  pointer-events: none;
+}
+.modal.peek-panel {
+  pointer-events: auto;
+  width: 100%;
+  max-width: none;
+  height: 100vh;
+  max-height: none;
+  padding: 0;
+  gap: 0;
+  border-radius: 0;
+  border-left: 1px solid var(--line);
+  background: var(--raised);
+  box-shadow: var(--shadow-modal);
+  animation: peek-in var(--d-3) var(--e-out);
+}
+@keyframes peek-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+}
+.peek-panel .td-header {
+  min-height: 48px;
+  padding: 8px 12px 8px 18px;
+  background: var(--raised);
+}
+.peek-panel .td-header .modal-id {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-2);
+}
+.peek-panel .td-header .wbs-status {
+  font-size: 12.5px;
+}
+.peek-panel .modal-jira-link {
+  color: var(--ink-3);
+  font-size: 12.5px;
+}
+.peek-panel .td-dirty {
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: var(--warn-wash);
+  color: var(--warn-text);
+  font-size: 12px;
+  font-weight: 500;
+}
+.peek-panel .td-body {
+  grid-template-columns: minmax(0, 1fr) 300px;
+}
+.peek-panel .td-side {
+  background: var(--sheet);
+  border-left: 1px solid var(--line);
+}
+.peek-panel .td-title {
+  font-size: var(--font-size-page);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.peek-panel .td-section {
+  border: none;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+}
+.peek-panel .td-group-title {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink-3);
+}
+.peek-panel .td-footer {
+  padding: 10px 14px 10px 18px;
+  background: var(--raised);
+}
+.peek-panel .td-footer .primary kbd {
+  background: transparent;
+  border-color: color-mix(in srgb, var(--on-strong) 30%, transparent);
+  color: color-mix(in srgb, var(--on-strong) 75%, transparent);
+  margin-left: 4px;
+}
+.peek-panel .td-footer .primary:disabled {
+  opacity: 1;
+  background: var(--sunken);
+  border-color: var(--line);
+  color: var(--ink-3);
+}
+.peek-panel .td-footer .primary:disabled kbd {
+  display: none;
+}
+@media (max-width: 1200px) {
+  .peek-layer {
+    width: min(640px, 100vw);
+  }
+  .peek-panel .td-body {
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  .peek-panel .td-main,
+  .peek-panel .td-side {
+    overflow: visible;
+  }
+  .peek-panel .td-side {
+    order: -1;
+    border-left: none;
+    border-bottom: 1px solid var(--line);
+  }
+}
+
+/* ---- Every other window: lighter dimmer, no blur, small radii, short motion. ---- */
+.modal-overlay {
+  background: var(--color-overlay);
+  backdrop-filter: none;
+  animation: overlay-in var(--d-2) linear;
+}
+.modal {
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-modal);
+  animation: modal-in var(--d-3) var(--e-out);
+}
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.99);
+  }
+}
+.modal h2,
+.modal-title {
+  letter-spacing: -0.01em;
+}
+.field > span {
+  color: var(--ink-2);
+  font-weight: 500;
+}
+
+/* ---- DateField ---- */
+.date-field {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 100%;
+  min-width: 120px;
+}
+.date-field input[type="text"] {
+  width: 100%;
+  padding-right: 30px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+.date-field.is-bad input[type="text"] {
+  border-color: var(--risk);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--risk) 14%, transparent);
+}
+button.date-field-pick {
+  position: absolute;
+  right: 3px;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--ink-3);
+}
+button.date-field-pick:hover:not(:disabled) {
+  border: none;
+  background: var(--sunken);
+  color: var(--ink);
+}
+.date-field-native {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+  border: 0;
+  padding: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal.peek-panel,
+  .modal,
+  .modal-overlay {
+    animation: none;
+  }
+}
+
+/* While the panel is open the bulk bar centres on what is left of the plan, not under the panel. */
+body:has(.peek-layer) .selection-bar {
+  left: calc(var(--rail-w) + (100vw - var(--rail-w) - min(920px, 64vw)) / 2);
+  max-width: calc(100vw - var(--rail-w) - min(920px, 64vw) - 24px);
+}

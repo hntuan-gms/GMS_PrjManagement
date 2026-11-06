@@ -292,7 +292,7 @@ export default function BacklogView(props: Props) {
               <span className="bd-spacer" />
               {sprint?.state === "future" && canUseAi && (
                 <button className="bd-ai-btn" onClick={() => props.onPlanSprint(sprint)} disabled={busy}>
-                  ✦ Lập kế hoạch AI
+                  Lập kế hoạch bằng AI
                 </button>
               )}
               {sprint?.state === "future" && sprint === firstFuture && !hasActive && (
@@ -329,7 +329,7 @@ export default function BacklogView(props: Props) {
                 <>
                   {canUseAi && unestimatedBacklog > 0 && (
                     <button className="bd-ai-btn" onClick={props.onRequestEstimates} disabled={props.estimating}>
-                      {props.estimating ? "Đang ước lượng..." : `✦ Ước lượng ${Math.min(30, unestimatedBacklog)} việc`}
+                      {props.estimating ? "Đang ước lượng..." : `Ước lượng bằng AI ${Math.min(30, unestimatedBacklog)} việc`}
                     </button>
                   )}
                   {props.suggestions.size > 1 && (
@@ -435,7 +435,7 @@ export default function BacklogView(props: Props) {
                         />
                         {suggestion && issue.estimate === null && (
                           <span className={`bl-suggest bl-conf-${suggestion.confidence}`} title={suggestion.reason} onClick={(e) => e.stopPropagation()}>
-                            ✦ {suggestion.value}
+                            <span className="ai-tag">AI</span> {suggestion.value}
                             <button onClick={() => props.onAcceptSuggestion(issue.key)} title="Áp dụng" aria-label="Áp dụng">
                               ✓
                             </button>

@@ -69,7 +69,8 @@ let failed = 0;
 try {
   const apiPort = await freePort(4000);
   const appPort = await freePort(5173);
-  const urls = { E2E_API: `http://localhost:${apiPort}`, E2E_APP: `http://localhost:${appPort}/` };
+  // The app opens on "Hôm nay"; these tests are about the plan and its lenses, so they start there.
+  const urls = { E2E_API: `http://localhost:${apiPort}`, E2E_APP: `http://localhost:${appPort}/?view=gantt` };
   console.log(`stand-in API :${apiPort}, client :${appPort}`);
   start("mock", ["--import", "tsx", "mock-api.mts"], here, { MOCK_PORT: String(apiPort) });
   start(

@@ -229,7 +229,7 @@ console.log("\n== Nguồn lực ==");
 await fetch(API + "/api/tasks/DEMO-7", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ assigneeAccountId: null }) });
 await page.reload(); await page.waitForSelector(".wbs-row");
 await step("tab Nguồn lực: có bộ lọc, KHÔNG có ô người phụ trách", async () => {
-  await tab("Nguồn lực");
+  await tab("Nhân lực");
   await page.waitForSelector(".resource-view .tf-bar");
   await openFilterPanel(page);
   const facets = await page.$$eval(".resource-view .tf-facet-head", (b) => b.map((x) => x.textContent));
@@ -305,7 +305,7 @@ await step("tạo nhanh có chọn loại + người", async () => {
 
 console.log("\n== Báo cáo ==");
 await step("lọc theo người → số công việc khớp đúng máy chủ", async () => {
-  await tab("Báo cáo"); await page.waitForSelector(".pr-filters");
+  await tab("Nhịp dự án"); await page.waitForSelector(".pr-filters");
   const all = (await mock("/api/progress?asOf=" + localToday())).metrics.counts.total;
   await page.locator(".pr-filter", { hasText: "Người phụ trách" }).locator("select").selectOption({ label: "Nguyễn Anh" });
   const want = (await mock("/api/progress?asOf=" + localToday() + "&assignee=anh")).metrics.counts.total;
@@ -332,7 +332,7 @@ await step("bấm tile mở danh sách chi tiết: có tìm kiếm, sắp xếp,
 
 console.log("\n== Chấm công ==");
 await step("đổi tên tab + lọc 'Của tôi' chỉ còn 1 dòng", async () => {
-  await tab("Chấm công"); await page.waitForSelector(".ts-grid");
+  await page.locator("[data-view=timesheet]").click(); await page.waitForSelector(".ts-grid");
   await page.locator(".ts-person-filter").selectOption("me");
   await page.waitForFunction(() => document.querySelectorAll(".ts-grid tbody tr").length === 1);
 });
@@ -350,9 +350,9 @@ await step("xuất CSV chấm công", async () => {
 
 console.log("\n== Trợ lý AI ==");
 await step("Dừng: giữ phần trả lời dở và báo cho máy chủ ngắt", async () => {
-  await tab("Gantt");
+  await tab("Kế hoạch");
   await reset();
-  await page.locator(".chat-pill").click();
+  await page.locator(".app-rail button[aria-label='Trợ lý']").click();
   await page.fill(".chat-input-row textarea", "cho tôi một câu trả lời dài");
   await page.keyboard.press("Enter");
   await page.waitForFunction(() => document.querySelector(".chat-msg-model .chat-bubble")?.textContent.includes("Đây"), null, { timeout: 8000 });
@@ -372,9 +372,12 @@ await step("có nút Sao chép trên câu trả lời", async () => {
 console.log("\n== Tạo việc ==");
 await step("form tạo việc gửi kèm Ưu tiên, Nhãn và Ước lượng (kể cả khi chỉ tạo 1 task)", async () => {
   await page.keyboard.press("Escape");
-  await tab("Gantt");
+  await tab("Kế hoạch");
   await reset();
-  await page.locator(".toolbar button", { hasText: "Task mới" }).click();
+  // "C" is the sentence box now; the full form is a command in Ctrl K.
+  await page.keyboard.press("Control+k");
+  await page.keyboard.type("biểu mẫu");
+  await page.locator(".cmdk-row", { hasText: "biểu mẫu đầy đủ" }).click();
   await page.waitForSelector(".modal .task-input-field");
   await page.fill(".modal .task-input-field", "Việc có ưu tiên và nhãn");
   await page.locator(".modal .field", { hasText: "Độ ưu tiên" }).locator("select").selectOption("High");

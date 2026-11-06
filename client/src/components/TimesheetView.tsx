@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import DateField from "./DateField";
 import { api, ApiError } from "../api";
 import { csvName, downloadCsv } from "../csv";
 import { localToday, roundHours } from "../taskForm";
@@ -551,7 +552,7 @@ function LogWorkModal({
         <div className="field-row">
           <label className="field">
             <span>Ngày</span>
-            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+            <DateField value={date} onChange={setDate} ariaLabel="Ngày ghi giờ" />
           </label>
           <label className="field">
             <span>Số giờ</span>

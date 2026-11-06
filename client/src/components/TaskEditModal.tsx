@@ -1,4 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import DateField from "./DateField";
+import StatusGlyph from "./StatusGlyph";
 import { api } from "../api";
 import { isAssignableType } from "../types";
 import type { DependencyType, JiraUser, Predecessor, SlaSettings, Task, TaskAttachments, TaskTransition, TaskUpdateInput, TransitionField } from "../types";
@@ -36,12 +38,15 @@ interface Props {
   onAddSubtask: (parent: Task) => void;
   /** This task's SLA under the project's policy; null while SLA is off (no row at all). */
   sla?: { result: SlaResult | null; settings: SlaSettings; nowMs: number } | null;
+  /**
+   * The workspace asks the panel to close (Esc outside it, another task opened): it saves what was
+   * changed first, then calls onClose. A new nonce is a new request.
+   */
+  closeRequest?: number;
 }
 
 const DEP_TYPES: DependencyType[] = ["FS", "SS", "FF", "SF"];
 
-const FOCUSABLE =
-  'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
 
 /** A block of the main column that can be folded away. */
 function Section({ title, hint, children }: { title: string; hint?: ReactNode; children: ReactNode }) {
@@ -67,7 +72,7 @@ function Group({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-export default function TaskEditModal({ task, allTasks, users, onClose, onSave, onDelete, onWorkLogged, myAccountId, onAddSubtask, sla }: Props) {
+export default function TaskEditModal({ task, allTasks, users, onClose, onSave, onDelete, onWorkLogged, myAccountId, onAddSubtask, sla, closeRequest }: Props) {
   const dialogs = useDialogs();
   const [summary, setSummary] = useState(task.summary);
   // The project list leaves descriptions out, so this is fetched on open. Until it is here
@@ -236,18 +241,16 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
     JSON.stringify(predecessors) !== JSON.stringify(task.predecessors) ||
     hasPending(pending);
 
-  /** Closing throws away what was typed, so a window with changes in it asks first. */
+  /**
+   * Closing keeps what was typed: the panel saves it on the way out (plan §6.2), and only stays open
+   * if Jira refused — the error, or the boxes the workflow wants, are then right there to fix. The old
+   * "Bỏ thay đổi?" question made people choose between losing work and a second click.
+   */
   async function requestClose() {
     if (saving || deleting) return;
     if (dirty) {
-      const discard = await dialogs.confirm({
-        title: "Bỏ thay đổi?",
-        message: "Bạn có thay đổi chưa lưu. Đóng cửa sổ sẽ mất chúng.",
-        confirmLabel: "Bỏ thay đổi",
-        cancelLabel: "Tiếp tục chỉnh sửa",
-        tone: "danger",
-      });
-      if (!discard) return;
+      await handleSave();
+      return;
     }
     onClose();
   }
@@ -310,6 +313,15 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
     }
   }
 
+  // The workspace asked the panel to close (Esc outside it, another task opened): save, then go.
+  const onCloseRequested = useEffectEvent(() => void requestClose());
+  const lastCloseRequest = useRef(closeRequest);
+  useEffect(() => {
+    if (closeRequest === undefined || closeRequest === lastCloseRequest.current) return;
+    lastCloseRequest.current = closeRequest;
+    onCloseRequested();
+  }, [closeRequest]);
+
   async function handleDelete() {
     const ok = await dialogs.confirm({
       title: `Xoá ${task.id}`,
@@ -362,19 +374,7 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
     } else if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
       e.preventDefault();
       if (!saving && !deleting) void handleSave();
-    } else if (e.key === "Tab") {
-      const nodes = [...(dialogRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [])].filter((n) => n.offsetParent !== null);
-      if (nodes.length === 0) return;
-      const first = nodes[0];
-      const last = nodes[nodes.length - 1];
-      const active = document.activeElement;
-      if (e.shiftKey && (active === first || active === dialogRef.current)) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && active === last) {
-        e.preventDefault();
-        first.focus();
-      }
+
     }
   }
 
@@ -382,12 +382,12 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
   const spentPct = estimate ? Math.min(100, Math.round((spent / estimate) * 100)) : 0;
 
   return (
-    <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && void requestClose()}>
+    <div className="peek-layer">
       <div
         ref={dialogRef}
-        className="modal modal-detail"
+        className="modal modal-detail peek-panel"
         role="dialog"
-        aria-modal="true"
+        aria-modal="false"
         aria-labelledby="td-key"
         tabIndex={-1}
         onKeyDown={onKeyDown}
@@ -406,7 +406,8 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
             {task.id}
           </span>
           <span className={`wbs-status is-${task.statusCategory}`} title="Trạng thái hiện tại trên Jira">
-            {task.statusName}
+            <StatusGlyph category={task.statusCategory} percent={task.percentComplete} />
+            <span className="wbs-status-name">{task.statusName}</span>
           </span>
           <a href={task.jiraUrl} target="_blank" rel="noreferrer" className="modal-jira-link">
             Mở trên Jira
@@ -414,8 +415,8 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
           </a>
           <span className="td-header-spacer" />
           {dirty && (
-            <span className="td-dirty" role="status">
-              Có thay đổi chưa lưu
+            <span className="td-dirty" role="status" title="Đóng khung (Esc) hoặc Ctrl Enter để lưu lên Jira">
+              Chưa lưu · đóng là lưu
             </span>
           )}
           <button className="modal-close" onClick={() => void requestClose()} aria-label="Đóng" title="Đóng (Esc)">
@@ -594,7 +595,7 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
               <div className="td-pair">
                 <label className="field">
                   <span>Ngày bắt đầu</span>
-                  <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+                  <DateField value={startDate} onChange={setStartDate} ariaLabel="Ngày bắt đầu" />
                 </label>
                 <label className="field">
                   <span>Thời lượng (ngày)</span>
@@ -656,7 +657,7 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
                   <small className="field-hint">Ghi lên Jira dưới tên bạn.</small>
                   <div className="log-inline">
                     <NumberInput value={logHours} min={0.02} max={24} allowEmpty placeholder="Số giờ" className="log-hours" onChange={setLogHours} />
-                    <input type="date" className="log-date" value={logDate} onChange={(e) => setLogDate(e.target.value)} aria-label="Ngày ghi giờ" />
+                    <DateField className="log-date" value={logDate} onChange={setLogDate} ariaLabel="Ngày ghi giờ" />
                     <input
                       className="log-comment"
                       value={logComment}
@@ -774,7 +775,7 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
         <footer className="modal-footer td-footer">
           <button className="danger" onClick={handleDelete} disabled={deleting || saving}>
             <Icon name="trash" size={14} />
-            {deleting ? "Đang xoá..." : "Xoá task"}
+            {deleting ? "Đang xoá…" : "Xoá"}
           </button>
           {/* A sub-task has no sub-tasks of its own in Jira, so the button is only
               for tasks that can be a parent. */}
@@ -785,11 +786,9 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
             </button>
           )}
           <div className="spacer" />
-          <button onClick={() => void requestClose()} disabled={saving}>
-            Huỷ
-          </button>
-          <button className="primary" onClick={handleSave} disabled={saving} title="Ctrl + Enter">
-            {saving ? "Đang lưu..." : "Lưu & đồng bộ Jira"}
+          <button className="primary" onClick={handleSave} disabled={saving || !dirty} title="Đóng khung cũng lưu">
+            {saving ? "Đang lưu…" : dirty ? "Lưu" : "Đã lưu"}
+            <kbd>Ctrl ⏎</kbd>
           </button>
         </footer>
       </div>

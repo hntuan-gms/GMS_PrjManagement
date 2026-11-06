@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { anchorPoint, buildDependencyPath } from "../dependencyGeometry";
 import { useBarRects } from "../useBarRects";
 import type { DependencyType, Task } from "../types";
+import { earliestStart } from "../dependencyCascade";
 
 interface Props {
   /** .gantt-body, used to locate the chart's own SVG to portal into. */
@@ -21,7 +22,22 @@ interface Props {
     next: { type: DependencyType; lagDays: number }
   ) => void;
   onDeleteDependency: (successorId: string, predecessorId: string, type: DependencyType) => void;
+  /** "Dời theo" on a violated link: move the successor to the earliest start the link allows. */
+  onFixViolation?: (successorId: string, startDate: string) => void;
 }
+
+/**
+ * The earliest start a link allows, when the successor starts before it (the plan breaks the
+ * link: someone moved a bar, or the dates came from Jira). Same rule as the cascade
+ * (dependencyCascade.earliestStart). null = the link holds, or a side has no dates.
+ */
+function violation(pred: Task | undefined, succ: Task, type: DependencyType, lagDays: number): string | null {
+  if (!pred?.startDate || !pred.dueDate || !succ.startDate) return null;
+  const bound = earliestStart(type, pred.startDate, pred.dueDate, lagDays, Math.max(1, succ.durationDays));
+  return succ.startDate < bound ? bound : null;
+}
+
+const dmy = (iso: string) => iso.split("-").reverse().slice(0, 2).join("/");
 
 interface DragState {
   taskId: string;
@@ -67,12 +83,14 @@ export default function DependencyOverlay({
   onAddDependency,
   onEditDependency,
   onDeleteDependency,
+  onFixViolation,
 }: Props) {
   const { portalTarget, rects } = useBarRects(bodyEl, rows, measureKey);
   const [hover, setHover] = useState<{ taskId: string; edge: "start" | "end" } | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
   const [selected, setSelected] = useState<SelectedEdge | null>(null);
 
+  const byId = useMemo(() => new Map(rows.map((t) => [t.id, t])), [rows]);
   const dependencies = useMemo(() => {
     const edges: Array<{ predId: string; succId: string; type: DependencyType; lagDays: number }> = [];
     for (const t of rows) {
@@ -161,11 +179,13 @@ export default function DependencyOverlay({
             const { path, arrow } = buildDependencyPath(type, predRect, succRect);
             const isSelected =
               selected?.predId === predId && selected.succId === succId && selected.type === type;
+            const broken = violation(byId.get(predId), byId.get(succId)!, type, lagDays);
             return (
               <g
                 key={`${predId}->${succId}:${type}`}
-                className={isSelected ? "dep-arrow dep-arrow-selected" : "dep-arrow"}
+                className={`dep-arrow${isSelected ? " dep-arrow-selected" : ""}${broken ? " dep-arrow-violated" : ""}`}
               >
+                {broken && <title>{`${succId} bắt đầu sớm hơn ràng buộc ${type} từ ${predId} (sớm nhất ${dmy(broken)}). Bấm để sửa.`}</title>}
                 {/* A 1.5px line is nearly impossible to hit. This invisible fat
                     stroke sits underneath and takes the pointer events for it. */}
                 <path
@@ -247,6 +267,25 @@ export default function DependencyOverlay({
             <div className="dep-popover-title">
               {selected.predId} → {selected.succId}
             </div>
+            {(() => {
+              const succ = byId.get(selected.succId);
+              const bound = succ ? violation(byId.get(selected.predId), succ, selected.type, selected.lagDays) : null;
+              if (!bound || !onFixViolation) return null;
+              return (
+                <div className="dep-popover-row dep-violation">
+                  <span>Bắt đầu sớm hơn ràng buộc. Sớm nhất: {dmy(bound)}.</span>
+                  <button
+                    className="primary"
+                    onClick={() => {
+                      onFixViolation(selected.succId, bound);
+                      setSelected(null);
+                    }}
+                  >
+                    Dời theo
+                  </button>
+                </div>
+              );
+            })()}
             <div className="dep-popover-row">
               <select
                 value={selected.type}

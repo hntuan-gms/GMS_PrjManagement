@@ -6,8 +6,8 @@ import type { ProgressMetrics } from "../types";
  * single shape and a library would be most of the bundle for four donuts.
  *
  * One encoding across the page, so nothing has to be re-learned between charts:
- * - **Work state is an ordinal blue ramp** — done `#2a78d6`, in progress
- *   `#86b6ef`, not started a neutral gray. Stages are ordered, so one hue light→
+ * - **Work state is an ordinal blue ramp** — done (--info), in progress
+ *   (--info-line), not started a neutral gray. Stages are ordered, so one hue light→
  *   dark (never three unrelated hues), and "done" is the same blue as "actual"
  *   on the gauge and the trend line: done work IS the actual progress.
  * - **Status colours** (good/warning/serious/critical) appear only where

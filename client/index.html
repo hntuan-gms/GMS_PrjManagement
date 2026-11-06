@@ -4,7 +4,23 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>GMS PrjManagement</title>
+    <meta name="theme-color" content="#f6f5f1" />
+    <title>GMS · Bàn làm việc</title>
+    <script>
+      // Theme and density before the first paint, so a dark-mode user never sees a white flash.
+      // Same keys and rules as src/theme.ts (which takes over once the app runs).
+      (function () {
+        try {
+          var t = localStorage.getItem("gms.theme") || "system";
+          var dark = t === "dark" || (t === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+          document.documentElement.dataset.theme = dark ? "dark" : "light";
+          var d = localStorage.getItem("gms.density");
+          if (d === "compact" || d === "comfortable") document.documentElement.dataset.density = d;
+        } catch (e) {
+          document.documentElement.dataset.theme = "light";
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

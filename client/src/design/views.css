@@ -1,0 +1,331 @@
+/* ==========================================================================
+   Nhân lực, Bảng, Giờ làm, Nhịp dự án — "Giấy & Son" over the existing views (plan §6.6–6.9).
+   Loaded last: equal-specificity rules here replace the old fills.
+   ========================================================================== */
+
+/* ---- Nhân lực: a skyline, not a wall of percentages. ---- */
+.resource-view {
+  background: var(--sheet);
+}
+.band-free,
+.band-light,
+.band-healthy {
+  background: transparent;
+}
+.band-over {
+  background: var(--risk-wash);
+}
+.band-off {
+  background: repeating-linear-gradient(45deg, transparent, transparent 3px, var(--line) 3px, var(--line) 4px);
+}
+.rv-row-person .rv-cell,
+.rv-swatch {
+  position: relative;
+}
+.rv-sky {
+  position: absolute;
+  left: 18%;
+  right: 18%;
+  bottom: 3px;
+  height: calc((100% - 6px) * var(--load, 0.5));
+  border-radius: 2px 2px 0 0;
+  background: var(--ink-4);
+  transition: height var(--d-2) var(--e-move);
+}
+.band-healthy .rv-sky {
+  background: var(--ink-3);
+}
+/* Over capacity: the bar fills the cell and turns red with a hatch — never colour alone. */
+.band-over .rv-sky {
+  background: repeating-linear-gradient(45deg, var(--risk), var(--risk) 3px, var(--risk-text) 3px, var(--risk-text) 5px);
+}
+.band-off-violation .rv-sky {
+  background: var(--risk);
+}
+.rv-row-person .rv-cell {
+  color: transparent;
+  border-color: color-mix(in srgb, var(--line) 60%, transparent);
+}
+.rv-row-person .rv-cell.is-today,
+.rv-head-cell.is-today {
+  box-shadow: inset 1px 0 0 var(--son), inset -1px 0 0 var(--son);
+}
+.rv-head-cell.is-today {
+  color: var(--son-text);
+  font-weight: 600;
+}
+/* Legend swatches are little skylines too. */
+.rv-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px var(--line);
+  overflow: hidden;
+}
+.rv-swatch .rv-sky {
+  left: 2px;
+  right: 2px;
+  bottom: 0;
+}
+.rv-swatch.band-light .rv-sky {
+  --load: 0.45;
+}
+.rv-swatch.band-healthy .rv-sky {
+  --load: 0.9;
+}
+.rv-swatch.band-over .rv-sky {
+  --load: 1;
+}
+.rv-swatch.band-off .rv-sky {
+  display: none;
+}
+.rv-legend-item {
+  background: transparent;
+  border-color: transparent;
+  color: var(--ink-3);
+}
+.rv-pill {
+  height: 26px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: 12.5px;
+}
+.rv-pill.is-on {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--on-strong);
+}
+.rv-pill.rv-pill-warn {
+  background: var(--warn-wash);
+  border-color: transparent;
+  color: var(--warn-text);
+}
+.rv-kpi-stat {
+  color: var(--ink-3);
+}
+.rv-kpi-stat b {
+  font-family: var(--font-mono);
+  color: var(--ink);
+  font-weight: 500;
+}
+.rv-name strong,
+.rv-person-name {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* ---- Bảng ---- */
+.bd-colheads {
+  background: var(--sheet);
+}
+.bd-colhead {
+  border-radius: 0;
+  background: transparent;
+  border-top: none;
+  border-bottom: 1px solid var(--line);
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.bd-colhead.is-over {
+  background: transparent;
+  border-bottom: 2px solid var(--risk);
+}
+.bd-col {
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  background: color-mix(in srgb, var(--paper) 70%, var(--sunken));
+}
+.bd-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: none;
+  background: var(--raised);
+}
+.bd-card:hover {
+  border-color: var(--line-strong);
+  box-shadow: none;
+}
+.bd-key {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+.bd-epic {
+  background: transparent !important;
+  color: var(--ink-3) !important;
+  padding: 0 !important;
+  font-weight: 400;
+}
+/* The sprint header: one quiet band instead of a 120px card. */
+.sh {
+  border: none;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--sheet);
+  padding-block: 10px;
+}
+
+/* ---- Giờ làm ---- */
+.timesheet-view,
+.ts-view {
+  background: var(--sheet);
+}
+.ts-gap,
+.ts-missing,
+.ts-dot {
+  /* "chưa ghi" is a neutral dashed outline, not an accusing orange dot (plan §6.9). */
+  color: var(--ink-4) !important;
+  background: transparent !important;
+}
+
+/* ---- Nhịp dự án (report) ---- */
+.progress-view {
+  background: var(--sheet);
+}
+.pulse {
+  padding: 8px 0 4px;
+  border-bottom: 1px solid var(--line);
+}
+.pulse-lead {
+  margin: 0 0 6px;
+  font-size: var(--font-size-page);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.35;
+  color: var(--ink);
+}
+.pulse-lead .pulse-key.is-bad {
+  color: var(--risk-text);
+}
+.pulse-lead .pulse-key.is-watch {
+  color: var(--warn-text);
+}
+.pulse-lead .pulse-key.is-good {
+  color: var(--ok-text);
+}
+.pulse-detail {
+  margin: 0;
+  max-width: 760px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--ink-2);
+}
+.pulse-decisions {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+  margin: 18px 0 16px;
+}
+.pulse-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 14px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--raised);
+  animation: chip-in var(--d-3) var(--e-out);
+}
+.pulse-card h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.pulse-card p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+.pulse-card .pulse-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: auto;
+  padding-top: 6px;
+}
+.pulse-card .pulse-actions button {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12.5px;
+}
+.pulse-card.is-bad {
+  box-shadow: inset 3px 0 0 var(--risk);
+}
+.pulse-card.is-watch {
+  box-shadow: inset 3px 0 0 var(--warn);
+}
+.pulse-title {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-3);
+}
+/* The AI pane loses its purple gradient: a sheet with an ink header and a small "AI" mark. */
+.pr-ai {
+  background: var(--sheet);
+  border-left: 1px solid var(--line);
+}
+.ai-head {
+  color: var(--ink);
+  background: var(--raised);
+  border-bottom: 1px solid var(--line);
+}
+.ai-head-title span {
+  color: var(--ink-3);
+}
+.ai-spark {
+  width: auto;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  background: var(--ai-wash);
+  color: var(--ai-text);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+button.ai-generate {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--raised);
+  color: var(--ink);
+}
+button.ai-generate:hover:not(:disabled) {
+  background: var(--sunken);
+  color: var(--ink);
+}
+/* A value proposed by the AI: a small "AI" tag, never a sparkle (plan §4.2). */
+.ai-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--ai-wash);
+  color: var(--ai-text);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  vertical-align: 1px;
+}
+.bd-card:focus-visible {
+  outline: 2px solid var(--focus, var(--info));
+  outline-offset: 1px;
+}
+.rv-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.rv-sort select {
+  height: 26px;
+  font-size: 12.5px;
+}

@@ -53,7 +53,7 @@ await step("tab B đổi sang dự án khác: B thấy dự án đó", async () 
 await step("tab A vẫn ở DEMO: tải lại dữ liệu vẫn xin dự án DEMO và vẫn hiện việc của DEMO", async () => {
   const [req] = await Promise.all([
     a.waitForRequest((r) => /\/api\/sync$/.test(r.url())),
-    a.getByRole("button", { name: /Đồng bộ từ Jira/ }).click(),
+    a.locator(".sync-indicator").click(),
   ]);
   assert.equal(req.headers()["x-project-key"], "DEMO", "yêu cầu của tab A không nói rõ dự án của nó");
   await a.waitForFunction(() => !document.body.innerText.includes("Đang đồng bộ"));
@@ -71,7 +71,7 @@ await step("tab B không bị kéo ngược: vẫn OTHER sau khi A làm việc",
   assert.equal((await badge(b).textContent()).trim(), "OTHER");
   const [req] = await Promise.all([
     b.waitForRequest((r) => /\/api\/sync$/.test(r.url())),
-    b.getByRole("button", { name: /Đồng bộ từ Jira/ }).click(),
+    b.locator(".sync-indicator").click(),
   ]);
   assert.equal(req.headers()["x-project-key"], "OTHER");
   await b.waitForFunction(() => !document.body.innerText.includes("Đang đồng bộ"));

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
+import DateField from "./DateField";
 import { api } from "../api";
 import { computeCriticalPath } from "../criticalPath";
 import { todayIso } from "../resourceAllocation";
 import { csvName, downloadCsv } from "../csv";
-import { isAssignableType, type Health, type ProgressOverview, type ProgressReport, type ProgressScope, type Task } from "../types";
+import { isAssignableType, type Health, type JiraUser, type ProgressMetrics, type ProgressOverview, type ProgressReport, type ProgressScope, type Task } from "../types";
 import { isViewFresh, readViewCache, writeViewCache } from "../viewCache";
 import { overviewParams } from "../warmViews";
 import { buildReportLink } from "../deepLink";
@@ -15,6 +16,8 @@ import ProgressTrendChart from "./ProgressTrendChart";
 import ReportCompare from "./ReportCompare";
 import { PeopleBars, PhaseBars, ProgressGauge, ScheduleTimeline, StatusDonut, type WorkState } from "./progressCharts";
 import { useDialogs } from "./dialogContext";
+import { pulseDecisions, pulseHeadline, type PulseDecision } from "../projectPulse";
+import { toast } from "../toast";
 
 interface Props {
   tasks: Task[];
@@ -34,6 +37,10 @@ interface Props {
   refreshing?: boolean;
   /** The project's computed SLA; null while SLA is off (no SLA tiles). */
   sla?: SlaView | null;
+  /** For the "Cần bạn quyết" cards: who can be suggested, and the one-click actions. */
+  users?: JiraUser[];
+  onAssign?: (taskId: string, accountId: string) => Promise<void>;
+  onOpenResources?: () => void;
 }
 
 /**
@@ -94,7 +101,7 @@ function signed(n: number): string {
   return v > 0 ? `+${v}` : `${v}`;
 }
 
-export default function ProgressReportView({ tasks, focusReportId, canGenerate, onOpenEdit, cacheScope, projectKey, refreshing, sla = null }: Props) {
+export default function ProgressReportView({ tasks, focusReportId, canGenerate, onOpenEdit, cacheScope, projectKey, refreshing, sla = null, users, onAssign, onOpenResources }: Props) {
   const dialogs = useDialogs();
   // The last figures this tab showed for today's unscoped view, so reopening it paints at once.
   const [overview, setOverview] = useState<ProgressOverview | null>(
@@ -303,7 +310,7 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
       <div className="pr-main">
         <header className="pr-header">
           <div>
-            <h2>Báo cáo tiến độ</h2>
+            <h2>Nhịp dự án</h2>
             <span className="pr-sub">
               Tính trực tiếp từ Jira · {fmtDate(m.asOf)} · {m.counts.total} công việc
             </span>
@@ -335,6 +342,7 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
             <span className="pr-status-why">{showReasons ? "Ẩn lý do" : "Vì sao?"}</span>
           </button>
         </header>
+        <PulseBlock metrics={m} tasks={tasks} users={users ?? []} onOpenEdit={onOpenEdit} onAssign={onAssign} onOpenResources={onOpenResources} />
         {linkNote && (
           <div className="rv-notice" role="status">
             {linkNote}
@@ -373,7 +381,7 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
           />
           <label className="pr-filter">
             Tính đến ngày
-            <input type="date" value={asOf} onChange={(e) => e.target.value && setAsOf(e.target.value)} />
+            <DateField value={asOf} onChange={(v) => v && setAsOf(v)} ariaLabel="Tính đến ngày" />
           </label>
           {(scoped || asOf !== today) && (
             <button
@@ -832,4 +840,88 @@ function resolveDrill(drill: Drill, tasks: Task[], asOf: string, scope: Progress
       break;
   }
   return { title, rows: [...rows].sort(urgency) };
+}
+
+/**
+ * The top of "Nhịp dự án" (plan §6.8): one sentence built by code from the measured figures, then at
+ * most three cards that each end in an action. Never the model — it must always be there and always
+ * agree with the numbers below it (projectPulse.ts).
+ */
+function PulseBlock({
+  metrics,
+  tasks,
+  users,
+  onOpenEdit,
+  onAssign,
+  onOpenResources,
+}: {
+  metrics: ProgressMetrics;
+  tasks: Task[];
+  users: JiraUser[];
+  onOpenEdit: (task: Task) => void;
+  onAssign?: (taskId: string, accountId: string) => Promise<void>;
+  onOpenResources?: () => void;
+}) {
+  const head = useMemo(() => pulseHeadline(metrics), [metrics]);
+  const decisions = useMemo(() => pulseDecisions(metrics, tasks, users, todayIso()), [metrics, tasks, users]);
+  const [done, setDone] = useState<Set<string>>(new Set());
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const rest = head.lead.slice(head.leadKey.length);
+  const keyOf = (d: PulseDecision) => `${d.kind}:${d.taskIds.join(",")}`;
+
+  async function act(d: PulseDecision) {
+    const a = d.action;
+    const first = a.taskId ?? d.taskIds[0];
+    if (a.kind === "assign" && a.taskId && a.suggestedAccountId && onAssign) {
+      try {
+        await onAssign(a.taskId, a.suggestedAccountId);
+        setDone((s) => new Set(s).add(keyOf(d)));
+        toast(`Đã giao ${a.taskId}.`, { tone: "success" });
+      } catch (e) {
+        toast(e instanceof Error ? e.message : "Không giao được.", { tone: "error" });
+      }
+      return;
+    }
+    if (a.kind === "rebalance" && onOpenResources) return onOpenResources();
+    const t = first ? byId.get(first) : undefined;
+    if (t) onOpenEdit(t);
+  }
+
+  const verdictClass = head.verdict === "bad" ? "is-bad" : head.verdict === "watch" ? "is-watch" : "is-good";
+  const shown = decisions.filter((d) => !done.has(keyOf(d)));
+  return (
+    <section className="pulse" aria-label="Nhịp dự án">
+      <p className="pulse-lead">
+        <span className={`pulse-key ${verdictClass}`}>{head.leadKey}</span>
+        {rest}
+      </p>
+      {head.detail && <p className="pulse-detail">{head.detail}</p>}
+      {shown.length > 0 && (
+        <>
+          <div className="pulse-decisions">
+            {shown.map((d) => {
+              const first = d.action.taskId ?? d.taskIds[0];
+              const severe = d.kind === "late-blocking" || d.kind === "unassigned-critical";
+              return (
+                <article key={keyOf(d)} className={`pulse-card ${severe ? "is-bad" : "is-watch"}`}>
+                  <h3>{d.title}</h3>
+                  <p>{d.body}</p>
+                  <div className="pulse-actions">
+                    <button type="button" className="primary" onClick={() => void act(d)}>
+                      {d.action.label}
+                    </button>
+                    {d.action.kind !== "open" && first && byId.get(first) && (
+                      <button type="button" onClick={() => onOpenEdit(byId.get(first)!)}>
+                        Mở {first}
+                      </button>
+                    )}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </section>
+  );
 }

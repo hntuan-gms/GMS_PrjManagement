@@ -22,7 +22,8 @@ async function step(name, fn) {
 }
 const log = async () => (await (await fetch(API + "/api/__log")).json()).log;
 const setDelay = (ms) => fetch(API + "/api/__delay", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ms }) });
-const syncButton = () => page.locator(".toolbar button", { hasText: /Đồng bộ|Đang cập nhật|Đang đồng bộ/ });
+// The header's sync indicator (it replaced the "Đồng bộ từ Jira" button): "Khớp Jira" or "Đang đọc Jira…".
+const syncButton = () => page.locator(".sync-indicator");
 
 await fetch(API + "/api/__restore", { method: "POST" });
 
@@ -34,17 +35,17 @@ await step("lần đầu (chưa có bản lưu) phải chờ dữ liệu, rồi 
   assert.equal(keys.length, 1, keys.join());
   assert(keys[0].includes(".me."), "bản lưu phải gắn với tài khoản: " + keys[0]);
 });
-await step("mở lại khi máy chủ chậm 2,5 giây: bảng hiện ngay từ bản lưu, nút ghi 'Đang cập nhật'", async () => {
+await step("mở lại khi máy chủ chậm 2,5 giây: bảng hiện ngay từ bản lưu, chỉ báo ghi 'Đang đọc Jira'", async () => {
   await setDelay(2500);
   const started = Date.now();
   await page.reload();
   await page.waitForSelector(".wbs-row", { timeout: 1500 });
   assert(Date.now() - started < 2000, "bảng hiện sau " + (Date.now() - started) + "ms, chưa nhanh hơn máy chủ");
   assert((await page.locator(".center-message").count()) === 0, "không được hiện 'Đang tải dữ liệu...'");
-  assert((await syncButton().textContent()).includes("Đang cập nhật"));
+  assert((await syncButton().textContent()).includes("Đang đọc"));
 });
 await step("khi bản mới về thì nút trở lại bình thường", async () => {
-  await page.waitForFunction(() => [...document.querySelectorAll(".toolbar button")].some((b) => b.textContent.includes("Đồng bộ từ Jira")), null, { timeout: 6000 });
+  await page.waitForFunction(() => document.querySelector(".sync-indicator")?.textContent.includes("Khớp Jira"), null, { timeout: 6000 });
   await setDelay(0);
 });
 await step("chưa có bản lưu và máy chủ chậm: vẫn thấy header, nút đồng bộ xoay, chưa có bảng", async () => {
@@ -54,8 +55,8 @@ await step("chưa có bản lưu và máy chủ chậm: vẫn thấy header, nú
   await page.waitForSelector(".center-message", { timeout: 3000 });
   await page.waitForSelector(".toolbar", { timeout: 1500 });
   assert((await page.locator(".wbs-row").count()) === 0, "chưa có dữ liệu mà đã có hàng");
-  assert((await syncButton().textContent()).includes("Đang cập nhật"), "nút không báo đang tải");
-  assert((await page.locator(".toolbar button .spin").count()) > 0, "nút đồng bộ không xoay");
+  assert((await syncButton().textContent()).includes("Đang đọc"), "chỉ báo không báo đang tải");
+  assert((await page.locator(".sync-indicator.is-reading").count()) > 0, "chỉ báo đồng bộ không ở trạng thái đang đọc");
   await page.waitForSelector(".wbs-row", { timeout: 8000 });
   await setDelay(0);
 });
@@ -65,7 +66,7 @@ await step("danh sách việc không kèm mô tả", async () => {
 });
 
 console.log("\n== Mô tả lấy khi mở việc ==");
-await step("mở việc có mô tả: ô mô tả được điền sau khi tải, lưu không đổi gì thì gửi lại đúng mô tả", async () => {
+await step("mở việc có mô tả: ô mô tả được điền sau khi tải; sửa chỗ khác rồi lưu thì mô tả vẫn nguyên", async () => {
   await fetch(API + "/api/tasks/DEMO-5", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ description: "Mô tả có sẵn" }) });
   await page.reload();
   await page.waitForSelector(".wbs-row");
@@ -74,6 +75,9 @@ await step("mở việc có mô tả: ô mô tả được điền sau khi tải
   const box = page.locator(".modal .field:has(> span:text-is('Mô tả')) textarea");
   await page.waitForFunction(() => document.querySelector(".modal .field textarea")?.value === "Mô tả có sẵn");
   assert.equal(await box.isDisabled(), false);
+  // Nothing changed = nothing to save ("Đã lưu" is disabled); change the title, then save.
+  assert.equal(await page.locator(".modal-footer .primary").isDisabled(), true);
+  await page.locator(".td-title").fill("Thiết kế cơ sở dữ liệu (sửa)");
   await page.locator(".modal-footer .primary").click();
   await page.waitForFunction(async () => (await (await fetch("/api/__log")).json()).log.some((l) => l.m === "PATCH"));
   const patch = (await log()).find((l) => l.m === "PATCH");
@@ -114,9 +118,9 @@ await step("mở lại khi máy chủ chậm: bảng hiện ngay từ IndexedDB 
   await page.reload();
   await page.waitForSelector(".wbs-row", { timeout: 2000 });
   assert(Date.now() - started < 2300, "bảng hiện sau " + (Date.now() - started) + "ms, chưa nhanh hơn máy chủ");
-  assert((await syncButton().textContent()).includes("Đang cập nhật"), "nút không báo đang cập nhật");
-  assert((await page.locator(".toolbar button .spin").count()) > 0, "nút đồng bộ không xoay");
-  await page.waitForFunction(() => [...document.querySelectorAll(".toolbar button")].some((b) => b.textContent.includes("Đồng bộ từ Jira")), null, { timeout: 6000 });
+  assert((await syncButton().textContent()).includes("Đang đọc"), "chỉ báo không báo đang cập nhật");
+  assert((await page.locator(".sync-indicator.is-reading").count()) > 0, "chỉ báo đồng bộ không ở trạng thái đang đọc");
+  await page.waitForFunction(() => document.querySelector(".sync-indicator")?.textContent.includes("Khớp Jira"), null, { timeout: 6000 });
   await setDelay(0);
 });
 

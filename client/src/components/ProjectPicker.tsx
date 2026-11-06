@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { fold } from "../csvImport";
 import { api } from "../api";
 import type { ProjectSummary, Session } from "../types";
 import { readViewCache, viewCacheScope, writeViewCache } from "../viewCache";
@@ -42,16 +43,32 @@ export default function ProjectPicker({ session, variant, onSelect, onCancel, on
     };
   }, [reloadToken, cacheScope]);
 
+  // The projects this person opened last on this site come first (Ctrl P is mostly "go back to X").
+  const recentKey = `gms.recentProjects.${session.site.cloudId}`;
+  const [recent] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem(recentKey) ?? "[]") as string[];
+    } catch {
+      return [];
+    }
+  });
   const visible = useMemo(() => {
     if (!projects) return [];
-    const q = filter.trim().toLowerCase();
-    if (!q) return projects;
-    return projects.filter(
-      (p) => p.key.toLowerCase().includes(q) || p.name.toLowerCase().includes(q)
-    );
-  }, [projects, filter]);
+    const q = fold(filter);
+    const rank = (k: string) => {
+      const i = recent.indexOf(k);
+      return i === -1 ? Infinity : i;
+    };
+    const list = q ? projects.filter((p) => fold(`${p.key} ${p.name}`).includes(q)) : projects;
+    return [...list].sort((a, b) => rank(a.key) - rank(b.key));
+  }, [projects, filter, recent]);
 
   async function choose(key: string) {
+    try {
+      localStorage.setItem(recentKey, JSON.stringify([key, ...recent.filter((k) => k !== key)].slice(0, 5)));
+    } catch {
+      /* private mode */
+    }
     setChoosing(key);
     setError(null);
     try {

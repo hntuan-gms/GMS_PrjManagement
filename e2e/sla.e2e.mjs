@@ -106,7 +106,7 @@ await step("chi tiết task có dòng SLA (chỉ đọc)", async () => {
 
 console.log("\n== SLA: Báo cáo ==");
 await step("ô 'Trễ SLA' đếm 1 và mở đúng danh sách", async () => {
-  await page.locator(".toolbar-tabs button", { hasText: "Báo cáo" }).click();
+  await page.locator(".toolbar-tabs button", { hasText: "Nhịp dự án" }).click();
   const tile = page.locator(".pr-tile", { hasText: "Trễ SLA" }).filter({ hasNotText: "Sắp" });
   await tile.waitFor();
   assert.equal((await tile.locator("b").textContent()).trim(), "1");

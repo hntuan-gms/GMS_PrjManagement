@@ -138,7 +138,11 @@ export default function PersonBlock({
             className={`rv-cell band-${c.band} ${c.isToday ? "is-today" : ""}`}
             title={cellTooltip(c)}
           >
-            {granularity !== "day" && c.capacity > 0 ? pct(c.ratio) : ""}
+            {/* A skyline, not a number: the bar's height is the load, an empty cell is a free one,
+                and only work above capacity turns red (plan §6.7). The figure is in the tooltip. */}
+            {c.capacity > 0 && c.ratio > 0 && (
+              <span className="rv-sky" style={{ "--load": Math.min(1, c.ratio) } as React.CSSProperties} aria-hidden="true" />
+            )}
           </div>
         ))}
       </div>
@@ -219,7 +223,7 @@ function PersonTasks({
       <div className="rv-expand-head">
         <div className="rv-meta">
           <span>
-            {person.allocatedHours}h đã giao / {person.capacityHours}h khả dụng · {pct(person.utilisation)} hiệu suất
+            {person.allocatedHours}h đã giao / {person.capacityHours}h khả dụng · {pct(person.utilisation)} mức sử dụng
           </span>
           <button type="button" className="rv-profile-text" onClick={onOpenProfile}>
             <Icon name="edit" size={13} />

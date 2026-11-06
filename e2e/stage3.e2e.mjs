@@ -43,7 +43,7 @@ await page.waitForSelector(".wbs-row");
 
 console.log("\n== Nguồn lực: kỹ năng, nghỉ phép, kỳ ==");
 await step("ma trận kỹ năng: thêm cột, bấm ô → lưu vào hồ sơ người đó", async () => {
-  await tab("Nguồn lực");
+  await tab("Nhân lực");
   await page.waitForSelector(".resource-view .rv-modes");
   await page.locator(".rv-modes button", { hasText: "Kỹ năng" }).click();
   await page.waitForSelector(".sm-view");
@@ -110,7 +110,7 @@ await step("'Tháng này' (trong menu Khoảng) + cột theo tháng", async () =
 
 console.log("\n== Chấm công: sửa giờ ==");
 await step("sửa giờ của mình: chỉ gửi phần đã đổi", async () => {
-  await tab("Chấm công");
+  await page.locator("[data-view=timesheet]").click();
   await page.waitForSelector(".ts-grid");
   await page.locator(".ts-person-filter").selectOption("me");
   await page.locator(".ts-person-btn").first().click();
@@ -119,7 +119,8 @@ await step("sửa giờ của mình: chỉ gửi phần đã đổi", async () =
   await page.locator(".ts-entry-edit").first().click();
   assert.ok((await page.textContent(".modal-id")).includes("Sửa giờ đã ghi"));
   assert.equal(await page.locator(".modal select").first().isDisabled(), true, "không đổi được việc khi sửa");
-  await page.locator(".modal input").nth(1).fill("5");
+  // By its label, not by position: the date is a DateField (a text box plus a hidden picker).
+  await page.locator(".modal .field:has(> span:text-is('Số giờ')) input").fill("5");
   await page.locator(".modal-footer .primary", { hasText: "Lưu thay đổi" }).click();
   const put = await waitLog((l) => l.m === "PUT" && l.p.startsWith("/api/timesheet/worklogs/"));
   assert.equal(put.b.hours, 5);
@@ -221,7 +222,7 @@ await step("xoá sprint chưa chạy: hỏi trong app rồi DELETE", async () =>
 
 console.log("\n== Báo cáo: xu hướng theo ngày, Agile ==");
 await step("xu hướng theo ngày vẽ được từ số đo đã lưu, không cần báo cáo AI", async () => {
-  await tab("Báo cáo");
+  await tab("Nhịp dự án");
   await page.waitForSelector(".progress-view .pr-trend");
   assert.ok((await page.textContent(".progress-view")).includes("Xu hướng theo ngày"));
   assert.ok((await page.locator(".pr-trend svg").first().getAttribute("aria-label")).includes("3 ngày"));

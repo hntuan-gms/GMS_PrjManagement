@@ -256,12 +256,12 @@
 button.danger-solid {
   background: var(--color-danger);
   border-color: var(--color-danger-hover);
-  color: #ffffff;
+  color: var(--color-on-strong);
   font-weight: 600;
   box-shadow: var(--shadow-sm);
 }
 button.danger-solid:hover:not(:disabled) {
   background: var(--color-danger-hover);
   border-color: var(--color-danger-hover);
-  color: #ffffff;
+  color: var(--color-on-strong);
 }

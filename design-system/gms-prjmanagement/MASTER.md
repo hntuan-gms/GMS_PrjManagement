@@ -1,138 +1,130 @@
-# Design System Master — GMS PrjManagement
+# Design System Master — GMS · "Giấy & Son"
 
 > **Cách dùng:** khi làm một màn hình, đọc file này trước, rồi xem `pages/<tên-trang>.md`.
-> Nếu file trang tồn tại, luật trong đó **ghi đè** file này. Không có thì theo file này.
+> Nếu file trang tồn tại, luật trong đó **ghi đè** file này.
 >
 > **Nguồn sự thật cho giá trị là code**, không phải file này:
-> [client/src/design/tokens.css](../../client/src/design/tokens.css) (token) và
-> [client/src/design/controls.css](../../client/src/design/controls.css) (giao diện mặc định của input/select/textarea, hộp thoại).
-> File này nói *vì sao* và *quy tắc*; khi hai nơi lệch nhau, sửa file này theo code.
+> [client/src/design/tokens.css](../../client/src/design/tokens.css) (token, chế độ tối, mật độ, chuyển động),
+> [controls.css](../../client/src/design/controls.css) (ô nhập, hộp thoại),
+> [shell.css](../../client/src/design/shell.css) (thanh bên, header, ô lệnh, toast),
+> [plan.css](../../client/src/design/plan.css), [peek.css](../../client/src/design/peek.css),
+> [today.css](../../client/src/design/today.css), [views.css](../../client/src/design/views.css).
+> Khi file này và code lệch nhau, sửa file này theo code.
+>
+> Vì sao giao diện như thế này: [docs/plans/2026-11-06-tai-thiet-giao-dien.md](../../docs/plans/2026-11-06-tai-thiet-giao-dien.md).
 
-**Loại sản phẩm:** công cụ nội bộ quản lý dự án (Gantt/WBS, bảng, chấm công, báo cáo) trên Jira Cloud.
-**Mật độ:** dày (dashboard) — điều khiển 32px trong toolbar, 36px trong header.
-**Chuyển động:** tối thiểu — chỉ chuyển trạng thái (hover, mở menu), 150–200ms.
+**Ý tưởng:** *giấy* (nền ấm), *mực* (chữ và nút chính), và một màu chữ ký *son* (đỏ cam) chỉ cho "bây giờ" và "của tôi". Khung lùi lại, dữ liệu dẫn đầu. Màu là **tín hiệu**, hiếm và có nghĩa.
+
 **Ngôn ngữ giao diện:** tiếng Việt. Chuỗi mới phải là tiếng Việt.
-
-> Bản gốc do `ui-ux-pro-max --design-system` sinh ra (teal + cam, Fira, mẫu landing page) đã bị bỏ:
-> nó không khớp với một app đang chạy. Các luật chung của skill (checklist, điều cần tránh) được giữ ở cuối file.
 
 ---
 
 ## 1. Token: ba tầng
 
 ```
-Primitive  (giá trị thô, không ý kiến)   --blue-600, --space-2, --radius-md
+Primitive  --paper --sheet --raised --sunken --line --ink --ink-2..4 --son --info --ok --warn --risk --ai
    ↓
-Semantic   (giá trị để LÀM GÌ)           --color-primary, --color-border, --color-danger
+Semantic   --color-bg --color-surface --color-border --color-text-* --color-primary --color-danger …
    ↓
-Component  (một loại control dùng nó)    --control-*, --menu-*, --dialog-*
+Component  --control-* --menu-* --dialog-*
 ```
 
-- Chỉ `tokens.css` được viết màu hex, bán kính, bóng đổ, kích thước thô.
-- `App.css` và component chỉ tham chiếu tầng semantic và component. Cần giá trị mới thì **thêm hoặc sửa token**, đừng viết hex vào luật.
-- Đổi giao diện của mọi ô nhập = sửa `--control-*`; đổi mọi menu/popover/danh sách select = sửa `--menu-*`.
+- **Chỉ `tokens.css` được viết mã màu.** `client/test/noRawColors.test.ts` hỏng nếu có `#hex` trong CSS khác hoặc chuỗi `"#fff"` trong TS/TSX (ngoại lệ duy nhất: `theme.ts` cho `<meta name="theme-color">`).
+- SVG không đọc được `var()` trong thuộc tính (`fill=`): dùng `themeColors.readPalette()` (đọc token lúc chạy, đổi theo chế độ tối).
 
-### Màu (semantic)
+### Màu
 
-| Vai trò | Token | Giá trị |
+| Vai trò | Token | Ghi chú |
 |---|---|---|
-| Nền trang | `--color-bg` | slate-50 |
-| Mặt phẳng (card, panel) | `--color-surface` | trắng |
-| Viền / viền hover | `--color-border` / `--color-border-hover` | slate-200 / 300 |
-| Chữ chính / phụ / mờ | `--color-text-primary` / `-secondary` / `-muted` | slate-900 / 600 / 500 |
-| Hành động chính | `--color-primary` (hover `-hover`, nền nhạt `-light`) | blue-600 / 700 / 50 |
-| Focus | `--color-focus` | blue-500 |
-| Nguy hiểm | `--color-danger` (+ `-light`, `-border`) | red-600 |
-| Thành công | `--color-success` (+ `-light`, `-border`) | green-600 |
-| Cảnh báo | `--color-warning` (+ `-light`, `-border`), chữ dùng `--color-warning-text` | amber |
+| Nền ứng dụng / mặt làm việc / lớp nổi / vùng trũng | `--paper` / `--sheet` / `--raised` / `--sunken` | Phân tầng bằng độ sáng, không bằng bóng |
+| Đường kẻ | `--line`, `--line-strong`, `--line-stronger` | Dùng ít. Không kẻ dọc giữa cột bảng |
+| Chữ | `--ink` · `--ink-2` · `--ink-3` (nhạt nhất cho chữ, ≥4.8:1) · `--ink-4` (**chỉ** icon/đường) | |
+| Nút chính | `--color-primary` = **mực** | Không có nút xanh dương |
+| "Bây giờ / của tôi" | `--son` | Vạch hôm nay, chấm chưa đọc, dấu "đang ở đây" trên thanh bên, logo. **Không** dùng cho nút hay lỗi |
+| Đang chọn / focus | `--info-wash` + viền trái 2px `--info` / vòng `--control-ring` | |
+| Trạng thái | `--st-todo` ○ · `--st-doing` ◑ · `--st-done` ●✓ | Qua `StatusGlyph`, không phải viên màu |
+| Nguy cơ | `--risk` (+ `-wash`, `-text`) | Quá hạn, quá tải, vi phạm. **Luôn** kèm icon, chữ hoặc gạch chéo |
+| Cảnh báo | `--warn` (+ `-text` cho chữ) | Sắp hạn, thiếu dữ liệu. **Không** dùng cho tin tốt |
+| AI | `--ai` (+ `-wash`, `-text`) | **Chỉ** nhãn chữ "AI" nhỏ (`.ai-tag`, `.ai-spark`). Không gradient, không ✦ |
 
-- `--color-text-muted` (4.76:1 trên trắng) là chữ nhạt nhất còn đạt AA. Không dùng nhạt hơn cho chữ.
-- `--color-warning` (3:1) chỉ làm viền/nền/icon, **chữ cảnh báo dùng `--color-warning-text`**.
-- Không dùng màu làm tín hiệu duy nhất: trạng thái luôn có chữ hoặc icon đi kèm.
-- Màu thanh Gantt là băm id → bảng sắc độ cố định (`PALETTE_HUES`), không thuộc token UI.
+Mỗi họ tín hiệu có 5 bậc: `-wash` (nền) · `-soft` · `-line` (viền) · màu đặc · `-text` (chữ đạt AA trên `-wash`).
+
+**Chế độ tối:** `:root[data-theme="dark"]` đổi giá trị tầng primitive; mọi thứ khác đi theo. Script trong `index.html` đặt `data-theme` trước lần vẽ đầu (không nháy trắng). Lựa chọn Sáng / Tối / Theo máy ở menu avatar và `Ctrl K`, lưu `gms.theme` (`theme.ts`).
+
+**Thanh Gantt:** không băm id ra màu. "Hiển thị › Tô màu thanh theo": Trạng thái (mặc định) · Người · Epic · Không (`ganttMapping.barStyles`). Quá hạn luôn là `--risk`. Epic có con là một **ngoặc** (`TimelineMarkers`), không phải thanh đặc.
 
 ### Chữ
 
-- Phông hệ thống: `-apple-system, "Segoe UI", Roboto, …` (không tải phông web — công cụ nội bộ, ưu tiên tải nhanh và tiếng Việt đủ dấu).
-- Cỡ: `--font-size-xs` 11.5 · `sm` 12.5 (cỡ của ô nhập) · `md` 13 · `lg` 14 · `title` 17.
-- Số/mã (issue key, thời lượng): `ui-monospace` chỉ khi cần thẳng cột.
+- **Be Vietnam Pro** (`--font-sans`) cho mọi chữ: dấu vẽ cho tiếng Việt từ đầu. Tự host qua `@fontsource` (400/500/600/700).
+- **JetBrains Mono** (`--font-mono`) cho mã issue, %, giờ, ngày trong lưới, con số lớn: **Be Vietnam Pro không có số đều độ rộng** (đã đo: `tnum` không đổi gì).
+- Cỡ: `--font-size-xs` 11 · `sm` 12 · `md` 13 (mặc định) · `lg` 14 · `lead` 15 · `title` 18 · `page` 20 · `display` 30.
+- **Không viết hoa** tiêu đề nhóm (chữ hoa có dấu chồng ở 11px khó đọc). Nhãn nhóm là `12px`, `--ink-3`, viết thường.
+- Đã kiểm tra: chữ hoa có dấu chồng (Ấ Ặ Ỗ Ữ) không bị cắt trong dòng 28px.
 
-### Khoảng cách, bo góc, bóng, lớp
+### Khoảng cách, bo góc, bóng, mật độ
 
-- Khoảng cách theo `--space-1…5` (4/8/12/16/24). Mật độ dày: padding menu 4px, mục menu 7×10px.
-- Bo góc: `sm` 6 (mục menu, nút nhỏ) · `md` 8 (ô nhập, panel) · `lg` 12 · `xl` 16 (hộp thoại).
-- Bóng: `sm` cho nút nổi, `lg` cho menu/popover, `modal` cho cửa sổ/hộp thoại.
-- Lớp chồng: popover < modal < dialog (`--z-popover`, `--z-modal`, `--z-dialog`). Không đặt z-index tuỳ ý.
+- Lưới 4px: `--space-1…7` = 4/8/12/16/24/32/48.
+- Bo góc **nhỏ**: `sm` 4 · `md` 6 (nút, ô) · `lg` 10 (menu, thẻ) · `xl` 12 (cửa sổ). Góc con không lớn hơn góc cha.
+- Bóng chỉ cho lớp nổi (`--shadow-lg`, `--shadow-modal`). Thẻ Kanban, nút, ô nhập: **không bóng**.
+- Mật độ dòng (`html[data-density]`, `--row-h`): Gọn 28 · Vừa 32 (mặc định) · Thoáng 40. `GanttView` đọc cùng số qua `theme.ROW_HEIGHTS`.
 
----
+### Chuyển động
 
-## 2. Thành phần
+| Token | Giá trị | Dùng cho |
+|---|---|---|
+| `--d-0` | 0 | Thao tác bằng phím, lặp lại nhiều (mở `Ctrl K`, `j/k`, đổi lăng kính bằng số) |
+| `--d-1` | 90ms | Hover, nhấn (`scale(.98)`), bật/tắt |
+| `--d-2` | 150ms | Menu, popover, chip, thanh chọn |
+| `--d-3` | 220ms | Khung chi tiết, toast, tờ bên |
+| `--d-4` | 320ms | Thay đổi lớn |
+| `--e-out` / `--e-move` / `--e-in` | `(.23,1,.32,1)` / `(.2,0,0,1)` / `(.3,0,.8,.15)` | Vào / đổi chỗ / ra |
 
-### Ô nhập (input, select, textarea)
-
-- Giao diện mặc định đến từ `controls.css`, viết trong `:where()` (độ ưu tiên 0). **Ô mới không cần class** để khớp với phần còn lại; component nào tự định kiểu thì thắng.
-- Cao 32px trong toolbar (`--control-h`), 36px trong header (`--control-h-header`), **36px cho mọi ô một dòng trong cửa sổ/hộp thoại/`.field` (`--control-h-form`)** — ô chữ, ngày, số, select không được lệch nhau vài pixel; nút nằm cùng hàng với ô cũng cao bằng ô. Focus: viền `--control-border-focus` + vòng `--control-ring`, luôn nhìn thấy.
-- Nhãn luôn hiện (không dùng placeholder thay nhãn); lỗi nằm cạnh ô, kèm gợi ý cách sửa.
-- **`<select>` dùng `appearance: base-select`** (Chrome 135+) để danh sách mở ra là của app: cùng panel, hàng, dấu tick như mọi menu. Trình duyệt cũ rơi về danh sách của hệ điều hành nhưng ô đóng và mũi tên vẫn đúng. **Không gán `appearance` hay mũi tên riêng cho `<select>`.**
-- **Không dùng `<datalist>`** (trình duyệt tự vẽ danh sách gợi ý, không tuỳ biến được): dùng `SuggestInput` (cùng panel `--menu-*`).
-- Danh sách của select: dòng đang trỏ bằng bàn phím chỉ đổi màu nền, không có viền focus; chữ dài kết thúc bằng dấu `…`; thanh cuộn mảnh.
-- Chỉ ô ngày là còn dùng bảng chọn ngày của trình duyệt (không tuỳ biến được; định dạng ngày theo ngôn ngữ trình duyệt).
-
-### Nút
-
-- Một nút **solid** duy nhất cho mỗi vùng (header: "Task mới"). Hành động phụ là ghost: không viền khi nghỉ, nền `--color-ghost-hover` khi hover, chỉ nút đang bật mới có nền nhấn.
-- Nút chỉ có icon bắt buộc có `aria-label` (và `title`). Nút nguy hiểm: `danger-solid`, chỉ xuất hiện trong hộp thoại xác nhận.
-- Mọi phần tử bấm được có `cursor: pointer` và trạng thái focus bàn phím.
-
-### Menu / popover / hộp thoại
-
-- Menu và popover dùng `Popover.tsx`: đóng khi bấm ra ngoài, Tab đi chỗ khác, Esc; `role="menu"` nhận phím mũi tên; luôn nằm trọn trong cửa sổ (không bị cắt).
-- **Không dùng `window.confirm/prompt/alert`.** Dùng `useDialogs()` (`confirm`, `prompt`). Xác nhận phá huỷ tự focus vào "Huỷ".
-- Esc ở trong popover/hộp thoại chỉ đóng chính nó, không lan lên xoá lựa chọn của Gantt.
-
-### Icon
-
-- Chỉ SVG, từ bộ `components/Icons.tsx` (một bộ nét thống nhất). Không emoji làm icon. Cần icon mới: thêm vào `Icons.tsx`, đừng nhúng SVG lẻ.
-
-### Cửa sổ chi tiết công việc
-
-- Hai cột dưới một header và trên một footer cố định: cột chính là *việc này là gì* (tiêu đề, mô tả, đính kèm, phụ thuộc, liên kết, bình luận); cột phải là *quản lý nó thế nào*, dùng nhiều nhất lên đầu (trạng thái, con người, lịch, công sức, phân loại).
-- Hỏi trước khi đóng nếu có thay đổi chưa lưu; Ctrl+Enter lưu; Tab không thoát khỏi cửa sổ.
+- Chỉ animate `transform`, `opacity` (và nền/viền/chữ khi hover). **Không `transition: all`.**
+- `prefers-reduced-motion`: token rút về ≤ 90ms, các `animation` tắt.
+- Không phụ thuộc `transitionend` để trạng thái đúng.
 
 ---
 
-## 3. Luật bố cục dày đặc
+## 2. Khung ứng dụng
 
-- Toolbar một hàng, điều khiển 32px; chi tiết đẩy vào popover ("Bộ lọc", "Hiển thị", "Nhập / Xuất", `?`). Dưới 1400px các nút trong toolbar giữ icon, mất chữ.
-- **Không có thứ gì chiếm chỗ trong luồng khi chọn** (thanh thao tác hàng loạt là `position: fixed`), vì nó làm bảng nhảy giữa hai lần bấm của một double-click.
-- Chữ không bị cắt trong badge/chip; chip dài xuống dòng hoặc rút gọn có `title`.
-- Kiểm tra ở 1280px và 1500px (màn hình làm việc thật). Mobile không phải mục tiêu của các màn hình Gantt/WBS.
+- **Thanh bên** (`.app-rail`, 48px, cố định trái): logo son (về Hôm nay) · Tạo việc · Hôm nay · Dự án · Giờ làm · … · Trợ lý · Tìm (`Ctrl K`) · Phím tắt · avatar (Giao diện, Mật độ, Đăng xuất). Tooltip ghi kèm phím, hiện sau 400ms. Mục đang ở có dấu son ở mép.
+- **Header** (`.toolbar`, 44px): tên dự án (menu: Đổi dự án `Ctrl P`, Cài đặt SLA, Lịch làm việc) · bốn **lăng kính** chữ `Kế hoạch 1 · Bảng 2 · Nhân lực 3 · Nhịp dự án 4` (gạch mực dưới lăng kính hiện tại) · **chỉ báo đồng bộ** (`● Khớp Jira` / `Đang đọc Jira…` / `Jira đang giới hạn · n phút`; bấm = đọc lại) · nút giả ô tìm `Ctrl K`. **Không có nút đặc nào trong header.**
+- **Thanh lọc** (`.tf-bar`, 40px, điều khiển 28px): dùng chung cho Kế hoạch và Nhân lực. Bộ lọc đang bật là nền mực.
+- **Trang mặc định** là Hôm nay; sau đó nhớ lăng kính cuối theo dự án (`gms.view.<site>.<project>`). `?view=gantt|board|resource|report|timesheet|today` mở thẳng.
 
----
+## 3. Thành phần
 
-## 4. Điều cần tránh
+- **Ô lệnh** (`CommandBar`, `Ctrl K`): lệnh (kèm phím), tìm việc không dấu, tạo việc bằng câu (`quickAdd.ts`: `@người`, ngày, `3n`, `4h`, `!cao`, `^DEMO-2`, `sau DEMO-5`, `#nhãn`, `/bug`), hỏi trợ lý (`Tab`). Mở không hiệu ứng. Phím `C` mở thẳng chế độ Tạo.
+- **Phím tắt**: một danh sách duy nhất trong `shortcuts.ts`; bảng `?` đọc từ đó. Phím chữ không chạy khi đang gõ hoặc có lớp nào mở.
+- **Toast** (`toast()` + `Toaster`): góc dưới trái, nền mực, 5 giây, dừng khi rê chuột, có "Hoàn tác"/"Mở". Lỗi ghi Jira là toast đỏ, không phải dải chèn đẩy bảng xuống.
+- **Khung chi tiết** (`TaskEditModal` dạng `.peek-panel`): trượt từ phải, **không lớp phủ**, kế hoạch vẫn dùng được. **Đóng là lưu** (không hỏi "Bỏ thay đổi?"); mở việc khác khi khung đang mở thì lưu việc cũ trước (`closeRequest`). Nút "Lưu `Ctrl ⏎`" ở chân, "Đã lưu" khi không có gì đổi.
+- **Ô ngày**: dùng `DateField` (luôn DD/MM/YYYY, nhận "t6", "mai", "+3n", "15/11"). Không dùng `<input type="date">` trần cho ngày người dùng đọc lại (nó hiện theo ngôn ngữ trình duyệt: "10/29/2026").
+- **Trạng thái**: `StatusGlyph` + tên workflow mờ. **Ưu tiên**: `PriorityMark` (chỉ hiện cạnh tên khi cao/thấp). **Loại**: `IssueTypeIcon` nét mảnh một màu.
+- **Ô nhập**: mặc định từ `controls.css` (`:where()`), cao 34px trong cửa sổ, 28–30px trên thanh. `<select>` dùng `appearance: base-select`. Không `<datalist>` (dùng `SuggestInput`). Không `window.confirm/prompt` (dùng `useDialogs()`).
+- **Icon**: `Icons.tsx`, lưới 24, nét 1.75. Không emoji làm icon (kể cả 🎯, ✦).
 
-- Màu hex, bóng, bán kính viết thẳng vào `App.css`/component.
-- `<select>` có `appearance` hoặc mũi tên riêng; hộp thoại của trình duyệt.
-- Nhiều nút solid trong một vùng; viền xám trên mọi nút phụ ("box fever").
-- Dùng màu làm tín hiệu duy nhất; chữ nhạt hơn `--color-text-muted`.
-- Chuyển động tức thì (0ms) hoặc hover làm lệch bố cục (scale).
-- Phụ thuộc `animationend`/`transitionend` để đảm bảo trạng thái đúng.
-- z-index tuỳ ý ngoài thang `--z-*`.
+## 4. Luật bố cục dày đặc
 
----
+- **Không có thứ gì chiếm chỗ trong luồng khi chọn** (thanh thao tác hàng loạt `position: fixed`), vì nó làm bảng nhảy giữa hai lần bấm của một double-click.
+- Mã issue không bao giờ bị cắt: cột Mã rộng theo mã dài nhất (`--wbs-key-w`).
+- Ô Nhân lực không có việc thì **trống** (không "0%"); tải là chiều cao cột, chỉ quá tải mới đỏ.
+- Kiểm tra ở 1280px và 1500px; sáng và tối.
 
-## 5. Checklist trước khi giao một thay đổi giao diện
+## 5. Điều cần tránh
 
-- [ ] Không emoji làm icon; icon từ `Icons.tsx`
-- [ ] Mọi phần tử bấm được có `cursor: pointer`, hover mượt (150–200ms), focus bàn phím nhìn thấy
-- [ ] Chữ ≥ 4.5:1 (dùng token, đừng tự chọn xám)
-- [ ] Nút chỉ icon có `aria-label`
-- [ ] Không hex/radius/shadow mới ngoài `tokens.css`
-- [ ] Ô nhập mới khớp mặc định mà không cần class; `<select>` không tự đặt `appearance`
-- [ ] Không `<datalist>`; mọi ô một dòng trong cửa sổ cao bằng nhau
-- [ ] Không `window.confirm/prompt`
-- [ ] Không bị cắt ở 1280px và 1500px; popover nằm trọn trong cửa sổ
+- Mã màu ngoài `tokens.css`; gradient trang trí; tím/indigo ngoài nhãn AI; ✦.
+- Nút đặc màu xanh; nhiều nút đặc trong một vùng; viền xám trên mọi nút phụ.
+- Màu làm tín hiệu duy nhất; vàng cho tin tốt; chữ nhạt hơn `--ink-3`.
+- Tiêu đề viết hoa toàn bộ; bóng đổ trên thẻ khi nghỉ; bo góc > 12px.
+- `transition: all`; hiệu ứng trên thao tác bàn phím lặp lại; hover làm lệch bố cục.
+
+## 6. Checklist trước khi giao
+
+- [ ] Không mã màu mới ngoài `tokens.css` (`npm test` có `noRawColors`)
+- [ ] Đúng ở chế độ sáng **và** tối
+- [ ] Mọi phần tử bấm được có hover 90ms và focus bàn phím; nút chỉ icon có `aria-label`
+- [ ] Hành động mới có phím tắt (thêm vào `shortcuts.ts`) và/hoặc lệnh trong `Ctrl K`
+- [ ] Ngày hiện DD/MM; số trong cột là mono
 - [ ] `prefers-reduced-motion` được tôn trọng
 - [ ] Chuỗi mới bằng tiếng Việt
-- [ ] Chạy `cd client && npm run lint && npm run build` và e2e liên quan (`e2e/header-toolbar.e2e.mjs` kiểm tra bố cục toolbar/header)
+- [ ] `cd client && npm test && npm run lint && npm run build`, và e2e liên quan (`header-toolbar.e2e.mjs` là hợp đồng của khung)

@@ -45,8 +45,19 @@ import BulkStatusMenu from "./BulkStatusMenu";
 import { useDialogs } from "./dialogContext";
 import { TransitionFieldsDialog } from "./TransitionFields";
 import { neededFieldsFrom } from "../transitionFields";
-import Toolbar, { type WorkspaceView } from "./Toolbar";
+import Toolbar from "./Toolbar";
+import { LENSES, type SyncState, type WorkspaceView } from "../lenses";
 import TimesheetView from "./TimesheetView";
+import TodayView from "./TodayView";
+import DraftBar from "./DraftBar";
+import { addDraftEdit, compactEdits, replayDraft, startDraft, type PlanDraft } from "../planDraft";
+import CommandBar, { type Command, type CreatePreview } from "./CommandBar";
+import ShortcutSheet from "./ShortcutSheet";
+import Toaster from "./Toaster";
+import { toast } from "../toast";
+import { parseQuickAdd } from "../quickAdd";
+import { createSequence, isTypingTarget, overlayOpen } from "../shortcuts";
+import { setDensity, setThemeChoice } from "../theme";
 
 interface Props {
   session: Session;
@@ -55,6 +66,25 @@ interface Props {
   /** A saved report to open on arrival, from a shared link. */
   initialReportId?: string | null;
   onInitialReportShown?: () => void;
+}
+
+const VIEWS: WorkspaceView[] = ["today", "gantt", "board", "timesheet", "resource", "report"];
+
+/**
+ * Where a project opens: `?view=` in the address (links, e2e), else the lens this person last used
+ * in this project, else "Hôm nay" — the home page (plan §6.5).
+ */
+function initialView(storageKey: string): WorkspaceView {
+  try {
+    const q = new URLSearchParams(window.location.search).get("view");
+    const fromUrl = q === "plan" ? "gantt" : q;
+    if (fromUrl && (VIEWS as string[]).includes(fromUrl)) return fromUrl as WorkspaceView;
+    const saved = localStorage.getItem(storageKey);
+    if (saved && (VIEWS as string[]).includes(saved)) return saved as WorkspaceView;
+  } catch {
+    /* private mode */
+  }
+  return "today";
 }
 
 const OVERLAY_WARNING =
@@ -120,7 +150,28 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
   );
 
   // Opened from a link to a saved report (deepLink.ts): start on the Báo cáo tab, on that report.
-  const [view, setView] = useState<WorkspaceView>(initialReportId ? "report" : "gantt");
+  const viewKey = `gms.view.${session.site.cloudId}.${session.project?.key ?? ""}`;
+  const [view, setViewState] = useState<WorkspaceView>(() => (initialReportId ? "report" : initialView(viewKey)));
+  const setView = useCallback(
+    (v: WorkspaceView) => {
+      setViewState(v);
+      try {
+        localStorage.setItem(viewKey, v);
+      } catch {
+        /* private mode */
+      }
+    },
+    [viewKey]
+  );
+  // The layers this shell adds on top of the views: Ctrl K, "?", and a request to open the assistant.
+  const [cmdk, setCmdk] = useState<null | "command" | "create">(null);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [chatRequest, setChatRequest] = useState<{ nonce: number; text?: string } | null>(null);
+  const [draft, setDraft] = useState<PlanDraft | null>(null);
+  const draftRef = useRef<PlanDraft | null>(null);
+  draftRef.current = draft;
+  const [draftApplying, setDraftApplying] = useState<string | null>(null);
+  const [meta, setMeta] = useState<{ priorities: string[]; issueTypes: Array<{ name: string; subtask: boolean }> } | null>(null);
   // A filter the assistant set while the board was not showing. The board's own
   // filter is local to it and starts empty on every visit, so it is handed over
   // through here and taken once (BoardView's onIncomingFilterTaken).
@@ -209,6 +260,20 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
   const [bulkNeeds, setBulkNeeds] = useState<{ statusName: string; ids: string[]; fields: TransitionField[]; reason?: string } | null>(null);
   const [shiftDays, setShiftDays] = useState(1);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
+  // The detail panel saves on its way out (TaskEditModal.requestClose). Opening another task while it
+  // is up, or Esc outside it, therefore asks it to close (closeRequest) instead of unmounting it —
+  // and the task waiting to open (pendingOpen) takes its place once it has.
+  const [pendingOpen, setPendingOpen] = useState<Task | null>(null);
+  const [closeRequest, setCloseRequest] = useState(0);
+  const openTask = useCallback(
+    (t: Task) => {
+      if (editingTask && editingTask.id !== t.id) {
+        setPendingOpen(t);
+        setCloseRequest((n) => n + 1);
+      } else setEditingTask(t);
+    },
+    [editingTask]
+  );
   // Open with an optional parent: "+ Sub-task" in the edit modal pre-fills it.
   const [creating, setCreating] = useState<false | { parentId?: string }>(false);
   // The plan being reviewed, opened from the assistant's table card.
@@ -409,7 +474,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
     function onKeyDown(e: KeyboardEvent) {
       if (e.key !== "Escape") return;
       if (editingTask) {
-        setEditingTask(null);
+        setCloseRequest((n) => n + 1);
       } else if (selectedIds.size > 0 || selectedId) {
         setSelectedIds(new Set());
         setSelectedId(null);
@@ -573,8 +638,16 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
 
   async function refreshTasks() {
     const t = await api.listTasks();
-    setTasks(t);
     saveTasksCache(cacheKey, t, users);
+    const d = draftRef.current;
+    if (d) {
+      // Drafting: keep the moves, replay them on the fresh plan (planDraft.replayDraft).
+      const r = replayDraft(d, t);
+      setDraft(r.draft);
+      setTasks(r.tasks);
+      return;
+    }
+    setTasks(t);
   }
 
   /**
@@ -760,6 +833,15 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
    * nothing newer has touched since.
    */
   async function handleScheduleChange(id: string, startDate: string, durationDays: number) {
+    if (draft) {
+      // Bản nháp: nothing goes to Jira; the move and its cascade are only shown (planDraft.ts).
+      const r = addDraftEdit(draft, tasks, { id, startDate, durationDays });
+      flushSync(() => {
+        setDraft(r.draft);
+        setTasks(r.tasks);
+      });
+      return;
+    }
     const seq = nextSeq();
     const before = tasks;
     const cascade = computeOptimisticCascade(tasks, id, startDate, durationDays);
@@ -811,6 +893,22 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
    * consulted for the display name because the optimistic task has to carry one:
    * the resource rows key off assigneeAccountId but the Gantt shows the name.
    */
+  /** A status picked on the plan's cell: moved at once; a move that needs fields opens the panel to ask. */
+  async function handleTransition(task: Task, transitionId: string, toStatusName: string) {
+    try {
+      await updateOne(task.id, { statusTransition: transitionId });
+      toast(`Đã chuyển ${task.id} sang ${toStatusName}.`, { tone: "success" });
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) return;
+      if (neededFieldsFrom(e)) {
+        toast(`Chuyển ${task.id} sang ${toStatusName} cần nhập thêm thông tin.`, { tone: "info" });
+        openTask(task);
+        return;
+      }
+      toast(e instanceof Error ? e.message : `Không chuyển được ${task.id}.`, { tone: "error" });
+    }
+  }
+
   async function handleAssign(taskId: string, accountId: string | null) {
     const task = tasks.find((t) => t.id === taskId);
     if (!task || task.assigneeAccountId === accountId) return;
@@ -898,6 +996,296 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
     }
   }
 
+  /* ---- Bản nháp kế hoạch (plan §6.1.6) ---- */
+  async function toggleDraft() {
+    if (draft) return discardDraft();
+    setDraft(startDraft(tasks));
+    if (view !== "gantt") setView("gantt");
+    toast("Đang nháp: kéo thả thoải mái, chưa ghi gì lên Jira. Áp dụng khi đã ưng.", { tone: "info" });
+  }
+  async function discardDraft() {
+    if (!draft) return;
+    if (draft.edits.length > 0) {
+      const ok = await dialogs.confirm({
+        title: "Bỏ bản nháp?",
+        message: "Các thay đổi trong bản nháp chưa được ghi lên Jira và sẽ mất.",
+        confirmLabel: "Bỏ nháp",
+        tone: "danger",
+      });
+      if (!ok) return;
+    }
+    setTasks(draft.base);
+    setDraft(null);
+  }
+  async function applyDraft() {
+    if (!draft) return;
+    const edits = compactEdits(draft.edits);
+    const failed: string[] = [];
+    for (let i = 0; i < edits.length; i++) {
+      const e = edits[i];
+      setDraftApplying(`${i + 1}/${edits.length}`);
+      try {
+        await api.updateTask(e.id, { startDate: e.startDate, durationDays: e.durationDays });
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 401) return;
+        failed.push(`${e.id}: ${err instanceof Error ? err.message : "lỗi"}`);
+      }
+    }
+    setDraftApplying(null);
+    // Cleared before the re-read, or refreshTasks would see the draft and replay it onto Jira's answer.
+    draftRef.current = null;
+    setDraft(null);
+    await refreshTasks();
+    if (failed.length === 0) toast(`Đã áp dụng bản nháp: ${edits.length} việc được dời trên Jira.`, { tone: "success" });
+    else toast(`Áp dụng xong, ${failed.length} việc không ghi được: ${failed.join("; ")}`, { tone: "error" });
+  }
+
+  /** One field-level write with the usual staleness guard (the detail window's save does the same). */
+  async function updateOne(id: string, patch: TaskUpdateInput) {
+    const seq = nextSeq();
+    const updated = await api.updateTask(id, patch);
+    setTasks((prev) => applyTaskUpdate(prev, updated, seq));
+  }
+
+  // The lists quick-add resolves words against; fetched once, the first time the command bar opens.
+  useEffect(() => {
+    if (!cmdk || meta) return;
+    Promise.all([api.listPriorities().catch(() => [] as string[]), api.listIssueTypes().catch(() => [])]).then(([priorities, issueTypes]) =>
+      setMeta({ priorities, issueTypes })
+    );
+  }, [cmdk, meta]);
+
+  const quickCtx = () => ({
+    today: todayIso(),
+    users,
+    meAccountId: session.user.accountId,
+    tasks,
+    issueTypes: meta?.issueTypes.map((t) => t.name) ?? [],
+    priorities: meta?.priorities ?? [],
+    projectKey: session.project?.key ?? "",
+  });
+
+  const previewCreate = (text: string): CreatePreview | null => {
+    if (!text.trim()) return null;
+    const r = parseQuickAdd(text, quickCtx());
+    return {
+      title: r.title,
+      line: r.preview,
+      chips: r.tokens.map((t) => ({ label: t.label, kind: t.kind, warn: !!(t.ambiguous || t.unresolved) })),
+    };
+  };
+
+  /** C / Ctrl K / "+ Thêm việc": one sentence → one Jira issue, then its links (plan §6.4). */
+  async function quickCreate(text: string, open: boolean) {
+    const r = parseQuickAdd(text, quickCtx());
+    const f = r.fields;
+    if (!r.title.trim()) {
+      toast("Chưa có tên việc.", { tone: "error" });
+      return;
+    }
+    const parent = f.parentId ? tasks.find((t) => t.id === f.parentId) : undefined;
+    const subtaskType = meta?.issueTypes.find((t) => t.subtask)?.name ?? "Sub-task";
+    // Under a Story or Task, Jira only takes a sub-task; under an Epic (or nothing) a Task.
+    const issueType = (f.issueType ?? (parent && parent.issueType !== "Epic" ? subtaskType : "Task")) as Task["issueType"];
+    try {
+      const res = await api.createTasksBulk({
+        summaries: [r.title],
+        issueType,
+        wbsParentId: f.parentId ?? null,
+        startDate: f.startDate ?? null,
+        durationDays: f.durationDays ?? (f.startDate ? 1 : undefined),
+        assigneeAccountId: f.assigneeAccountId ?? null,
+        estimateHours: f.estimateHours ?? null,
+        priority: f.priority,
+        labels: f.labels,
+      });
+      if (res.errors.length > 0 || res.created.length === 0) throw new Error(res.errors[0]?.message ?? "Jira không tạo được việc.");
+      const created = res.created[0];
+      if (f.predecessors?.length) await api.updateTask(created.id, { predecessors: f.predecessors });
+      for (const key of f.successorOf ?? []) {
+        const succ = tasks.find((t) => t.id === key);
+        if (succ) await api.updateTask(key, { predecessors: [...succ.predecessors, { taskId: created.id, type: "FS", lagDays: 0 }] });
+      }
+      await refreshTasks();
+      for (const w of res.warnings ?? []) toast(w, { tone: "info" });
+      toast(`Đã tạo ${created.id} · ${r.title}`, {
+        tone: "success",
+        action: { label: "Mở", run: () => setEditingTask(tasksRef.current.find((t) => t.id === created.id) ?? created) },
+      });
+      if (open) {
+        setCmdk(null);
+        setEditingTask(created);
+      }
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) return;
+      toast(e instanceof Error ? e.message : "Không tạo được việc.", { tone: "error" });
+    }
+  }
+
+  const go = (v: WorkspaceView) => {
+    if (v === "resource" && resourceAccess !== "allowed") return;
+    setView(v);
+  };
+
+  function toggleMine() {
+    const people = new Set(taskFilter.people);
+    if (people.has(session.user.accountId)) people.delete(session.user.accountId);
+    else people.add(session.user.accountId);
+    setTaskFilter({ ...taskFilter, people });
+  }
+
+  const commands: Command[] = [
+    { id: "create", label: "Tạo việc", group: "Thường dùng", icon: "plus", keys: "C", aliases: "task moi them", run: () => setTimeout(() => setCmdk("create"), 0) },
+    {
+      id: "create-form",
+      label: "Tạo việc bằng biểu mẫu đầy đủ…",
+      group: "Thường dùng",
+      icon: "edit",
+      aliases: "bieu mau form nhieu viec dinh kem",
+      run: () => setCreating({}),
+    },
+    { id: "go-today", label: "Đi tới Hôm nay", group: "Thường dùng", icon: "sun", keys: "G H", run: () => go("today") },
+    ...LENSES.filter((l) => l.id !== "resource" || resourceAccess === "allowed").map<Command>((l) => ({
+      id: `lens-${l.id}`,
+      label: `Đi tới ${l.label}`,
+      group: "Đi tới",
+      icon: l.id === "gantt" ? "plan" : l.id === "board" ? "board" : l.id === "resource" ? "users" : "pulse",
+      keys: l.key,
+      aliases: l.id === "gantt" ? "gantt wbs" : l.id === "report" ? "bao cao" : l.id === "resource" ? "nguon luc" : "kanban sprint",
+      run: () => go(l.id),
+    })),
+    { id: "go-time", label: "Đi tới Giờ làm", group: "Đi tới", icon: "clock", keys: "G T", aliases: "cham cong timesheet", run: () => go("timesheet") },
+    ...(selectedIds.size > 0
+      ? [
+          {
+            id: "assign-me",
+            label: `Giao ${selectedIds.size} việc đã chọn cho tôi`,
+            group: "Việc đã chọn",
+            icon: "user",
+            keys: "I",
+            run: () => handleBulkAssign(session.user.accountId),
+          } as Command,
+          ...users.map<Command>((u) => ({
+            id: `assign-${u.accountId}`,
+            label: `Giao ${selectedIds.size} việc đã chọn cho ${u.displayName}`,
+            group: "Việc đã chọn",
+            icon: "user",
+            aliases: "gan",
+            run: () => handleBulkAssign(u.accountId),
+          })),
+          { id: "baseline", label: "Lưu kế hoạch gốc (baseline) cho việc đã chọn", group: "Việc đã chọn", icon: "layers", run: () => void handleBulkBaseline("save") } as Command,
+          { id: "delete", label: `Xoá ${selectedIds.size} việc đã chọn…`, group: "Việc đã chọn", icon: "trash", keys: "Delete", run: () => void handleDeleteSelected() } as Command,
+        ]
+      : []),
+    {
+      id: "draft",
+      label: draft ? "Bỏ bản nháp kế hoạch" : "Bật bản nháp kế hoạch (thử lịch, chưa ghi Jira)",
+      group: "Kế hoạch",
+      icon: "layers",
+      keys: "Shift D",
+      aliases: "nhap thu draft what if",
+      run: () => void toggleDraft(),
+    },
+    ...(draft && draft.edits.length > 0
+      ? [{ id: "draft-apply", label: "Áp dụng bản nháp lên Jira", group: "Kế hoạch", icon: "check", run: () => void applyDraft() } as Command]
+      : []),
+    { id: "mine", label: "Lọc: việc của tôi", group: "Lọc", icon: "user", keys: "M", run: () => toggleMine() },
+    { id: "overdue", label: "Lọc: quá hạn", group: "Lọc", icon: "alert", keys: "O", run: () => setTaskFilter({ ...taskFilter, onlyOverdue: !taskFilter.onlyOverdue }) },
+    { id: "clear", label: "Xoá mọi lọc", group: "Lọc", icon: "x", keys: "Shift F", run: () => setTaskFilter(EMPTY_TASK_FILTER) },
+    { id: "sync", label: "Đọc lại từ Jira", group: "Dự án", icon: "sync", keys: "Shift R", aliases: "dong bo refresh", run: () => void handleSync() },
+    { id: "projects", label: "Chuyển dự án…", group: "Dự án", icon: "switch", keys: "Ctrl P", run: onSwitchProject },
+    { id: "import", label: "Nhập công việc từ CSV / Excel…", group: "Dự án", icon: "upload", run: () => setImporting(true) },
+    { id: "kbkt", label: "Nhập KBKT (test case)…", group: "Dự án", icon: "upload", run: () => setImportingKbkt(true) },
+    { id: "sla", label: "Cài đặt SLA…", group: "Dự án", icon: "clock", run: () => setSlaOpen(true) },
+    { id: "calendar", label: "Lịch làm việc & ngày lễ…", group: "Dự án", icon: "calendar", run: () => setCalendarOpen(true) },
+    ...(session.staff
+      ? [{ id: "assistant", label: "Mở trợ lý", group: "Trợ lý", icon: "chat", aliases: "ai chat hoi", run: () => setChatRequest({ nonce: Date.now() }) } as Command]
+      : []),
+    { id: "theme-light", label: "Giao diện sáng", group: "Giao diện", icon: "sun", aliases: "light", run: () => setThemeChoice("light") },
+    { id: "theme-dark", label: "Giao diện tối", group: "Giao diện", icon: "moon", aliases: "dark", run: () => setThemeChoice("dark") },
+    { id: "theme-system", label: "Giao diện theo máy", group: "Giao diện", icon: "monitor", aliases: "system", run: () => setThemeChoice("system") },
+    { id: "density-compact", label: "Mật độ dòng: gọn", group: "Giao diện", aliases: "compact", run: () => setDensity("compact") },
+    { id: "density-default", label: "Mật độ dòng: vừa", group: "Giao diện", run: () => setDensity("default") },
+    { id: "density-comfortable", label: "Mật độ dòng: thoáng", group: "Giao diện", aliases: "comfortable", run: () => setDensity("comfortable") },
+    { id: "help", label: "Bảng phím tắt", group: "Trợ giúp", icon: "keyboard", keys: "?", run: () => setShortcutsOpen(true) },
+    { id: "logout", label: "Đăng xuất", group: "Tài khoản", icon: "logout", run: onLogout },
+  ];
+
+  // The keyboard layer (plan §7). Letter keys never fire while typing or with any layer open.
+  const sequence = useMemo(() => createSequence({ "g h": "go-today", "g t": "go-time", "g s": "go-settings" }), []);
+  const toggleOverdue = () => setTaskFilter({ ...taskFilter, onlyOverdue: !taskFilter.onlyOverdue });
+  const keyState = useRef({ go, toggleMine, toggleOverdue, handleSync, handleBulkAssign, handleDeleteSelected, toggleDraft });
+  keyState.current = { go, toggleMine, toggleOverdue, handleSync, handleBulkAssign, handleDeleteSelected, toggleDraft };
+  const blockers = !!(editingTask || creating || reviewRunId || importing || importingKbkt || slaOpen || calendarOpen || cmdk || shortcutsOpen);
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const k = e.key;
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && k.toLowerCase() === "k") {
+        e.preventDefault();
+        setCmdk((c) => (c ? null : "command"));
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && k.toLowerCase() === "p") {
+        e.preventDefault();
+        onSwitchProject();
+        return;
+      }
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (blockers || isTypingTarget(e.target) || overlayOpen()) return;
+      const ks = keyState.current;
+      const seqHit = sequence.feed(k);
+      if (seqHit === "pending") {
+        e.preventDefault();
+        return;
+      }
+      if (seqHit === "go-today") return ks.go("today");
+      if (seqHit === "go-time") return ks.go("timesheet");
+      if (seqHit === "go-settings") return setSlaOpen(true);
+      if (k === "?") {
+        e.preventDefault();
+        setShortcutsOpen(true);
+      } else if (k === "c") {
+        e.preventDefault();
+        setCmdk("create");
+      } else if (k >= "1" && k <= "4" && k.length === 1) {
+        const lens = LENSES[Number(k) - 1];
+        if (lens) ks.go(lens.id);
+      } else if (k === "R" && e.shiftKey) {
+        void ks.handleSync();
+      } else if (k === "m") {
+        ks.toggleMine();
+      } else if (k === "o") {
+        ks.toggleOverdue();
+      } else if (k === "D" && e.shiftKey) {
+        void ks.toggleDraft();
+      } else if (k === "F" && e.shiftKey) {
+        setTaskFilter(EMPTY_TASK_FILTER);
+      } else if (k === "t" && view === "gantt") {
+        window.dispatchEvent(new Event("gms:gantt-today"));
+      } else if (k === "i" && selectedIds.size > 0) {
+        ks.handleBulkAssign(session.user.accountId);
+      } else if (k === "Delete" && selectedIds.size > 0) {
+        void ks.handleDeleteSelected();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [blockers, sequence, onSwitchProject, view, selectedIds, session.user.accountId, setTaskFilter]);
+
+  // A failed write used to be a red strip pushing the plan down; it is a toast now (plan §5.6).
+  useEffect(() => {
+    if (!syncError) return;
+    toast(syncError, { tone: "error" });
+    setSyncError(null);
+  }, [syncError]);
+
+  const syncState: SyncState =
+    jiraLimitedUntil !== null
+      ? { kind: "limited", minutes: Math.max(1, Math.ceil((jiraLimitedUntil - Date.now()) / 60_000)) }
+      : syncing || showingCache || loading
+        ? { kind: "reading" }
+        : { kind: "ok", at: lastSyncedAt };
+
   const toolbar = (
       <Toolbar
         session={session}
@@ -905,11 +1293,12 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
         onViewChange={setView}
         overloadedPeople={overloadedPeople}
         showResources={resourceAccess === "allowed"}
-        onAddTask={() => setCreating({})}
+        onAddTask={() => setCmdk("create")}
         onSync={handleSync}
-        syncing={syncing}
-        refreshing={showingCache || loading}
-        lastSyncedAt={lastSyncedAt}
+        sync={syncState}
+        onOpenCommand={() => setCmdk("command")}
+        onOpenShortcuts={() => setShortcutsOpen(true)}
+        onOpenAssistant={session.staff ? () => setChatRequest({ nonce: Date.now() }) : undefined}
         onSwitchProject={onSwitchProject}
         onOpenSla={() => setSlaOpen(true)}
         onOpenCalendar={() => setCalendarOpen(true)}
@@ -953,27 +1342,6 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
     <WorkCalendarContext.Provider value={workCalendar}>
       <div className="app">
         {toolbar}
-
-        {syncError && (
-          <div className="notice notice-error">
-            <span>{syncError}</span>
-            <button className="link-btn" onClick={() => setSyncError(null)}>
-              Đóng
-            </button>
-          </div>
-        )}
-
-        {jiraLimitedUntil !== null && (
-          <div className="notice notice-warn" role="status">
-            <span>
-              Jira đang giới hạn số lượt truy cập của ứng dụng, nên đây là dữ liệu đã lưu và có thể chưa có thay đổi mới nhất.
-              Thao tác ghi lên Jira có thể bị từ chối trong khoảng {Math.max(1, Math.ceil((jiraLimitedUntil - Date.now()) / 60_000))} phút tới.
-            </span>
-            <button className="link-btn" onClick={() => setJiraLimitedUntil(null)}>
-              Đóng
-            </button>
-          </div>
-        )}
 
         {session.overlayEphemeral && !overlayNoticeDismissed && (
           <div className="notice notice-warn">
@@ -1082,11 +1450,38 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
           />
         )}
 
+        {draft && (
+          <DraftBar
+            draft={draft}
+            tasks={tasks}
+            applying={draftApplying}
+            onApply={() => void applyDraft()}
+            onDiscard={() => void discardDraft()}
+            onOpenTask={(id) => {
+              const t = tasks.find((x) => x.id === id);
+              if (t) openTask(t);
+            }}
+          />
+        )}
+
         <div className="app-body">
           {/* Gated on access as well as on the selected view, so nothing can
               leave a refused user looking at the resource tab. The access check
               applies to that tab only — the report tab is open to everyone. */}
-          {view === "gantt" || (view === "resource" && resourceAccess !== "allowed") ? (
+          {view === "today" ? (
+            <TodayView
+              session={session}
+              tasks={tasks}
+              today={todayIso()}
+              capacityHours={
+                pool?.profiles.find((p) => p.accountId === session.user.accountId)?.capacityHoursPerDay ?? pool?.defaultCapacityHours ?? 8
+              }
+              onOpenTask={openTask}
+              onUpdateTask={updateOne}
+              onQuickCreate={(text) => quickCreate(text, false)}
+              onWorkLogged={refreshTasks}
+            />
+          ) : view === "gantt" || (view === "resource" && resourceAccess !== "allowed") ? (
             <GanttView
               tasks={tasks}
               collapsed={collapsed}
@@ -1099,7 +1494,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
               myAccountId={session.user.accountId}
               today={todayIso()}
               onSetCollapsed={(ids) => setCollapsed(new Set(ids))}
-              onOpenEdit={setEditingTask}
+              onOpenEdit={openTask}
               onScheduleChange={handleScheduleChange}
               onProgressChange={handleProgressChange}
               onAddDependency={handleAddDependency}
@@ -1112,15 +1507,20 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
               undo={{ label: undoing ? null : (undoStack.at(-1)?.label ?? null), onUndo: () => void undo() }}
               onOpenImport={() => setImporting(true)}
               onImportKbkt={() => setImportingKbkt(true)}
+              onQuickCreate={(text) => quickCreate(text, false)}
+              users={users}
+              onAssign={(id, acc) => void handleAssign(id, acc)}
+              onTransition={(t, id, name) => void handleTransition(t, id, name)}
+              draftBase={draft?.base ?? null}
             />
           ) : view === "timesheet" ? (
-            <TimesheetView session={session} tasks={tasks} onOpenEdit={setEditingTask} onTasksChanged={refreshTasks} />
+            <TimesheetView session={session} tasks={tasks} onOpenEdit={openTask} onTasksChanged={refreshTasks} />
           ) : view === "board" ? (
             <BoardView
               session={session}
               tasks={tasks}
               users={users}
-              onOpenEdit={setEditingTask}
+              onOpenEdit={openTask}
               onTasksChanged={refreshTasks}
               incomingFilter={chatBoardFilter}
               onIncomingFilterTaken={() => setChatBoardFilter(null)}
@@ -1134,7 +1534,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
               poolError={poolError}
               onPoolChange={setPool}
               onAssign={handleAssign}
-              onOpenEdit={setEditingTask}
+              onOpenEdit={openTask}
               filter={taskFilter}
               onFilterChange={setTaskFilter}
               myAccountId={session.user.accountId}
@@ -1146,10 +1546,13 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
               tasks={tasks}
               focusReportId={focusReportId}
               canGenerate={session.staff}
-              onOpenEdit={setEditingTask}
+              onOpenEdit={openTask}
               cacheScope={viewCacheScope(session.site.cloudId, session.user.accountId, session.project?.key ?? "")}
               refreshing={showingCache}
               sla={slaView}
+              users={users}
+              onAssign={(taskId, accountId) => updateOne(taskId, { assigneeAccountId: accountId })}
+              onOpenResources={() => go("resource")}
             />
           )}
         </div>
@@ -1174,7 +1577,11 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
             allTasks={tasks}
             users={users}
             sla={slaView ? { result: slaView.byId.get(editingTask.id) ?? null, settings: slaView.settings, nowMs: slaView.nowMs } : null}
-            onClose={() => setEditingTask(null)}
+            onClose={() => {
+              setEditingTask(pendingOpen);
+              setPendingOpen(null);
+            }}
+            closeRequest={closeRequest}
             onSave={async (patch) => {
               const seq = nextSeq();
               const updated = await api.updateTask(editingTask.id, patch);
@@ -1211,10 +1618,26 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
             knownKeys={taskKeys}
             onOpenIssue={(key) => {
               const task = tasks.find((t) => t.id === key);
-              if (task) setEditingTask(task);
+              if (task) openTask(task);
             }}
+            openRequest={chatRequest}
           />
         )}
+
+        {cmdk && (
+          <CommandBar
+            tasks={tasks}
+            commands={commands}
+            initialMode={cmdk}
+            onClose={() => setCmdk(null)}
+            onOpenTask={openTask}
+            onCreate={(text, open) => void quickCreate(text, open)}
+            previewCreate={previewCreate}
+            onAsk={session.staff ? (text) => setChatRequest({ nonce: Date.now(), text }) : undefined}
+          />
+        )}
+        {shortcutsOpen && <ShortcutSheet onClose={() => setShortcutsOpen(false)} />}
+        <Toaster />
 
         {reviewRunId && (
           <PlanReviewModal

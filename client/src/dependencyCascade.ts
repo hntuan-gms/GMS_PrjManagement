@@ -7,8 +7,11 @@ function addDays(iso: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** Earliest allowed start for a task, given one FS/SS/FF/SF link to another task. */
-function earliestStart(
+/**
+ * Earliest allowed start for a task, given one FS/SS/FF/SF link to another task.
+ * Exported for today.ts ("trễ n ngày nếu bạn trễ"), which must use the very rule the cascade enforces.
+ */
+export function earliestStart(
   type: DependencyType,
   otherStart: string,
   otherEnd: string,

@@ -417,7 +417,17 @@ function Card({
       onDragEnd={onDragEnd}
       onDragOver={onDragOver}
       onClick={onOpen}
-      onKeyDown={(e) => e.key === "Enter" && onOpen()}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") return onOpen();
+        if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+        // j/k (↓/↑) within a column, h/l (←/→) to the same row of the next column — the keys every
+        // list in the app uses (plan §6.6). Pure focus movement over the DOM the board drew.
+        const dir = { j: "down", ArrowDown: "down", k: "up", ArrowUp: "up", h: "left", ArrowLeft: "left", l: "right", ArrowRight: "right" }[e.key];
+        if (!dir) return;
+        e.preventDefault();
+        e.stopPropagation();
+        focusNeighbourCard(e.currentTarget as HTMLElement, dir as "down" | "up" | "left" | "right");
+      }}
       title={issue.summary}
     >
       <button
@@ -542,4 +552,29 @@ function Card({
       </div>
     </div>
   );
+}
+
+/** Moves keyboard focus from one card to its neighbour (see the card's onKeyDown). */
+function focusNeighbourCard(card: HTMLElement, dir: "down" | "up" | "left" | "right") {
+  const col = card.closest(".bd-col");
+  if (!col) return;
+  const inCol = [...col.querySelectorAll<HTMLElement>(".bd-card")];
+  const i = inCol.indexOf(card);
+  if (dir === "down" || dir === "up") {
+    inCol[dir === "down" ? Math.min(inCol.length - 1, i + 1) : Math.max(0, i - 1)]?.focus();
+    return;
+  }
+  const row = col.parentElement;
+  if (!row) return;
+  const cols = [...row.children].filter((c) => c.classList.contains("bd-col"));
+  let j = cols.indexOf(col) + (dir === "right" ? 1 : -1);
+  // Skip empty (folded) columns.
+  while (j >= 0 && j < cols.length) {
+    const cards = [...cols[j].querySelectorAll<HTMLElement>(".bd-card")];
+    if (cards.length > 0) {
+      cards[Math.min(i, cards.length - 1)].focus();
+      return;
+    }
+    j += dir === "right" ? 1 : -1;
+  }
 }

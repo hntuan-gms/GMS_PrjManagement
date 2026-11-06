@@ -11,7 +11,8 @@ import { chromium } from "playwright-core";
 const API = process.env.E2E_API ?? "http://localhost:4000";
 const APP = process.env.E2E_APP ?? "http://localhost:5173/";
 const ROWS = 1500;
-const ROW_H = 42;
+// The default density ("Vừa"): theme.ROW_HEIGHTS.default, --row-h in tokens.css.
+const ROW_H = 32;
 const browser = await chromium.launch({ channel: "chrome", headless: true });
 const page = await browser.newPage({ viewport: { width: 1600, height: 950 } });
 page.setDefaultTimeout(15000);

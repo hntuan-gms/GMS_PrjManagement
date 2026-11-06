@@ -133,22 +133,15 @@ await step("Rejected (validator): lần lưu đầu bị từ chối → ô xu�
 });
 
 console.log("\n== Thay đổi chưa lưu & hộp thoại ==");
-await step("sửa tiêu đề rồi Esc → hỏi 'Bỏ thay đổi?'; chọn tiếp tục thì ở lại, bỏ thì đóng", async () => {
+await step("sửa tiêu đề rồi Esc → khung tự lưu rồi đóng, không hỏi 'Bỏ thay đổi?'", async () => {
   await openTask("DEMO-5");
   await page.locator(".td-title").fill("Tiêu đề mới");
   assert.ok(await page.locator(".td-dirty").isVisible(), "phải báo có thay đổi chưa lưu");
   await page.keyboard.press("Escape");
-  const dlg = page.locator(".dlg");
-  await dlg.waitFor();
-  assert.ok((await dlg.textContent()).includes("thay đổi chưa lưu"));
-  await dlg.locator("button", { hasText: "Tiếp tục chỉnh sửa" }).click();
-  assert.equal(await page.locator(".modal-detail").count(), 1);
-  assert.equal(await page.locator(".td-title").inputValue(), "Tiêu đề mới", "mất nội dung đã gõ");
-  await page.keyboard.press("Escape");
-  await dlg.waitFor();
-  await dlg.locator("button.danger-solid").click();
   await page.waitForSelector(".modal", { state: "detached" });
-  assert.equal((await patches()).length, 0, "không được lưu gì");
+  assert.equal(await page.locator(".dlg").count(), 0, "không được hỏi");
+  const last = (await patches()).at(-1);
+  assert.equal(last?.b.summary, "Tiêu đề mới", "đóng khung phải lưu tiêu đề đã gõ");
 });
 await step("không sửa gì thì đóng ngay, không hỏi", async () => {
   await openTask("DEMO-5");
@@ -157,17 +150,16 @@ await step("không sửa gì thì đóng ngay, không hỏi", async () => {
   assert.equal(await page.locator(".dlg").count(), 0);
 });
 await step("Esc trong hộp thoại chỉ đóng hộp thoại; focus trả về chỗ cũ", async () => {
+  // The one dialog the panel still raises is "Xoá …?": Esc there closes only the dialog.
   await openTask("DEMO-5");
-  await page.locator(".td-title").fill("x");
-  await page.locator("button.modal-close").focus();
-  await page.keyboard.press("Escape");
+  await page.locator(".td-footer button.danger").focus();
+  await page.keyboard.press("Enter");
   await page.locator(".dlg").waitFor();
   await page.keyboard.press("Escape");
   await page.locator(".dlg").waitFor({ state: "detached" });
   assert.equal(await page.locator(".modal-detail").count(), 1, "Esc trong hộp thoại đã đóng luôn cửa sổ chi tiết");
-  assert.equal(await page.evaluate(() => document.activeElement?.classList.contains("modal-close")), true, "focus phải về nút cũ");
+  assert.equal(await page.evaluate(() => document.activeElement?.classList.contains("danger")), true, "focus phải về nút cũ");
   await page.locator("button.modal-close").click();
-  await page.locator(".dlg button.danger-solid").click();
   await page.waitForSelector(".modal", { state: "detached" });
 });
 await step("không có hộp thoại nào của trình duyệt được bật", async () => {

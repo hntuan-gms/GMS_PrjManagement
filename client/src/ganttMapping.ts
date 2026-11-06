@@ -1,5 +1,6 @@
 import type { Task as GanttTask } from "gantt-task-react";
 import type { Task } from "./types";
+import { categoryColors, type Palette } from "./themeColors";
 
 export interface OrderedTask {
   task: Task;
@@ -140,7 +141,7 @@ function nextDayIso(iso: string): string {
  * Anchoring both edges to the same 00:00 keeps them at the identical time-of-day
  * after an equal shift, so the day-count between them can no longer drift.
  */
-export function toGanttTasks(ordered: OrderedTask[], ranges: Map<string, DateRange>): GanttTask[] {
+export function toGanttTasks(ordered: OrderedTask[], ranges: Map<string, DateRange>, colors?: BarColorContext): GanttTask[] {
   return ordered
     .filter((o) => ranges.has(o.task.id))
     .map(({ task, hasChildren }) => {
@@ -158,48 +159,57 @@ export function toGanttTasks(ordered: OrderedTask[], ranges: Map<string, DateRan
         // the next render — disabled rather than left to look broken. A
         // childless Epic has no rollup to snap back to, so it stays draggable.
         isDisabled: task.issueType === "Epic" && hasChildren,
-        styles: statusStyles(task),
+        ...(colors ? { styles: barStyles(task, hasChildren, colors, range.end) } : {}),
       };
     });
 }
 
-// Hues picked by hand, not evenly spaced around the wheel: the 60°-140° band
-// (yellow-green) is skipped because it turns muddy at this saturation/lightness,
-// and everything left is close enough in chroma that any two neighbours in a
-// list still read as "a matched set" rather than clashing — which is the actual
-// mechanism behind "random but harmonious": fix saturation and lightness, vary
-// only the hue, and pick hues from one continuous, tested arc.
-const PALETTE_HUES = [4, 18, 32, 155, 172, 189, 206, 223, 250, 271, 291, 315, 335, 352];
+/**
+ * How bars are coloured ("Hiển thị › Tô màu theo"). The old rule hashed each task id into a
+ * pastel hue: the biggest, loudest shapes on the screen carried colour that meant nothing, and
+ * people went looking for a meaning that was not there. Now colour always answers a question:
+ * what state is this in (default), whose is it, which Epic is it under — or nothing at all.
+ */
+export type BarColorBy = "status" | "person" | "epic" | "none";
 
-/** A task's hue is a hash of its id, not re-rolled per render — "varied", not "flickering". */
-function hueFor(taskId: string): number {
-  let hash = 0;
-  for (let i = 0; i < taskId.length; i++) hash = (hash * 31 + taskId.charCodeAt(i)) >>> 0;
-  return PALETTE_HUES[hash % PALETTE_HUES.length];
+export interface BarColorContext {
+  colorBy: BarColorBy;
+  palette: Palette;
+  /** YYYY-MM-DD, the browser's local day — a bar past its due date and not done is drawn as risk. */
+  today: string;
+  /** Category index per assignee / Epic id, in a stable order (team list, WBS order). */
+  categoryOf: (task: Task) => number | null;
 }
 
-function statusStyles(task: Task) {
-  // Bug keeps a fixed, unambiguous red: "there is a bug in this chart" is a
-  // signal worth being able to spot at a glance across a hundred other bars,
-  // and randomizing it away would cost more than the variety is worth.
-  if (task.issueType === "Bug") {
-    return { backgroundColor: "#f8caca", progressColor: "#d64545", backgroundSelectedColor: "#f2a4a4" };
-  }
+export interface BarStyle {
+  backgroundColor: string;
+  backgroundSelectedColor: string;
+  progressColor: string;
+  progressSelectedColor: string;
+}
 
-  const hue = hueFor(task.id);
+export function barStyles(task: Task, hasChildren: boolean, ctx: BarColorContext, dueDate: string | null): BarStyle {
+  const p = ctx.palette;
+  const style = (bg: string, progress: string, selected = bg): BarStyle => ({
+    backgroundColor: bg,
+    backgroundSelectedColor: selected,
+    progressColor: progress,
+    progressSelectedColor: progress,
+  });
   const done = task.statusCategory === "done";
-  // Epics get a bolder (more saturated, less pastel) version of their own hue —
-  // still part of the random palette, but visually a "summary bar" among the
-  // ordinary task bars under it, the same way MS Project's own Gantt weights them.
-  const epic = task.issueType === "Epic";
-  const saturation = epic ? 58 : 52;
-  // Finished work fades toward white rather than keeping full pastel strength,
-  // so a glance at a busy chart still separates "done" from "in progress"
-  // without needing the old fixed green to do that job.
-  const bgLightness = done ? 92 : 85;
-  return {
-    backgroundColor: `hsl(${hue} ${saturation}% ${bgLightness}%)`,
-    progressColor: `hsl(${hue} ${saturation + 8}% ${done ? 62 : 45}%)`,
-    backgroundSelectedColor: `hsl(${hue} ${saturation}% ${bgLightness - 9}%)`,
-  };
+  // An Epic (or any parent) is a span, not work: drawn quiet so the work under it leads.
+  // TimelineMarkers draws it as a bracket; the bar itself only carries the label.
+  if (hasChildren && task.issueType === "Epic") return style(p.sheet, p.sheet, p.sunken);
+  // Late is the one signal that overrides every colouring choice.
+  if (!done && dueDate && dueDate < ctx.today) return style(p.riskSoft, p.risk);
+  if (ctx.colorBy === "person" || ctx.colorBy === "epic") {
+    const i = ctx.categoryOf(task);
+    if (i === null) return style(p.line, p.ink4, p.lineStrong);
+    const c = categoryColors(i, p.dark);
+    return style(c.bg, c.progress, c.selected);
+  }
+  if (ctx.colorBy === "none") return style(p.line, p.ink3, p.lineStrong);
+  if (done) return style(p.okSoft, p.ok);
+  if (task.statusCategory === "indeterminate") return style(p.infoSoft, p.info);
+  return style(p.line, p.ink3, p.lineStrong);
 }

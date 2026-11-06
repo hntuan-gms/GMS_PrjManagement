@@ -58,7 +58,7 @@ await reset();
 
 await page.goto(process.env.E2E_APP ?? "http://localhost:5173/");
 await page.waitForSelector(".wbs-row");
-await page.locator(".toolbar-tabs button", { hasText: "Nguồn lực" }).click();
+await page.locator(".toolbar-tabs button", { hasText: "Nhân lực" }).click();
 await page.waitForSelector(".resource-view .rv-row-person");
 
 const rect = (sel) => page.locator(sel).first().boundingBox();
@@ -103,13 +103,13 @@ await step("không còn ô 'Chỉ hiện người đang có việc' và dòng ch
   for (const t of ["Mức tải", "Kỹ năng", "Quá hạn", "Bộ lọc"]) assert.ok(text.includes(t), t + " thiếu");
   assert.equal(await page.locator(".resource-view .tf-bar .sf-select").count(), 1, "thiếu menu bộ lọc đã lưu");
 });
-await step("pill KPI: Tất cả / Có việc / Đang quá tải kèm số, Hiệu suất TB, nút chưa gán", async () => {
+await step("pill KPI: Tất cả / Có việc / Đang quá tải kèm số, Mức sử dụng, nút chưa gán", async () => {
   const pills = await page.locator(".rv-pills .rv-pill").allTextContents();
   assert.equal(pills.length, 3);
   assert.match(pills[0], /^Tất cả \(\d+\)$/);
   assert.match(pills[1], /^Có việc \(\d+\)$/);
   assert.match(pills[2], /^Đang quá tải \(\d+\)$/);
-  assert.match(await page.locator(".rv-kpi-stat").innerText(), /Hiệu suất TB: \d+%/);
+  assert.match(await page.locator(".rv-kpi-stat").innerText(), /Mức sử dụng: \d+%/);
   assert.match(await page.locator(".rv-pill-warn").innerText(), /^\s*\d+ công việc chưa gán\s*$/);
 });
 await step("chú giải rút gọn: 4 mục, không có 'Trống', mô tả đầy đủ nằm trong tooltip", async () => {
@@ -198,6 +198,12 @@ await step("nhiều cột: giữ bề rộng tối thiểu của cột và cuộ
   assert.ok(m.cell >= 21.5 && m.cell <= 23, "cột phải giữ ~22px, là " + m.cell);
 });
 await step("nhãn tháng rút gọn khi hẹp (T10/26, T10) và không bao giờ tràn sang tháng bên cạnh", async () => {
+  // Start three days before a month ends, so whatever day this runs there is a month showing only a
+  // few days (the presets keep the window's start). It used to rely on today's date and failed in the
+  // early hours, when every preset happened to fit inside one month.
+  const now = new Date();
+  const lastDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0));
+  await setWindow(new Date(lastDay.getTime() - 2 * 86400000).toISOString().slice(0, 10), lastDay.toISOString().slice(0, 10));
   let compact = 0;
   for (const preset of ["4 tuần", "8 tuần", "1 quý"]) {
     for (const g of ["day", "week", "month"]) {
@@ -592,26 +598,29 @@ console.log("\n== Tải lại trang (F5): các tab không phải chờ Jira lầ
 // Jira answers slowly: if the tab only paints once the answer lands, the checks below time out.
 const SLOW = 2500;
 const slow = (re) => page.route(re, async (route) => { await new Promise((r) => setTimeout(r, SLOW)); route.continue(); });
-await step("nhãn 'Nguồn lực' và số quá tải hiện ngay sau F5, không đợi danh sách thành viên", async () => {
+await step("nhãn 'Nhân lực' và số quá tải hiện ngay sau F5, không đợi danh sách thành viên", async () => {
   await slow(/\/api\/resources(\?|$)/);
   await page.reload();
   await page.waitForSelector(".toolbar-tabs");
-  await page.locator(".toolbar-tabs button", { hasText: "Nguồn lực" }).waitFor({ timeout: 1200 });
+  await page.locator(".toolbar-tabs button", { hasText: "Nhân lực" }).waitFor({ timeout: 1200 });
   const labels = (await page.locator(".toolbar-tabs button").allTextContents()).map((t) => t.replace(/\d+\s*thành viên.*$/, "").replace(/\d+$/, "").trim());
-  assert.deepEqual(labels, ["Gantt / WBS", "Bảng", "Chấm công", "Nguồn lực", "Báo cáo"]);
+  assert.deepEqual(labels, ["Kế hoạch", "Bảng", "Nhân lực", "Nhịp dự án"]);
   await page.unroute(/\/api\/resources(\?|$)/);
 });
-await step("Báo cáo, Bảng, Chấm công đã xem trước đó hiện ngay sau F5 từ bản lưu của tab", async () => {
+await step("Nhịp dự án, Bảng, Giờ làm đã xem trước đó hiện ngay sau F5 từ bản lưu của tab", async () => {
   // Visit each once so the tab has something to remember, then reload with Jira slowed down.
-  for (const name of ["Báo cáo", "Bảng", "Chấm công"]) {
-    await page.locator(".toolbar-tabs button", { hasText: name }).click();
-    await page.waitForSelector({ "Báo cáo": ".pr-tile", "Bảng": ".bd-card", "Chấm công": ".ts-grid" }[name]);
+  // Nhịp dự án and Bảng are lenses in the header; Giờ làm (the old Chấm công) is a place on the rail.
+  const open = (name) =>
+    name === "Giờ làm" ? page.locator("[data-view=timesheet]").click() : page.locator(".toolbar-tabs button", { hasText: name }).click();
+  for (const name of ["Nhịp dự án", "Bảng", "Giờ làm"]) {
+    await open(name);
+    await page.waitForSelector({ "Nhịp dự án": ".pr-tile", "Bảng": ".bd-card", "Giờ làm": ".ts-grid" }[name]);
   }
   await slow(/\/api\/(progress|board|timesheet)/);
   await page.reload();
   await page.waitForSelector(".toolbar-tabs");
-  for (const [name, sel] of [["Báo cáo", ".pr-tile"], ["Bảng", ".bd-card"], ["Chấm công", ".ts-grid"]]) {
-    await page.locator(".toolbar-tabs button", { hasText: name }).click();
+  for (const [name, sel] of [["Nhịp dự án", ".pr-tile"], ["Bảng", ".bd-card"], ["Giờ làm", ".ts-grid"]]) {
+    await open(name);
     await page.waitForSelector(sel, { timeout: 1500 });
   }
   await page.unroute(/\/api\/(progress|board|timesheet)/);

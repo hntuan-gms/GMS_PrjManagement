@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import DateField from "./DateField";
 import { api } from "../api";
 import { isAssignableType } from "../types";
 import type { BulkTaskCreateInput, BulkTaskCreateResult, IssueTypeName, JiraUser, Task } from "../types";
@@ -404,7 +405,7 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate, initi
         <div className="field-row">
           <label className="field">
             <span className="field-label-text">Ngày bắt đầu</span>
-            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+            <DateField value={startDate} onChange={setStartDate} ariaLabel="Ngày bắt đầu" />
           </label>
           <label className="field">
             <span className="field-label-text">Thời lượng (ngày)</span>

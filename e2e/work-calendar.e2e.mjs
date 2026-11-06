@@ -98,7 +98,7 @@ await step("lưu: hộp thoại đóng, máy chủ giữ 13 ngày lễ và 1 ng�
 
 console.log("\n== Các màn hình đọc lịch ==");
 await step("Nguồn lực: ngày lễ ghi 'Ngày lễ: …', Thứ 7 làm bù có công suất 8h", async () => {
-  await page.locator(".toolbar-tabs button", { hasText: "Nguồn lực" }).click();
+  await page.locator(".toolbar-tabs button", { hasText: "Nhân lực" }).click();
   await page.waitForSelector(".resource-view .rv-row-person");
   await page.locator(".rv-granularity").selectOption("day");
   const titles = await page.locator(".rv-row-person").first().locator(".rv-cell").evaluateAll((els) => els.map((e) => e.title));
@@ -111,7 +111,7 @@ await step("Nguồn lực: ngày lễ ghi 'Ngày lễ: …', Thứ 7 làm bù c�
 });
 
 await step("Chấm công: cả tuần là ngày lễ — không ô 'chưa ghi', giờ kỳ vọng 0h", async () => {
-  await page.locator(".toolbar-tabs button", { hasText: "Chấm công" }).click();
+  await page.locator("[data-view=timesheet]").click();
   await page.waitForSelector(".ts-grid tbody tr");
   const heads = await page.locator(".ts-grid thead th.is-holiday").count();
   assert.equal(heads, 7, `${heads} cột ngày lễ`);

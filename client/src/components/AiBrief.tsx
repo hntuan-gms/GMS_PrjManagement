@@ -138,7 +138,7 @@ export default function AiBrief({
     <div className="ai-head">
       <div className="ai-head-title">
         <span className="ai-spark" aria-hidden="true">
-          ✦
+          AI
         </span>
         <div>
           <b>Nhận định AI</b>
@@ -184,7 +184,7 @@ export default function AiBrief({
           {error && <div className="ai-error">{error}</div>}
           <div className="ai-empty">
             <div className="ai-empty-mark" aria-hidden="true">
-              ✦
+              AI
             </div>
             <b>Chưa có nhận định nào</b>
             <p>
@@ -194,7 +194,7 @@ export default function AiBrief({
             </p>
             {canGenerate && (
               <button className="primary" onClick={onGenerate}>
-                ✦ Phân tích ngay
+                Phân tích ngay
               </button>
             )}
           </div>

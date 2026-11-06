@@ -149,6 +149,30 @@ export function filterPeople(people: PersonLoad[], view: PeopleView): PersonLoad
   return people;
 }
 
+/**
+ * Row order on the Nhân lực tab (plan §6.7). "load" keeps buildResourceLoad's own order (most
+ * overloaded first); "least-free" is Runn's "least available" — whoever has the least room in the
+ * window, which is who to protect; "most-free" is who to hand the next task to.
+ */
+export type PeopleSort = "load" | "least-free" | "most-free" | "name";
+
+export const PEOPLE_SORT_LABEL: Record<PeopleSort, string> = {
+  load: "Quá tải trước",
+  "least-free": "Ít rảnh nhất",
+  "most-free": "Rảnh nhất",
+  name: "Tên",
+};
+
+export function sortPeople(people: PersonLoad[], mode: PeopleSort): PersonLoad[] {
+  if (mode === "load") return people;
+  const free = (p: PersonLoad) => p.capacityHours - p.allocatedHours;
+  const byName = (a: PersonLoad, b: PersonLoad) => a.displayName.localeCompare(b.displayName, "vi");
+  const out = [...people];
+  if (mode === "name") return out.sort(byName);
+  if (mode === "least-free") return out.sort((a, b) => free(a) - free(b) || byName(a, b));
+  return out.sort((a, b) => free(b) - free(a) || byName(a, b));
+}
+
 /* ------------------------------------------------------- unassigned list */
 
 /** The unassigned list's search box: key or title, ignoring case and diacritics ("dang nhap" finds "Đăng nhập"). */

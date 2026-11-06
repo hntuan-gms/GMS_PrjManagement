@@ -14,9 +14,22 @@ interface Props {
   versions: ProjectVersion[];
   showReleases: boolean;
   measureKey: string;
+  /** YYYY-MM-DD: draws the son "now" line. */
+  today?: string;
+  /** Epics with children: drawn as a bracket (a span), not a solid bar. */
+  bracketIds?: Set<string>;
+  /** Bản nháp: where moved bars were before the draft (dashed ghosts). */
+  ghosts?: Map<string, { start: string; end: string }>;
 }
 
 const dmy = (iso: string) => iso.split("-").reverse().join("/");
+
+/** Pixels per day, read off the first bar (the same scale dateX uses). */
+function dayWidthOf(refs: Array<{ rect: { width: number }; range: DateRange }>): number {
+  const r = refs[0];
+  const days = Math.max(1, (Date.parse(r.range.end) - Date.parse(r.range.start)) / 86_400_000 + 1);
+  return r.rect.width / days;
+}
 
 /**
  * What the Gantt draws besides bars and arrows, portaled into the chart's own SVG
@@ -24,7 +37,7 @@ const dmy = (iso: string) => iso.split("-").reverse().join("/");
  * vertical line at each release date. Baselines are BaselineOverlay's. Nothing here takes
  * pointer events — the bars underneath stay draggable.
  */
-export default function TimelineMarkers({ bodyEl, rows, ranges, versions, showReleases, measureKey }: Props) {
+export default function TimelineMarkers({ bodyEl, rows, ranges, versions, showReleases, measureKey, today, bracketIds, ghosts }: Props) {
   const { portalTarget, rects } = useBarRects(bodyEl, rows, measureKey);
 
   const refs = useMemo(
@@ -41,8 +54,19 @@ export default function TimelineMarkers({ bodyEl, rows, ranges, versions, showRe
   const chartHeight = parseFloat(portalTarget.getAttribute("height") ?? "0") || 0;
   const chartWidth = parseFloat(portalTarget.getAttribute("width") ?? "0") || Infinity;
 
+  const todayX = today ? dateX(refs, today) : null;
+  // Mid-day: the line sits in the middle of today's column, not on its left edge.
+  const todayMid = todayX === null || refs.length === 0 ? null : todayX + dayWidthOf(refs) / 2;
+
   return createPortal(
     <g className="timeline-markers" pointerEvents="none">
+      {todayMid !== null && todayMid >= 0 && todayMid <= chartWidth && (
+        <g className="today-line">
+          <title>{`Hôm nay ${dmy(today!)}`}</title>
+          <line x1={todayMid} x2={todayMid} y1={0} y2={chartHeight} />
+          <circle cx={todayMid} cy={3} r={3} />
+        </g>
+      )}
       {showReleases &&
         versions
           .filter((v) => v.releaseDate && !v.archived)
@@ -65,8 +89,31 @@ export default function TimelineMarkers({ bodyEl, rows, ranges, versions, showRe
         const range = ranges.get(t.id);
         if (!rect || !range) return null;
         const cy = rect.y + rect.height / 2;
+        const bracket = bracketIds?.has(t.id);
+        const ghost = ghosts?.get(t.id);
+        const gx1 = ghost ? dateX(refs, ghost.start) : null;
+        const gx2 = ghost ? dateX(refs, ghost.end) : null;
+        const by = rect.y + rect.height - 2;
         return (
           <g key={t.id}>
+            {ghost && gx1 !== null && gx2 !== null && (
+              <rect
+                className="draft-ghost"
+                x={gx1}
+                y={rect.y}
+                width={Math.max(4, gx2 - gx1 + dayWidthOf(refs))}
+                height={rect.height}
+                rx={3}
+              >
+                <title>{`Trước bản nháp: ${dmy(ghost.start)} → ${dmy(ghost.end)}`}</title>
+              </rect>
+            )}
+            {bracket && (
+              <path
+                className="epic-bracket"
+                d={`M${rect.x + 1} ${by - 6} V${by} H${rect.x + rect.width - 1} V${by - 6}`}
+              />
+            )}
             {isMilestone(t) && (
               <polygon
                 className="milestone-diamond"

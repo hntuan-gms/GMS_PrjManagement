@@ -98,7 +98,7 @@ export default function BaselineOverlay({ bodyEl, rows, ranges, baselines, measu
 
   if (!measured.svg) return null;
 
-  const strips: Array<{ id: string; box: Box; slip: number; title: string }> = [];
+  const strips: Array<{ id: string; box: Box; slip: number; onPlan: boolean; title: string }> = [];
   for (const t of rows) {
     const bar = measured.bars.get(t.id);
     const range = ranges.get(t.id);
@@ -107,7 +107,8 @@ export default function BaselineOverlay({ bodyEl, rows, ranges, baselines, measu
     const box = baselineBox(bar, range, baseline, pxPerDay, measured.width || Infinity);
     if (!box) continue;
     const slip = slipDays(range, baseline);
-    strips.push({ id: t.id, box, slip, title: baselineTitle(baseline, slip) });
+    const onPlan = slip === 0 && range.start === baseline.start;
+    strips.push({ id: t.id, box, slip, onPlan, title: baselineTitle(baseline, slip) });
   }
 
   return createPortal(
@@ -115,7 +116,9 @@ export default function BaselineOverlay({ bodyEl, rows, ranges, baselines, measu
       {strips.map((s) => (
         <rect
           key={s.id}
-          className={`baseline-bar${s.slip > 0 ? " is-late" : ""}`}
+          // On plan, the strip is barely there: a second rule under every bar doubled the ink on the
+          // chart without saying anything. It speaks up only when the work has moved off its baseline.
+          className={`baseline-bar${s.slip > 0 ? " is-late" : ""}${s.onPlan ? " is-on-plan" : ""}`}
           data-task-id={s.id}
           x={s.box.x}
           y={s.box.y}

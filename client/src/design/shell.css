@@ -1,0 +1,688 @@
+/* ==========================================================================
+   Shell — rail, header, lenses, sync indicator, command bar, toasts, shortcut sheet.
+   "Giấy & Son": the frame is paper and ink and steps back; see tokens.css.
+   Loaded after App.css (main.tsx), so equal-specificity rules here win.
+   ========================================================================== */
+
+/* ---- Rail: 48px, fixed, dimmed — content leads. ---- */
+.app-rail {
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 30;
+  width: var(--rail-w);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 0 10px;
+  background: var(--paper);
+  border-right: 1px solid var(--line);
+}
+.rail-mark {
+  width: 28px;
+  height: 28px;
+  margin-bottom: 6px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--son);
+  color: var(--on-son);
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: -0.02em;
+}
+.rail-mark:hover:not(:disabled) {
+  background: var(--son);
+  color: var(--on-son);
+  border: none;
+  filter: brightness(1.05);
+}
+.rail-sep {
+  width: 20px;
+  height: 1px;
+  margin: 6px 0;
+  background: var(--line);
+}
+.rail-fill {
+  flex: 1;
+}
+button.rail-btn {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--ink-3);
+}
+button.rail-btn:hover:not(:disabled) {
+  background: var(--sunken);
+  color: var(--ink);
+  border: none;
+}
+button.rail-btn.is-active {
+  background: var(--raised);
+  color: var(--ink);
+  box-shadow: 0 0 0 1px var(--line);
+}
+button.rail-btn.is-active::before {
+  /* A son tick on the rail's edge: "you are here". */
+  content: "";
+  position: absolute;
+  left: -6px;
+  top: 9px;
+  bottom: 9px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--son);
+}
+/* Tooltips with the shortcut, after a short wait (plan §5.2). */
+.app-rail [data-tip]:hover::after,
+.app-rail [data-tip]:focus-visible::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%);
+  white-space: pre;
+  padding: 5px 8px;
+  border-radius: var(--radius-md);
+  background: var(--ink);
+  color: var(--on-strong);
+  font-size: 12px;
+  font-weight: 500;
+  pointer-events: none;
+  z-index: 60;
+  opacity: 0;
+  animation: tip-in var(--d-2) var(--e-out) 400ms forwards;
+}
+@keyframes tip-in {
+  from {
+    opacity: 0;
+    transform: translate(-3px, -50%);
+  }
+  to {
+    opacity: 1;
+    transform: translate(0, -50%);
+  }
+}
+.app-rail .popover {
+  display: flex;
+}
+button.rail-avatar {
+  margin-top: 4px;
+}
+.rail-avatar .user-avatar {
+  width: 28px;
+  height: 28px;
+}
+.popover-menu.rail-menu {
+  left: calc(100% + 8px) !important;
+  bottom: 0 !important;
+  top: auto !important;
+  min-width: 260px;
+}
+.menu-profile-name small {
+  display: block;
+  color: var(--ink-3);
+  font-weight: 400;
+  font-size: 12px;
+}
+.seg-group.menu-seg {
+  display: flex;
+  margin: 2px 8px 8px;
+}
+.seg-group.menu-seg button {
+  flex: 1;
+  gap: 5px;
+}
+.menu-kbd {
+  margin-left: auto;
+}
+
+/* ---- Header: 44px, sheet, one hairline. ---- */
+.toolbar {
+  min-height: var(--header-h);
+  height: var(--header-h);
+  gap: 16px;
+  padding: 0 12px 0 14px;
+  background: var(--sheet);
+  border-bottom: 1px solid var(--line);
+  flex-wrap: nowrap;
+}
+.toolbar-left {
+  flex: none;
+}
+button.hd-btn {
+  height: 30px;
+  padding: 0 8px;
+}
+button.project-switch {
+  gap: 8px;
+  max-width: 320px;
+  color: var(--ink);
+}
+.project-switch .proj-name {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+.project-switch .proj-key {
+  padding: 0;
+  background: none;
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: 11.5px;
+}
+.project-switch .caret {
+  color: var(--ink-4);
+}
+
+/* Lenses: words, no boxes; the active one carries an ink underline. */
+.toolbar-tabs.lens-tabs {
+  gap: 2px;
+  margin: 0;
+  margin-bottom: -1px;
+}
+.lens-tabs button {
+  position: relative;
+  padding: 0 10px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--ink-3);
+  border-bottom: 2px solid transparent;
+}
+.lens-tabs button:hover:not(:disabled) {
+  color: var(--ink);
+  border-bottom-color: transparent;
+}
+.lens-tabs button.active,
+.lens-tabs button.active:hover:not(:disabled) {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+  font-weight: 600;
+}
+.tab-badge {
+  min-width: 16px;
+  height: 16px;
+  margin-left: 5px;
+  font-size: 10.5px;
+  background: var(--risk);
+}
+
+.toolbar-right {
+  gap: 10px;
+}
+
+/* Sync indicator: replaces the old "Đồng bộ từ Jira" button. A state, clickable to re-read. */
+button.sync-indicator {
+  height: 28px;
+  padding: 0 8px;
+  gap: 7px;
+  border: none;
+  background: transparent;
+  color: var(--ink-3);
+  font-size: 12px;
+  font-weight: 500;
+}
+button.sync-indicator:hover:not(:disabled) {
+  background: var(--sunken);
+  border: none;
+  color: var(--ink);
+}
+button.sync-indicator:disabled {
+  opacity: 1;
+  cursor: progress;
+}
+.sync-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ok);
+  flex: none;
+}
+.sync-indicator.is-reading .sync-dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--info);
+  border-top-color: transparent;
+  animation: sync-pulse 1.2s linear infinite;
+}
+.sync-indicator.is-limited .sync-dot {
+  background: var(--warn);
+}
+.sync-indicator.is-limited {
+  color: var(--warn-text);
+}
+.sync-indicator.is-error .sync-dot {
+  background: var(--risk);
+}
+.sync-indicator.is-error {
+  color: var(--risk-text);
+}
+@keyframes sync-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+button.cmdk-trigger {
+  height: 28px;
+  width: 220px;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 0 6px 0 10px;
+  border: 1px solid var(--line);
+  background: var(--sunken);
+  color: var(--ink-3);
+  font-weight: 400;
+  font-size: 12.5px;
+}
+button.cmdk-trigger:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: var(--sunken);
+  color: var(--ink-2);
+}
+button.cmdk-trigger kbd {
+  margin-left: auto;
+}
+
+kbd {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 5px;
+  min-width: 18px;
+  height: 18px;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-bottom-width: 1px;
+  border-radius: var(--radius-sm);
+  background: var(--raised);
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+/* ---- Status glyph ---- */
+.status-glyph {
+  flex: none;
+  display: block;
+}
+.status-glyph .sg-ring {
+  fill: none;
+  stroke: var(--st-todo);
+  stroke-width: 1.5;
+}
+.sg-indeterminate .sg-ring {
+  stroke: var(--st-doing);
+}
+.sg-indeterminate .sg-fill {
+  fill: var(--st-doing);
+}
+.sg-done .sg-ring {
+  stroke: var(--st-done);
+}
+.sg-done .sg-solid {
+  fill: var(--st-done);
+}
+.sg-done .sg-tick {
+  fill: none;
+  stroke: var(--on-strong);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ---- Command bar ---- */
+.cmdk-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-command);
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 16vh;
+}
+.cmdk {
+  width: min(640px, calc(100vw - 32px));
+  max-height: 64vh;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  background: var(--raised);
+  box-shadow: var(--shadow-modal);
+  overflow: hidden;
+}
+.cmdk-input {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  height: 52px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-3);
+}
+.cmdk-input input {
+  flex: 1;
+  height: 100%;
+  border: none;
+  background: transparent;
+  padding: 0;
+  font-size: var(--font-size-lead);
+  color: var(--ink);
+  box-shadow: none;
+  outline: none;
+}
+.cmdk-input input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+button.cmdk-mode {
+  height: 24px;
+  padding: 0 8px;
+  border: none;
+  background: var(--sunken);
+  font-size: 12px;
+}
+.cmdk-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px;
+}
+.cmdk-group {
+  padding: 8px 10px 4px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--ink-3);
+}
+.cmdk-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 6px 10px;
+  border-radius: var(--radius-md);
+  color: var(--ink-2);
+  font-size: 13.5px;
+  cursor: pointer;
+}
+.cmdk-row.is-active {
+  background: var(--sunken);
+  color: var(--ink);
+}
+.cmdk-row .icon {
+  flex: none;
+  color: var(--ink-3);
+}
+.cmdk-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cmdk-key {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.cmdk-meta {
+  flex: none;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.cmdk-create-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cmdk-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+.qa-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  background: var(--sunken);
+  color: var(--ink-2);
+  font-size: 12px;
+  animation: chip-in var(--d-1) var(--e-out);
+}
+.qa-chip.qa-assignee {
+  background: var(--info-wash);
+  color: var(--info-text);
+}
+.qa-chip.qa-priority {
+  background: var(--risk-wash);
+  color: var(--risk-text);
+}
+.qa-chip.qa-predecessor,
+.qa-chip.qa-successor,
+.qa-chip.qa-parent {
+  background: var(--ok-wash);
+  color: var(--ok-text);
+}
+.qa-chip.is-warn {
+  background: var(--warn-wash);
+  color: var(--warn-text);
+}
+@keyframes chip-in {
+  from {
+    transform: scale(0.96);
+    opacity: 0.4;
+  }
+}
+.cmdk-empty {
+  padding: 18px 12px;
+  color: var(--ink-3);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.cmdk-foot {
+  display: flex;
+  gap: 14px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--line);
+  background: var(--sheet);
+  color: var(--ink-3);
+  font-size: 11.5px;
+}
+.cmdk-foot span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+/* ---- Shortcut sheet ---- */
+.shortcut-sheet {
+  width: min(860px, calc(100vw - 32px));
+  max-height: 76vh;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  background: var(--raised);
+  box-shadow: var(--shadow-modal);
+  padding: 18px 22px 22px;
+  outline: none;
+}
+.shortcut-sheet header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.shortcut-sheet h2 {
+  margin: 0;
+  font-size: var(--font-size-title);
+  font-weight: 600;
+}
+.shortcut-sheet header .icon-btn {
+  margin-left: auto;
+}
+.muted {
+  color: var(--ink-3);
+  font-size: 12.5px;
+}
+.shortcut-grid {
+  columns: 3 240px;
+  column-gap: 28px;
+}
+.shortcut-grid section {
+  break-inside: avoid;
+  margin-bottom: 16px;
+}
+.shortcut-grid h3 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-3);
+}
+.shortcut-grid dl {
+  margin: 0;
+}
+.shortcut-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+.shortcut-row dt {
+  color: var(--ink-2);
+}
+.shortcut-row dd {
+  margin: 0;
+  display: flex;
+  gap: 3px;
+}
+
+/* ---- Toasts: bottom-left, ink. ---- */
+.toaster {
+  position: fixed;
+  left: calc(var(--rail-w) + 16px);
+  bottom: 16px;
+  z-index: var(--z-toast);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 440px;
+  min-height: 40px;
+  padding: 6px 6px 6px 14px;
+  border-radius: var(--radius-lg);
+  background: var(--ink);
+  color: var(--on-strong);
+  font-size: 13px;
+  box-shadow: var(--shadow-lg);
+  animation: toast-in var(--d-3) var(--e-out);
+  transform: scale(calc(1 - var(--toast-depth, 0) * 0.02));
+  transform-origin: left bottom;
+  transition: transform var(--d-2) var(--e-move);
+}
+.toast-error {
+  background: var(--risk);
+}
+.toast-msg {
+  flex: 1;
+  line-height: 1.4;
+}
+button.toast-action {
+  height: 28px;
+  padding: 0 10px;
+  gap: 6px;
+  border: none;
+  background: color-mix(in srgb, var(--on-strong) 14%, transparent);
+  color: var(--on-strong);
+  font-weight: 600;
+}
+button.toast-action:hover:not(:disabled) {
+  border: none;
+  background: color-mix(in srgb, var(--on-strong) 24%, transparent);
+  color: var(--on-strong);
+}
+button.toast-action kbd {
+  background: transparent;
+  border-color: color-mix(in srgb, var(--on-strong) 30%, transparent);
+  color: color-mix(in srgb, var(--on-strong) 80%, transparent);
+}
+button.toast-close {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: color-mix(in srgb, var(--on-strong) 70%, transparent);
+}
+button.toast-close:hover:not(:disabled) {
+  border: none;
+  background: color-mix(in srgb, var(--on-strong) 14%, transparent);
+  color: var(--on-strong);
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+/* ---- Small shared bits ---- */
+.issue-icon {
+  color: var(--ink-3);
+}
+.issue-icon.is-epic {
+  color: var(--ink);
+}
+button.icon-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--ink-3);
+}
+button.icon-btn:hover:not(:disabled) {
+  border: none;
+  background: var(--sunken);
+  color: var(--ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast,
+  .qa-chip,
+  .app-rail [data-tip]::after {
+    animation: none;
+  }
+  .app-rail [data-tip]:hover::after {
+    opacity: 1;
+  }
+}
+
+/* The bulk bar owns the bottom edge while it is up: toasts stack above it instead of covering it. */
+body:has(.selection-bar) .toaster {
+  bottom: 84px;
+}

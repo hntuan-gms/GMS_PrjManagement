@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
+import DateField from "./DateField";
 import { addDaysLocal, capacityRows, localDate, toJiraDateTime, totalWeight } from "../boardModel";
 import type { BoardIssue, BoardSnapshot, Sprint, SprintPlanProposal } from "../types";
 import CapacityTable from "./CapacityTable";
@@ -91,20 +92,20 @@ export function SprintFormModal({
             <div className="field-row">
               <label className="field">
                 <span>Bắt đầu</span>
-                <input
-                  type="date"
+                <DateField
                   value={start}
-                  onChange={(e) => {
+                  ariaLabel="Ngày bắt đầu sprint"
+                  onChange={(v) => {
                     // Moving the start keeps the length, as Jira's dialog does.
                     const len = Math.round((Date.parse(end) - Date.parse(start)) / 86_400_000);
-                    setStart(e.target.value);
-                    if (e.target.value) setEnd(addDaysLocal(e.target.value, Math.max(1, len)));
+                    setStart(v);
+                    if (v) setEnd(addDaysLocal(v, Math.max(1, len)));
                   }}
                 />
               </label>
               <label className="field">
                 <span>Kết thúc</span>
-                <input type="date" value={end} onChange={(e) => setEnd(e.target.value)} />
+                <DateField value={end} onChange={setEnd} base={start} ariaLabel="Ngày kết thúc sprint" />
               </label>
             </div>
           </>
@@ -371,7 +372,7 @@ export function SprintPlanModal({
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal bd-modal bd-plan" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header bd-plan-head">
-          <span className="ai-spark" aria-hidden="true">✦</span>
+          <span className="ai-spark" aria-hidden="true">AI</span>
           <span className="modal-id">Kế hoạch AI cho {sprint.name}</span>
           <button className="modal-close" onClick={onClose}>✕</button>
         </div>

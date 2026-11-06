@@ -33,7 +33,8 @@ const waitModel = (text) => page.waitForFunction((t) => [...document.querySelect
 await fetch(API + "/api/__reset", { method: "POST" });
 await page.goto(process.env.E2E_APP ?? "http://localhost:5173/");
 await page.waitForSelector(".wbs-row");
-await page.locator(".chat-pill").click();
+// No floating pill any more: the rail's "Trợ lý" (or Ctrl K → Tab) opens the assistant.
+await page.locator(".app-rail button[aria-label='Trợ lý']").click();
 await page.waitForSelector(".chat-input-row textarea");
 
 console.log("\n== Trợ lý: tạo lại, sửa câu hỏi ==");
@@ -42,8 +43,11 @@ await step("hỏi một câu → một câu trả lời", async () => {
   await waitModel("Trả lời số 1");
   assert((await users()).length === 1 && (await models()).length === 1);
 });
-await step("chi phí quy ra tiền hiện ở thanh token", async () => {
-  await page.waitForFunction(() => /≈/.test(document.querySelector(".chat-token-strip")?.textContent ?? ""));
+await step("chi phí quy ra tiền hiện trong bảng thống kê (không còn dải token ở chân khung)", async () => {
+  assert.equal(await page.locator(".chat-token-strip").count(), 0, "dải token không còn hiện với mọi người");
+  await page.locator("button[title='Thống kê token']").click();
+  await page.waitForFunction(() => /≈/.test(document.querySelector(".chat-usage-panel")?.textContent ?? ""));
+  await page.locator("button[title='Thống kê token']").click();
 });
 await step("'Tạo lại' → gọi máy chủ với regenerate, câu trả lời cũ được thay (không dồn thêm)", async () => {
   await page.locator(".chat-copy", { hasText: "Tạo lại" }).click();

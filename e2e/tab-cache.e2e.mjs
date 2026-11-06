@@ -30,8 +30,8 @@ await page.waitForSelector(".wbs-row");
  * what was fetched stale, so the tab asks again — which is what these steps need to observe.
  */
 async function makeStale() {
-  await page.getByRole("button", { name: /Đồng bộ từ Jira/ }).click();
-  await page.waitForFunction(() => [...document.querySelectorAll(".toolbar button")].some((b) => b.textContent.includes("Đồng bộ từ Jira")));
+  await page.locator(".sync-indicator").click();
+  await page.waitForFunction(() => document.querySelector(".sync-indicator")?.textContent.includes("Khớp Jira"));
   await page.waitForTimeout(150);
 }
 
@@ -52,7 +52,7 @@ console.log("\n== Mở lại tab ==");
 await step("Bảng: lần đầu đợi API, lần sau hiện thẻ ngay khi API còn chưa trả lời", async () => {
   await tab("Bảng");
   await page.waitForSelector(".bd-card");
-  await tab("Gantt");
+  await tab("Kế hoạch");
   await page.waitForSelector(".wbs-row");
   await makeStale();
   const held = await hold("**/api/board*");
@@ -63,14 +63,14 @@ await step("Bảng: lần đầu đợi API, lần sau hiện thẻ ngay khi API
   await held.stop();
 });
 await step("Chấm công: hiện lại bảng giờ công cũ trong lúc tải", async () => {
-  await tab("Chấm công");
+  await page.locator("[data-view=timesheet]").click();
   await page.waitForSelector(".ts-wrap");
   await page.waitForFunction(() => !document.body.textContent.includes("Đang tải từ Jira"));
   const before = await page.locator(".ts-grid tbody tr").count();
-  await tab("Gantt");
+  await tab("Kế hoạch");
   await makeStale();
   const held = await hold("**/api/timesheet*");
-  await tab("Chấm công");
+  await page.locator("[data-view=timesheet]").click();
   await page.waitForSelector(".ts-wrap");
   assert.ok(await page.getByText("Đang tải từ Jira").count(), "phải báo đang tải lại");
   assert.equal(await page.locator(".ts-grid tbody tr").count(), before, "bảng cũ phải còn hiện");
@@ -78,12 +78,12 @@ await step("Chấm công: hiện lại bảng giờ công cũ trong lúc tải",
   await held.stop();
 });
 await step("Báo cáo: hiện số liệu cũ ngay, không có màn 'đang tải'", async () => {
-  await tab("Báo cáo");
+  await tab("Nhịp dự án");
   await page.waitForFunction(() => !document.querySelector(".pr-loading"));
-  await tab("Gantt");
+  await tab("Kế hoạch");
   await makeStale();
   const held = await hold("**/api/progress?*");
-  await tab("Báo cáo");
+  await tab("Nhịp dự án");
   await page.waitForTimeout(300);
   assert.equal(await page.locator(".pr-loading").count(), 0, "đang hiện màn tải thay vì số liệu cũ");
   assert.ok((await page.textContent(".app-body")).includes("công việc"));

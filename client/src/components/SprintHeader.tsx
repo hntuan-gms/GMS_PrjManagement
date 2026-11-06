@@ -72,7 +72,7 @@ export default function SprintHeader(props: Props) {
               {overdue ? <span className="bd-bad">đã quá ngày kết thúc</span> : `còn ${left} ngày làm việc`}
             </span>
           </div>
-          {sprint.goal ? <p className="sh-goal">🎯 {sprint.goal}</p> : <p className="sh-goal bd-muted">Chưa đặt mục tiêu sprint</p>}
+          {sprint.goal ? <p className="sh-goal">Mục tiêu: {sprint.goal}</p> : <p className="sh-goal bd-muted">Chưa đặt mục tiêu sprint</p>}
         </div>
 
         <div className="sh-progress">
@@ -99,7 +99,7 @@ export default function SprintHeader(props: Props) {
         <div className="sh-actions">
           {props.canUseAi && (
             <button className="bd-ai-btn" onClick={props.onAnalyze} disabled={insight.loading}>
-              {insight.loading ? "Đang phân tích..." : insight.data ? "↻ Phân tích lại" : "✦ Phân tích sprint"}
+              {insight.loading ? "Đang phân tích..." : insight.data ? "↻ Phân tích lại" : "Phân tích sprint (AI)"}
             </button>
           )}
           <button onClick={props.onComplete}>Hoàn thành sprint</button>
@@ -112,7 +112,7 @@ export default function SprintHeader(props: Props) {
       {(insight.loading || insight.data || insight.error) && (
         <div className="sh-ai">
           <button className="sh-ai-head" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
-            <span className="ai-spark sh-spark" aria-hidden="true">✦</span>
+            <span className="ai-spark sh-spark" aria-hidden="true">AI</span>
             <b>Họp nhanh hôm nay</b>
             {insight.data && (
               <span className={`sh-verdict sh-tone-${VERDICT[insight.data.forecast.verdict].tone}`}>
