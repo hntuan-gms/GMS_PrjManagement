@@ -32,8 +32,8 @@ export default function LabelsInput({ value, onChange, suggestions = [], placeho
   return (
     <div className="labels-input">
       {value.map((l) => (
-        <span key={l} className="label-chip">
-          {l}
+        <span key={l} className="label-chip" title={l}>
+          <span className="label-chip-text">{l}</span>
           <button type="button" aria-label={`Gỡ nhãn ${l}`} onClick={() => onChange(value.filter((x) => x !== l))}>
             ×
           </button>

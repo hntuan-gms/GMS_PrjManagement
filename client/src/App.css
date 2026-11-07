@@ -2907,15 +2907,7 @@ button.rv-un-main:active {
 }
 
 .auth-mark {
-  width: 32px;
-  height: 32px;
-  display: grid;
-  place-items: center;
-  border-radius: var(--radius-md);
-  background: var(--son);
-  color: var(--on-son);
-  font-weight: 700;
-  font-size: var(--font-size-title);
+  display: block;
 }
 
 /* Secondary on purpose: switching account signs the browser out of Atlassian
@@ -7810,8 +7802,18 @@ button.tf-chip-x:hover:not(:disabled) {
   background: var(--info-soft);
   color: var(--ai-text);
   font-size: var(--font-size-sm);
+  /* A label has no spaces, so a long one cannot wrap: it is cut with … and shown whole in the tooltip. */
+  max-width: 100%;
+  min-width: 0;
+}
+.label-chip-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .label-chip button {
+  flex: none;
   border: none;
   background: none;
   padding: 0 4px;

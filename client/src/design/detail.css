@@ -359,6 +359,15 @@ button.tdx-more {
 .tdx-prop .label-chip {
   background: var(--sunken);
   color: var(--ink-2);
+  /* Leaves room on the chip's own line for the resting field, so no empty line hangs under it. */
+  max-width: calc(100% - 28px);
+}
+.tdx-prop .labels-input {
+  max-width: calc(100% + 8px);
+}
+.tdx-prop .labels-input:not(:focus-within) input {
+  flex-basis: 20px;
+  min-width: 20px;
 }
 .tdx-prop .labels-input:hover .label-chip {
   background: color-mix(in srgb, var(--ink) 8%, var(--sunken));

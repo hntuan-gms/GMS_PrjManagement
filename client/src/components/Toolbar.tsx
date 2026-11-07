@@ -5,6 +5,7 @@ import { useAppearance } from "../useAppearance";
 import { Icon, type IconName } from "./Icons";
 import { useDialogs } from "./dialogContext";
 import Popover from "./Popover";
+import BrandMark from "./BrandMark";
 import { initialsOf as initials } from "../avatar";
 
 import { dismissForNavigation } from "../layers";
@@ -147,9 +148,18 @@ export default function Toolbar({
   return (
     <>
       <nav className="app-rail" aria-label="Điều hướng">
-        <span className="rail-mark" aria-hidden="true">
-          <span>G</span>
-        </span>
+        <button
+          type="button"
+          className="rail-mark"
+          aria-label="GMS · về Hôm nay"
+          data-tip="Hôm nay  G H"
+          onClick={() => {
+            dismissForNavigation();
+            onViewChange("today");
+          }}
+        >
+          <BrandMark size={30} />
+        </button>
         <RailButton icon="plus" label="Tạo việc" keys="C" onClick={onAddTask} />
         <span className="rail-sep" aria-hidden="true" />
         <RailButton icon="sun" label="Hôm nay" keys="G H" view="today" active={view === "today"} onClick={() => onViewChange("today")} />

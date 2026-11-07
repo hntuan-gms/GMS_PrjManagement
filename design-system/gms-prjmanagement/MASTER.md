@@ -40,7 +40,7 @@ Component  --control-* --menu-* --dialog-*
 | Đường kẻ | `--line`, `--line-strong`, `--line-stronger` | Dùng ít. Không kẻ dọc giữa cột bảng |
 | Chữ | `--ink` · `--ink-2` · `--ink-3` (nhạt nhất cho chữ, ≥4.8:1) · `--ink-4` (**chỉ** icon/đường) | |
 | Nút chính | `--color-primary` = **mực** | Không có nút xanh dương |
-| "Bây giờ / của tôi" | `--son` | Vạch hôm nay, chấm chưa đọc, dấu "đang ở đây" trên thanh bên, logo. **Không** dùng cho nút hay lỗi |
+| "Bây giờ / của tôi" | `--son` | Vạch hôm nay, chấm chưa đọc, dấu "đang ở đây" trên thanh bên, chấm trong logo. **Không** dùng cho nút hay lỗi |
 | Đang chọn / focus | `--info-wash` + viền trái 2px `--info` / vòng `--control-ring` | |
 | Trạng thái | `--st-todo` ○ · `--st-doing` ◑ · `--st-done` ●✓ | Qua `StatusGlyph`, không phải viên màu |
 | Nguy cơ | `--risk` (+ `-wash`, `-text`) | Quá hạn, quá tải, vi phạm. **Luôn** kèm icon, chữ hoặc gạch chéo |
@@ -87,7 +87,7 @@ Mỗi họ tín hiệu có 5 bậc: `-wash` (nền) · `-soft` · `-line` (viề
 
 ## 2. Khung ứng dụng
 
-- **Thanh bên** (`.app-rail`, 56px, cố định trái, icon kèm nhãn 10px): logo son (về Hôm nay) · Tạo việc · Hôm nay · Dự án · … · Trợ lý · avatar (Giao diện, Mật độ, Phím tắt `?`, Đăng xuất). Rail là của tôi, header là của dự án; một hành động chỉ có một nút (không còn nút Tìm, Giờ làm ở rail). Tooltip ghi kèm phím, hiện sau 400ms. Mục đang ở có dấu son ở mép.
+- **Thanh bên** (`.app-rail`, 56px, cố định trái, icon kèm nhãn 10px): logo (về Hôm nay) · Tạo việc · Hôm nay · Dự án · … · Trợ lý · avatar (Giao diện, Mật độ, Phím tắt `?`, Đăng xuất). Rail là của tôi, header là của dự án; một hành động chỉ có một nút (không còn nút Tìm, Giờ làm ở rail). Tooltip ghi kèm phím, hiện sau 400ms. Mục đang ở có dấu son ở mép.
 - **Header** (`.toolbar`, 44px): tên dự án (menu: Đổi dự án `Ctrl P`, Cài đặt dự án `G S`) · bốn **lăng kính** chữ `Kế hoạch 1 · Bảng 2 · Nhân lực 3 · Nhịp dự án 4` (gạch mực dưới lăng kính hiện tại) · **chỉ báo đồng bộ** (`● Khớp Jira` / `Đang đọc Jira…` / `Jira đang giới hạn · n phút`; bấm = đọc lại) · nút giả ô tìm `Ctrl K`. **Không có nút đặc nào trong header.**
 - **Thanh lọc** (`.tf-bar`, 40px, điều khiển 28px): dùng chung cho Kế hoạch và Nhân lực. Bộ lọc đang bật là nền mực.
 - **Trang mặc định** là Hôm nay; sau đó nhớ lăng kính cuối theo dự án (`gms.view.<site>.<project>`). `?view=gantt|board|resource|report|settings|today` mở thẳng; `timesheet` là bí danh của Nhân lực · Giờ đã ghi.
@@ -97,6 +97,9 @@ Mỗi họ tín hiệu có 5 bậc: `-wash` (nền) · `-soft` · `-line` (viề
 - **Lớp phủ** đăng ký ở `layers.ts` (`useLayer`): Esc đóng lớp trên cùng, phím tắt đứng yên phía sau.
 
 ## 3. Thành phần
+
+- **Logo** (`BrandMark`): ô mực bo 8/32, chữ G màu giấy, gạch ngang của G là một dòng thời gian với chấm son ở "bây giờ". Chế độ tối tự đảo mực/giấy qua token. Cùng một hình ở ba chỗ, sửa cả ba: `components/BrandMark.tsx`, `public/favicon.svg`, màn chào trong `index.html`.
+- **Màn chào** (`index.html` + `splash.ts`): vẽ từ byte đầu tiên (trước JS và font), không bao giờ giữ lại để trình diễn. Lần mở đầu trong tab: logo được vẽ (~0,6 s) rồi bay vào ô logo trên thanh bên; các lần tải lại: chỉ hiện nếu tải lâu hơn một cái chớp mắt. Giảm chuyển động: không hiệu ứng.
 
 - **Ô lệnh** (`CommandBar`, `Ctrl K`): lệnh (kèm phím), tìm việc không dấu, tạo việc bằng câu (`quickAdd.ts`: `@người`, ngày, `3n`, `4h`, `!cao`, `^DEMO-2`, `sau DEMO-5`, `#nhãn`, `/bug`), hỏi trợ lý (`Tab`). Mở không hiệu ứng. Phím `C` mở thẳng chế độ Tạo.
 - **Phím tắt**: một danh sách duy nhất trong `shortcuts.ts`; bảng `?` đọc từ đó. Phím chữ không chạy khi đang gõ hoặc có lớp nào mở.

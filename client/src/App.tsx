@@ -6,6 +6,7 @@ import ProjectPicker from "./components/ProjectPicker";
 import ProjectWorkspace from "./components/ProjectWorkspace";
 import { captureDeepLink, clearDeepLink, type DeepLink } from "./deepLink";
 import { useSession } from "./useSession";
+import { dismissSplash } from "./splash";
 
 /**
  * Auth shell. Every hook runs before any branch, so the early returns below stay
@@ -43,9 +44,14 @@ export default function App() {
     );
   }, [link, session, projectKey, selectProject]);
 
-  if (status === "checking") {
-    return <div className="center-message">Đang kiểm tra phiên đăng nhập...</div>;
-  }
+  // The splash (index.html) covers the wait for the session; it leaves once there is a real
+  // screen under it, so the mark can fly into the rail's.
+  const waiting = status === "checking" || Boolean(link && session && projectKey !== link.project);
+  useEffect(() => {
+    if (!waiting) dismissSplash();
+  }, [waiting]);
+
+  if (status === "checking") return null;
   // Holding the workspace back while the link's project is being switched to, so the wrong
   // project's tasks do not flash up first.
   if (link && session && projectKey !== link.project) {

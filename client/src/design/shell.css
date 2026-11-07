@@ -18,24 +18,45 @@
   background: var(--paper);
   border-right: 1px solid var(--line);
 }
-.rail-mark {
-  width: 28px;
-  height: 28px;
-  margin-bottom: 6px;
+/* The mark is the way home (Hôm nay). No box of its own: the tile is the button. */
+button.rail-mark {
+  position: relative;
+  width: 46px;
+  height: 40px;
+  margin-bottom: 4px;
   padding: 0;
+  display: grid;
+  place-items: center;
   border: none;
   border-radius: var(--radius-md);
-  background: var(--son);
-  color: var(--on-son);
-  font-weight: 700;
-  font-size: var(--font-size-lead);
-  letter-spacing: -0.02em;
+  background: transparent;
 }
-.rail-mark:hover:not(:disabled) {
-  background: var(--son);
-  color: var(--on-son);
+button.rail-mark:hover:not(:disabled) {
+  background: transparent;
   border: none;
-  filter: brightness(1.05);
+}
+button.rail-mark .brand-mark {
+  transition: transform var(--d-1) var(--e-out);
+}
+button.rail-mark:hover .brand-mark {
+  transform: scale(1.06);
+}
+button.rail-mark:active .brand-mark {
+  transform: scale(0.96);
+}
+button.rail-mark:focus-visible {
+  outline: none;
+  box-shadow: var(--control-ring);
+}
+/* Ink tile, paper G, son "now" dot; dark mode swaps ink and paper through the tokens. */
+.brand-tile {
+  fill: var(--ink);
+}
+.brand-g {
+  stroke: var(--paper);
+}
+.brand-dot {
+  fill: var(--son);
 }
 .rail-sep {
   width: 20px;
@@ -782,9 +803,6 @@ body:has(.selection-bar) .toaster {
 }
 
 /* The mark at the top of the rail is a mark, not a button. */
-.rail-mark {
-  cursor: default;
-}
 .project-current {
   margin-left: auto;
   display: inline-flex;
