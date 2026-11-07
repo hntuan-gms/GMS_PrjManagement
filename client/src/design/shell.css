@@ -370,11 +370,16 @@ kbd {
 .sg-reopened .sg-fill {
   fill: var(--warn);
 }
-.sg-blocked .sg-ring {
+.sg-blocked .sg-ring,
+.sg-failed .sg-ring {
   stroke: var(--risk);
 }
-.sg-blocked .sg-solid {
+.sg-blocked .sg-solid,
+.sg-failed .sg-solid {
   fill: var(--risk);
+}
+.sg-notrun .sg-fill {
+  fill: var(--ink-3);
 }
 .sg-done .sg-ring {
   stroke: var(--st-done);

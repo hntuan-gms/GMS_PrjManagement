@@ -1339,7 +1339,7 @@ export default function GanttView({
           .map((t) => ({
             id: t.id,
             label: t.toStatusName,
-            lead: <StatusGlyph category={t.toCategory} />,
+            lead: <StatusGlyph category={t.toCategory} name={t.toStatusName} />,
             hint: t.fields.some((f) => !f.optional) ? "cần nhập thêm" : t.name !== t.toStatusName ? t.name : undefined,
           }));
   const cellEditor =

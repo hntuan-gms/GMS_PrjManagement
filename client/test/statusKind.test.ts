@@ -37,11 +37,23 @@ describe("statusKind", () => {
     for (const [cat, name, want] of cases) assert.equal(statusKind(cat, name), want, name);
   });
 
-  it("a closed status is only done or dropped, whatever its name", () => {
+  it("a closed status is done or dropped, unless its name is a test result", () => {
     assert.equal(statusKind("done", "Cancelled"), "dropped");
     assert.equal(statusKind("done", "Đã hủy"), "dropped");
     assert.equal(statusKind("done", "Reviewed and closed"), "done");
-    assert.equal(statusKind("done", "Blocked"), "done");
+    assert.equal(statusKind("done", "Chờ duyệt"), "done");
+    assert.equal(statusKind("done", "Ready to ship"), "done");
+  });
+
+  it("test-result statuses filed under done each get their own kind", () => {
+    assert.equal(statusKind("done", "PASSED"), "done");
+    assert.equal(statusKind("done", "Failed"), "failed");
+    assert.equal(statusKind("done", "Không đạt"), "failed");
+    assert.equal(statusKind("done", "Not Run"), "notrun");
+    assert.equal(statusKind("done", "Chưa chạy"), "notrun");
+    assert.equal(statusKind("done", "Skipped"), "notrun");
+    assert.equal(statusKind("done", "Pending"), "hold");
+    assert.equal(statusKind("done", "Blocked"), "blocked");
   });
 
   it("'ready' and 'backlog' do not apply to work already under way", () => {

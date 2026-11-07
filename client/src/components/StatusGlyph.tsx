@@ -11,7 +11,7 @@ const LABEL: Record<Task["statusCategory"], string> = {
  * Status as a shape, not a filled pill (plan §4.5), readable without colour; the colour only confirms it.
  * Each state a workflow can be in has its own shape (`statusKind`): ○ to do, ◌ backlog, ▷ ready,
  * a pie that fills with % while in progress, ◉ in review/testing, ⏸ on hold, ⊖ blocked, ↺ reopened,
- * ✓ done, ⊘ cancelled. The workflow's own status name ("In-Progress", "Pending"…) is shown beside it
+ * ✓ done/passed, ✕ failed, grey ▷ not run, ⊘ cancelled. The workflow's own status name ("In-Progress", "Pending"…) is shown beside it
  * by the caller — names differ per site and cannot be translated safely (BUG-05), the kind is a best
  * reading of the name and falls back to the category.
  */
@@ -43,6 +43,15 @@ function inner(kind: StatusKind, percent: number) {
           <path d="M4.5 7h5" className="sg-mark" />
         </>
       );
+    case "failed":
+      return (
+        <>
+          <circle cx={C} cy={C} r={R} className="sg-solid" />
+          <path d="M5.2 5.2l3.6 3.6M8.8 5.2l-3.6 3.6" className="sg-mark" />
+        </>
+      );
+    case "notrun":
+      return <path d="M5.9 4.7L9.5 7 5.9 9.3z" className="sg-fill" />;
     case "dropped":
       return <path d="M3.4 10.6l7.2-7.2" className="sg-slash" />;
     case "review":
