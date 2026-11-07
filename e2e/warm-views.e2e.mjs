@@ -73,6 +73,28 @@ await step("sau khi đồng bộ, mở lại Bảng thì hỏi lại", async () 
   assert.ok(counts.board > boardBefore, "Bảng không hỏi lại dù việc đã đổi");
 });
 
+console.log("\n== Tab mở khi tải sẵn chưa xong ==");
+await step("bấm Bảng lúc yêu cầu tải sẵn còn đang chạy: chờ nó, không gửi thêm yêu cầu thứ hai", async () => {
+  const slow = await browser.newPage({ viewport: { width: 1500, height: 900 } });
+  slow.setDefaultTimeout(15000);
+  let boards = 0;
+  slow.on("request", (r) => {
+    if (/\/api\/board(\?|$)/.test(r.url()) && r.method() === "GET") boards++;
+  });
+  await slow.route(/\/api\/board(\?|$)/, async (route) => {
+    await new Promise((x) => setTimeout(x, 2500));
+    await route.continue();
+  });
+  await slow.goto(process.env.E2E_APP ?? "http://localhost:5173/");
+  await slow.waitForSelector(".wbs-row");
+  await slow.waitForTimeout(800);
+  assert.equal(boards, 1, "yêu cầu tải sẵn chưa được gửi: " + boards);
+  await slow.locator(".toolbar-tabs button", { hasText: "Bảng" }).click();
+  await slow.waitForSelector(".bd-card", { timeout: 10000 });
+  assert.equal(boards, 1, `Bảng gửi thêm ${boards - 1} yêu cầu dù tải sẵn đã có`);
+  await slow.close();
+});
+
 await step("không có lỗi trình duyệt", async () => {
   assert.deepEqual(problems, []);
 });

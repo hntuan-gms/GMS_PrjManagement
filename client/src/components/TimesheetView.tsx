@@ -7,6 +7,7 @@ import { localToday, roundHours } from "../taskForm";
 import type { Session, Task, Timesheet, TimesheetPerson, WorklogEntry } from "../types";
 import { addDays, rangeOf, weekday, type TimesheetMode } from "../timesheetRange";
 import { isViewFresh, readViewCache, viewCacheScope, writeViewCache } from "../viewCache";
+import { warmInFlight } from "../warmViews";
 import NumberInput from "./NumberInput";
 import { Icon } from "./Icons";
 import TaskPicker from "./TaskPicker";
@@ -91,24 +92,30 @@ export default function TimesheetView({
   useEffect(() => {
     let alive = true;
     // Fetched ahead when the project opened (warmViews.ts) and nothing changed since: no second read of Jira.
-    if (reloadKey === 0 && isViewFresh(cacheScope, "timesheet", range)) {
+    const showAhead = () => {
+      if (reloadKey !== 0 || !isViewFresh(cacheScope, "timesheet", range)) return false;
       const ahead = readViewCache<Timesheet>(cacheScope, "timesheet", range);
-      if (ahead) {
-        setResult({ key: requestKey, sheet: ahead });
-        return;
-      }
-    }
-    api
-      .getTimesheet(from, to)
-      .then((sheet) => {
-        writeViewCache(cacheScope, "timesheet", range, sheet);
-        if (alive) setResult({ key: requestKey, sheet });
-      })
-      .catch(
-        (e) =>
-          alive &&
-          setResult({ key: requestKey, error: e instanceof ApiError || e instanceof Error ? e.message : "Không tải được timesheet." })
-      );
+      if (!ahead) return false;
+      setResult({ key: requestKey, sheet: ahead });
+      return true;
+    };
+    const fetchNow = () =>
+      api
+        .getTimesheet(from, to)
+        .then((sheet) => {
+          writeViewCache(cacheScope, "timesheet", range, sheet);
+          if (alive) setResult({ key: requestKey, sheet });
+        })
+        .catch(
+          (e) =>
+            alive &&
+            setResult({ key: requestKey, error: e instanceof ApiError || e instanceof Error ? e.message : "Không tải được timesheet." })
+        );
+    if (showAhead()) return;
+    // Still on its way: wait for that answer rather than send the same request again.
+    const pending = reloadKey === 0 ? warmInFlight(cacheScope, "timesheet", range) : null;
+    if (pending) void pending.then(() => alive && !showAhead() && fetchNow());
+    else void fetchNow();
     return () => {
       alive = false;
     };

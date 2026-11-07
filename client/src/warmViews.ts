@@ -62,3 +62,11 @@ export function warmBoardAndTimesheet(scope: string, projectKey: string): Promis
     warm(scope, "timesheet", `${from}|${to}`, () => api.getTimesheet(from, to, { background: true })),
   ]).then(() => undefined);
 }
+
+/**
+ * A warm-up still on its way for this answer. A tab opened before it lands waits for it instead of asking
+ * Jira for the same thing again (a second read of the board or the timesheet, for nothing).
+ */
+export function warmInFlight(scope: string, view: string, params: string): Promise<void> | null {
+  return inFlight.get(`${scope}|${view}|${params}`) ?? null;
+}

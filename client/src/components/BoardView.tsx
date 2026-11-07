@@ -50,6 +50,7 @@ import KanbanBoard from "./KanbanBoard";
 import SprintHeader from "./SprintHeader";
 import { readStoredBoardId, storedBoardKey } from "../boardModel";
 import { isViewFresh, readViewCache, viewCacheScope, writeViewCache } from "../viewCache";
+import { warmInFlight } from "../warmViews";
 import { CompleteSprintModal, CreateBoardModal, SprintFormModal, SprintPlanModal } from "./SprintModals";
 import { TransitionFieldsDialog } from "./TransitionFields";
 import { useDialogs } from "./dialogContext";
@@ -246,13 +247,25 @@ export default function BoardView({
   useEffect(() => {
     if (refreshing) return;
     // Fetched ahead when the project opened (warmViews.ts) and nothing changed since: no second read of Jira.
-    if (isViewFresh(cacheScope, "board", String(boardId))) {
+    const showAhead = () => {
+      if (!isViewFresh(cacheScope, "board", String(boardId))) return false;
       const ahead = readViewCache<BoardSnapshot>(cacheScope, "board", String(boardId));
-      if (ahead) {
-        setSnapshot(ahead);
-        setLoadError(null);
-        return;
-      }
+      if (!ahead) return false;
+      setSnapshot(ahead);
+      setLoadError(null);
+      return true;
+    };
+    if (showAhead()) return;
+    // Still on its way: wait for that answer rather than send the same request again.
+    const pending = warmInFlight(cacheScope, "board", String(boardId));
+    if (pending) {
+      let alive = true;
+      void pending.then(() => {
+        if (alive && !showAhead()) load(boardId);
+      });
+      return () => {
+        alive = false;
+      };
     }
     load(boardId);
     // eslint-disable-next-line react-hooks/exhaustive-deps

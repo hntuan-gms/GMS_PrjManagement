@@ -6,7 +6,7 @@ import { todayIso } from "../resourceAllocation";
 import { csvName, downloadCsv } from "../csv";
 import { isAssignableType, type JiraUser, type ProgressMetrics, type ProgressOverview, type ProgressReport, type ProgressScope, type Task } from "../types";
 import { isViewFresh, readViewCache, writeViewCache } from "../viewCache";
-import { overviewParams } from "../warmViews";
+import { overviewParams, warmInFlight } from "../warmViews";
 import { buildReportLink } from "../deepLink";
 import type { SlaView } from "../sla";
 import AgileReports from "./AgileReports";
@@ -155,24 +155,31 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
   useEffect(() => {
     if (refreshing) return;
     // Fetched ahead when the project opened (warmViews.ts) and nothing changed since: no second read of Jira.
-    if (reloadTick === 0 && isViewFresh(cacheScope, "progress", overviewParams(asOf, scope))) {
-      const ahead = readViewCache<ProgressOverview>(cacheScope, "progress", overviewParams(asOf, scope));
-      if (ahead) {
-        setOverview(ahead);
-        setLoadError(null);
-        return;
-      }
-    }
+    const params = overviewParams(asOf, scope);
+    const showAhead = () => {
+      if (reloadTick !== 0 || !isViewFresh(cacheScope, "progress", params)) return false;
+      const ahead = readViewCache<ProgressOverview>(cacheScope, "progress", params);
+      if (!ahead) return false;
+      setOverview(ahead);
+      setLoadError(null);
+      return true;
+    };
     let alive = true;
-    api
-      .getProgress(asOf, scope)
-      .then((data) => {
-        writeViewCache(cacheScope, "progress", overviewParams(asOf, scope), data);
-        if (!alive) return;
-        setOverview(data);
-        setLoadError(null);
-      })
-      .catch((e: Error) => alive && setLoadError(e.message));
+    const fetchNow = () =>
+      api
+        .getProgress(asOf, scope)
+        .then((data) => {
+          writeViewCache(cacheScope, "progress", params, data);
+          if (!alive) return;
+          setOverview(data);
+          setLoadError(null);
+        })
+        .catch((e: Error) => alive && setLoadError(e.message));
+    if (showAhead()) return;
+    // Still on its way: wait for that answer rather than send the same request again.
+    const pending = reloadTick === 0 ? warmInFlight(cacheScope, "progress", params) : null;
+    if (pending) void pending.then(() => alive && !showAhead() && fetchNow());
+    else void fetchNow();
     return () => {
       alive = false;
     };
