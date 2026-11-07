@@ -1,5 +1,7 @@
 import { useState, type ReactNode } from "react";
+import { initialsOf as initials } from "../avatar";
 import type { ActionPriority, Health, InsightKind, ProgressMetrics, ProgressReport } from "../types";
+import { Icon } from "./Icons";
 
 /**
  * The AI half of the report page, kept visibly apart from the numbers.
@@ -82,11 +84,6 @@ function fmtDate(iso: string): string {
   return `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
 }
 
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  return ((parts.at(-1)?.[0] ?? "") + (parts.length > 1 ? parts[0][0] : "")).toUpperCase() || "?";
-}
-
 function InsightIcon({ kind }: { kind: InsightKind }) {
   // Feather-style strokes; decorative — the kind is also written as a label.
   const paths: Record<InsightKind, ReactNode> = {
@@ -137,22 +134,23 @@ export default function AiBrief({
   const header = (
     <div className="ai-head">
       <div className="ai-head-title">
-        <span className="ai-spark" aria-hidden="true">
-          AI
-        </span>
+        <span className="ai-tag">AI</span>
         <div>
-          <b>Nhận định AI</b>
-          <span>
-            {report
-              ? `${isLatest ? "Mới nhất" : "Báo cáo cũ"} · ${fmtDateTime(report.createdAt)}`
-              : "Phân tích nguyên nhân, dự báo và giải pháp"}
-          </span>
+          <b>Nhận định</b>
+          <span>{report ? `${isLatest ? "Mới nhất" : "Báo cáo cũ"} · ${fmtDateTime(report.createdAt)}` : "Đang phân tích"}</span>
         </div>
       </div>
-      {/* Hidden rather than disabled for guests: the route 403s for them. */}
-      {canGenerate && (
+      {/* Hidden rather than disabled for guests: the route 403s for them. With no analysis yet the button
+          is on the page's header row (ProgressReportView), where there is no frame around it. */}
+      {canGenerate && report && (
         <button className="ai-generate" onClick={onGenerate} disabled={generating}>
-          {generating ? "Đang phân tích..." : report ? "↻ Phân tích lại" : "Phân tích ngay"}
+          {generating ? (
+            "Đang phân tích..."
+          ) : (
+            <>
+              <Icon name="sync" size={13} /> Phân tích lại
+            </>
+          )}
         </button>
       )}
     </div>
@@ -176,32 +174,9 @@ export default function AiBrief({
     );
   }
 
-  if (!report) {
-    return (
-      <aside className="pr-ai">
-        {header}
-        <div className="ai-body">
-          {error && <div className="ai-error">{error}</div>}
-          <div className="ai-empty">
-            <div className="ai-empty-mark" aria-hidden="true">
-              AI
-            </div>
-            <b>Chưa có nhận định nào</b>
-            <p>
-              {canGenerate
-                ? "AI sẽ đọc toàn bộ công việc, phụ thuộc và tải của từng người để chỉ ra nguyên nhân, dự báo ngày kết thúc và đề xuất ai nên làm gì."
-                : "Phần nhận định do thành viên nội bộ tạo và sẽ hiện ở đây khi có."}
-            </p>
-            {canGenerate && (
-              <button className="primary" onClick={onGenerate}>
-                Phân tích ngay
-              </button>
-            )}
-          </div>
-        </div>
-      </aside>
-    );
-  }
+  // No analysis yet: no frame at all. The offer is the page header's "Phân tích ngay" (plan H9), and the
+  // dashboard takes the full width.
+  if (!report) return null;
 
   const n = report.narrative;
   const insights = n.insights ?? [];

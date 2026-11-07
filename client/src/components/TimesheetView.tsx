@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import DateField from "./DateField";
+import Avatar from "./Avatar";
 import { api, ApiError } from "../api";
 import { csvName, downloadCsv } from "../csv";
 import { localToday, roundHours } from "../taskForm";
@@ -7,6 +8,9 @@ import type { Session, Task, Timesheet, TimesheetPerson, WorklogEntry } from "..
 import { addDays, rangeOf, weekday, type TimesheetMode } from "../timesheetRange";
 import { isViewFresh, readViewCache, viewCacheScope, writeViewCache } from "../viewCache";
 import NumberInput from "./NumberInput";
+import { Icon } from "./Icons";
+import TaskPicker from "./TaskPicker";
+import { orderTasksForLogging, parseHours } from "../parseHours";
 import { dayClass, expectation, isAway } from "../timesheetDays";
 import { dayLabel } from "../workCalendar";
 import { useWorkCalendar } from "./workCalendarContext";
@@ -34,15 +38,6 @@ function eachDay(from: string, to: string): string[] {
   return out;
 }
 
-function initials(name: string): string {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(-2)
-    .map((p) => p[0]?.toUpperCase() ?? "")
-    .join("");
-}
-
 const away = (p: TimesheetPerson, d: string) => isAway(p, d);
 
 /** Sequential ramp over the share of a day's capacity; "over" is a state, not a darker blue. */
@@ -60,11 +55,14 @@ export default function TimesheetView({
   tasks,
   onOpenEdit,
   onTasksChanged,
+  modeSwitch,
 }: {
   session: Session;
   tasks: Task[];
   onOpenEdit: (task: Task) => void;
   onTasksChanged: () => void;
+  /** The lens's mode switch (Mức tải · Giờ đã ghi · Kỹ năng), drawn first in the toolbar. */
+  modeSwitch?: ReactNode;
 }) {
   const today = localToday();
   const calendar = useWorkCalendar();
@@ -80,6 +78,8 @@ export default function TimesheetView({
   // Deleting a worklog asks first, in the app rather than in a browser dialog.
   const [confirmDelete, setConfirmDelete] = useState<WorklogEntry | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  // Hours typed into a cell of your own row, waiting for the task they belong to (plan F5).
+  const [logPick, setLogPick] = useState<{ date: string; hours: number; rect: DOMRect } | null>(null);
 
   // Loading and error are derived from which request the last result answered,
   // rather than reset in the effect. A reload of the same range keeps showing
@@ -166,6 +166,23 @@ export default function TimesheetView({
     return { person, entries };
   }, [selection, sheet]);
 
+  // The picker lists your last logged task first, then your work in progress (parseHours.orderTasksForLogging).
+  const loggable = useMemo(() => orderTasksForLogging(tasks, me, sheet?.entries ?? []), [tasks, me, sheet]);
+
+  async function logInline(t: Task) {
+    const pick = logPick;
+    if (!pick) return;
+    setLogPick(null);
+    setActionError(null);
+    try {
+      await api.logWork({ issueKey: t.id, date: pick.date, hours: pick.hours, comment: null });
+      setReloadKey((k) => k + 1);
+      onTasksChanged();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Không ghi được giờ.");
+    }
+  }
+
   function shift(dir: -1 | 1) {
     if (mode === "week") setAnchor(addDays(from, dir * 7));
     else {
@@ -205,6 +222,7 @@ export default function TimesheetView({
   return (
     <div className="ts-wrap">
       <div className="ts-toolbar">
+        {modeSwitch}
         <div className="segmented-control">
           <button className={`segmented-btn ${mode === "week" ? "active" : ""}`} onClick={() => setMode("week")}>
             Tuần
@@ -216,8 +234,8 @@ export default function TimesheetView({
         <button onClick={() => shift(-1)} aria-label="Kỳ trước">‹</button>
         <b className="ts-range">{rangeLabel}</b>
         <button onClick={() => shift(1)} aria-label="Kỳ sau">›</button>
-        <button onClick={() => setAnchor(today)} disabled={today >= from && today <= to}>
-          Hôm nay
+        <button onClick={() => setAnchor(today)} disabled={today >= from && today <= to} title="Về kỳ chứa hôm nay">
+          Về hôm nay
         </button>
         <select
           className="ts-person-filter"
@@ -303,7 +321,7 @@ export default function TimesheetView({
                   <tr key={p.accountId} className={selection?.accountId === p.accountId ? "is-selected" : ""}>
                     <th className="ts-person">
                       <button className="ts-person-btn" onClick={() => setSelection({ accountId: p.accountId, date: null })}>
-                        <span className="bd-avatar">{initials(p.displayName)}</span>
+                        <Avatar name={p.displayName} avatarUrl={p.avatarUrl} className="bd-avatar" decorative />
                         <span className="ts-name">{p.displayName}</span>
                         {p.accountId === me && <span className="ts-tag">bạn</span>}
                         {p.outsider && <span className="ts-tag" title="Có ghi giờ nhưng không nằm trong danh sách thành viên dự án">ngoài DA</span>}
@@ -339,9 +357,20 @@ export default function TimesheetView({
                             </>
                           ) : off ? (
                             <span className="ts-away">Nghỉ</span>
-                          ) : gap ? (
-                            <span className="ts-gap" aria-label="Chưa ghi giờ">●</span>
-                          ) : null}
+                          ) : (
+                            <>
+                              {gap && (
+                                <span className="ts-gap" aria-label="Chưa ghi giờ">
+                                  ●
+                                </span>
+                              )}
+                              {/* Your own row: an empty day takes hours straight away. Jira only accepts time logged
+                                  under the signed-in user, so other people's rows stay read-only. */}
+                              {p.accountId === me && (
+                                <InlineHours date={d} onCommit={(hours, rect) => setLogPick({ date: d, hours, rect })} />
+                              )}
+                            </>
+                          )}
                         </td>
                       );
                     })}
@@ -419,7 +448,7 @@ export default function TimesheetView({
                             aria-label="Sửa giờ đã ghi"
                             title="Sửa"
                           >
-                            ✎
+                            <Icon name="edit" size={14} />
                           </button>
                         )}
                         {e.mine && (
@@ -454,6 +483,16 @@ export default function TimesheetView({
         </div>
       )}
 
+      {logPick && (
+        <TaskPicker
+          anchor={logPick.rect}
+          tasks={loggable}
+          placeholder={`Ghi ${logPick.hours}h ngày ${dm(logPick.date)} cho việc`}
+          onPick={(t) => void logInline(t)}
+          onClose={() => setLogPick(null)}
+        />
+      )}
+
       {logFor && (
         <LogWorkModal
           tasks={tasks}
@@ -468,6 +507,44 @@ export default function TimesheetView({
         />
       )}
     </div>
+  );
+}
+
+/**
+ * The input in an empty day of your own row: type 4, 1.5 or 2h30 and press Enter; the task is asked next.
+ * Not a number field: "2h30" must be typeable. A value that is not a duration stays and turns red.
+ */
+function InlineHours({ date, onCommit }: { date: string; onCommit: (hours: number, rect: DOMRect) => void }) {
+  const [text, setText] = useState("");
+  const [bad, setBad] = useState(false);
+  return (
+    <input
+      className={`ts-inline${text ? " is-filled" : ""}${bad ? " is-bad" : ""}`}
+      value={text}
+      inputMode="decimal"
+      autoComplete="off"
+      aria-label={`Ghi giờ ngày ${dm(date)}`}
+      aria-invalid={bad || undefined}
+      title={bad ? "Nhập số giờ, ví dụ 4, 1,5 hoặc 2h30" : undefined}
+      onClick={(e) => e.stopPropagation()}
+      onChange={(e) => {
+        setText(e.target.value);
+        setBad(false);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          const hours = parseHours(text);
+          if (hours === null) setBad(true);
+          else onCommit(hours, e.currentTarget.getBoundingClientRect());
+        } else if (e.key === "Escape" && text) {
+          // A draft is dropped first; a second Esc is the app's.
+          e.stopPropagation();
+          setText("");
+          setBad(false);
+        }
+      }}
+    />
   );
 }
 

@@ -90,13 +90,17 @@ async function openTask(id) {
 }
 const statusSelect = () => page.locator("#td-status");
 
-await step("bố cục hai cột: nội dung chính bên trái, chi tiết bên phải; trạng thái ở đầu bảng chi tiết", async () => {
+await step("bố cục một cột: chi tiết (.td-side) nằm trên nội dung (.td-main); trạng thái ở đầu khung", async () => {
   await openTask("DEMO-5");
+  await page.waitForTimeout(500); // the panel slides in
   const main = await page.locator(".td-main").boundingBox();
   const side = await page.locator(".td-side").boundingBox();
-  assert.ok(side.x > main.x + main.width - 2, "bảng chi tiết phải nằm bên phải");
-  const groups = await page.$$eval(".td-group-title", (h) => h.map((x) => x.textContent));
-  assert.deepEqual(groups.slice(0, 2), ["Trạng thái", "Con người"]);
+  assert.ok(side.y + side.height <= main.y + 2, "bảng chi tiết phải nằm trên nội dung");
+  assert.ok(Math.abs(side.x - main.x) < 2, "hai khối phải cùng một cột");
+  assert.equal(await page.locator(".td-group-title").count(), 0, "không còn tiêu đề nhóm");
+  const head = await page.locator(".td-header").boundingBox();
+  const status = await statusSelect().boundingBox();
+  assert.ok(status.y >= head.y && status.y + status.height <= head.y + head.height + 2, "trạng thái phải nằm ở dòng đầu");
   assert.equal(await page.locator(".modal-detail").getAttribute("role"), "dialog");
 });
 await step("danh sách trạng thái là danh sách của ứng dụng (select tuỳ biến), không phải của hệ điều hành", async () => {
@@ -149,16 +153,15 @@ await step("không sửa gì thì đóng ngay, không hỏi", async () => {
   await page.waitForSelector(".modal", { state: "detached" });
   assert.equal(await page.locator(".dlg").count(), 0);
 });
-await step("Esc trong hộp thoại chỉ đóng hộp thoại; focus trả về chỗ cũ", async () => {
-  // The one dialog the panel still raises is "Xoá …?": Esc there closes only the dialog.
+await step("Esc trong hộp thoại chỉ đóng hộp thoại, khung chi tiết còn nguyên", async () => {
+  // The one dialog the panel still raises is "Xoá …?" (last item of the ⋯ menu): Esc there closes only the dialog.
   await openTask("DEMO-5");
-  await page.locator(".td-footer button.danger").focus();
-  await page.keyboard.press("Enter");
+  await page.locator(".td-more").click();
+  await page.locator(".td-more-menu .menu-item.is-danger").click();
   await page.locator(".dlg").waitFor();
   await page.keyboard.press("Escape");
   await page.locator(".dlg").waitFor({ state: "detached" });
   assert.equal(await page.locator(".modal-detail").count(), 1, "Esc trong hộp thoại đã đóng luôn cửa sổ chi tiết");
-  assert.equal(await page.evaluate(() => document.activeElement?.classList.contains("danger")), true, "focus phải về nút cũ");
   await page.locator("button.modal-close").click();
   await page.waitForSelector(".modal", { state: "detached" });
 });

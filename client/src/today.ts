@@ -1,4 +1,5 @@
 import { earliestStart } from "./dependencyCascade";
+import { formatWeekdayDayMonth } from "./humanDate";
 import { addDays, diffDays } from "./resourceAllocation";
 import { isAssignableType, type Predecessor, type Task } from "./types";
 import { dayKind, dayLabel, DEFAULT_WORK_CALENDAR, isoWeekday, type WorkCalendar } from "./workCalendar";
@@ -34,12 +35,19 @@ export interface TodayData {
   /** My open tasks starting in the next UPCOMING_DAYS days, grouped by start date, soonest first. */
   upcoming: Array<{ date: string; tasks: Task[] }>;
   overdue: Task[];
+  /** My open work with no dates at all that no section above claims: it has no plan yet ("Xếp lịch"). */
+  unscheduled: Task[];
   counts: { doing: number; dueThisWeek: number };
   /** Built by code from the figures above; the caller prefixes "Chào <tên>." */
   greeting: string;
 }
 
 export const UPCOMING_DAYS = 10;
+
+/** The heading of an "Sắp tới" group: the day the work starts ("Bắt đầu T4 11/11"), so the due date at the row's end reads as a different thing. */
+export function upcomingHeading(date: string, today: string): string {
+  return `Bắt đầu ${formatWeekdayDayMonth(date, today)}`;
+}
 
 const isOpen = (t: Task) => t.statusCategory !== "done";
 
@@ -122,6 +130,8 @@ export function buildToday(tasks: Task[], meAccountId: string, today: string, ca
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([date, list]) => ({ date, tasks: list.sort((a, b) => a.id.localeCompare(b.id)) }));
 
+  const unscheduled = mine.filter((t) => !placed.has(t.id) && !t.startDate && !t.dueDate);
+
   const sunday = weekEnd(today);
   const counts = {
     doing: mine.filter((t) => t.statusCategory === "indeterminate").length,
@@ -134,6 +144,7 @@ export function buildToday(tasks: Task[], meAccountId: string, today: string, ca
     today: todayList,
     upcoming,
     overdue,
+    unscheduled,
     counts,
     greeting: todayGreeting({ waitingPeople: waitingPeople.size, overdue: overdueAll.length, today, calendar }),
   };

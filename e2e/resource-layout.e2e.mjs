@@ -4,6 +4,7 @@
 // columns, and the profile & leave slide-over. What reaches Jira for real is on the manual checklist.
 import assert from "node:assert/strict";
 import { chromium } from "playwright-core";
+import { fillDate, openTimesheet, setGranularity, granularityOf } from "./toolbar.mjs";
 
 const API = process.env.E2E_API ?? "http://localhost:4000";
 const browser = await chromium.launch({ channel: "chrome", headless: true });
@@ -66,16 +67,17 @@ const rowOf = (name) => page.locator(".rv-row-person", { hasText: name });
 // The window, read from (and written through) the exact-date boxes in the "Khoảng" menu.
 const windowOf = async () => {
   await page.locator(".rv-preset").click();
-  const inputs = page.locator(".rv-exact input[type=date]");
-  const w = { from: await inputs.nth(0).inputValue(), to: await inputs.nth(1).inputValue() };
+  const inputs = page.locator(".rv-exact .date-field input[type=text]");
+  const iso = (dmy) => `${dmy.slice(6, 10)}-${dmy.slice(3, 5)}-${dmy.slice(0, 2)}`;
+  const w = { from: iso(await inputs.nth(0).inputValue()), to: iso(await inputs.nth(1).inputValue()) };
   await page.keyboard.press("Escape");
   return w;
 };
 const setWindow = async (from, to) => {
   await page.locator(".rv-preset").click();
-  const inputs = page.locator(".rv-exact input[type=date]");
-  await inputs.nth(0).fill(from);
-  await inputs.nth(1).fill(to);
+  const inputs = page.locator(".rv-exact .date-field input[type=text]");
+  await fillDate(inputs.nth(0), from);
+  await fillDate(inputs.nth(1), to);
   await page.keyboard.press("Escape");
 };
 const lenOf = (w) => (Date.parse(w.to) - Date.parse(w.from)) / 86400000 + 1;
@@ -108,7 +110,8 @@ await step("pill KPI: Tất cả / Có việc / Đang quá tải kèm số, Mứ
   assert.equal(pills.length, 3);
   assert.match(pills[0], /^Tất cả \(\d+\)$/);
   assert.match(pills[1], /^Có việc \(\d+\)$/);
-  assert.match(pills[2], /^Đang quá tải \(\d+\)$/);
+  // A zero count is hidden (MASTER), the pill stays.
+  assert.match(pills[2], /^Đang quá tải( \(\d+\))?$/);
   assert.match(await page.locator(".rv-kpi-stat").innerText(), /Mức sử dụng: \d+%/);
   assert.match(await page.locator(".rv-pill-warn").innerText(), /^\s*\d+ công việc chưa gán\s*$/);
 });
@@ -157,7 +160,7 @@ const pickPreset = async (label) => {
 };
 await step("đặt khoảng quanh hôm nay, cột theo ngày (để đối chiếu thanh với cột)", async () => {
   await setWindow(isoIn(-2), isoIn(25));
-  await page.locator(".rv-granularity").selectOption("day");
+  await setGranularity(page, "day");
 });
 await step("ít cột: cột ngày giãn hết bề ngang bảng (không còn khoảng trống bên phải)", async () => {
   const m = await page.evaluate(() => {
@@ -189,7 +192,7 @@ await step("hàng việc mở rộng giãn cùng cột: thanh vẫn thẳng cộ
 });
 await step("nhiều cột: giữ bề rộng tối thiểu của cột và cuộn ngang", async () => {
   await pickPreset("1 quý");
-  await page.locator(".rv-granularity").selectOption("day");
+  await setGranularity(page, "day");
   const m = await page.evaluate(() => {
     const scroll = document.querySelector(".rv-heatmap-scroll");
     return { over: scroll.scrollWidth - scroll.clientWidth, cell: document.querySelector(".rv-head-cell").getBoundingClientRect().width };
@@ -208,7 +211,7 @@ await step("nhãn tháng rút gọn khi hẹp (T10/26, T10) và không bao giờ
   for (const preset of ["4 tuần", "8 tuần", "1 quý"]) {
     for (const g of ["day", "week", "month"]) {
       await pickPreset(preset);
-      await page.locator(".rv-granularity").selectOption(g);
+      await setGranularity(page, g);
       const res = await page.locator(".rv-month").evaluateAll((els) =>
         els.map((el) => {
           const shown = [...el.children].find((c) => getComputedStyle(c).display !== "none");
@@ -218,7 +221,7 @@ await step("nhãn tháng rút gọn khi hẹp (T10/26, T10) và không bao giờ
       for (const r of res) {
         assert.ok(!r.clipped, `${preset}/${g}: "${r.text}" bị cắt`);
         assert.ok(r.text && r.title, "thiếu nhãn hoặc title đầy đủ");
-        if (!/^(Thg \d+\/\d{4}|Năm \d{4})$/.test(r.text)) compact++;
+        if (!/^(Tháng \d+\/\d{4}|Năm \d{4})$/.test(r.text)) compact++;
       }
     }
   }
@@ -226,7 +229,7 @@ await step("nhãn tháng rút gọn khi hẹp (T10/26, T10) và không bao giờ
 });
 await step("trả lại khoảng quanh hôm nay, cột theo ngày", async () => {
   await setWindow(isoIn(-2), isoIn(25));
-  await page.locator(".rv-granularity").selectOption("day");
+  await setGranularity(page, "day");
 });
 await step("tooltip ô: ngày DD/MM/YYYY; ngày nghỉ ghi 'Ngày nghỉ' thay vì 0h / 0h", async () => {
   const titles = await page.locator(".rv-row-person .rv-cell").evaluateAll((els) => els.map((e) => ({ t: e.title, off: e.className.includes("band-off") })));
@@ -245,7 +248,7 @@ console.log("\n== Cuộn và zoom như Gantt ==");
 await step("không còn thanh trượt cửa sổ, mũi tên kỳ trước/sau; có 'Hôm nay'; ngày chính xác vẫn ở menu 'Khoảng'", async () => {
   assert.equal(await page.locator(".rv-scrub").count(), 0);
   assert.equal(await page.locator(".rv-step").count(), 0);
-  assert.equal(await page.locator(".rv-range > input[type=date]").count(), 0, "ô ngày không được nằm ngoài menu");
+  assert.equal(await page.locator(".rv-range > .date-field, .rv-range > input").count(), 0, "ô ngày không được nằm ngoài menu");
   assert.equal(await page.locator(".rv-range button", { hasText: "Hôm nay" }).count(), 1);
   const w = await windowOf();
   assert.equal(w.from, isoIn(-2));
@@ -253,7 +256,7 @@ await step("không còn thanh trượt cửa sổ, mũi tên kỳ trước/sau; 
 });
 await step("mặc định vẽ cả dự án (không cắt theo cửa sổ 4 tuần): cột đầu ≤ việc sớm nhất, cột cuối ≥ việc muộn nhất", async () => {
   await pickPreset("Theo dự án");
-  await page.locator(".rv-granularity").selectOption("week");
+  await setGranularity(page, "week");
   const tasks = await (await api("GET", "/api/tasks")).json();
   const dated = tasks.filter((t) => t.startDate);
   const minStart = dated.map((t) => t.startDate).sort()[0];
@@ -267,7 +270,7 @@ await step("mặc định vẽ cả dự án (không cắt theo cửa sổ 4 tu�
 });
 await step("bảng có thanh cuộn riêng: cuộn dọc thì tiêu đề đứng yên, cuộn ngang thì cột tên đứng yên", async () => {
   await page.setViewportSize({ width: 1500, height: 430 });
-  await page.locator(".rv-granularity").selectOption("day");
+  await setGranularity(page, "day");
   await rowOf("Nguyễn Anh").click();
   await rowOf("Trần Bình").click();
   await page.waitForSelector(".rv-expand");
@@ -297,7 +300,7 @@ await step("bảng có thanh cuộn riêng: cuộn dọc thì tiêu đề đứn
   });
 });
 await step("Ctrl + cuộn chỉ zoom trục thời gian: cột rộng/hẹp theo, số hàng, chiều cao hàng và vị trí cuộn dọc không đổi", async () => {
-  await page.locator(".rv-granularity").selectOption("week");
+  await setGranularity(page, "week");
   const snap = () =>
     page.evaluate(() => {
       const sc = document.querySelector(".rv-heatmap-scroll");
@@ -308,7 +311,7 @@ await step("Ctrl + cuộn chỉ zoom trục thời gian: cột rộng/hẹp theo
         rowH: document.querySelector(".rv-row-person").getBoundingClientRect().height,
         taskH: document.querySelector(".rv-task-row").getBoundingClientRect().height,
         top: sc.scrollTop,
-        granularity: document.querySelector(".rv-granularity").value,
+        granularity: document.querySelector(".rv-granularity [aria-pressed=true]").dataset.g,
       };
     });
   await page.evaluate(() => (document.querySelector(".rv-heatmap-scroll").scrollTop = 60));
@@ -337,12 +340,12 @@ await step("Ctrl + cuộn chỉ zoom trục thời gian: cột rộng/hẹp theo
     assert.equal(s.top, before.top, `cuộn dọc đổi ${before.top} → ${s.top}`);
   }
   // Choosing a granularity is the same zoom, in one click.
-  await page.locator(".rv-granularity").selectOption("day");
+  await setGranularity(page, "day");
   assert.ok(Math.abs((await snap()).cell - 22) < 1);
   await page.evaluate(() => (document.querySelector(".rv-heatmap-scroll").scrollTop = 0));
 });
 await step("zoom giữ nguyên ngày đang ở dưới con trỏ", async () => {
-  await page.locator(".rv-granularity").selectOption("day");
+  await setGranularity(page, "day");
   await page.evaluate(() => (document.querySelector(".rv-heatmap-scroll").scrollLeft = 500));
   const box = await rect(".rv-heatmap-scroll");
   const px = box.x + box.width * 0.6;
@@ -382,7 +385,7 @@ await step("mở một người: mọi việc của họ đều có hàng, kể 
   assert.equal(await block.locator(".rv-tl-beyond").count(), anh);
   assert.equal(await page.locator(".rv-expand-note").count(), 0);
   await setWindow(isoIn(-2), isoIn(25));
-  await page.locator(".rv-granularity").selectOption("day");
+  await setGranularity(page, "day");
   await rowOf("Nguyễn Anh").click();
   await rowOf("Trần Bình").click();
   assert.equal(await page.locator(".rv-expand").count(), 0);
@@ -523,10 +526,11 @@ await step("banner chồng lịch nằm ngay trên các hàng việc; hai việc
 await step("rê chuột vào hàng việc hiện 'Chuyển…'; chọn người khác → PATCH", async () => {
   const row = page.locator(".rv-expand .rv-task-row", { hasText: "DEMO-7" });
   await row.hover();
-  const sel = row.locator(".rv-assign-select");
-  await page.waitForFunction((el) => Number(getComputedStyle(el).opacity) > 0.9, await sel.elementHandle());
+  const btn = row.locator(".rv-assign-btn");
+  await page.waitForFunction((el) => Number(getComputedStyle(el).opacity) > 0.9, await btn.elementHandle());
   await reset();
-  await sel.selectOption({ label: "Lê Chi" });
+  await btn.click();
+  await page.locator(".cell-picker-item", { hasText: "Lê Chi" }).click();
   const patch = await waitLog((l) => l.m === "PATCH" && l.p === "/api/tasks/DEMO-7");
   assert.equal(patch.b.assigneeAccountId, "chi");
   await page.waitForFunction(() => document.querySelectorAll(".rv-expand .rv-task-row.is-conflict").length === 0);
@@ -557,39 +561,61 @@ await step("bấm lại hàng thì thu gọn", async () => {
 });
 
 console.log("\n== Hồ sơ & Kỳ nghỉ ==");
-await step("nút ✎ trên hàng mở ngăn bên phải: đủ trường, một nút 'Lưu thay đổi', không còn câu hướng dẫn cũ", async () => {
+await step("nút ✎ trên hàng mở ngăn bên phải: đủ trường, không lớp phủ, một nút 'Lưu', không còn câu hướng dẫn cũ", async () => {
   await rowOf("Lê Chi").hover();
   await rowOf("Lê Chi").locator(".rv-profile-btn").click();
   await page.waitForSelector(".rv-drawer");
   const text = await page.locator(".rv-drawer").innerText();
   for (const t of ["Vai trò", "Công suất (giờ/ngày)", "Từ", "Đến", "Kỹ năng", "Ghi chú"]) assert.ok(text.includes(t), t + " thiếu");
   assert.ok(!text.includes("Bấm “Lưu” ở trên"));
-  assert.equal(await page.locator(".rv-drawer button", { hasText: "Lưu thay đổi" }).count(), 1);
-  assert.equal(await page.locator(".rv-drawer button", { hasText: /^Lưu$/ }).count(), 0);
+  assert.equal(await page.locator(".rv-drawer-foot button").count(), 1, "chỉ một nút, không Huỷ");
+  assert.equal(await page.locator(".rv-drawer button", { hasText: "Lưu thay đổi" }).count(), 0);
+  assert.ok(!text.includes("Đang dùng mặc định"), "câu mặc định đã bỏ");
+  assert.equal(await page.locator(".rv-drawer-scrim").count(), 0, "không lớp phủ tối");
   const box = await rect(".rv-drawer");
-  assert.ok(box.x + box.width >= 1499 && box.height >= 890, "phải là ngăn kéo sát mép phải, cao hết màn hình");
+  assert.ok(box.x + box.width >= 1499 && box.y >= 40 && box.height >= 840, "ngăn kéo sát mép phải, nằm dưới thanh đầu trang");
+  assert.equal(await page.locator(".rv-drawer .rv-avatar").first().innerText(), "CL", "chữ tắt theo Avatar chung (Lê Chi → CL)");
 });
-await step("sửa dở rồi Esc: hỏi bỏ thay đổi bằng hộp thoại trong app; 'Tiếp tục sửa' giữ nguyên", async () => {
+await step("sửa dở rồi Esc: LƯU rồi đóng, không hỏi (đóng là lưu)", async () => {
   await page.locator(".rv-drawer input").first().fill("QA Lead");
-  await page.keyboard.press("Escape");
-  await page.waitForSelector(".dlg");
-  await page.locator(".dlg button", { hasText: "Tiếp tục sửa" }).click();
-  assert.equal(await page.locator(".rv-drawer").count(), 1);
-  assert.equal(await page.locator(".rv-drawer input").first().inputValue(), "QA Lead");
-});
-await step("'Lưu thay đổi' ghi hồ sơ rồi đóng ngăn; hàng người hiện vai trò mới", async () => {
+  assert.equal((await page.locator(".rv-drawer-foot button.primary").innerText()).startsWith("Lưu"), true);
   await reset();
-  await page.locator(".rv-drawer-foot button.primary").click();
+  await page.keyboard.press("Escape");
   const put = await waitLog((l) => l.m === "PUT" && l.p.startsWith("/api/resources/"));
   assert.equal(put.b.role, "QA Lead");
   await page.waitForSelector(".rv-drawer", { state: "detached" });
+  assert.equal(await page.locator(".dlg").count(), 0, "không còn hộp hỏi 'Bỏ thay đổi?'");
   assert.ok((await rowOf("Lê Chi").innerText()).includes("QA Lead"));
 });
-await step("Tab không thoát khỏi ngăn kéo; Esc khi chưa sửa đóng ngay", async () => {
+await step("nút 'Lưu' ghi hồ sơ rồi đóng ngăn; chưa sửa thì nút là 'Đã lưu' (tắt)", async () => {
   await rowOf("Lê Chi").locator(".rv-profile-btn").click();
   await page.waitForSelector(".rv-drawer");
-  for (let i = 0; i < 14; i++) await page.keyboard.press("Tab");
-  assert.ok(await page.evaluate(() => document.querySelector(".rv-drawer").contains(document.activeElement)));
+  const btn = page.locator(".rv-drawer-foot button.primary");
+  assert.equal(await btn.isDisabled(), true);
+  assert.ok((await btn.innerText()).startsWith("Đã lưu"));
+  await page.locator(".rv-drawer input").first().fill("QA Senior");
+  await reset();
+  await btn.click();
+  const put = await waitLog((l) => l.m === "PUT" && l.p.startsWith("/api/resources/"));
+  assert.equal(put.b.role, "QA Senior");
+  await page.waitForSelector(".rv-drawer", { state: "detached" });
+});
+await step("lưu không được (công suất sai) thì ngăn ở lại và nói lý do; sửa lại rồi Esc thì đóng", async () => {
+  await rowOf("Lê Chi").locator(".rv-profile-btn").click();
+  await page.waitForSelector(".rv-drawer");
+  await page.locator(".rv-drawer input[type=number]").fill("30");
+  await page.keyboard.press("Escape");
+  await page.waitForSelector(".rv-drawer .rv-notice-error");
+  assert.equal(await page.locator(".rv-drawer").count(), 1, "phải ở lại khi không lưu được");
+  await page.locator(".rv-drawer input[type=number]").fill("8");
+  await page.keyboard.press("Escape");
+  await page.waitForSelector(".rv-drawer", { state: "detached" });
+});
+await step("ngăn không chặn Tab và không có lớp phủ: bấm ra ngoài không đóng", async () => {
+  await rowOf("Lê Chi").locator(".rv-profile-btn").click();
+  await page.waitForSelector(".rv-drawer");
+  await page.locator(".rv-kpis").click({ position: { x: 2, y: 2 } });
+  assert.equal(await page.locator(".rv-drawer").count(), 1);
   await page.keyboard.press("Escape");
   await page.waitForSelector(".rv-drawer", { state: "detached" });
 });
@@ -603,15 +629,15 @@ await step("nhãn 'Nhân lực' và số quá tải hiện ngay sau F5, không �
   await page.reload();
   await page.waitForSelector(".toolbar-tabs");
   await page.locator(".toolbar-tabs button", { hasText: "Nhân lực" }).waitFor({ timeout: 1200 });
-  const labels = (await page.locator(".toolbar-tabs button").allTextContents()).map((t) => t.replace(/\d+\s*thành viên.*$/, "").replace(/\d+$/, "").trim());
+  const labels = (await page.locator(".toolbar-tabs button").allTextContents()).map((t) => t.replace(/\d+\s*(thành viên|người quá tải).*$/, "").replace(/\d+$/, "").trim());
   assert.deepEqual(labels, ["Kế hoạch", "Bảng", "Nhân lực", "Nhịp dự án"]);
   await page.unroute(/\/api\/resources(\?|$)/);
 });
 await step("Nhịp dự án, Bảng, Giờ làm đã xem trước đó hiện ngay sau F5 từ bản lưu của tab", async () => {
   // Visit each once so the tab has something to remember, then reload with Jira slowed down.
-  // Nhịp dự án and Bảng are lenses in the header; Giờ làm (the old Chấm công) is a place on the rail.
+  // Nhịp dự án and Bảng are lenses in the header; Giờ làm (the old Chấm công) is a mode of Nhân lực ("Giờ đã ghi").
   const open = (name) =>
-    name === "Giờ làm" ? page.locator("[data-view=timesheet]").click() : page.locator(".toolbar-tabs button", { hasText: name }).click();
+    name === "Giờ làm" ? openTimesheet(page, { wait: false }) : page.locator(".toolbar-tabs button", { hasText: name }).click();
   for (const name of ["Nhịp dự án", "Bảng", "Giờ làm"]) {
     await open(name);
     await page.waitForSelector({ "Nhịp dự án": ".pr-tile", "Bảng": ".bd-card", "Giờ làm": ".ts-grid" }[name]);

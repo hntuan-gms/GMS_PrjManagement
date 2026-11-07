@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useLayer } from "../useLayer";
+import DateField from "./DateField";
+import TaskPicker from "./TaskPicker";
 import { api } from "../api";
-import { formatDayMonth, formatWeekdayDayMonth, WEEKDAY_LONG } from "../humanDate";
-import { suggestWorklogs, type LogSuggestion } from "../logSuggest";
-import { buildToday } from "../today";
+import { formatDayMonth, WEEKDAY_LONG } from "../humanDate";
+import { suggestWorklogs } from "../logSuggest";
+import { buildToday, upcomingHeading } from "../today";
 import { toast } from "../toast";
-import type { Session, Task, TaskUpdateInput } from "../types";
+import { isAssignableType, type Session, type Task, type TaskUpdateInput } from "../types";
 import { isoWeekday } from "../workCalendar";
 import { useWorkCalendar } from "./workCalendarContext";
 import { Icon } from "./Icons";
@@ -42,19 +45,10 @@ export default function TodayView({ session, tasks, today, capacityHours, onOpen
   const [draft, setDraft] = useState("");
   const rootRef = useRef<HTMLDivElement>(null);
 
-  // My open work that no section above claims and that has no dates: it is still mine, and the page is
-  // where I should notice it has no plan yet.
-  const unscheduled = useMemo(() => {
-    const listed = new Set([
-      ...data.waitingOnMe.map((w) => w.task.id),
-      ...data.overdue.map((t) => t.id),
-      ...data.today.map((t) => t.id),
-      ...data.upcoming.flatMap((g) => g.tasks.map((t) => t.id)),
-    ]);
-    return tasks.filter(
-      (t) => t.assigneeAccountId === me && t.statusCategory !== "done" && t.issueType !== "Epic" && !t.startDate && !t.dueDate && !listed.has(t.id)
-    );
-  }, [tasks, me, data]);
+  // My open work with no dates: it is still mine, and the page is where I should notice it has no plan yet.
+  const unscheduled = data.unscheduled;
+  // The row whose "Xếp lịch" date box is open.
+  const [scheduling, setScheduling] = useState<string | null>(null);
 
   const order: Task[] = useMemo(
     () => [
@@ -125,10 +119,22 @@ export default function TodayView({ session, tasks, today, capacityHours, onOpen
     }
   }
 
+  async function schedule(t: Task, startDate: string) {
+    setScheduling(null);
+    try {
+      await onUpdateTask(t.id, { startDate });
+      toast(`Đã xếp lịch ${t.id} từ ${formatDayMonth(startDate, today)}.`, { tone: "success" });
+    } catch (e) {
+      toast(e instanceof Error ? e.message : `Không xếp lịch được ${t.id}.`, { tone: "error" });
+    }
+  }
+
   // j/k/Enter/X inside the page — the same keys as every list in the app.
   function onKeyDown(e: React.KeyboardEvent) {
     const target = e.target as HTMLElement;
     if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
+    // Enter on a button inside a row is that button's own click, not "open the row under the cursor".
+    if (e.key === "Enter" && target.closest("button")) return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const k = e.key;
     if (k === "j" || k === "ArrowDown") {
@@ -149,6 +155,10 @@ export default function TodayView({ session, tasks, today, capacityHours, onOpen
   useEffect(() => {
     rootRef.current?.querySelector<HTMLElement>(`[data-today-row="${cursor}"]`)?.scrollIntoView({ block: "nearest" });
   }, [cursor]);
+
+  useEffect(() => {
+    if (scheduling) rootRef.current?.querySelector<HTMLInputElement>(".today-schedule input[type=text]")?.focus();
+  }, [scheduling]);
 
   const index = new Map(order.map((t, i) => [t.id, i]));
   const weekday = WEEKDAY_LONG[isoWeekday(today)];
@@ -203,19 +213,24 @@ export default function TodayView({ session, tasks, today, capacityHours, onOpen
               {weekday}, {d} tháng {m}
               {y !== new Date().getFullYear() ? `, ${y}` : ""}
             </p>
+            {session.project?.name && <p className="today-project">{session.project.name}</p>}
             <h1 className="today-greeting">
               Chào {firstName(session.user.displayName)}. <span>{data.greeting}</span>
             </h1>
           </div>
           <dl className="today-counts">
-            <div>
-              <dt>Đang làm</dt>
-              <dd>{data.counts.doing}</dd>
-            </div>
-            <div>
-              <dt>Đến hạn tuần này</dt>
-              <dd>{data.counts.dueThisWeek}</dd>
-            </div>
+            {data.counts.doing > 0 && (
+              <div>
+                <dt>Đang làm</dt>
+                <dd>{data.counts.doing}</dd>
+              </div>
+            )}
+            {data.counts.dueThisWeek > 0 && (
+              <div>
+                <dt>Đến hạn tuần này</dt>
+                <dd>{data.counts.dueThisWeek}</dd>
+              </div>
+            )}
           </dl>
         </header>
 
@@ -288,7 +303,7 @@ export default function TodayView({ session, tasks, today, capacityHours, onOpen
             <h2>Sắp tới</h2>
             {data.upcoming.map((g) => (
               <div key={g.date} className="today-day">
-                <span className="today-day-label">{formatWeekdayDayMonth(g.date, today)}</span>
+                <span className="today-day-label">{upcomingHeading(g.date, today)}</span>
                 <ul>{g.tasks.map((t) => row(t, due(t)))}</ul>
               </div>
             ))}
@@ -298,7 +313,30 @@ export default function TodayView({ session, tasks, today, capacityHours, onOpen
         {unscheduled.length > 0 && (
           <section className="today-section">
             <h2>Chưa xếp lịch</h2>
-            <ul>{unscheduled.map((t) => row(t, "chưa có ngày"))}</ul>
+            <ul>
+              {unscheduled.map((t) =>
+                row(
+                  t,
+                  scheduling === t.id ? (
+                    <span className="today-schedule" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), setScheduling(null))}>
+                      <DateField value="" ariaLabel={`Ngày bắt đầu ${t.id}`} onChange={(iso) => void schedule(t, iso)} />
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="text-btn today-schedule-btn"
+                      aria-label={`Xếp lịch ${t.id}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setScheduling(t.id);
+                      }}
+                    >
+                      Xếp lịch
+                    </button>
+                  )
+                )
+              )}
+            </ul>
           </section>
         )}
 
@@ -353,9 +391,14 @@ function LogSheet({
   onClose: () => void;
   onLogged: () => void;
 }) {
+  useLayer("log-sheet", true, { onEscape: onClose, dismissOnNav: true });
   const [logged, setLogged] = useState<number | null>(null);
-  const [rows, setRows] = useState<Array<LogSuggestion & { done?: boolean }>>([]);
+  // "thêm" = a row the person added with "+ Việc khác", not one the page suggested.
+  const [rows, setRows] = useState<Array<{ taskId: string; hours: number; reason: string; done?: boolean }>>([]);
   const [sending, setSending] = useState(false);
+  const [pickAt, setPickAt] = useState<DOMRect | null>(null);
+  // The picker is a layer of its own: Esc closes it first, not the sheet under it.
+  useLayer("log-picker", pickAt !== null, { onEscape: () => setPickAt(null) });
 
   useEffect(() => {
     let alive = true;
@@ -380,6 +423,10 @@ function LogSheet({
   }, []);
 
   const total = rows.reduce((s, r) => s + (r.hours || 0), 0);
+  function addOther(t: Task) {
+    setPickAt(null);
+    setRows((rs) => (rs.some((r) => r.taskId === t.id) ? rs : [...rs, { taskId: t.id, hours: Math.max(0.5, Math.floor((capacityHours - (logged ?? 0) - total) * 2) / 2), reason: "thêm" }]));
+  }
   const set = (id: string, hours: number) => setRows((rs) => rs.map((r) => (r.taskId === id ? { ...r, hours: Math.max(0, Math.round(hours * 2) / 2) } : r)));
 
   async function send() {
@@ -416,44 +463,60 @@ function LogSheet({
       </header>
       <div className="side-sheet-body">
         {logged === null ? (
-          <p className="muted">Đang xem bạn đã ghi gì hôm nay…</p>
-        ) : rows.length === 0 ? (
-          <p className="muted">Không có việc nào đang làm để gợi ý. Mở một việc và dùng “+ Ghi giờ” trong đó.</p>
+          <p className="muted">Đang tải…</p>
         ) : (
-          <ul className="log-rows">
-            {rows.map((r) => {
-              const t = byId.get(r.taskId);
-              return (
-                <li key={r.taskId} className={r.done ? "is-done" : ""}>
-                  <span className="today-key">{r.taskId}</span>
-                  <span className="log-title">
-                    {t?.summary ?? ""}
-                    <small>{r.reason}</small>
-                  </span>
-                  <span className="log-hours">
-                    <button type="button" className="icon-btn" aria-label="Bớt nửa giờ" onClick={() => set(r.taskId, r.hours - 0.5)} disabled={r.done}>
-                      −
-                    </button>
-                    <input
-                      inputMode="decimal"
-                      value={String(r.hours)}
-                      disabled={r.done}
-                      aria-label={`Số giờ cho ${r.taskId}`}
-                      onChange={(e) => {
-                        const v = Number(e.target.value.replace(",", "."));
-                        if (Number.isFinite(v)) set(r.taskId, v);
-                      }}
-                    />
-                    <button type="button" className="icon-btn" aria-label="Thêm nửa giờ" onClick={() => set(r.taskId, r.hours + 0.5)} disabled={r.done}>
-                      +
-                    </button>
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
+          <>
+            {rows.length > 0 && (
+              <ul className="log-rows">
+                {rows.map((r) => {
+                  const t = byId.get(r.taskId);
+                  return (
+                    <li key={r.taskId} className={r.done ? "is-done" : ""}>
+                      <span className="today-key">{r.taskId}</span>
+                      <span className="log-title">
+                        {t?.summary ?? ""}
+                        <small>{r.reason}</small>
+                      </span>
+                      <span className="log-hours">
+                        <button type="button" className="icon-btn" aria-label="Bớt nửa giờ" onClick={() => set(r.taskId, r.hours - 0.5)} disabled={r.done}>
+                          −
+                        </button>
+                        <input
+                          inputMode="decimal"
+                          value={String(r.hours)}
+                          disabled={r.done}
+                          aria-label={`Số giờ cho ${r.taskId}`}
+                          onChange={(e) => {
+                            const v = Number(e.target.value.replace(",", "."));
+                            if (Number.isFinite(v)) set(r.taskId, v);
+                          }}
+                        />
+                        <button type="button" className="icon-btn" aria-label="Thêm nửa giờ" onClick={() => set(r.taskId, r.hours + 0.5)} disabled={r.done}>
+                          +
+                        </button>
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            <button type="button" className="log-other" onClick={(e) => setPickAt(e.currentTarget.getBoundingClientRect())}>
+              <Icon name="plus" size={14} />
+              Việc khác
+            </button>
+          </>
         )}
-        <p className="log-note">Gợi ý dựa trên việc bạn đang làm, không phải đo thời gian thật. Giờ được ghi bằng tài khoản Jira của bạn.</p>
+        <p className="log-note">Ghi bằng tài khoản Jira của bạn</p>
+        {pickAt && (
+          <TaskPicker
+            anchor={pickAt}
+            tasks={tasks}
+            exclude={rows.map((r) => r.taskId)}
+            filter={(t) => isAssignableType(t.issueType)}
+            onPick={addOther}
+            onClose={() => setPickAt(null)}
+          />
+        )}
       </div>
       <footer className="side-sheet-foot">
         <span>

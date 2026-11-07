@@ -3,19 +3,36 @@
    ========================================================================== */
 
 /* ---- Peek: slides in from the right, no dimmer — the plan stays visible and usable. ---- */
+:root {
+  /* One column: wide enough for a label and its value, narrow enough to leave the plan beside it. */
+  --peek-w: min(100vw, clamp(400px, 34vw, 480px));
+}
 .peek-layer {
   position: fixed;
   inset: 0 0 0 auto;
   z-index: var(--z-peek);
-  width: min(920px, 64vw);
+  width: var(--peek-w);
   display: flex;
   pointer-events: none;
+}
+/* From 1200px the panel docks under the header and the workspace gives it room (padding, not a cover);
+   below that it lies over the plan as it always did. Every lens that opens a task shares .app-body. */
+.app-body {
+  transition: padding-right var(--d-3) var(--e-out);
+}
+@media (min-width: 1201px) {
+  .peek-layer {
+    top: var(--header-h);
+  }
+  body:has(.peek-layer) .app-body {
+    padding-right: var(--peek-w);
+  }
 }
 .modal.peek-panel {
   pointer-events: auto;
   width: 100%;
   max-width: none;
-  height: 100vh;
+  height: 100%;
   max-height: none;
   padding: 0;
   gap: 0;
@@ -58,11 +75,33 @@
   font-weight: 500;
 }
 .peek-panel .td-body {
-  grid-template-columns: minmax(0, 1fr) 300px;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+.peek-panel .td-main,
+.peek-panel .td-side {
+  overflow: visible;
+  scrollbar-width: auto;
 }
 .peek-panel .td-side {
-  background: var(--sheet);
-  border-left: 1px solid var(--line);
+  order: -1;
+  flex: none;
+  gap: 10px;
+  padding: 10px 18px 14px;
+  background: var(--raised);
+  border-left: none;
+  border-bottom: 1px solid var(--line);
+}
+.peek-panel .td-main {
+  flex: none;
+  padding: 14px 18px 20px;
+}
+.peek-panel .td-titlebar {
+  flex: none;
+  padding: 8px 18px 4px;
 }
 .peek-panel .td-title {
   font-size: var(--font-size-page);
@@ -101,26 +140,6 @@
 .peek-panel .td-footer .primary:disabled kbd {
   display: none;
 }
-@media (max-width: 1200px) {
-  .peek-layer {
-    width: min(640px, 100vw);
-  }
-  .peek-panel .td-body {
-    display: flex;
-    flex-direction: column;
-    overflow-y: auto;
-  }
-  .peek-panel .td-main,
-  .peek-panel .td-side {
-    overflow: visible;
-  }
-  .peek-panel .td-side {
-    order: -1;
-    border-left: none;
-    border-bottom: 1px solid var(--line);
-  }
-}
-
 /* ---- Every other window: lighter dimmer, no blur, small radii, short motion. ---- */
 .modal-overlay {
   background: var(--color-overlay);
@@ -207,6 +226,387 @@ button.date-field-pick:hover:not(:disabled) {
 
 /* While the panel is open the bulk bar centres on what is left of the plan, not under the panel. */
 body:has(.peek-layer) .selection-bar {
-  left: calc(var(--rail-w) + (100vw - var(--rail-w) - min(920px, 64vw)) / 2);
-  max-width: calc(100vw - var(--rail-w) - min(920px, 64vw) - 24px);
+  left: calc(var(--rail-w) + (100vw - var(--rail-w) - var(--peek-w)) / 2);
+  max-width: calc(100vw - var(--rail-w) - var(--peek-w) - 24px);
+}
+
+/* ==========================================================================
+   The panel's one column (plan D2): header, title, the facts as label + value rows, then the work.
+   ========================================================================== */
+.peek-panel .td-header {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+.td-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.td-status select {
+  height: 28px;
+  max-width: 190px;
+  min-width: 0;
+  padding-inline: 8px;
+  font-size: var(--font-size-md);
+}
+.td-watchers {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--ink-3);
+  font-size: var(--font-size-sm);
+  font-variant-numeric: tabular-nums;
+}
+.td-watchers.is-on {
+  color: var(--info-text);
+}
+button.td-more {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink-3);
+}
+button.td-more:hover:not(:disabled),
+button.td-more.is-open {
+  background: var(--sunken);
+  border-color: transparent;
+  color: var(--ink);
+}
+.td-more-menu {
+  min-width: 210px;
+}
+a.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  font-size: var(--font-size-md);
+  text-decoration: none;
+}
+a.menu-item:hover,
+a.menu-item:focus-visible {
+  background: var(--sunken);
+  outline-offset: -2px;
+}
+a.menu-item > .icon {
+  color: var(--ink-3);
+}
+button.menu-item.is-danger,
+button.menu-item.is-danger > .icon {
+  color: var(--risk-text);
+}
+
+/* Label on the left, value on the right; what does not fit goes under the label. */
+.peek-panel .td-side .field.td-row {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  align-items: center;
+  gap: 4px 10px;
+  flex: none;
+}
+.peek-panel .td-side .field.td-row > span:first-child {
+  color: var(--ink-3);
+  font-size: var(--font-size-md);
+  font-weight: 500;
+  letter-spacing: 0;
+}
+.peek-panel .td-side .field.td-row > small,
+.peek-panel .td-side .field.td-row > .td-bar,
+.peek-panel .td-side .field.td-row > .td-logform,
+.peek-panel .td-side .field.td-row > .log-note,
+.peek-panel .td-side .field.td-row > .time-over {
+  grid-column: 2;
+}
+.peek-panel .td-side .field.td-row > select {
+  width: 100%;
+  min-width: 0;
+}
+
+.td-pick-wrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+button.td-pick {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  height: var(--control-h-form);
+  padding: 0 8px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink);
+  font-size: var(--font-size-md);
+  font-weight: 400;
+  text-align: left;
+}
+button.td-pick:hover:not(:disabled) {
+  background: var(--sunken);
+  border-color: var(--line);
+}
+button.td-pick .caret {
+  flex: none;
+  margin-left: auto;
+  color: var(--ink-3);
+}
+.td-pick-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.td-pick-text.is-empty {
+  color: var(--ink-3);
+}
+.td-avatar {
+  width: 20px;
+  height: 20px;
+}
+button.td-pick-clear {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink-3);
+}
+button.td-pick-clear:hover:not(:disabled) {
+  background: var(--sunken);
+  border-color: transparent;
+  color: var(--ink);
+}
+
+/* Lịch: 30/10 → 02/11 · 4 ngày. Wraps rather than squeezes when the panel is narrow. */
+.td-sched {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.td-sched .date-field {
+  flex: 1 1 124px;
+  width: auto;
+  min-width: 124px;
+  max-width: 150px;
+}
+.td-arrow {
+  color: var(--ink-3);
+}
+.td-dur,
+.td-est {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.td-dur input,
+.td-est input {
+  width: 56px;
+  min-width: 0;
+}
+.td-unit {
+  color: var(--ink-3);
+  font-size: var(--font-size-md);
+  white-space: nowrap;
+}
+.td-pct-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.td-pct-row input[type="range"] {
+  flex: 1;
+  min-width: 0;
+}
+.td-pct-row .td-pct {
+  margin: 0;
+  min-width: 3.2ch;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.td-effort {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+.td-effort .td-spent-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.td-effort .time-spent {
+  white-space: nowrap;
+  color: var(--ink-3);
+}
+.td-effort .time-spent b {
+  color: var(--ink);
+  font-size: inherit;
+  font-weight: 600;
+}
+.td-effort .time-spent.is-over b {
+  color: var(--warn-text);
+}
+
+/* Ưu tiên and Loại share a row; each keeps its own label. */
+.td-duo {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+}
+.peek-panel .td-side .td-duo > .field.td-row {
+  flex: 1 1 170px;
+  grid-template-columns: auto minmax(0, 1fr);
+}
+.peek-panel .td-side .td-duo > .field.td-row:first-child {
+  flex-basis: 200px;
+  grid-template-columns: 84px minmax(0, 1fr);
+}
+
+/* Sprint, components and versions: one line, folded away while there is nothing to say. */
+.td-extra > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  color: var(--ink-3);
+  font-size: var(--font-size-md);
+  font-weight: 500;
+}
+.td-extra > summary::-webkit-details-marker {
+  display: none;
+}
+.td-extra[open] > summary .td-section-caret {
+  rotate: 90deg;
+}
+.td-extra-values {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+  font-weight: 400;
+}
+.td-extra[open] .td-extra-values {
+  display: none;
+}
+.td-extra-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 6px;
+}
+
+/* An empty description is one dim line. */
+.td-desc-empty {
+  flex: none;
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+.td-desc-empty > span:first-child {
+  color: var(--ink-3);
+  font-weight: 500;
+}
+button.td-ghost {
+  justify-self: start;
+  height: 28px;
+  padding: 0 8px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink-3);
+  font-weight: 400;
+}
+button.td-ghost:hover:not(:disabled) {
+  background: var(--sunken);
+  border-color: transparent;
+  color: var(--ink);
+}
+
+/* An empty section is one "+" button; the three sit on a line. */
+.td-add-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+button.td-add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 8px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink-3);
+  font-size: var(--font-size-md);
+  font-weight: 500;
+}
+button.td-add-btn:hover:not(:disabled) {
+  background: var(--sunken);
+  border-color: transparent;
+  color: var(--ink);
+}
+.peek-panel .pred-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.peek-panel .pred-add select {
+  width: 72px;
+}
+.peek-panel .pred-add input {
+  width: 56px;
+}
+.td-section[hidden] {
+  display: none;
+}
+
+/* A file dragged over the panel lights the whole panel up as the drop zone. */
+.modal.peek-panel {
+  position: relative;
+}
+.modal.peek-panel.is-dropping {
+  box-shadow: inset 0 0 0 2px var(--info), var(--shadow-modal);
+  background: var(--info-wash);
+}
+.modal.peek-panel.is-dropping::after {
+  content: "Thả tệp để đính kèm";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--info-wash) 80%, transparent);
+  color: var(--info-text);
+  font-size: var(--font-size-lead);
+  font-weight: 600;
+  pointer-events: none;
 }

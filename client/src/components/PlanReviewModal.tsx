@@ -149,7 +149,7 @@ export default function PlanReviewModal({ runId, users, onClose, onApplied }: Pr
         {result ? (
           <div className="ai-result">
             <p>
-              Đã tạo <strong>{result.created.length}</strong> task trong Jira
+              Đã tạo <strong>{result.created.length}</strong> việc trong Jira
               {result.created.length > 0 && `: ${result.created.join(", ")}`}
             </p>
             {result.errors.length > 0 && (
@@ -326,7 +326,7 @@ export default function PlanReviewModal({ runId, users, onClose, onApplied }: Pr
                 onClick={apply}
                 disabled={busy !== null || plan.items.length === 0}
               >
-                {busy === "applying" ? "Đang tạo task..." : `Duyệt & tạo ${plan.items.length} task`}
+                {busy === "applying" ? "Đang tạo việc..." : `Duyệt & tạo ${plan.items.length} việc`}
               </button>
             </div>
           </div>

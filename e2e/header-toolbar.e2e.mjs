@@ -218,10 +218,14 @@ console.log("\n== Chưa có ngày ==");
 await step("cảnh báo 'Chưa có ngày (n)' vẫn ở hàng nhanh và mở được task", async () => {
   const pill = page.locator(".gantt-toolbar .warning-pill");
   assert.match((await pill.textContent()).trim(), /^Chưa có ngày \(\d+\)$/);
+  // A filter now, not a list: only the rows without dates remain, and a double-click opens one.
   await pill.click();
-  await page.locator(".unscheduled-item").first().click();
+  await page.waitForFunction(() => document.querySelectorAll(".wbs-row").length === 1);
+  await page.locator(".wbs-row").first().locator(".wbs-col-name").dblclick();
   await page.waitForSelector(".modal .modal-id");
   await page.click(".modal-close");
+  await page.waitForSelector(".modal", { state: "detached" });
+  await pill.click();
 });
 await step("ioAction vẫn tải CSV", async () => {
   const [dl] = await Promise.all([page.waitForEvent("download"), ioAction(page, "Xuất CSV")]);

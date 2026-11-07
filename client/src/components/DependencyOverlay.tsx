@@ -14,14 +14,16 @@ interface Props {
   showArrows: boolean;
   /** Bumped whenever bar geometry could have changed (dates, viewMode, columnWidth, listWidth). */
   measureKey: string;
-  onAddDependency: (successorId: string, predecessorId: string, type: DependencyType) => void;
+  /** Rows whose bar is an invisible placeholder (no dates yet): no arrows to or from them, no handles on them. */
+  hidden?: Set<string>;
+  onAddDependency: (successorId: string, predecessorId: string, type: DependencyType) => void | Promise<void>;
   onEditDependency: (
     successorId: string,
     predecessorId: string,
     currentType: DependencyType,
     next: { type: DependencyType; lagDays: number }
   ) => void;
-  onDeleteDependency: (successorId: string, predecessorId: string, type: DependencyType) => void;
+  onDeleteDependency: (successorId: string, predecessorId: string, type: DependencyType) => void | Promise<void>;
   /** "Dời theo" on a violated link: move the successor to the earliest start the link allows. */
   onFixViolation?: (successorId: string, startDate: string) => void;
 }
@@ -38,6 +40,9 @@ function violation(pred: Task | undefined, succ: Task, type: DependencyType, lag
 }
 
 const dmy = (iso: string) => iso.split("-").reverse().slice(0, 2).join("/");
+
+/** True once someone has dragged from a dot in this session; until then each dot says it can be dragged. */
+let depHintSeen = false;
 
 interface DragState {
   taskId: string;
@@ -80,6 +85,7 @@ export default function DependencyOverlay({
   rows,
   showArrows,
   measureKey,
+  hidden,
   onAddDependency,
   onEditDependency,
   onDeleteDependency,
@@ -94,12 +100,14 @@ export default function DependencyOverlay({
   const dependencies = useMemo(() => {
     const edges: Array<{ predId: string; succId: string; type: DependencyType; lagDays: number }> = [];
     for (const t of rows) {
+      if (hidden?.has(t.id)) continue;
       for (const p of t.predecessors) {
+        if (hidden?.has(p.taskId)) continue;
         edges.push({ predId: p.taskId, succId: t.id, type: p.type, lagDays: p.lagDays });
       }
     }
     return edges;
-  }, [rows]);
+  }, [rows, hidden]);
 
   if (!portalTarget) return null;
 
@@ -207,7 +215,7 @@ export default function DependencyOverlay({
       <g className="dep-endpoints">
         {rows.map((task) => {
           const rect = rects.get(task.id);
-          if (!rect) return null;
+          if (!rect || hidden?.has(task.id)) return null;
           return (["start", "end"] as const).map((edge) => {
             const p = anchorPoint(rect, edge);
             const isHovered = hover?.taskId === task.id && hover.edge === edge;
@@ -234,8 +242,14 @@ export default function DependencyOverlay({
                   data-dep-edge={edge}
                   onMouseEnter={() => setHover({ taskId: task.id, edge })}
                   onMouseLeave={() => setHover((h) => (h?.taskId === task.id && h.edge === edge ? null : h))}
-                  onMouseDown={(e) => startConnect(task.id, edge, e)}
-                />
+                  onMouseDown={(e) => {
+                    depHintSeen = true;
+                    startConnect(task.id, edge, e);
+                  }}
+                >
+                  {/* Said until the first drag of the session: the dots are drawn and nothing says they are handles. */}
+                  {!depHintSeen && <title>Kéo sang việc khác để nối</title>}
+                </circle>
               </g>
             );
           });

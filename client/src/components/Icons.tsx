@@ -52,6 +52,9 @@ export type IconName =
   | "send"
   | "pin"
   | "filter"
+  | "paperclip"
+  | "menu"
+  | "print"
   | "more";
 
 /** One outline family (24 grid, 2px stroke) so the header and toolbar read as a set.
@@ -327,6 +330,15 @@ const PATHS: Record<IconName, ReactNode> = {
   send: <path d="M5 12h13M13 6l6 6-6 6" />,
   pin: <path d="M9 4h6l-1 5 3 3H7l3-3-1-5ZM12 15v5" />,
   filter: <path d="M4 6h16M7 12h10M10 18h4" />,
+  paperclip: <path d="M20 11.5l-8 8a5 5 0 0 1-7-7l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.6 8.6a1.7 1.7 0 0 1-2.4-2.4l7.9-7.9" />,
+  menu: <path d="M4 6h16M4 12h16M4 18h16" />,
+  print: (
+    <>
+      <path d="M7 9V3.5h10V9" />
+      <rect x="3.5" y="9" width="17" height="8" rx="1.5" />
+      <path d="M7 14h10v6.5H7z" />
+    </>
+  ),
   more: (
     <>
       <path d="M6 12h.01" />

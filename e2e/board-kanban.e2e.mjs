@@ -59,11 +59,19 @@ await step("đổi lại Scrum rồi về Kanban vẫn hiện (không kẹt ở 
 });
 
 console.log("\n== Bộ lọc ==");
-await step("không có facet Trạng thái trên board; có Loại/Epic/Nhãn/Ưu tiên/Phiên bản", async () => {
+await step("không có facet Trạng thái trên board; có Người/Loại/Epic/Nhãn/Ưu tiên", async () => {
   await page.locator(".bd-filters .tf-add").click();
   const names = await page.$$eval(".bd-filters .tf-facet-name", (b) => b.map((x) => x.textContent.trim()));
-  assert.deepEqual(names, ["Loại", "Epic", "Nhãn", "Ưu tiên", "Phiên bản"]);
+  for (const k of ["Người phụ trách", "Loại", "Epic", "Nhãn", "Ưu tiên"]) assert.ok(names.includes(k), k + " thiếu: " + names);
+  assert.ok(!names.includes("Trạng thái"), "Trạng thái không nên có trên bảng: " + names);
   await page.keyboard.press("Escape");
+});
+await step("thanh lọc của Bảng cùng kiểu với Kế hoạch: Tìm · Của tôi · Quá hạn · Bộ lọc", async () => {
+  const bar = page.locator(".bd-filters .tf-bar");
+  assert.equal(await bar.locator(".tf-search").count(), 1);
+  const flat = (await bar.locator(".tf-left").textContent()).replace(/\s+/g, " ");
+  const at = (k) => flat.indexOf(k);
+  assert.ok(at("Của tôi") >= 0 && at("Quá hạn") > at("Của tôi") && at("Bộ lọc") > at("Quá hạn"), flat);
 });
 await step("chọn một giá trị → chip, đếm thẻ, gỡ chip thì hết lọc", async () => {
   await page.locator(".bd-filters .tf-add").click();

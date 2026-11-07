@@ -1,7 +1,11 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type RefObject } from "react";
-import { filterUnassigned } from "../resourceColumns";
-import type { Task } from "../types";
+import { shortRange } from "../dateLabels";
+import { diffDays, type ResourceLoad } from "../resourceAllocation";
+import { filterUnassigned, taskBarDates } from "../resourceColumns";
+import type { JiraUser, Task } from "../types";
+import type { WorkCalendar } from "../workCalendar";
 import { Icon } from "./Icons";
+import PersonPicker from "./PersonPicker";
 
 /**
  * The dragged task, held in React state rather than read back out of the
@@ -21,7 +25,12 @@ interface Props {
   /** The KPI button that opens this; the panel first appears just under it. */
   anchorRef: RefObject<HTMLElement | null>;
   tasks: Task[];
-  members: Array<{ accountId: string; displayName: string }>;
+  /** Who "Gán…" offers, with the load that says who is free inside the task's dates. */
+  people: JiraUser[];
+  load: Pick<ResourceLoad, "people">;
+  calendar: WorkCalendar;
+  /** Hovering a row marks its dates on the people grid (null when the pointer leaves). */
+  onHoverTask: (task: Task | null) => void;
   drag: DragState | null;
   /** True when dropping the dragged task on "nobody" would change something. */
   canDropUnassigned: boolean;
@@ -65,7 +74,10 @@ export default function ResourceUnassigned({
   onClose,
   anchorRef,
   tasks,
-  members,
+  people,
+  load,
+  calendar,
+  onHoverTask,
   drag,
   canDropUnassigned,
   isDropTarget,
@@ -83,6 +95,7 @@ export default function ResourceUnassigned({
   // Set a tick after a drag starts: restyling the card in the dragstart handler itself would
   // put the faded look into the browser's drag image.
   const [ghostFor, setGhostFor] = useState<string | null>(null);
+  const [picker, setPicker] = useState<{ task: Task; rect: DOMRect } | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const grab = useRef<{ dx: number; dy: number } | null>(null);
   const titleId = useId();
@@ -129,6 +142,11 @@ export default function ResourceUnassigned({
     grab.current = null;
     setMoving(false);
   }
+
+  // A closed card or a task that has left the list must not leave its dates marked on the grid.
+  useEffect(() => {
+    if (!open) onHoverTask(null);
+  }, [open, onHoverTask]);
 
   function onKeyDown(e: KeyboardEvent) {
     if (e.key !== "Escape") return;
@@ -188,43 +206,68 @@ export default function ResourceUnassigned({
             </div>
           ) : (
             <ul className="rv-un-list">
-              {shown.map((t) => (
-                <li key={t.id} className="rv-un-row">
-                  <button
-                    type="button"
-                    className="rv-un-main"
-                    draggable
-                    onDragStart={(e) => {
-                      e.dataTransfer.effectAllowed = "move";
-                      e.dataTransfer.setData("text/plain", t.id);
-                      onDragStartTask(t);
-                    }}
-                    onClick={() => onOpenEdit(t)}
-                    title={`${t.id} · ${t.summary}\nKéo thả lên một thành viên để gán`}
+              {shown.map((t) => {
+                const dates = taskBarDates(t);
+                const when = dates ? `${shortRange(dates.start, dates.end)} · ${diffDays(dates.start, dates.end) + 1} ngày` : null;
+                return (
+                  <li
+                    key={t.id}
+                    className="rv-un-row"
+                    onMouseEnter={() => onHoverTask(t)}
+                    onMouseLeave={() => onHoverTask(null)}
+                    onFocus={() => onHoverTask(t)}
+                    onBlur={() => onHoverTask(null)}
                   >
-                    <span className="rv-un-key">{t.id}</span>
-                    <span className="rv-un-summary">{t.summary}</span>
-                  </button>
-                  {/* Drag-and-drop is the fast path; this is the one that works
-                      from a keyboard or a touch screen. */}
-                  <select
-                    className="rv-assign-select"
-                    value=""
-                    onChange={(e) => e.target.value && onAssign(t.id, e.target.value)}
-                    aria-label={`Gán ${t.id} cho`}
-                  >
-                    <option value="">Gán…</option>
-                    {members.map((p) => (
-                      <option key={p.accountId} value={p.accountId}>
-                        {p.displayName}
-                      </option>
-                    ))}
-                  </select>
-                </li>
-              ))}
+                    <button
+                      type="button"
+                      className="rv-un-main"
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.effectAllowed = "move";
+                        e.dataTransfer.setData("text/plain", t.id);
+                        onDragStartTask(t);
+                      }}
+                      onClick={() => onOpenEdit(t)}
+                      title={`${t.id} · ${t.summary}${when ? `\n${when}` : ""}\nKéo thả lên một thành viên để gán`}
+                    >
+                      <span className="rv-un-key">{t.id}</span>
+                      <span className="rv-un-summary">{t.summary}</span>
+                      {when && <span className="rv-un-when">{when}</span>}
+                    </button>
+                    {/* Drag-and-drop is the fast path; this is the one that works
+                        from a keyboard or a touch screen, and it says who is free inside the dates. */}
+                    <button
+                      type="button"
+                      className="rv-assign-btn is-shown"
+                      aria-label={`Gán ${t.id} cho`}
+                      onClick={(e) => setPicker({ task: t, rect: e.currentTarget.getBoundingClientRect() })}
+                    >
+                      Gán…
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>
+      )}
+
+      {picker && (
+        <PersonPicker
+          anchor={picker.rect}
+          people={people}
+          task={picker.task}
+          load={load}
+          calendar={calendar}
+          allowUnassign={false}
+          placeholder="Gán cho"
+          onPick={(accountId) => {
+            const t = picker.task;
+            setPicker(null);
+            if (accountId) onAssign(t.id, accountId);
+          }}
+          onClose={() => setPicker(null)}
+        />
       )}
 
       {drag && canDropUnassigned && (

@@ -1,40 +1,42 @@
 import { useMemo, useState } from "react";
-import { epicRollup, shortDate, versionRollup, type BoardFilter } from "../boardModel";
+import { epicRollup, shortDate, versionRollup } from "../boardModel";
 import type { BoardSnapshot } from "../types";
 
 interface Props {
   snapshot: BoardSnapshot;
   unit: string;
-  filter: BoardFilter;
-  onFilterChange: (f: BoardFilter) => void;
+  /** Epic keys and version names in the shared filter (TaskFilter.epics / .versions). */
+  epics: Set<string>;
+  versions: Set<string>;
+  onChange: (field: "epics" | "versions", next: Set<string>) => void;
 }
 
 type Tab = "epic" | "version";
 
 /**
  * Backlog's left panel: the Epics and the Versions, each with how far along it is. A row is a
- * filter — clicking it narrows the backlog to that Epic or release (the same `BoardFilter` the
- * toolbar edits, so the chip and "Xoá lọc" there undo it), and clicking again lifts it.
+ * filter — clicking it narrows the backlog to that Epic or release (the shared `TaskFilter`'s
+ * `epics` / `versions`, so the chip and "Xoá lọc" in the filter bar undo it, and the Gantt sees it
+ * too), and clicking again lifts it.
  *
  * Counts come from the whole board, not from the filtered list: a panel that shrinks to what is
  * already filtered could not be used to pick the next Epic.
  */
-export default function BacklogPanels({ snapshot, unit, filter, onFilterChange }: Props) {
+export default function BacklogPanels({ snapshot, unit, epics: epicSel, versions: versionSel, onChange }: Props) {
   const [tab, setTab] = useState<Tab>("epic");
   const [hideDone, setHideDone] = useState(true);
 
   const epics = useMemo(() => epicRollup(snapshot.issues, snapshot), [snapshot]);
   const versions = useMemo(() => versionRollup(snapshot.issues, snapshot.versions, snapshot), [snapshot]);
   const rows = tab === "epic" ? epics : versions;
-  const selected = tab === "epic" ? filter.epics : filter.versions;
+  const selected = tab === "epic" ? epicSel : versionSel;
   const shown = rows.filter((r) => !hideDone || selected.has(r.key) || (tab === "epic" ? r.done < r.total : !r.released));
 
   function toggle(key: string) {
-    const field = tab === "epic" ? "epics" : "versions";
-    const next = new Set(filter[field]);
+    const next = new Set(selected);
     if (next.has(key)) next.delete(key);
     else next.add(key);
-    onFilterChange({ ...filter, [field]: next });
+    onChange(tab === "epic" ? "epics" : "versions", next);
   }
 
   return (

@@ -3,6 +3,7 @@
 // back on the second visit, so anything on screen before it answers came from the cache.
 import assert from "node:assert/strict";
 import { chromium } from "playwright-core";
+import { openTimesheet } from "./toolbar.mjs";
 
 const browser = await chromium.launch({ channel: "chrome", headless: true });
 const page = await browser.newPage({ viewport: { width: 1500, height: 900 } });
@@ -63,14 +64,14 @@ await step("Bảng: lần đầu đợi API, lần sau hiện thẻ ngay khi API
   await held.stop();
 });
 await step("Chấm công: hiện lại bảng giờ công cũ trong lúc tải", async () => {
-  await page.locator("[data-view=timesheet]").click();
+  await openTimesheet(page, { wait: false });
   await page.waitForSelector(".ts-wrap");
   await page.waitForFunction(() => !document.body.textContent.includes("Đang tải từ Jira"));
   const before = await page.locator(".ts-grid tbody tr").count();
   await tab("Kế hoạch");
   await makeStale();
   const held = await hold("**/api/timesheet*");
-  await page.locator("[data-view=timesheet]").click();
+  await openTimesheet(page, { wait: false });
   await page.waitForSelector(".ts-wrap");
   assert.ok(await page.getByText("Đang tải từ Jira").count(), "phải báo đang tải lại");
   assert.equal(await page.locator(".ts-grid tbody tr").count(), before, "bảng cũ phải còn hiện");

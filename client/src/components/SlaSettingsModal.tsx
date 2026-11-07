@@ -3,16 +3,23 @@ import { api, ApiError } from "../api";
 import { todayIso } from "../resourceAllocation";
 import type { SlaSettings, SlaSettingsResponse } from "../types";
 import { useDialogs } from "./dialogContext";
+import DateField from "./DateField";
 import NumberInput from "./NumberInput";
+import TimeInput from "./TimeInput";
 import { describeWorkDays } from "../workCalendarForm";
 
 interface Props {
   /** The policy as last read; the dialog edits a copy. */
   current: SlaSettingsResponse;
-  onClose: () => void;
+  /** Dialog only: the page (embedded) has nothing to close. */
+  onClose?: () => void;
   onSaved: (saved: SlaSettingsResponse) => void;
-  /** Closes this dialog (asking first if something changed) and opens "Lịch làm việc & ngày lễ…". */
+  /** Dialog: closes it (asking first if something changed) and opens "Lịch làm việc & ngày lễ…". Page: switches section. */
   onOpenCalendar: () => void;
+  /** A section of the settings page: no overlay or dialog chrome, Save/Huỷ at the foot of the section. */
+  embedded?: boolean;
+  /** Embedded: tells the page whether there are unsaved edits, so it can ask before leaving the section. */
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 const OFFSETS = Array.from({ length: 27 }, (_, i) => i - 12);
@@ -30,7 +37,7 @@ function comparable(s: SlaSettings): string {
  * as a summary. Anyone can open it; only a project admin can save (the server checks
  * again, and never writes the calendar from this dialog).
  */
-export default function SlaSettingsModal({ current, onClose, onSaved, onOpenCalendar }: Props) {
+export default function SlaSettingsModal({ current, onClose, onSaved, onOpenCalendar, embedded = false, onDirtyChange }: Props) {
   const { confirm } = useDialogs();
   const [draft, setDraft] = useState<SlaSettings>(() => structuredClone(current.settings));
   const [priorities, setPriorities] = useState<string[]>([]);
@@ -50,10 +57,11 @@ export default function SlaSettingsModal({ current, onClose, onSaved, onOpenCale
   }, []);
 
   useEffect(() => {
+    if (embedded) return;
     const opener = document.activeElement as HTMLElement | null;
     modalRef.current?.querySelector<HTMLElement>("input, button")?.focus();
     return () => opener?.focus?.();
-  }, []);
+  }, [embedded]);
 
   // The site's priorities in Jira's order, then any the policy names that the site no longer has.
   const priorityRows = useMemo(() => {
@@ -71,6 +79,15 @@ export default function SlaSettingsModal({ current, onClose, onSaved, onOpenCale
 
   const patch = (p: Partial<SlaSettings>) => setDraft((d) => ({ ...d, ...p }));
 
+  useEffect(() => {
+    onDirtyChange?.(dirty && !readOnly);
+  }, [dirty, readOnly, onDirtyChange]);
+  // On the page, "Huỷ" puts the saved values back without asking (plan 2.6); the dialog asks before closing.
+  const reset = () => {
+    setDraft(structuredClone(current.settings));
+    setError(null);
+  };
+
   function setTarget(priority: string, hours: number | null) {
     setDraft((d) => {
       const rest = d.targets.filter((t) => t.priority.toLowerCase() !== priority.toLowerCase());
@@ -87,11 +104,12 @@ export default function SlaSettingsModal({ current, onClose, onSaved, onOpenCale
   }
 
   async function requestClose() {
-    if (await confirmDiscard()) onClose();
+    if (await confirmDiscard()) onClose?.();
   }
 
   async function openCalendar() {
-    if (await confirmDiscard()) onOpenCalendar();
+    // The settings page asks about unsaved edits itself before it switches section.
+    if (embedded || (await confirmDiscard())) onOpenCalendar();
   }
 
   async function save() {
@@ -101,8 +119,11 @@ export default function SlaSettingsModal({ current, onClose, onSaved, onOpenCale
     try {
       // Switching SLA on for the first time starts it today, so earlier work is not judged by a rule it never had.
       const toSave = draft.enabled && !draft.appliesFrom ? { ...draft, appliesFrom: todayIso() } : draft;
-      onSaved(await api.saveSlaSettings(toSave));
-      onClose();
+      const saved = await api.saveSlaSettings(toSave);
+      onSaved(saved);
+      // On the page the form stays: show what the server kept (e.g. "áp dụng từ" filled in) so it is not "changed".
+      if (embedded) setDraft(structuredClone(saved.settings));
+      onClose?.();
     } catch (e) {
       setError(e instanceof ApiError || e instanceof Error ? e.message : "Không lưu được cài đặt SLA.");
     } finally {
@@ -112,6 +133,7 @@ export default function SlaSettingsModal({ current, onClose, onSaved, onOpenCale
 
   function onKeyDown(e: KeyboardEvent) {
     if (e.key === "Escape") {
+      if (embedded) return;
       // Stopped here: the workspace clears the Gantt selection on a window-level Escape.
       e.stopPropagation();
       void requestClose();
@@ -121,33 +143,13 @@ export default function SlaSettingsModal({ current, onClose, onSaved, onOpenCale
     }
   }
 
-  return (
-    <div className="modal-overlay" onClick={() => void requestClose()}>
-      <div
-        className="modal sla-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="sla-title"
-        ref={modalRef}
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={onKeyDown}
-      >
-        <div className="modal-header">
-          <div className="modal-title-wrap">
-            <span className="modal-id" id="sla-title">
-              Cài đặt SLA
-            </span>
-            <p className="modal-subtitle">
-              Mỗi mức ưu tiên có một thời hạn xử lý. Đồng hồ chạy từ lúc việc được tạo, chỉ tính giờ làm việc (bỏ nghỉ trưa, ngày nghỉ, ngày lễ).
-            </p>
-          </div>
-          <button className="modal-close" onClick={() => void requestClose()} aria-label="Đóng">
-            ✕
-          </button>
-        </div>
+  const note = readOnly ? (
+    <div className="sla-note">
+      {embedded ? "Chỉ quản trị dự án được sửa" : "Bạn chỉ xem được. Chỉ người có quyền Administer Projects trên dự án này mới sửa được cài đặt SLA."}
+    </div>
+  ) : null;
 
-        {readOnly && <div className="sla-note">Bạn chỉ xem được. Chỉ người có quyền Administer Projects trên dự án này mới sửa được cài đặt SLA.</div>}
-
+  const form = (
         <fieldset className="sla-form" disabled={readOnly || saving}>
           <label className="sla-switch">
             <input type="checkbox" checked={draft.enabled} onChange={(e) => patch({ enabled: e.target.checked })} />
@@ -157,7 +159,7 @@ export default function SlaSettingsModal({ current, onClose, onSaved, onOpenCale
           <div className="field-row">
             <label className="field">
               <span>Áp dụng cho việc tạo từ ngày</span>
-              <input type="date" value={draft.appliesFrom ?? ""} onChange={(e) => patch({ appliesFrom: e.target.value || null })} />
+              <DateField value={draft.appliesFrom ?? ""} ariaLabel="Áp dụng từ ngày" onChange={(iso) => patch({ appliesFrom: iso || null })} />
               <small className="field-hint">Để trống: tính từ hôm nay khi bật. Việc tạo trước ngày này không bị tính SLA.</small>
             </label>
             <label className="field">
@@ -216,18 +218,16 @@ export default function SlaSettingsModal({ current, onClose, onSaved, onOpenCale
               {draft.periods.map((p, i) => (
                 <div key={i} className="sla-period">
                   <span>Khung {i + 1}</span>
-                  <input
-                    type="time"
+                  <TimeInput
                     aria-label={`Khung ${i + 1} bắt đầu`}
                     value={p.start}
-                    onChange={(e) => patch({ periods: draft.periods.map((x, j) => (j === i ? { ...x, start: e.target.value } : x)) })}
+                    onChange={(v) => patch({ periods: draft.periods.map((x, j) => (j === i ? { ...x, start: v } : x)) })}
                   />
                   <span>–</span>
-                  <input
-                    type="time"
+                  <TimeInput
                     aria-label={`Khung ${i + 1} kết thúc`}
                     value={p.end}
-                    onChange={(e) => patch({ periods: draft.periods.map((x, j) => (j === i ? { ...x, end: e.target.value } : x)) })}
+                    onChange={(v) => patch({ periods: draft.periods.map((x, j) => (j === i ? { ...x, end: v } : x)) })}
                   />
                   {draft.periods.length > 1 && (
                     <button type="button" className="sla-remove" aria-label={`Xoá khung ${i + 1}`} onClick={() => patch({ periods: draft.periods.filter((_, j) => j !== i) })}>
@@ -257,8 +257,58 @@ export default function SlaSettingsModal({ current, onClose, onSaved, onOpenCale
           </section>
 
         </fieldset>
+  );
 
-        {error && <div className="modal-error">{error}</div>}
+  const errorEl = error ? <div className="modal-error">{error}</div> : null;
+
+  if (embedded) {
+    return (
+      <div className="sla-modal is-embedded" ref={modalRef} onKeyDown={onKeyDown}>
+        {note}
+        {form}
+        {errorEl}
+        {!readOnly && (
+          <div className="settings-foot">
+            <button onClick={reset} disabled={saving || !dirty}>
+              Huỷ
+            </button>
+            <button className="primary" onClick={() => void save()} disabled={saving || !dirty}>
+              {saving ? "Đang lưu…" : "Lưu cài đặt"}
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="modal-overlay" onClick={() => void requestClose()}>
+      <div
+        className="modal sla-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="sla-title"
+        ref={modalRef}
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={onKeyDown}
+      >
+        <div className="modal-header">
+          <div className="modal-title-wrap">
+            <span className="modal-id" id="sla-title">
+              Cài đặt SLA
+            </span>
+            <p className="modal-subtitle">
+              Mỗi mức ưu tiên có một thời hạn xử lý. Đồng hồ chạy từ lúc việc được tạo, chỉ tính giờ làm việc (bỏ nghỉ trưa, ngày nghỉ, ngày lễ).
+            </p>
+          </div>
+          <button className="modal-close" onClick={() => void requestClose()} aria-label="Đóng">
+            ✕
+          </button>
+        </div>
+
+        {note}
+        {form}
+        {errorEl}
         <div className="modal-footer">
           <div className="spacer" />
           <button onClick={() => void requestClose()}>{readOnly ? "Đóng" : "Huỷ"}</button>

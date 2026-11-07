@@ -71,9 +71,13 @@ await step("Epic không chọn được khi task đang có người phụ trách
   assert((await opt.textContent()).includes("đang có người phụ trách"));
 });
 await step("việc cha chỉ gồm việc hợp lệ: không có chính nó và không có Sub-task", async () => {
-  const opts = await page.$$eval(".modal .field:has(> span:text-is('Việc cha')) select option", (o) => o.map((x) => x.value));
-  assert(opts.includes("DEMO-1") && opts.includes("DEMO-2"), opts.join());
-  assert(!opts.includes("DEMO-5"), "không được tự làm cha của mình");
+  await page.locator(".modal .field:has(> span:text-is('Thuộc')) .td-pick").click();
+  await page.waitForSelector(".cell-picker-item");
+  const opts = (await page.$$eval(".cell-picker-item", (o) => o.map((x) => x.textContent))).join(" | ");
+  assert(opts.includes("DEMO-1") && opts.includes("DEMO-2"), opts);
+  assert(!/DEMO-5(?!\d)/.test(opts), "không được tự làm cha của mình: " + opts);
+  await page.keyboard.press("Escape");
+  await page.waitForSelector(".cell-picker-item", { state: "detached" });
 });
 await step("issue link của Jira hiện cạnh phụ thuộc, có chiều đúng, không kèm đoạn giải thích", async () => {
   const text = await page.locator(".modal .td-section", { has: page.locator(".td-section-title", { hasText: "Liên kết Jira" }) }).textContent();
@@ -82,9 +86,10 @@ await step("issue link của Jira hiện cạnh phụ thuộc, có chiều đún
 });
 await step("thêm liên kết 'relates to' DEMO-7, rồi gỡ", async () => {
   const box = page.locator(".modal .td-section", { has: page.locator(".td-section-title", { hasText: "Liên kết Jira" }) });
-  await box.locator("select").selectOption({ label: "relates to" });
-  await box.locator("input").fill("DEMO-7");
-  await box.locator("button", { hasText: "+ Liên kết" }).click();
+  await box.locator("select[aria-label='Kiểu liên kết']").selectOption({ label: "relates to" });
+  await box.locator("button", { hasText: "Chọn việc" }).click();
+  await page.locator(".cell-picker input").fill("DEMO-7");
+  await page.locator(".cell-picker-item", { hasText: "DEMO-7" }).first().click();
   await page.waitForFunction(() => document.querySelector(".modal")?.textContent.includes("relates to") && document.querySelector(".modal")?.textContent.includes("DEMO-7"));
   const posted = (await log()).find((l) => l.m === "POST" && l.p === "/api/tasks/DEMO-5/issue-links");
   assert.deepEqual(posted.b, { typeName: "Relates", otherKey: "DEMO-7", direction: "outward" });
@@ -93,24 +98,25 @@ await step("thêm liên kết 'relates to' DEMO-7, rồi gỡ", async () => {
 });
 await step("một mã không có thì Jira từ chối và lỗi hiện ngay tại chỗ", async () => {
   const box = page.locator(".modal .td-section", { has: page.locator(".td-section-title", { hasText: "Liên kết Jira" }) });
-  await box.locator("input").fill("DEMO-999");
-  await box.locator("button", { hasText: "+ Liên kết" }).click();
+  await box.locator("button", { hasText: "Chọn việc" }).click();
+  await page.locator(".cell-picker input").fill("DEMO-999");
+  await page.locator(".cell-picker-item", { hasText: "Dùng mã này" }).click();
   await box.locator(".field-note.is-error").waitFor();
   assert((await box.textContent()).includes("không tìm thấy"));
-  await box.locator("input").fill("");
 });
 await step("theo dõi / bỏ theo dõi chính mình", async () => {
-  const box = page.locator(".modal .field:has(> span:text-is('Người theo dõi'))");
-  await box.locator("button").click();
-  await box.locator("button.is-on").waitFor();
-  assert.equal((await box.locator("button").textContent()).trim(), "✓ Đang theo dõi (2)");
+  await page.locator(".modal .td-more").click();
+  await page.locator(".td-more-menu [role=menuitem]", { hasText: /^\s*Theo dõi/ }).click();
+  await page.locator(".modal .td-watchers.is-on").waitFor();
   const put = (await log()).find((l) => l.m === "PUT" && l.p.endsWith("/watchers"));
   assert.deepEqual(put.b, { watching: true });
 });
 await step("lưu: chỉ gửi những gì đã đổi (thành phần, việc cha)", async () => {
   await reset();
   await page.locator(".name-picker").first().locator("select").selectOption("UI");
-  await page.locator(".modal .field:has(> span:text-is('Việc cha')) select").selectOption("DEMO-1");
+  await page.locator(".modal .field:has(> span:text-is('Thuộc')) .td-pick").click();
+  await page.locator(".cell-picker input").fill("DEMO-1");
+  await page.locator(".cell-picker-item", { hasText: "DEMO-1" }).first().click();
   await page.locator(".modal-footer .primary").click();
   await page.waitForFunction(async () => (await (await fetch("/api/__log")).json()).log.some((l) => l.m === "PATCH"));
   const patch = (await log()).find((l) => l.m === "PATCH");

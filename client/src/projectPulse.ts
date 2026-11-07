@@ -43,31 +43,66 @@ function joinCauses(causes: string[]): string {
 }
 
 /**
+ * One measured cause. `covers` is the kind of decision row (pulseDecisions) that already says the same
+ * thing about the same work, so the headline can leave it out instead of saying it twice (plan H6);
+ * `ids` are the issues it is about. A cause no decision row can carry (work that should have started, the
+ * overall gap) has no `covers` and always stays in the headline.
+ */
+export interface PulseCause {
+  text: string;
+  covers?: PulseDecisionKind[];
+  ids?: string[];
+}
+
+/**
  * The measured causes, worst first: critical work already late, critical work nobody owns, other late
  * work, work that should have started, then the overall gap. Each is a fact from the metrics, phrased.
  */
-export function pulseCauses(m: ProgressMetrics): string[] {
-  const causes: string[] = [];
+export function pulseCauseItems(m: ProgressMetrics): PulseCause[] {
+  const causes: PulseCause[] = [];
+  const lateKinds: PulseDecisionKind[] = ["late-blocking", "overdue"];
   const critLate = m.overdue.filter((t) => t.critical);
-  if (critLate.length === 1) causes.push(`${critLate[0].id} trên đường găng đã trễ ${critLate[0].daysLate} ngày`);
-  else if (critLate.length > 1) causes.push(`${critLate.length} việc trên đường găng đã quá hạn`);
+  const critLateIds = critLate.map((t) => t.id);
+  if (critLate.length === 1) causes.push({ text: `${critLate[0].id} trên đường găng đã trễ ${critLate[0].daysLate} ngày`, covers: lateKinds, ids: critLateIds });
+  else if (critLate.length > 1) causes.push({ text: `${critLate.length} việc trên đường găng đã quá hạn`, covers: lateKinds, ids: critLateIds });
 
   const critUnowned = m.unassigned.filter((t) => t.critical);
-  if (critUnowned.length === 1) causes.push(`${critUnowned[0].id} trên đường găng chưa có người`);
-  else if (critUnowned.length > 1) causes.push(`${critUnowned.length} việc trên đường găng chưa có người`);
+  const unownedIds = critUnowned.map((t) => t.id);
+  if (critUnowned.length === 1) causes.push({ text: `${critUnowned[0].id} trên đường găng chưa có người`, covers: ["unassigned-critical"], ids: unownedIds });
+  else if (critUnowned.length > 1) causes.push({ text: `${critUnowned.length} việc trên đường găng chưa có người`, covers: ["unassigned-critical"], ids: unownedIds });
 
   const otherLate = m.counts.overdue - critLate.length;
   if (otherLate > 0) {
     const single = m.overdue.filter((t) => !t.critical);
-    if (otherLate === 1 && single.length === 1) causes.push(`${single[0].id} đã trễ ${single[0].daysLate} ngày`);
-    else causes.push(critLate.length > 0 ? `${otherLate} việc khác đã quá hạn` : `${otherLate} việc đã quá hạn`);
+    const ids = single.map((t) => t.id);
+    if (otherLate === 1 && single.length === 1) causes.push({ text: `${single[0].id} đã trễ ${single[0].daysLate} ngày`, covers: lateKinds, ids });
+    else causes.push({ text: critLate.length > 0 ? `${otherLate} việc khác đã quá hạn` : `${otherLate} việc đã quá hạn`, covers: lateKinds, ids });
   }
-  if (m.counts.notStarted > 0) causes.push(`${m.counts.notStarted} việc đã đến ngày bắt đầu mà chưa làm`);
-  if (m.spi !== null && m.spi < 0.95) causes.push(`mới xong ${m.actualPct}% trong khi kế hoạch đến hôm nay là ${m.plannedPct}%`);
+  if (m.counts.notStarted > 0) causes.push({ text: `${m.counts.notStarted} việc đã đến ngày bắt đầu mà chưa làm` });
+  if (m.spi !== null && m.spi < 0.95) causes.push({ text: `mới xong ${m.actualPct}% trong khi kế hoạch đến hôm nay là ${m.plannedPct}%` });
   return causes;
 }
 
-export function pulseHeadline(m: ProgressMetrics): PulseHeadline {
+export function pulseCauses(m: ProgressMetrics): string[] {
+  return pulseCauseItems(m).map((c) => c.text);
+}
+
+/**
+ * Whether a decision row already carries this cause: a row of the right kind that is about at least one of
+ * the same issues. The overlap test is on issue keys, so a row about other work does not hide a cause.
+ */
+function coveredBy(cause: PulseCause, decisions: PulseDecision[]): boolean {
+  const kinds = cause.covers;
+  if (!kinds) return false;
+  return decisions.some((d) => kinds.includes(d.kind) && (!cause.ids || cause.ids.length === 0 || cause.ids.some((id) => d.taskIds.includes(id))));
+}
+
+/**
+ * The conclusion and the forecast. `decisions` are the "Cần bạn quyết" rows shown under it: a cause that is
+ * already one of them is left out of the sentence (plan H6 — one idea said once), so the detail keeps the
+ * forecast and whatever no row can carry. Without `decisions` every cause is written, as before.
+ */
+export function pulseHeadline(m: ProgressMetrics, decisions: PulseDecision[] = []): PulseHeadline {
   if (m.counts.total === 0) {
     const lead = "Chưa có việc nào để đo tiến độ.";
     return { verdict: "watch", lead, leadKey: lead.slice(0, -1), detail: "Thêm việc có ngày bắt đầu và kết thúc để thấy nhịp dự án." };
@@ -98,9 +133,10 @@ export function pulseHeadline(m: ProgressMetrics): PulseHeadline {
         : `Dự án mới ở giai đoạn đầu: kế hoạch đến hôm nay mới là ${m.plannedPct}%.`
     );
   } else {
-    const causes = pulseCauses(m);
+    const items = pulseCauseItems(m);
+    const causes = items.filter((c) => !coveredBy(c, decisions)).map((c) => c.text);
     if (causes.length > 0) sentences.push(`Nguyên nhân chính: ${joinCauses(causes)}.`);
-    else if (m.healthReasons[0]) sentences.push(stripSpi(m.healthReasons[0]));
+    else if (items.length === 0 && m.healthReasons[0]) sentences.push(stripSpi(m.healthReasons[0]));
   }
   const { plannedEnd, baselineEnd } = m.schedule;
   if (plannedEnd) {
@@ -122,6 +158,8 @@ export interface PulseAction {
   suggestedAccountId?: string;
   /** For "rebalance": whose load to open. */
   accountId?: string;
+  /** For "rebalance": the first overloaded day, to scroll the person's row to. */
+  date?: string;
 }
 
 export interface PulseDecision {
@@ -281,7 +319,7 @@ export function pulseDecisions(
         title: `${name} quá tải ${formatDayRange(overload.from, overload.to, today)}`,
         body: `${overload.concurrent} việc trùng ngày${overload.days > 1 ? `, ${overload.days} ngày quá tải trong 2 tuần tới` : ""}.`,
         taskIds: overload.taskIds,
-        action: { kind: "rebalance", label: "Cân tải", accountId: overload.accountId },
+        action: { kind: "rebalance", label: nameOf(overload.accountId) ? `Xem lịch ${givenName(name)}` : "Xem lịch", accountId: overload.accountId, date: overload.from },
       },
     });
   }

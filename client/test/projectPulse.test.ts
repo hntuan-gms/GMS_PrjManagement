@@ -164,7 +164,7 @@ describe("pulseDecisions", () => {
     assert.equal(out[2].title, "Lê Chi quá tải 10/11");
     assert.equal(out[2].body, "2 việc trùng ngày.");
     assert.deepEqual(out[2].taskIds, ["P-5", "P-6"]);
-    assert.deepEqual(out[2].action, { kind: "rebalance", label: "Cân tải", accountId: "chi" });
+    assert.deepEqual(out[2].action, { kind: "rebalance", label: "Xem lịch Chi", accountId: "chi", date: "2026-11-10" });
   });
 
   it("with the worst handled, plain late work and missing baselines come up", () => {
@@ -184,6 +184,53 @@ describe("pulseDecisions", () => {
 
   it("nothing to decide is an empty list", () => {
     assert.deepEqual(pulseDecisions(metrics(), [tasks[3]], users, TODAY), []);
+  });
+});
+
+describe("one idea said once (plan H6)", () => {
+  const behind = metrics(
+    {
+      health: "off_track",
+      spi: 0.5,
+      actualPct: 17,
+      plannedPct: 33,
+      schedule: { start: "2026-10-01", plannedEnd: "2026-11-24", baselineEnd: "2026-11-20", slipDays: 4, daysRemaining: 18 },
+      overdue: [{ ...ref("P-2", true), daysLate: 2 }],
+      unassigned: [ref("P-3", true)],
+    },
+    { overdue: 1, unassigned: 1, notStarted: 2 }
+  );
+  const decisions = pulseDecisions(behind, tasks, users, TODAY);
+  const keysIn = (text: string) => text.match(/[A-Z]+-\d+/g) ?? [];
+
+  it("a cause that is already a decision row is left out of the sentence", () => {
+    const h = pulseHeadline(behind, decisions);
+    assert.equal(h.lead, "Chậm 4 ngày so với kế hoạch.");
+    assert.doesNotMatch(h.detail, /đường găng/);
+    assert.match(h.detail, /Dự kiến xong 24\/11 \(kế hoạch 20\/11\)\./);
+    // what no row can carry stays
+    assert.match(h.detail, /2 việc đã đến ngày bắt đầu mà chưa làm/);
+  });
+
+  it("no issue key is in both the headline detail and the decision rows", () => {
+    const h = pulseHeadline(behind, decisions);
+    const inRows = new Set(decisions.flatMap((d) => [...d.taskIds, ...keysIn(d.title), ...keysIn(d.body)]));
+    assert.deepEqual(keysIn(h.detail).filter((k) => inRows.has(k)), []);
+    // and without rows the cause is still written, with its key
+    assert.match(pulseHeadline(behind).detail, /P-2/);
+  });
+
+  it("a cause whose row is not shown (cut off at three) is still written", () => {
+    const h = pulseHeadline(behind, decisions.filter((d) => d.kind !== "late-blocking"));
+    assert.match(h.detail, /P-2 trên đường găng đã trễ 2 ngày/);
+  });
+
+  it("only a measured sentence is dropped when nothing else is left to say", () => {
+    const onlyLate = metrics({ health: "at_risk", overdue: [{ ...ref("P-2", true), daysLate: 2 }] }, { overdue: 1 });
+    const d = pulseDecisions(onlyLate, tasks, users, TODAY);
+    const h = pulseHeadline(onlyLate, d);
+    assert.doesNotMatch(h.detail, /Nguyên nhân chính/);
+    assert.doesNotMatch(h.detail, /P-2/);
   });
 });
 

@@ -1,3 +1,4 @@
+import { formatRange } from "./dateLabels";
 import {
   addDays,
   defaultWindow,
@@ -192,4 +193,21 @@ export function pct(ratio: number): string {
 /** "2026-11-04" → "04/11". */
 export function shortDate(iso: string): string {
   return `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
+}
+
+/* ---------------------------------------------------------- person summary */
+
+/**
+ * What an opened person's one-line summary is measured over: the window the table shows when one was
+ * picked, else the next four weeks from today. The whole project would almost always read as a few
+ * percent, which says nothing about whether this person can take more now.
+ */
+export function summaryWindow(range: Window | null, today: string): { from: string; to: string; label: string } {
+  if (range) return { from: range.from, to: range.to, label: formatRange(range.from, range.to) };
+  return { from: today, to: addDays(today, 27), label: "4 tuần tới" };
+}
+
+/** The window the overload badge by a name counts: today and the 13 days after it. */
+export function overloadWindow(today: string): { from: string; to: string } {
+  return { from: today, to: addDays(today, 13) };
 }

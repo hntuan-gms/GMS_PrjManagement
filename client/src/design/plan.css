@@ -544,3 +544,146 @@ body:has(.draft-bar) .gantt-body {
   border-color: transparent;
   color: var(--ink);
 }
+
+/* ---- Đại phẫu C: rows without dates, cell editors, one-row toolbar, draft strip ---- */
+
+/* C1. An undated row keeps its place; its time side is a lane you draw a bar on. */
+.wbs-row.is-unscheduled .wbs-summary {
+  color: var(--ink-2);
+}
+.unsched-lane {
+  fill: transparent;
+  stroke: transparent;
+  stroke-width: 1;
+  stroke-dasharray: 1 3;
+  cursor: crosshair;
+  pointer-events: all;
+}
+.unsched-lane:hover {
+  fill: color-mix(in srgb, var(--sunken) 55%, transparent);
+  stroke: var(--line-strong);
+}
+.unsched-draw > rect:first-child {
+  fill: var(--info-soft);
+  stroke: var(--info);
+  stroke-width: 1;
+}
+.unsched-tip {
+  fill: var(--ink);
+}
+.unsched-draw text {
+  fill: var(--on-strong);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+}
+
+/* C4. The cell being edited: a box laid over it. The table rows are user-select: none, the box is not. */
+.wbs-cell-editor {
+  position: fixed;
+  z-index: var(--z-popover);
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  border: 1px solid var(--info);
+  border-radius: var(--radius-sm);
+  background: var(--raised);
+  box-shadow: var(--control-ring);
+  user-select: text;
+}
+.wbs-cell-editor.is-bad {
+  border-color: var(--risk);
+}
+.wbs-cell-editor input[type="text"] {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 0 8px;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  outline: none;
+  font: inherit;
+  font-size: var(--font-size-md);
+  color: var(--ink);
+  user-select: text;
+}
+.wbs-cell-editor.is-start input[type="text"],
+.wbs-cell-editor.is-due input[type="text"],
+.wbs-cell-editor.is-duration input[type="text"],
+.wbs-cell-editor.is-pct input[type="text"] {
+  font-family: var(--font-mono);
+}
+.wbs-cell-editor .date-field {
+  height: 100%;
+  min-width: 0;
+}
+.wbs-cell-editor button.date-field-pick {
+  height: 22px;
+}
+/* Where Enter and F2 act: the cell the last edit ended on. */
+.wbs-cell-cursor {
+  outline: 2px solid var(--info);
+  outline-offset: -2px;
+  border-radius: var(--radius-sm);
+}
+.wbs-preds {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* C2. One row at every width: the labels give way to icons, then the search shrinks, nothing wraps. */
+.gantt-toolbar {
+  container: gantt-bar / inline-size;
+  flex-wrap: nowrap;
+}
+.gantt-toolbar .tf-left {
+  min-width: 0;
+}
+.gantt-toolbar .tf-search {
+  flex: 1 1 220px;
+  min-width: 140px;
+  max-width: 320px;
+}
+.tf-bar .tf-btn.warning-pill.is-on,
+.tf-bar .tf-btn.warning-pill.is-on:hover:not(:disabled) {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--on-strong);
+}
+.tf-bar .tf-btn.warning-pill.is-on svg {
+  color: var(--on-strong);
+}
+@container gantt-bar (max-width: 1499px) {
+  .gantt-toolbar .tb-btn .tb-label {
+    display: none;
+  }
+}
+@container gantt-bar (max-width: 1299px) {
+  .gantt-toolbar .fb-label,
+  .gantt-toolbar .sf-trigger-label {
+    display: none;
+  }
+}
+
+/* C6. Over the Gantt the draft strip lies on the filter row instead of pushing the plan down. */
+body:has(.gantt-toolbar) .draft-bar {
+  align-self: flex-start;
+  box-sizing: border-box;
+  width: fit-content;
+  max-width: 62%;
+  height: var(--toolbar-h);
+  min-height: var(--toolbar-h);
+  margin-bottom: calc(-1 * var(--toolbar-h));
+  padding-block: 0;
+  border-bottom: none;
+  border-right: 1px solid var(--warn-line);
+}
+body:has(.gantt-toolbar) .draft-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

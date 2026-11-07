@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { fold } from "../csvImport";
+import { useLayer } from "../useLayer";
+import { rankSearch } from "../commandRank";
 import type { Task } from "../types";
 import { Icon, type IconName } from "./Icons";
 import StatusGlyph from "./StatusGlyph";
@@ -53,6 +54,7 @@ const SEARCH_LIMIT = 8;
 const CREATE_HINT = /(^|\s)(@\S|!\S|\^\S|#\S|\/\S)|(^|\s)(sau|trước)\s+[A-Z][A-Z0-9]+-\d+/i;
 
 export default function CommandBar({ tasks, commands, initialMode = "command", onClose, onOpenTask, onCreate, previewCreate, onAsk }: Props) {
+  useLayer("cmdk", true, { onEscape: onClose });
   const [mode, setMode] = useState<"command" | "create">(initialMode);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
@@ -67,7 +69,6 @@ export default function CommandBar({ tasks, commands, initialMode = "command", o
   }, []);
 
   const q = query.trim();
-  const fq = fold(q);
 
   const rows: Row[] = useMemo(() => {
     if (mode === "create") {
@@ -81,29 +82,12 @@ export default function CommandBar({ tasks, commands, initialMode = "command", o
     const looksLikeCreate = q.startsWith("+") || CREATE_HINT.test(q);
     const createRow: Row = { kind: "create", text: q.replace(/^\+\s*/, ""), preview: previewCreate(q.replace(/^\+\s*/, "")) };
     if (looksLikeCreate) out.push(createRow);
-    // Search: key prefix first, then every folded word of the query inside the title.
-    const words = fq.split(" ").filter(Boolean);
-    const upper = q.toUpperCase();
-    const hits = tasks
-      .map((t) => {
-        const key = t.id.toUpperCase();
-        if (key === upper) return { t, score: 0 };
-        if (key.startsWith(upper)) return { t, score: 1 };
-        const hay = fold(`${t.id} ${t.summary} ${t.assigneeName ?? ""}`);
-        return words.every((w) => hay.includes(w)) ? { t, score: 2 } : null;
-      })
-      .filter((x): x is { t: Task; score: number } => x !== null)
-      .sort((a, b) => a.score - b.score || Number(a.t.statusCategory === "done") - Number(b.t.statusCategory === "done"))
-      .slice(0, SEARCH_LIMIT);
-    for (const h of hits) out.push({ kind: "task", task: h.t });
-    for (const cmd of commands) {
-      const hay = fold(`${cmd.label} ${cmd.aliases ?? ""} ${cmd.group}`);
-      if (words.every((w) => hay.includes(w))) out.push({ kind: "command", cmd });
-    }
+    // Tasks and commands share one ranking (commandRank.ts).
+    for (const r of rankSearch(q, tasks, commands, SEARCH_LIMIT)) out.push(r.kind === "task" ? { kind: "task", task: r.task } : { kind: "command", cmd: r.cmd });
     if (!looksLikeCreate) out.push(createRow);
     if (onAsk) out.push({ kind: "ask", text: q });
     return out;
-  }, [mode, q, fq, tasks, commands, previewCreate, onAsk]);
+  }, [mode, q, tasks, commands, previewCreate, onAsk]);
 
 
   useEffect(() => {

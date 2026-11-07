@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { burndown, localDate, shortDate, totalWeight, workingDaysLocal } from "../boardModel";
 import type { BoardIssue, BoardSnapshot, Sprint, SprintInsight } from "../types";
+import { Icon } from "./Icons";
+import Popover from "./Popover";
 import { useWorkCalendar } from "./workCalendarContext";
 
 /**
@@ -63,51 +65,91 @@ export default function SprintHeader(props: Props) {
 
   return (
     <div className="sh">
-      <div className="sh-main">
-        <div className="sh-title">
-          <div>
-            <b>{sprint.name}</b>
-            <span className="bd-muted">
-              {shortDate(start)} → {shortDate(end)} ·{" "}
-              {overdue ? <span className="bd-bad">đã quá ngày kết thúc</span> : `còn ${left} ngày làm việc`}
-            </span>
-          </div>
-          {sprint.goal ? <p className="sh-goal">Mục tiêu: {sprint.goal}</p> : <p className="sh-goal bd-muted">Chưa đặt mục tiêu sprint</p>}
-        </div>
-
-        <div className="sh-progress">
-          <div className="sh-bar" aria-label={`Xong ${done}/${scope} ${unit}`}>
-            <span className="sh-bar-done" style={{ width: `${scope ? (done / scope) * 100 : 0}%` }} />
-            <span className="sh-bar-doing" style={{ width: `${scope ? (doing / scope) * 100 : 0}%` }} />
-            <span className="sh-bar-time" style={{ left: `${elapsedPct}%` }} title={`Đã qua ${elapsedPct}% thời gian`} />
-          </div>
-          <div className="sh-progress-text">
+      <div className="sh-line">
+        <b className="sh-name" title={sprint.goal ? `Mục tiêu: ${sprint.goal}` : undefined}>
+          {sprint.name}
+        </b>
+        <span className="bd-muted sh-when">
+          {shortDate(start)} → {shortDate(end)} · {overdue ? <span className="bd-bad">quá ngày kết thúc</span> : `còn ${left} ngày`}
+        </span>
+        {/* The burndown is one press away rather than 140px of header: the bar already says how far. */}
+        <Popover
+          className="sh-meter"
+          caret={false}
+          menuLabel="Burndown của sprint"
+          menuClassName="sh-burn-pop"
+          title="Xem burndown"
+          label={
+            <>
+              <span className="sh-bar" aria-label={`Xong ${done}/${scope} ${unit}`}>
+                <span className="sh-bar-done" style={{ width: `${scope ? (done / scope) * 100 : 0}%` }} />
+                <span className="sh-bar-doing" style={{ width: `${scope ? (doing / scope) * 100 : 0}%` }} />
+                <span className="sh-bar-time" style={{ left: `${elapsedPct}%` }} title={`Đã qua ${elapsedPct}% thời gian`} />
+              </span>
+              <b>{donePct}%</b>
+            </>
+          }
+        >
+          <div className="sh-burn-head">
             <b>{donePct}%</b> xong · {done}/{scope} {unit}
-            <span className={`sh-pace sh-pace-${pace}`}>
-              {pace === "ahead" ? "▲ Nhanh hơn nhịp" : pace === "ok" ? "● Đúng nhịp" : pace === "behind" ? "▼ Chậm hơn nhịp" : "Mới bắt đầu"}
-            </span>
           </div>
+          <Burndown series={series} unit={unit} today={today} />
           <div className="sh-legend">
             <span><i className="pr-swatch pr-state-bg-done" /> Xong</span>
             <span><i className="pr-swatch pr-state-bg-inProgress" /> Đang làm</span>
             <span><i className="sh-time-key" /> Thời gian đã qua</span>
           </div>
-        </div>
-
-        <Burndown series={series} unit={unit} today={today} />
-
-        <div className="sh-actions">
-          {props.canUseAi && (
-            <button className="bd-ai-btn" onClick={props.onAnalyze} disabled={insight.loading}>
-              {insight.loading ? "Đang phân tích..." : insight.data ? "↻ Phân tích lại" : "Phân tích sprint (AI)"}
-            </button>
+        </Popover>
+        <span className={`sh-pace sh-pace-${pace}`}>
+          {pace === "ahead" ? "▲ Nhanh hơn nhịp" : pace === "ok" ? "● Đúng nhịp" : pace === "behind" ? "▼ Chậm hơn nhịp" : "Mới bắt đầu"}
+        </span>
+        <span className="bd-spacer" />
+        <button onClick={props.onComplete}>Hoàn thành sprint</button>
+        <Popover
+          className="bl-icon bl-more"
+          role="menu"
+          caret={false}
+          align="end"
+          menuLabel="Tuỳ chọn sprint"
+          menuClassName="bl-more-menu"
+          ariaLabel="Tuỳ chọn sprint"
+          title="Sửa sprint, phân tích"
+          label={<Icon name="more" size={14} />}
+        >
+          {({ close }) => (
+            <>
+              <button
+                type="button"
+                role="menuitem"
+                className="menu-item"
+                onClick={() => {
+                  close();
+                  props.onEdit();
+                }}
+              >
+                <Icon name="edit" size={14} />
+                Sửa sprint
+              </button>
+              {props.canUseAi && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="menu-item"
+                  disabled={insight.loading}
+                  onClick={() => {
+                    close();
+                    props.onAnalyze();
+                  }}
+                >
+                  {insight.loading ? "Đang phân tích..." : insight.data ? "Phân tích lại" : "Phân tích sprint"}
+                  <span className="ai-tag">AI</span>
+                </button>
+              )}
+            </>
           )}
-          <button onClick={props.onComplete}>Hoàn thành sprint</button>
-          <button className="bl-icon" onClick={props.onEdit} title="Sửa sprint" aria-label="Sửa sprint">
-            ✎
-          </button>
-        </div>
+        </Popover>
       </div>
+      {sprint.goal && <p className="sh-goal">{sprint.goal}</p>}
 
       {(insight.loading || insight.data || insight.error) && (
         <div className="sh-ai">

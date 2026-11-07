@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useLayer } from "../useLayer";
 import { api } from "../api";
 import type { PersonLoad } from "../resourceAllocation";
 import { pct, shortDate } from "../resourceColumns";
 import { normalizeSkills } from "../skillMatrix";
 import type { ResourceAbsence, ResourceProfile } from "../types";
-import { useDialogs } from "./dialogContext";
+import DateField from "./DateField";
+import Avatar from "./Avatar";
 import { Icon } from "./Icons";
 import SkillsInput from "./SkillsInput";
 
@@ -31,8 +33,11 @@ const sameSkills = (a: string[], b: string[]) => a.length === b.length && a.ever
  * heatmap, on the same date columns. This is only the part that is *edited*.
  *
  * Leave periods already stored are listed (edit loads one into the form, ✕ deletes it at once,
- * as it always has); a period typed into the form is added or updated by the same "Lưu thay đổi"
+ * as it always has); a period typed into the form is added or updated by the same "Lưu"
  * that writes the profile. Only what changed is sent: leave alone, no profile write.
+ *
+ * Like the task panel (plan 2.6) it has no dimmer and closing saves: Esc, ✕ or the rail all write what
+ * was edited and then close. If the write is refused, or a field is not valid, it stays open and says why.
  */
 export default function ResourceProfileDrawer({
   person,
@@ -44,7 +49,7 @@ export default function ResourceProfileDrawer({
   onAbsenceRemoved,
   onAbsenceUpdated,
 }: Props) {
-  const { confirm } = useDialogs();
+  useLayer("resource-profile", true, { onEscape: () => void requestClose(), dismissOnNav: true });
   const [role, setRole] = useState(person.role ?? "");
   const [capacity, setCapacity] = useState(String(person.capacityHoursPerDay));
   const [skills, setSkills] = useState<string[]>(person.profile?.skills ?? []);
@@ -74,9 +79,9 @@ export default function ResourceProfileDrawer({
     return () => opener?.focus?.();
   }, []);
 
+  /** Closing is saving: what was edited is written first, and a refusal keeps the drawer open. */
   async function requestClose() {
-    if (dirty && !(await confirm({ message: "Bỏ các thay đổi chưa lưu?", confirmLabel: "Bỏ thay đổi", cancelLabel: "Tiếp tục sửa", tone: "danger" }))) return;
-    onClose();
+    await save();
   }
 
   function onKeyDown(e: KeyboardEvent) {
@@ -86,24 +91,10 @@ export default function ResourceProfileDrawer({
       void requestClose();
       return;
     }
+    // Ctrl/Cmd+Enter saves; so does the drawer's own button. Tab is not trapped: it is not a modal.
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       void save();
-      return;
-    }
-    if (e.key !== "Tab") return;
-    const items = [
-      ...(drawerRef.current?.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled)") ?? []),
-    ];
-    if (items.length === 0) return;
-    const first = items[0];
-    const last = items[items.length - 1];
-    if (e.shiftKey && document.activeElement === first) {
-      e.preventDefault();
-      last.focus();
-    } else if (!e.shiftKey && document.activeElement === last) {
-      e.preventDefault();
-      first.focus();
     }
   }
 
@@ -179,25 +170,20 @@ export default function ResourceProfileDrawer({
 
   return (
     <>
-      <div className="rv-drawer-scrim" onClick={() => void requestClose()} />
       <div
         ref={drawerRef}
         className="rv-drawer"
         role="dialog"
-        aria-modal="true"
+        aria-modal="false"
         aria-label={`Hồ sơ và kỳ nghỉ của ${person.displayName}`}
         onKeyDown={onKeyDown}
       >
         <div className="rv-drawer-head">
-          {person.avatarUrl ? (
-            <img src={person.avatarUrl} alt="" className="rv-avatar rv-avatar-lg" />
-          ) : (
-            <span className="rv-avatar rv-avatar-lg rv-avatar-empty">{person.displayName.slice(0, 1)}</span>
-          )}
+          <Avatar name={person.displayName} avatarUrl={person.avatarUrl} className="rv-avatar rv-avatar-lg rv-avatar-empty" decorative />
           <div className="rv-drawer-title">
             <b>{person.displayName}</b>
             <small>
-              {person.allocatedHours}h đã giao / {person.capacityHours}h khả dụng · {pct(person.utilisation)} hiệu suất
+              {person.allocatedHours}h đã giao / {person.capacityHours}h khả dụng · {pct(person.utilisation)} mức sử dụng
               {person.overloadedDays > 0 && ` · ${person.overloadedDays} ngày quá tải`}
             </small>
           </div>
@@ -213,8 +199,7 @@ export default function ResourceProfileDrawer({
           </label>
           <label className="field">
             <span>Công suất (giờ/ngày)</span>
-            <input type="number" min={1} max={24} step={0.5} value={capacity} onChange={(e) => setCapacity(e.target.value)} />
-            {!person.profile && <small className="field-hint">Đang dùng mặc định {defaultCapacityHours}h/ngày.</small>}
+            <input type="number" min={1} max={24} step={0.5} value={capacity} placeholder={String(defaultCapacityHours)} onChange={(e) => setCapacity(e.target.value)} />
           </label>
 
           <fieldset className="rv-drawer-leave">
@@ -222,11 +207,11 @@ export default function ResourceProfileDrawer({
             <div className="field-row">
               <label className="field">
                 <span>Từ</span>
-                <input type="date" value={absFrom} onChange={(e) => setAbsFrom(e.target.value)} />
+                <DateField value={absFrom} ariaLabel="Nghỉ từ" onChange={setAbsFrom} />
               </label>
               <label className="field">
                 <span>Đến</span>
-                <input type="date" value={absTo} onChange={(e) => setAbsTo(e.target.value)} />
+                <DateField value={absTo} ariaLabel="Nghỉ đến" base={absFrom || undefined} onChange={setAbsTo} />
               </label>
             </div>
             <label className="field">
@@ -273,11 +258,9 @@ export default function ResourceProfileDrawer({
         </div>
 
         <div className="rv-drawer-foot">
-          <button type="button" onClick={() => void requestClose()}>
-            Huỷ
-          </button>
-          <button type="button" className="primary" onClick={() => void save()} disabled={saving}>
-            {saving ? "Đang lưu…" : "Lưu thay đổi"}
+          <button type="button" className="primary" onClick={() => void save()} disabled={saving || !dirty} title="Đóng khung cũng lưu">
+            {saving ? "Đang lưu…" : dirty ? "Lưu" : "Đã lưu"}
+            <kbd>Ctrl ⏎</kbd>
           </button>
         </div>
       </div>

@@ -3,7 +3,7 @@
 // The stand-in's seed makes DEMO-3 late, DEMO-4 done on time and DEMO-7 within its deadline.
 import { chromium } from "playwright-core";
 import assert from "node:assert/strict";
-import { openDisplay } from "./toolbar.mjs";
+import { fillDate, openDisplay, openSettings } from "./toolbar.mjs";
 
 const APP = process.env.E2E_APP ?? "http://localhost:5173/";
 const browser = await chromium.launch({ channel: "chrome", headless: true });
@@ -26,6 +26,11 @@ const localDay = (n) => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
 const row = (key) => page.locator(".wbs-row", { hasText: key });
+// Cài đặt is a page: back to the plan ("← Về Kế hoạch") before the steps that read the Gantt.
+const backToPlan = async () => {
+  await page.locator(".settings-back").click();
+  await page.waitForSelector(".wbs-row");
+};
 const slaButton = () => page.locator(".gantt-toolbar button", { hasText: "Trễ SLA" });
 
 await page.request.post(new URL("/api/__restore", APP).href);
@@ -38,11 +43,10 @@ await step("SLA tắt mặc định: không có nút 'Trễ SLA'", async () => {
   assert.equal(await slaButton().count(), 0);
 });
 
-await step("menu dự án → 'Cài đặt SLA…' mở hộp thoại với lịch mặc định", async () => {
-  await page.locator(".project-switch").click();
-  await page.locator("[role=menuitem]", { hasText: "Cài đặt SLA" }).click();
+await step("menu dự án → Cài đặt dự án → SLA mở mục với lịch mặc định", async () => {
+  await openSettings(page, "SLA");
   await page.waitForSelector(".sla-modal");
-  const times = await page.$$eval(".sla-modal input[type=time]", (els) => els.map((e) => e.value));
+  const times = await page.$$eval(".sla-modal input[aria-label^='Khung']", (els) => els.map((e) => e.value));
   assert.deepEqual(times, ["08:00", "12:00", "13:00", "17:00"]);
   // The site's priorities fill the target table.
   await page.waitForFunction(() => document.querySelectorAll(".sla-target").length === 5);
@@ -51,24 +55,28 @@ await step("menu dự án → 'Cài đặt SLA…' mở hộp thoại với lị
 
 await step("bật SLA, áp dụng từ 60 ngày trước, lưu", async () => {
   await page.locator(".sla-switch input").check();
-  await page.locator(".sla-modal input[type=date]").first().fill(localDay(-60));
+  await fillDate(page.locator(".sla-modal .date-field input[type=text]").first(), localDay(-60));
   await page.locator(".sla-modal button.primary", { hasText: "Lưu cài đặt" }).click();
-  await page.waitForSelector(".sla-modal", { state: "detached" });
+  // Saved: the page stays and its Save goes back to disabled (nothing left to save).
+  await page.waitForFunction(() => document.querySelector(".sla-modal button.primary")?.disabled);
+  await backToPlan();
   await slaButton().waitFor();
 });
 
-await step("khung giờ chồng nhau bị máy chủ từ chối, hộp thoại giữ nguyên", async () => {
-  await page.locator(".project-switch").click();
-  await page.locator("[role=menuitem]", { hasText: "Cài đặt SLA" }).click();
+await step("khung giờ chồng nhau bị máy chủ từ chối; 'Huỷ' trả về giá trị đã lưu, không hỏi", async () => {
+  await openSettings(page, "SLA");
   await page.waitForSelector(".sla-modal");
-  await page.locator(".sla-modal input[aria-label='Khung 1 kết thúc']").fill("13:30");
+  const end1 = page.locator(".sla-modal input[aria-label='Khung 1 kết thúc']");
+  await end1.fill("13:30");
+  await end1.press("Enter");
   await page.locator(".sla-modal button.primary").click();
   await page.waitForSelector(".sla-modal .modal-error");
   assert.match(await page.textContent(".sla-modal .modal-error"), /chồng nhau/);
-  await page.locator(".sla-modal .modal-footer button", { hasText: "Huỷ" }).click();
-  // Unsaved changes: the app asks before discarding.
-  await page.locator(".dlg button.danger-solid").click();
-  await page.waitForSelector(".sla-modal", { state: "detached" });
+  await page.locator(".sla-modal .settings-foot button", { hasText: "Huỷ" }).click();
+  assert.equal(await page.locator(".dlg").count(), 0, "Huỷ trên trang Cài đặt không hỏi lại");
+  assert.equal(await end1.inputValue(), "12:00");
+  assert.equal(await page.locator(".sla-modal button.primary").isDisabled(), true);
+  await backToPlan();
 });
 
 console.log("\n== SLA: Gantt ==");

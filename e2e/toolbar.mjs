@@ -36,3 +36,42 @@ export async function ioAction(page, label) {
   await page.locator(".gantt-toolbar button", { hasText: "Nhập / Xuất" }).click();
   await page.locator(".io-menu button", { hasText: label }).click();
 }
+
+/** Nhân lực in its "Giờ đã ghi" mode (what the rail's "Giờ làm" used to open): lens, then the mode switch. */
+export async function openTimesheet(page, { wait = true } = {}) {
+  if (!(await page.locator("[data-lens=resource][aria-current=page]").count())) await page.locator("[data-lens=resource]").click();
+  await page.locator("[data-mode=ts]").click();
+  if (wait) await page.waitForSelector(".ts-grid");
+}
+
+/**
+ * Cài đặt dự án, on a section ("Lịch làm việc", "SLA", "Nhập KBKT"; none = whatever it opens on).
+ * Goes through the project menu unless the page is already up.
+ */
+export async function openSettings(page, section) {
+  if (!(await page.locator(".settings-page").count())) {
+    await page.locator(".project-switch").click();
+    await page.locator("[role=menuitem]", { hasText: "Cài đặt dự án" }).click();
+    await page.waitForSelector(".settings-page");
+  }
+  if (section) {
+    await page.locator(".settings-nav-item", { hasText: section }).click();
+    await page.waitForSelector(".settings-body h2", { hasText: section });
+  }
+}
+
+/** Types a date into a DateField ("2026-11-15" is written as 15/11/2026) and commits it with Enter. */
+export async function fillDate(locator, iso) {
+  await locator.fill(`${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`);
+  await locator.press("Enter");
+}
+
+/** Nhân lực's "Ngày | Tuần | Tháng" switch (it replaced the "Cột" select): `g` is "day", "week" or "month". */
+export async function setGranularity(page, g) {
+  await page.locator(`.rv-granularity [data-g=${g}]`).click();
+}
+
+/** Which of Ngày / Tuần / Tháng is on, as "day" | "week" | "month". */
+export async function granularityOf(page) {
+  return page.locator(".rv-granularity [aria-pressed=true]").getAttribute("data-g");
+}

@@ -6,11 +6,12 @@ import { EMPTY_FILTER, type BoardFilter } from "../boardModel";
 import { EMPTY_TASK_FILTER, useTaskFilter } from "../taskFilter";
 import { toBoardFilter, toTaskFilter, type ViewFilterSpec } from "../viewFilter";
 import { makeEntry, pushEntry, undoSteps, type UndoEntry } from "../undo";
-import { addDays, buildResourceLoad, defaultWindow, todayIso } from "../resourceAllocation";
+import { addDays, buildResourceLoad, todayIso } from "../resourceAllocation";
 import { loadBigTasksCache, loadTasksCache, saveTasksCache, tasksCacheKey } from "../tasksCache";
 import { dropViewCache, noteViewsStale, readViewCache, viewCacheScope, writeViewCache } from "../viewCache";
 import { warmBoardAndTimesheet, warmProgress } from "../warmViews";
-import { computeSla } from "../sla";
+import { computeSla, slaIds } from "../sla";
+import SavedFilterMenu from "./SavedFilterMenu";
 import { toWorkCalendar } from "../workCalendar";
 import type {
   BulkTaskCreateResult,
@@ -20,6 +21,7 @@ import type {
   ProjectVersion,
   ResourcePool,
   SlaSettingsResponse,
+  WorkCalendarSettings,
   Session,
   Task,
   TaskUpdateInput,
@@ -37,8 +39,8 @@ import KbktImportModal from "./KbktImportModal";
 import ProgressReportView from "./ProgressReportView";
 import ResourceView from "./ResourceView";
 import TaskEditModal from "./TaskEditModal";
-import SlaSettingsModal from "./SlaSettingsModal";
-import WorkCalendarModal from "./WorkCalendarModal";
+import ProjectSettings from "./ProjectSettings";
+import type { SettingsSection } from "../settingsSections";
 import { WorkCalendarContext } from "./workCalendarContext";
 import { Icon } from "./Icons";
 import BulkStatusMenu from "./BulkStatusMenu";
@@ -46,7 +48,8 @@ import { useDialogs } from "./dialogContext";
 import { TransitionFieldsDialog } from "./TransitionFields";
 import { neededFieldsFrom } from "../transitionFields";
 import Toolbar from "./Toolbar";
-import { LENSES, type SyncState, type WorkspaceView } from "../lenses";
+import { LENSES, parseView, type ResourceMode, type SyncState, type WorkspaceView } from "../lenses";
+import ResourceModes from "./ResourceModes";
 import TimesheetView from "./TimesheetView";
 import TodayView from "./TodayView";
 import DraftBar from "./DraftBar";
@@ -57,6 +60,7 @@ import Toaster from "./Toaster";
 import { toast } from "../toast";
 import { parseQuickAdd } from "../quickAdd";
 import { createSequence, isTypingTarget, overlayOpen } from "../shortcuts";
+import { isOpen as layersOpen } from "../layers";
 import { setDensity, setThemeChoice } from "../theme";
 
 interface Props {
@@ -68,23 +72,31 @@ interface Props {
   onInitialReportShown?: () => void;
 }
 
-const VIEWS: WorkspaceView[] = ["today", "gantt", "board", "timesheet", "resource", "report"];
-
 /**
  * Where a project opens: `?view=` in the address (links, e2e), else the lens this person last used
- * in this project, else "Hôm nay" — the home page (plan §6.5).
+ * in this project, else "Hôm nay" — the home page (plan §6.5). "timesheet" still works in both places and
+ * means Nhân lực in its "Giờ đã ghi" mode (lenses.parseView).
  */
-function initialView(storageKey: string): WorkspaceView {
+function initialView(storageKey: string): { view: WorkspaceView; resourceMode?: ResourceMode } {
   try {
-    const q = new URLSearchParams(window.location.search).get("view");
-    const fromUrl = q === "plan" ? "gantt" : q;
-    if (fromUrl && (VIEWS as string[]).includes(fromUrl)) return fromUrl as WorkspaceView;
-    const saved = localStorage.getItem(storageKey);
-    if (saved && (VIEWS as string[]).includes(saved)) return saved as WorkspaceView;
+    const fromUrl = parseView(new URLSearchParams(window.location.search).get("view"));
+    if (fromUrl) return fromUrl;
+    const saved = parseView(localStorage.getItem(storageKey));
+    if (saved) return saved;
   } catch {
     /* private mode */
   }
-  return "today";
+  return { view: "today" };
+}
+
+function savedResourceMode(storageKey: string): ResourceMode {
+  try {
+    const v = localStorage.getItem(storageKey);
+    if (v === "load" || v === "ts" || v === "skills") return v;
+  } catch {
+    /* private mode */
+  }
+  return "load";
 }
 
 const OVERLAY_WARNING =
@@ -151,10 +163,34 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
 
   // Opened from a link to a saved report (deepLink.ts): start on the Báo cáo tab, on that report.
   const viewKey = `gms.view.${session.site.cloudId}.${session.project?.key ?? ""}`;
-  const [view, setViewState] = useState<WorkspaceView>(() => (initialReportId ? "report" : initialView(viewKey)));
+  const resourceModeKey = `gms.resmode.${session.site.cloudId}.${session.project?.key ?? ""}`;
+  const [start] = useState(() => initialView(viewKey));
+  const [view, setViewState] = useState<WorkspaceView>(() => (initialReportId ? "report" : start.view));
+  // Nhân lực has three modes. Someone who may not see the member list (resourceAccess "denied") only has
+  // "Giờ đã ghi": the mode in use is derived, never stored as something they cannot have.
+  const [resourceModeState, setResourceModeState] = useState<ResourceMode>(() => start.resourceMode ?? savedResourceMode(resourceModeKey));
+  const resourceMode: ResourceMode = resourceAccess === "denied" ? "ts" : resourceModeState;
+  const setResourceMode = useCallback(
+    (m: ResourceMode) => {
+      setResourceModeState(m);
+      try {
+        localStorage.setItem(resourceModeKey, m);
+      } catch {
+        /* private mode */
+      }
+    },
+    [resourceModeKey]
+  );
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  // The place the settings page was opened from, for its "← Về …" (a lens or Hôm nay; never "settings" itself).
+  const settingsFrom = useRef<WorkspaceView>("today");
   const setView = useCallback(
     (v: WorkspaceView) => {
+      if (v === "settings" && viewRef.current !== "settings") settingsFrom.current = viewRef.current;
       setViewState(v);
+      // Settings is a page you go to and come back from, not somewhere a project should reopen on.
+      if (v === "settings") return;
       try {
         localStorage.setItem(viewKey, v);
       } catch {
@@ -416,8 +452,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
   // column and chips paint straight away after F5. Readable by everyone; a failure just
   // means no SLA is shown, never a broken workspace.
   const [sla, setSla] = useState<SlaSettingsResponse | null>(() => readViewCache<SlaSettingsResponse>(viewScope, "sla", "") ?? null);
-  const [slaOpen, setSlaOpen] = useState(false);
-  const [calendarOpen, setCalendarOpen] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>("calendar");
   useEffect(() => {
     let alive = true;
     api.getSlaSettings().then(
@@ -449,11 +484,11 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
 
   const taskKeys = useMemo(() => new Set(tasks.map((t) => t.id)), [tasks]);
 
-  // The toolbar's overload count, over the same default window the resource tab
-  // opens on — so the badge and the tab can never contradict each other.
+  // The toolbar's overload count: who is over capacity in the next two weeks. Counting the whole project
+  // made the badge red on any large one, which says nothing; this is what can still be acted on.
   const overloadedPeople = useMemo(() => {
     const today = todayIso();
-    const span = defaultWindow(tasks, today);
+    const span = { from: today, to: addDays(today, 13) };
     return buildResourceLoad({
       tasks,
       users,
@@ -527,14 +562,14 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
       if (e.key.toLowerCase() !== "z" || !(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
       const el = e.target as HTMLElement | null;
       if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable)) return;
-      if (editingTask || creating || reviewRunId || importing || importingKbkt || slaOpen || calendarOpen) return;
+      if (editingTask || creating || reviewRunId || importing || importingKbkt) return;
       if (view !== "gantt") return;
       e.preventDefault();
       void undoRef.current();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [editingTask, creating, reviewRunId, importing, importingKbkt, slaOpen, calendarOpen, view]);
+  }, [editingTask, creating, reviewRunId, importing, importingKbkt, view]);
 
   async function handleSync() {
     setSyncing(true);
@@ -1122,9 +1157,39 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
     }
   }
 
-  const go = (v: WorkspaceView) => {
-    if (v === "resource" && resourceAccess !== "allowed") return;
-    setView(v);
+  const go = (v: WorkspaceView) => setView(v);
+  /** Cài đặt dự án, on a section when one is named (the Ctrl K commands, SLA's link to the calendar). */
+  const openSettings = (section?: SettingsSection) => {
+    if (section) setSettingsSection(section);
+    setView("settings");
+  };
+  /** The calendar is a slice of the SLA row: fold it into the copy every view reads, so the heatmap,
+   *  timesheet, sprint header and SLA chips all move on this render. What the tabs fetched ahead was
+   *  computed on the old calendar (sprint capacity), so it is stale now. */
+  const handleCalendarSaved = (calendar: Required<WorkCalendarSettings>) => {
+    noteViewsStale(viewScope);
+    if (sla) {
+      const next = { ...sla, settings: { ...sla.settings, ...calendar } };
+      setSla(next);
+      writeViewCache(viewScope, "sla", "", next);
+    } else {
+      api.getSlaSettings().then(
+        (r) => {
+          setSla(r);
+          writeViewCache(viewScope, "sla", "", r);
+        },
+        () => undefined
+      );
+    }
+  };
+  const handleSlaSaved = (r: SlaSettingsResponse) => {
+    setSla(r);
+    writeViewCache(viewScope, "sla", "", r);
+  };
+  /** Nhân lực in a given mode (G T = "Giờ đã ghi"). */
+  const goResource = (m: ResourceMode) => {
+    setResourceMode(m);
+    setView("resource");
   };
 
   function toggleMine() {
@@ -1145,7 +1210,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
       run: () => setCreating({}),
     },
     { id: "go-today", label: "Hôm nay", group: "Thường dùng", icon: "sun", keys: "G H", run: () => go("today") },
-    ...LENSES.filter((l) => l.id !== "resource" || resourceAccess === "allowed").map<Command>((l) => ({
+    ...LENSES.map<Command>((l) => ({
       id: `lens-${l.id}`,
       label: l.label,
       group: "Đi tới",
@@ -1154,7 +1219,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
       aliases: l.id === "gantt" ? "gantt wbs" : l.id === "report" ? "bao cao" : l.id === "resource" ? "nguon luc" : "kanban sprint",
       run: () => go(l.id),
     })),
-    { id: "go-time", label: "Giờ làm", group: "Đi tới", icon: "clock", keys: "G T", aliases: "cham cong timesheet", run: () => go("timesheet") },
+    { id: "go-time", label: "Nhân lực: giờ đã ghi", group: "Đi tới", icon: "clock", keys: "G T", aliases: "gio lam cham cong timesheet", run: () => goResource("ts") },
     ...(selectedIds.size > 0
       ? [
           {
@@ -1196,8 +1261,8 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
     { id: "projects", label: "Chuyển dự án…", group: "Dự án", icon: "switch", keys: "Ctrl P", run: onSwitchProject },
     { id: "import", label: "Nhập công việc từ CSV / Excel…", group: "Dự án", icon: "upload", run: () => setImporting(true) },
     { id: "kbkt", label: "Nhập KBKT (test case)…", group: "Dự án", icon: "upload", run: () => setImportingKbkt(true) },
-    { id: "sla", label: "Cài đặt SLA…", group: "Dự án", icon: "clock", run: () => setSlaOpen(true) },
-    { id: "calendar", label: "Lịch làm việc & ngày lễ…", group: "Dự án", icon: "calendar", run: () => setCalendarOpen(true) },
+    { id: "sla", label: "Cài đặt SLA…", group: "Dự án", icon: "clock", run: () => openSettings("sla") },
+    { id: "calendar", label: "Lịch làm việc & ngày lễ…", group: "Dự án", icon: "calendar", run: () => openSettings("calendar") },
     ...(session.staff
       ? [{ id: "assistant", label: "Mở trợ lý", group: "Trợ lý", icon: "chat", aliases: "ai chat hoi", run: () => setChatRequest({ nonce: Date.now() }) } as Command]
       : []),
@@ -1214,19 +1279,22 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
   // The keyboard layer (plan §7). Letter keys never fire while typing or with any layer open.
   const sequence = useMemo(() => createSequence({ "g h": "go-today", "g t": "go-time", "g s": "go-settings" }), []);
   const toggleOverdue = () => setTaskFilter({ ...taskFilter, onlyOverdue: !taskFilter.onlyOverdue });
-  const keyState = useRef({ go, toggleMine, toggleOverdue, handleSync, handleBulkAssign, handleDeleteSelected, toggleDraft });
-  keyState.current = { go, toggleMine, toggleOverdue, handleSync, handleBulkAssign, handleDeleteSelected, toggleDraft };
-  const blockers = !!(editingTask || creating || reviewRunId || importing || importingKbkt || slaOpen || calendarOpen || cmdk || shortcutsOpen);
+  const keyState = useRef({ go, goResource, openSettings, toggleMine, toggleOverdue, handleSync, handleBulkAssign, handleDeleteSelected, toggleDraft });
+  keyState.current = { go, goResource, openSettings, toggleMine, toggleOverdue, handleSync, handleBulkAssign, handleDeleteSelected, toggleDraft };
+  const blockers = !!(editingTask || creating || reviewRunId || importing || importingKbkt || cmdk || shortcutsOpen);
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const k = e.key;
       if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && k.toLowerCase() === "k") {
         e.preventDefault();
+        // Behind a picker or dialog the command bar would open under it; the open panel itself does not count.
+        if (layersOpen("cmdk", "task-detail")) return;
         setCmdk((c) => (c ? null : "command"));
         return;
       }
       if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && k.toLowerCase() === "p") {
         e.preventDefault();
+        if (layersOpen("task-detail")) return;
         onSwitchProject();
         return;
       }
@@ -1239,8 +1307,8 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
         return;
       }
       if (seqHit === "go-today") return ks.go("today");
-      if (seqHit === "go-time") return ks.go("timesheet");
-      if (seqHit === "go-settings") return setSlaOpen(true);
+      if (seqHit === "go-time") return ks.goResource("ts");
+      if (seqHit === "go-settings") return ks.openSettings();
       if (k === "?") {
         e.preventDefault();
         setShortcutsOpen(true);
@@ -1268,8 +1336,10 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
         void ks.handleDeleteSelected();
       }
     }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // Capture phase: a focused Gantt bar (just dragged or clicked) stops every keydown it gets, so Shift D
+    // and the rest never reached `window` while the bar still had focus.
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, [blockers, sequence, onSwitchProject, view, selectedIds, session.user.accountId, setTaskFilter]);
 
   // A failed write used to be a red strip pushing the plan down; it is a toast now (plan §5.6).
@@ -1292,7 +1362,6 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
         view={view}
         onViewChange={setView}
         overloadedPeople={overloadedPeople}
-        showResources={resourceAccess === "allowed"}
         onAddTask={() => setCmdk("create")}
         onSync={handleSync}
         sync={syncState}
@@ -1300,8 +1369,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
         onOpenShortcuts={() => setShortcutsOpen(true)}
         onOpenAssistant={session.staff ? () => setChatRequest({ nonce: Date.now() }) : undefined}
         onSwitchProject={onSwitchProject}
-        onOpenSla={() => setSlaOpen(true)}
-        onOpenCalendar={() => setCalendarOpen(true)}
+        onOpenSettings={() => openSettings()}
         onLogout={onLogout}
       />
   );
@@ -1483,7 +1551,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
               onQuickCreate={(text) => quickCreate(text, false)}
               onWorkLogged={refreshTasks}
             />
-          ) : view === "gantt" || (view === "resource" && resourceAccess !== "allowed") ? (
+          ) : view === "gantt" ? (
             <GanttView
               tasks={tasks}
               collapsed={collapsed}
@@ -1515,8 +1583,6 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
               onTransition={(t, id, name) => void handleTransition(t, id, name)}
               draftBase={draft?.base ?? null}
             />
-          ) : view === "timesheet" ? (
-            <TimesheetView session={session} tasks={tasks} onOpenEdit={openTask} onTasksChanged={refreshTasks} />
           ) : view === "board" ? (
             <BoardView
               session={session}
@@ -1526,10 +1592,25 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
               onTasksChanged={refreshTasks}
               incomingFilter={chatBoardFilter}
               onIncomingFilterTaken={() => setChatBoardFilter(null)}
+              taskFilter={taskFilter}
+              onFilterChange={setTaskFilter}
+              filterContext={{ jqlKeys, slaBreached: slaView ? slaIds(slaView.byId, "breached") : null }}
+              filterLeading={<SavedFilterMenu filter={taskFilter} onApply={setTaskFilter} myAccountId={session.user.accountId} />}
+              resourceData={pool ? { profiles: pool.profiles, absences: pool.absences } : undefined}
               refreshing={showingCache}
+            />
+          ) : view === "resource" && resourceMode === "ts" ? (
+            <TimesheetView
+              session={session}
+              tasks={tasks}
+              onOpenEdit={openTask}
+              onTasksChanged={refreshTasks}
+              modeSwitch={<ResourceModes mode="ts" onChange={setResourceMode} canPlan={resourceAccess === "allowed"} />}
             />
           ) : view === "resource" ? (
             <ResourceView
+              mode={resourceMode === "skills" ? "skills" : "load"}
+              onModeChange={setResourceMode}
               tasks={tasks}
               users={users}
               pool={pool}
@@ -1541,6 +1622,20 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
               onFilterChange={setTaskFilter}
               myAccountId={session.user.accountId}
               jqlKeys={jqlKeys}
+            />
+          ) : view === "settings" ? (
+            <ProjectSettings
+              section={settingsSection}
+              onSectionChange={setSettingsSection}
+              sla={sla}
+              onSlaSaved={handleSlaSaved}
+              onCalendarSaved={handleCalendarSaved}
+              backLabel={
+                settingsFrom.current === "today"
+                  ? "Hôm nay"
+                  : (LENSES.find((l) => l.id === settingsFrom.current)?.label ?? "Hôm nay")
+              }
+              onBack={() => go(settingsFrom.current === "settings" ? "today" : settingsFrom.current)}
             />
           ) : (
             <ProgressReportView
@@ -1647,48 +1742,6 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
             users={users}
             onClose={() => setReviewRunId(null)}
             onApplied={refreshTasks}
-          />
-        )}
-
-        {slaOpen && sla && (
-          <SlaSettingsModal
-            current={sla}
-            onClose={() => setSlaOpen(false)}
-            onSaved={(r) => {
-              setSla(r);
-              writeViewCache(viewScope, "sla", "", r);
-            }}
-            onOpenCalendar={() => {
-              setSlaOpen(false);
-              setCalendarOpen(true);
-            }}
-          />
-        )}
-
-        {calendarOpen && (
-          <WorkCalendarModal
-            initial={sla?.settings ?? null}
-            canEdit={sla?.canEdit ?? false}
-            onClose={() => setCalendarOpen(false)}
-            onSaved={(calendar) => {
-              // The calendar is a slice of the SLA row: fold it into the copy every view reads, so the heatmap,
-              // timesheet, sprint header and SLA chips all move on this render. What the tabs fetched ahead was
-              // computed on the old calendar (sprint capacity), so it is stale now.
-              noteViewsStale(viewScope);
-              if (sla) {
-                const next = { ...sla, settings: { ...sla.settings, ...calendar } };
-                setSla(next);
-                writeViewCache(viewScope, "sla", "", next);
-              } else {
-                api.getSlaSettings().then(
-                  (r) => {
-                    setSla(r);
-                    writeViewCache(viewScope, "sla", "", r);
-                  },
-                  () => undefined
-                );
-              }
-            }}
           />
         )}
 

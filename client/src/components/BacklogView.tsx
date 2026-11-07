@@ -1,9 +1,13 @@
 import { useMemo, useState, type DragEvent, type MouseEvent } from "react";
-import { canonicalIssueType, capacityRows, localDate, shortDate, totalWeight, velocityAverage, weightOf, type BoardFilter } from "../boardModel";
+import { canonicalIssueType, capacityRows, localDate, shortDate, totalWeight, velocityAverage, weightOf } from "../boardModel";
+import { shortRange } from "../dateLabels";
+import { sprintSlot } from "../sprintSlot";
+import { toast } from "../toast";
 import BacklogPanels from "./BacklogPanels";
 import BulkStatusMenu from "./BulkStatusMenu";
 import CapacityTable from "./CapacityTable";
 import { Icon } from "./Icons";
+import Popover from "./Popover";
 import IssueTypeIcon from "./IssueTypeIcon";
 import PriorityMark from "./PriorityMark";
 import AssigneePicker, { type Member } from "./AssigneePicker";
@@ -42,9 +46,13 @@ interface Props {
   onPlanSprint: (sprint: Sprint) => void;
   /** Who can give how many hours to the sprint's window (not AI, open to every project member). */
   onLoadCapacity: (sprint: Sprint) => Promise<SprintCapacity>;
-  /** The Epic / Phiên bản panel narrows the same filter the toolbar edits. */
-  filter: BoardFilter;
-  onFilterChange: (f: BoardFilter) => void;
+  /** The Epic / Phiên bản panel writes the shared filter's `epics` / `versions`, the same ones the filter bar edits. */
+  epics: Set<string>;
+  versions: Set<string>;
+  onFacetChange: (field: "epics" | "versions", next: Set<string>) => void;
+  today: string;
+  /** Gives a task with no dates a start and a length (the "Xếp" action of the toast after a drop into a sprint). */
+  onSchedule?: (items: { key: string; startDate: string; durationDays: number }[]) => Promise<unknown> | void;
   /** The workspace's tasks for these keys — what the status menu asks the workflow about. */
   getTasks: (keys: string[]) => Task[];
   /** Bulk edits over the selection; each runs one issue at a time on the board's side. */
@@ -162,6 +170,36 @@ export default function BacklogView(props: Props) {
     const beforeKey = hint.beforeKey && keys.includes(hint.beforeKey) ? null : hint.beforeKey;
     endDrag();
     props.onMove(keys, section, beforeKey);
+    if (typeof section === "number") offerSchedule(keys, section);
+  }
+
+  /**
+   * A task with no dates dropped into a sprint has no place on the Gantt (plan G7). Say where it
+   * would go and let the person decide: nothing is written until "Xếp".
+   */
+  function offerSchedule(keys: string[], sprintId: number) {
+    const sprint = snapshot.sprints.find((s) => s.id === sprintId);
+    if (!sprint || !props.onSchedule) return;
+    const moved = keys.filter((k) => snapshot.issues.find((i) => i.key === k)?.sprintId !== sprintId);
+    const placed: { key: string; startDate: string; durationDays: number }[] = [];
+    let range: [string, string] | null = null;
+    for (const t of getTasks(moved)) {
+      const slot = sprintSlot(t, sprint, props.today);
+      if (!slot) continue;
+      placed.push({ key: t.id, startDate: slot.startDate, durationDays: slot.durationDays });
+      range = [slot.sprintStart, slot.sprintEnd];
+    }
+    if (placed.length === 0 || !range) return;
+    const what = placed.length === 1 ? placed[0].key : `${placed.length} việc`;
+    toast(`Xếp ${what} vào ${shortRange(range[0], range[1])}?`, {
+      ms: 9000,
+      action: {
+        label: "Xếp",
+        run: () => {
+          void props.onSchedule?.(placed);
+        },
+      },
+    });
   }
 
   async function toggleCapacity(sprint: Sprint) {
@@ -197,7 +235,7 @@ export default function BacklogView(props: Props) {
 
   return (
     <div className="bl bl-layout">
-      <BacklogPanels snapshot={snapshot} unit={unit} filter={props.filter} onFilterChange={props.onFilterChange} />
+      <BacklogPanels snapshot={snapshot} unit={unit} epics={props.epics} versions={props.versions} onChange={props.onFacetChange} />
       <div className="bl-main">
       {selected.size > 1 && (
         <div className="bl-selection">
@@ -291,8 +329,9 @@ export default function BacklogView(props: Props) {
 
               <span className="bd-spacer" />
               {sprint?.state === "future" && canUseAi && (
-                <button className="bd-ai-btn" onClick={() => props.onPlanSprint(sprint)} disabled={busy}>
-                  Lập kế hoạch bằng AI
+                <button className="bl-action" onClick={() => props.onPlanSprint(sprint)} disabled={busy}>
+                  Lập kế hoạch
+                  <span className="ai-tag">AI</span>
                 </button>
               )}
               {sprint?.state === "future" && sprint === firstFuture && !hasActive && (
@@ -316,20 +355,57 @@ export default function BacklogView(props: Props) {
                 </button>
               )}
               {sprint && (
-                <button className="bl-icon" onClick={() => props.onEditSprint(sprint)} title="Sửa sprint" aria-label="Sửa sprint">
-                  ✎
-                </button>
-              )}
-              {sprint?.state === "future" && (
-                <button className="bl-icon" onClick={() => props.onDeleteSprint(sprint)} title="Xoá sprint (việc trong sprint về backlog)" aria-label="Xoá sprint">
-                  <Icon name="trash" size={14} />
-                </button>
+                // Edit and delete share one menu: two bare icons side by side read as one action.
+                <Popover
+                  className="bl-icon bl-more"
+                  role="menu"
+                  caret={false}
+                  align="end"
+                  menuLabel={`Tuỳ chọn ${sprint.name}`}
+                  menuClassName="bl-more-menu"
+                  ariaLabel={`Tuỳ chọn ${sprint.name}`}
+                  title="Sửa hoặc xoá sprint"
+                  label={<Icon name="more" size={14} />}
+                >
+                  {({ close }) => (
+                    <>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="menu-item"
+                        onClick={() => {
+                          close();
+                          props.onEditSprint(sprint);
+                        }}
+                      >
+                        <Icon name="edit" size={14} />
+                        Sửa sprint
+                      </button>
+                      {sprint.state === "future" && (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="menu-item menu-item-danger"
+                          title="Việc trong sprint về backlog"
+                          onClick={() => {
+                            close();
+                            props.onDeleteSprint(sprint);
+                          }}
+                        >
+                          <Icon name="trash" size={14} />
+                          Xoá sprint
+                        </button>
+                      )}
+                    </>
+                  )}
+                </Popover>
               )}
               {!sprint && (
                 <>
                   {canUseAi && unestimatedBacklog > 0 && (
-                    <button className="bd-ai-btn" onClick={props.onRequestEstimates} disabled={props.estimating}>
-                      {props.estimating ? "Đang ước lượng..." : `Ước lượng bằng AI ${Math.min(30, unestimatedBacklog)} việc`}
+                    <button className="bl-action" onClick={props.onRequestEstimates} disabled={props.estimating}>
+                      {props.estimating ? "Đang ước lượng..." : `Ước lượng ${Math.min(30, unestimatedBacklog)} việc`}
+                      <span className="ai-tag">AI</span>
                     </button>
                   )}
                   {props.suggestions.size > 1 && (
@@ -344,7 +420,7 @@ export default function BacklogView(props: Props) {
               )}
             </header>
 
-            {sprint?.goal && !isCollapsed && <div className="bl-goal">🎯 {sprint.goal}</div>}
+            {sprint?.goal && !isCollapsed && <div className="bl-goal">{sprint.goal}</div>}
 
             {sprint && capacityOpen?.sprintId === sprint.id && !isCollapsed && (
               <div className="bl-capacity">
@@ -427,6 +503,7 @@ export default function BacklogView(props: Props) {
                         </span>
                         <PriorityMark priority={issue.priority} />
                         <AssigneePicker
+                          issueKey={issue.key}
                           issueType={issue.issueType}
                           accountId={issue.assigneeAccountId}
                           name={issue.assigneeName}

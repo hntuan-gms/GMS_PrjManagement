@@ -10,6 +10,7 @@ import {
   WEEKDAY_LABELS,
   type DatedEntry,
 } from "../workCalendarForm";
+import DateField from "./DateField";
 import { useDialogs } from "./dialogContext";
 import { Icon } from "./Icons";
 
@@ -20,8 +21,13 @@ interface Props {
   initial: WorkCalendarSettings | null;
   /** The workspace's answer to "may this user edit?" (same rule as SLA); confirmed by the GET. */
   canEdit: boolean;
-  onClose: () => void;
+  /** Dialog only: the page (embedded) has nothing to close. */
+  onClose?: () => void;
   onSaved: (calendar: Calendar) => void;
+  /** A section of the settings page: no overlay or dialog chrome, Save/Huỷ at the foot of the section. */
+  embedded?: boolean;
+  /** Embedded: tells the page whether there are unsaved edits, so it can ask before leaving the section. */
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 const DEFAULT: Calendar = { workDays: [1, 2, 3, 4, 5], holidays: [], makeUpDays: [] };
@@ -37,7 +43,7 @@ function normalize(c: WorkCalendarSettings | null): Calendar {
  * (workCalendar.ts). Anyone can open it; only a project admin can save (PUT /api/calendar checks again).
  * Holidays are entered as a range and stored one entry per date; the list shows them grouped back into ranges.
  */
-export default function WorkCalendarModal({ initial, canEdit: canEditHint, onClose, onSaved }: Props) {
+export default function WorkCalendarModal({ initial, canEdit: canEditHint, onClose, onSaved, embedded = false, onDirtyChange }: Props) {
   const { confirm } = useDialogs();
   const [base, setBase] = useState<Calendar>(() => normalize(initial));
   const [draft, setDraft] = useState<Calendar>(() => normalize(initial));
@@ -79,10 +85,22 @@ export default function WorkCalendarModal({ initial, canEdit: canEditHint, onClo
   }, []);
 
   useEffect(() => {
+    if (embedded) return;
     const opener = document.activeElement as HTMLElement | null;
     modalRef.current?.querySelector<HTMLElement>("input, button")?.focus();
     return () => opener?.focus?.();
-  }, []);
+  }, [embedded]);
+
+  useEffect(() => {
+    onDirtyChange?.(dirty && !readOnly);
+  }, [dirty, readOnly, onDirtyChange]);
+  // On the page, "Huỷ" puts the saved values back without asking (plan 2.6); the dialog asks before closing.
+  const reset = () => {
+    touched.current = false;
+    setDraft(base);
+    setError(null);
+    setHError(null);
+  };
 
   const patch = (p: Partial<Calendar>) => {
     touched.current = true;
@@ -121,7 +139,7 @@ export default function WorkCalendarModal({ initial, canEdit: canEditHint, onClo
 
   async function requestClose() {
     if (dirty && !readOnly && !(await confirm({ message: "Bỏ các thay đổi chưa lưu?", confirmLabel: "Bỏ thay đổi", cancelLabel: "Tiếp tục sửa", tone: "danger" }))) return;
-    onClose();
+    onClose?.();
   }
 
   async function save() {
@@ -134,8 +152,13 @@ export default function WorkCalendarModal({ initial, canEdit: canEditHint, onClo
     setError(null);
     try {
       const r = await api.saveWorkCalendar(draft);
-      onSaved(normalize(r.calendar));
-      onClose();
+      const saved = normalize(r.calendar);
+      onSaved(saved);
+      // On the page the form stays; what was just saved becomes the baseline it is compared against.
+      setBase(saved);
+      setDraft(saved);
+      touched.current = false;
+      onClose?.();
     } catch (e) {
       setError(e instanceof ApiError || e instanceof Error ? e.message : "Không lưu được lịch làm việc.");
     } finally {
@@ -145,6 +168,7 @@ export default function WorkCalendarModal({ initial, canEdit: canEditHint, onClo
 
   function onKeyDown(e: KeyboardEvent) {
     if (e.key === "Escape") {
+      if (embedded) return;
       // Stopped here: the workspace clears the Gantt selection on a window-level Escape.
       e.stopPropagation();
       void requestClose();
@@ -157,35 +181,14 @@ export default function WorkCalendarModal({ initial, canEdit: canEditHint, onClo
   const holidayGroups = groupDated(draft.holidays);
   const makeUpGroups = groupDated(draft.makeUpDays);
 
-  return (
-    <div className="modal-overlay" onClick={() => void requestClose()}>
-      <div
-        className="modal sla-modal cal-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="cal-title"
-        ref={modalRef}
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={onKeyDown}
-      >
-        <div className="modal-header">
-          <div className="modal-title-wrap">
-            <span className="modal-id" id="cal-title">
-              Lịch làm việc & ngày lễ
-            </span>
-            <p className="modal-subtitle">
-              Dùng chung cho cả dự án.
-            </p>
-          </div>
-          <button className="modal-close" onClick={() => void requestClose()} aria-label="Đóng" title="Đóng">
-            <Icon name="x" />
-          </button>
-        </div>
+  const note =
+    readOnly && !loading ? (
+      <div className="sla-note">
+        {embedded ? "Chỉ quản trị dự án được sửa" : "Bạn chỉ xem được. Chỉ người có quyền Administer Projects trên dự án này mới sửa được lịch làm việc."}
+      </div>
+    ) : null;
 
-        {readOnly && !loading && (
-          <div className="sla-note">Bạn chỉ xem được. Chỉ người có quyền Administer Projects trên dự án này mới sửa được lịch làm việc.</div>
-        )}
-
+  const form = (
         <fieldset className="sla-form" disabled={readOnly || saving}>
           <section className="sla-section cal-section-first">
             <h3>Ngày làm việc trong tuần</h3>
@@ -205,11 +208,11 @@ export default function WorkCalendarModal({ initial, canEdit: canEditHint, onClo
             <div className="cal-add cal-add-range">
               <label className="field">
                 <span>Từ ngày</span>
-                <input type="date" value={hFrom} onChange={(e) => setHFrom(e.target.value)} />
+                <DateField value={hFrom} ariaLabel="Từ ngày" onChange={setHFrom} />
               </label>
               <label className="field">
                 <span>Đến ngày</span>
-                <input type="date" value={hTo} min={hFrom || undefined} onChange={(e) => setHTo(e.target.value)} />
+                <DateField value={hTo} ariaLabel="Đến ngày" base={hFrom || undefined} onChange={setHTo} />
               </label>
               <label className="field">
                 <span>Tên ngày lễ</span>
@@ -250,7 +253,7 @@ export default function WorkCalendarModal({ initial, canEdit: canEditHint, onClo
             <div className="cal-add cal-add-single">
               <label className="field">
                 <span>Ngày</span>
-                <input type="date" value={mDate} onChange={(e) => setMDate(e.target.value)} />
+                <DateField value={mDate} ariaLabel="Ngày làm bù" onChange={setMDate} />
               </label>
               <label className="field">
                 <span>Ghi chú</span>
@@ -282,8 +285,59 @@ export default function WorkCalendarModal({ initial, canEdit: canEditHint, onClo
             )}
           </section>
         </fieldset>
+  );
 
-        {error && <div className="modal-error">{error}</div>}
+  const errorEl = error ? <div className="modal-error">{error}</div> : null;
+
+  if (embedded) {
+    return (
+      <div className="sla-modal cal-modal is-embedded" ref={modalRef} onKeyDown={onKeyDown}>
+        {note}
+        {form}
+        {errorEl}
+        {!readOnly && (
+          <div className="settings-foot">
+            {loading && <span className="sla-muted">Đang tải lịch mới nhất…</span>}
+            <button onClick={reset} disabled={saving || !dirty}>
+              Huỷ
+            </button>
+            <button className="primary" onClick={() => void save()} disabled={saving || !dirty}>
+              {saving ? "Đang lưu…" : "Lưu lịch"}
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="modal-overlay" onClick={() => void requestClose()}>
+      <div
+        className="modal sla-modal cal-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="cal-title"
+        ref={modalRef}
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={onKeyDown}
+      >
+        <div className="modal-header">
+          <div className="modal-title-wrap">
+            <span className="modal-id" id="cal-title">
+              Lịch làm việc & ngày lễ
+            </span>
+            <p className="modal-subtitle">
+              Dùng chung cho cả dự án.
+            </p>
+          </div>
+          <button className="modal-close" onClick={() => void requestClose()} aria-label="Đóng" title="Đóng">
+            <Icon name="x" />
+          </button>
+        </div>
+
+        {note}
+        {form}
+        {errorEl}
         <div className="modal-footer">
           {loading && <span className="sla-muted">Đang tải lịch mới nhất…</span>}
           <div className="spacer" />

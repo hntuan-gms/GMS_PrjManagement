@@ -3,7 +3,7 @@ import fs from "node:fs";
 import assert from "node:assert/strict";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { ioAction, openFilterPanel, pickFacet } from "./toolbar.mjs";
+import { ioAction, openFilterPanel, openTimesheet, pickFacet } from "./toolbar.mjs";
 
 const OUT = path.join(path.dirname(fileURLToPath(import.meta.url)), "shots");
 fs.mkdirSync(OUT, { recursive: true });
@@ -80,16 +80,21 @@ await step("tìm theo chữ khớp cả tên người phụ trách", async () =>
 });
 await step("Thu gọn / Mở rộng tất cả", async () => {
   await page.locator(".gantt-toolbar button[aria-label='Thu gọn tất cả nhóm']").click();
-  await page.waitForFunction(() => document.querySelectorAll(".wbs-row").length === 2);
+  await page.waitForFunction(() => document.querySelectorAll(".wbs-row").length === 3);
   await page.locator(".gantt-toolbar button[aria-label='Mở rộng tất cả nhóm']").click();
   await page.waitForFunction(() => document.querySelectorAll(".wbs-row").length >= 8);
 });
-await step("danh sách 'Chưa có ngày' mở được task", async () => {
-  await page.locator(".gantt-toolbar button", { hasText: "Chưa có ngày" }).click();
-  await page.locator(".unscheduled-item", { hasText: "DEMO-9" }).click();
+await step("'Chưa có ngày' là bộ lọc: chỉ còn dòng chưa có ngày, nhấp đúp mở việc", async () => {
+  const pill = page.locator(".gantt-toolbar .warning-pill");
+  await pill.click();
+  await page.waitForFunction(() => document.querySelectorAll(".wbs-row").length === 1);
+  await page.locator(".wbs-row", { hasText: "DEMO-9" }).locator(".wbs-col-name").dblclick();
   await page.waitForSelector(".modal .modal-id");
   assert.equal((await page.textContent(".modal .modal-id")).trim(), "DEMO-9");
   await page.click(".modal-close");
+  await page.waitForSelector(".modal", { state: "detached" });
+  await pill.click();
+  await page.waitForFunction(() => document.querySelectorAll(".wbs-row").length >= 8);
 });
 await step("'Hôm nay' không gây lỗi", async () => { await page.locator(".gantt-toolbar button", { hasText: "Hôm nay" }).click(); });
 await step("xuất CSV: BOM + đúng cột + có dữ liệu", async () => {
@@ -207,7 +212,7 @@ await step("tab 'Lịch sử thay đổi' dịch tên trường", async () => {
 });
 await step("đổi ưu tiên + thêm nhãn → PATCH có priority & labels đầy đủ", async () => {
   await reset();
-  await page.locator(".modal .field", { hasText: "Độ ưu tiên" }).locator("select").selectOption("Low");
+  await page.locator(".modal .field:has(> span:text-is('Ưu tiên')) select").selectOption("Low");
   const lab = page.locator(".labels-input input");
   await lab.click(); await lab.pressSequentially("docs"); await lab.press("Enter");
   await page.locator(".modal-footer .primary").click();
@@ -218,7 +223,8 @@ await step("đổi ưu tiên + thêm nhãn → PATCH có priority & labels đầ
 });
 await step("'+ Sub-task' mở form có sẵn task cha và loại con của dự án", async () => {
   await page.locator(".wbs-row", { hasText: "DEMO-5" }).dispatchEvent("dblclick");
-  await page.locator(".modal-footer button", { hasText: "+ Sub-task" }).click();
+  await page.locator(".td-more").click();
+  await page.locator(".td-more-menu .menu-item", { hasText: "+ Sub-task" }).click();
   await page.waitForSelector(".modal .field-label-text");
   await page.waitForFunction(() => [...document.querySelectorAll(".modal select")].some((s) => s.value === "Công việc con"));
   assert.ok(await page.$$eval(".modal select", (ss) => ss.some((s) => s.value === "DEMO-5")), "chưa chọn task cha DEMO-5");
@@ -246,9 +252,10 @@ await step("danh sách chưa gán: đóng sẵn, mở bằng nút KPI, có ô 'G
   assert.equal(await page.locator(".rv-unassigned").count(), 0, "mặc định phải đóng");
   await page.locator(".rv-pill-warn").click();
   await page.waitForSelector(".rv-unassigned");
-  assert.ok(await page.locator(".rv-unassigned .rv-assign-select").count() >= 1);
+  assert.ok(await page.locator(".rv-unassigned .rv-assign-btn").count() >= 1);
   await reset();
-  await page.locator(".rv-unassigned .rv-assign-select").first().selectOption({ label: "Lê Chi" });
+  await page.locator(".rv-unassigned .rv-assign-btn").first().click();
+  await page.locator(".cell-picker-item", { hasText: "Lê Chi" }).click();
   await page.waitForFunction(async () => (await (await fetch("/api/__log")).json()).log.some((l) => l.m === "PATCH"));
   assert.equal((await patches())[0].b.assigneeAccountId, "chi");
   await page.locator(".rv-unassigned .rv-un-close").click();
@@ -272,14 +279,16 @@ await step("tab Bảng hiển thị thẻ", async () => {
 });
 await step("đổi người ngay trên thẻ → PATCH", async () => {
   await reset();
-  await page.locator(".bd-card .bd-assignee select").first().selectOption({ label: "Lê Chi" });
+  await page.locator(".bd-card").first().hover();
+  await page.locator(".bd-card .bd-assignee").first().click();
+  await page.locator(".cell-picker-item", { hasText: "Lê Chi" }).first().click();
   await page.waitForFunction(async () => (await (await fetch("/api/__log")).json()).log.some((l) => l.m === "PATCH"));
   assert.equal((await patches())[0].b.assigneeAccountId, "chi");
 });
 await step("panel Bộ lọc có Loại / Epic / Nhãn / Ưu tiên, và không có Trạng thái (cột đã là trạng thái)", async () => {
   await page.locator(".bd-filters .tf-add").click();
   const t = await page.$$eval(".bd-filters .tf-facet-name", (b) => b.map((x) => x.textContent.trim()));
-  for (const k of ["Loại", "Epic", "Nhãn", "Ưu tiên"]) assert.ok(t.includes(k), k + " thiếu: " + t);
+  for (const k of ["Người phụ trách", "Loại", "Epic", "Nhãn", "Ưu tiên"]) assert.ok(t.includes(k), k + " thiếu: " + t);
   assert.ok(!t.includes("Trạng thái"), "Trạng thái không nên có trên bảng: " + t);
   await page.keyboard.press("Escape");
 });
@@ -332,7 +341,7 @@ await step("bấm tile mở danh sách chi tiết: có tìm kiếm, sắp xếp,
 
 console.log("\n== Chấm công ==");
 await step("đổi tên tab + lọc 'Của tôi' chỉ còn 1 dòng", async () => {
-  await page.locator("[data-view=timesheet]").click(); await page.waitForSelector(".ts-grid");
+  await openTimesheet(page);
   await page.locator(".ts-person-filter").selectOption("me");
   await page.waitForFunction(() => document.querySelectorAll(".ts-grid tbody tr").length === 1);
 });
@@ -385,7 +394,7 @@ await step("form tạo việc gửi kèm Ưu tiên, Nhãn và Ước lượng (k
   await labelBox.fill("backend");
   await labelBox.press("Enter");
   await page.locator(".modal .field", { hasText: "Ước lượng" }).locator("input").fill("6");
-  await page.locator(".modal .primary", { hasText: "Tạo task" }).click();
+  await page.locator(".modal-create .modal-footer .primary", { hasText: /^Tạo$/ }).click();
   await page.waitForFunction(async () => (await (await fetch("/api/__log")).json()).log.some((l) => l.m === "POST" && l.p === "/api/tasks/bulk"));
   const post = (await mock("/api/__log")).log.find((l) => l.p === "/api/tasks/bulk" && l.m === "POST");
   assert.equal(post.b.priority, "High");

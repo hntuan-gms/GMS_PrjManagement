@@ -1,0 +1,124 @@
+/* ==========================================================================
+   Cài đặt dự án (ProjectSettings): menu trái, một mục bên phải.
+   Các mục là phần thân của hộp thoại cũ (.sla-modal, .cal-modal, .kb-settings) vẽ với `is-embedded`.
+   ========================================================================== */
+.settings-page {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  background: var(--sheet);
+}
+.settings-nav {
+  flex: none;
+  width: 220px;
+  padding: 20px 12px;
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+}
+.settings-back {
+  align-self: flex-start;
+  margin-bottom: 12px;
+  padding: 4px 8px;
+  border: none;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: var(--font-size-md);
+}
+.settings-back:hover:not(:disabled) {
+  background: var(--sunken);
+  color: var(--ink);
+}
+.settings-nav-title {
+  padding: 0 8px 8px;
+  color: var(--ink);
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+}
+.settings-nav-item {
+  justify-content: flex-start;
+  text-align: left;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  color: var(--ink-2);
+  font-weight: 500;
+}
+.settings-nav-item:hover:not(:disabled) {
+  background: var(--sunken);
+  color: var(--ink);
+}
+.settings-nav-item.active {
+  background: var(--sunken);
+  color: var(--ink);
+  font-weight: 600;
+}
+.settings-body {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 24px 32px 48px;
+}
+.settings-body > * {
+  max-width: 720px;
+}
+.settings-title {
+  margin: 0 0 16px;
+  font-size: var(--font-size-page);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+/* The dialogs' roots lose their dialog width and borders on the page. */
+.sla-modal.is-embedded {
+  width: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.kb-settings.is-embedded {
+  border: none;
+  padding: 0;
+  border-radius: 0;
+}
+.kb-settings.is-embedded .kb-settings-body {
+  padding-top: 0;
+}
+.settings-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.settings-foot > .kb-muted,
+.settings-foot > .sla-muted {
+  margin-right: auto;
+}
+@media (max-width: 720px) {
+  .settings-page {
+    flex-direction: column;
+  }
+  .settings-nav {
+    width: auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+    padding: 12px;
+  }
+  .settings-nav-title {
+    display: none;
+  }
+  .settings-nav-item {
+    width: auto;
+  }
+  .settings-body {
+    padding: 16px;
+  }
+}

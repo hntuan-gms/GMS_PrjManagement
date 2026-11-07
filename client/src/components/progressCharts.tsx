@@ -1,4 +1,7 @@
 
+import { initialsOf as initials } from "../avatar";
+import { shortDay } from "../dateLabels";
+import { todayIso } from "../resourceAllocation";
 import type { ProgressMetrics } from "../types";
 
 /**
@@ -103,12 +106,16 @@ function toUtc(iso: string): number {
   return Date.UTC(Number(iso.slice(0, 4)), Number(iso.slice(5, 7)) - 1, Number(iso.slice(8, 10)));
 }
 
-function short(iso: string | null): string {
-  return iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}` : "—";
+/** A date in a tooltip: the same "16/9" / "16/9/2027" form as everywhere (dateLabels.ts), read against today. */
+function shortOrDash(iso: string | null): string {
+  return iso ? shortDay(iso, todayIso()) : "—";
 }
 
 export function ScheduleTimeline({ schedule, asOf }: { schedule: ProgressMetrics["schedule"]; asOf: string }) {
   const { start, plannedEnd, baselineEnd, slipDays, daysRemaining } = schedule;
+  // One way to write a date (dateLabels.ts): "16/9", and "16/9/2027" in another year, the same as the
+  // sentence above ("Dự kiến xong 16/9/2027") rather than "16/09" here.
+  const short = (iso: string | null): string => (iso ? shortDay(iso, asOf) : "—");
   if (!start || !plannedEnd) {
     return <p className="pr-muted">Chưa có công việc nào được lên lịch.</p>;
   }
@@ -193,7 +200,7 @@ export function PhaseBars({
                 </span>
               )}
               {late && (
-                <span className="pr-flag pr-flag-serious" title={`Kết thúc ${short(p.end)}, baseline ${short(p.baselineEnd)}`}>
+                <span className="pr-flag pr-flag-serious" title={`Kết thúc ${shortOrDash(p.end)}, baseline ${shortOrDash(p.baselineEnd)}`}>
                   <span aria-hidden="true">⏱</span>
                 </span>
               )}
@@ -204,8 +211,8 @@ export function PhaseBars({
                 {p.done}/{p.total} việc xong · thực tế {p.actualPct}% · kế hoạch {p.plannedPct}%
               </span>
               <span>
-                {short(p.start)} → {short(p.end)}
-                {late ? ` (baseline ${short(p.baselineEnd)})` : ""}
+                {shortOrDash(p.start)} → {shortOrDash(p.end)}
+                {late ? ` (baseline ${shortOrDash(p.baselineEnd)})` : ""}
               </span>
               {p.overdue > 0 && <span>{p.overdue} việc quá hạn</span>}
               <span className="pr-hovercard-hint">Bấm để xem các việc</span>
@@ -220,11 +227,6 @@ export function PhaseBars({
 /* -------------------------------------------------------------------------- */
 /* People: stacked bar per person, length = how much they hold.               */
 /* -------------------------------------------------------------------------- */
-
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  return ((parts.at(-1)?.[0] ?? "") + (parts.length > 1 ? parts[0][0] : "")).toUpperCase() || "?";
-}
 
 export function PeopleBars({
   people,

@@ -1,3 +1,4 @@
+import { initialsOf } from "./avatar";
 import type { BoardIssue, BoardSnapshot, IssueTypeName, Sprint, SprintCapacityPerson } from "./types";
 import { DEFAULT_WORK_CALENDAR, isWorkingDate, type WorkCalendar } from "./workCalendar";
 
@@ -442,9 +443,7 @@ export function canonicalIssueType(issueType: string): IssueTypeName {
 }
 
 export function initials(name: string | null): string {
-  if (!name) return "?";
-  const parts = name.trim().split(/\s+/);
-  return ((parts.at(-1)?.[0] ?? "") + (parts.length > 1 ? parts[0][0] : "")).toUpperCase() || "?";
+  return initialsOf(name);
 }
 
 /** Working days since the last update, today included — the "stuck?" signal on in-progress cards. */

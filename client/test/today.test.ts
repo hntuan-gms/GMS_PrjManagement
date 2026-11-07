@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildToday, slipIfLate, todayGreeting } from "../src/today";
+import { buildToday, slipIfLate, todayGreeting, upcomingHeading } from "../src/today";
 import type { Predecessor } from "../src/types";
 import { toWorkCalendar } from "../src/workCalendar";
 import { task } from "./fixtures";
@@ -116,5 +116,24 @@ describe("slipIfLate", () => {
 
   it("an undated side moves nothing", () => {
     assert.equal(slipIfLate(mine, task({ id: "S", summary: "s", startDate: null }), fs("M"), TODAY), 0);
+  });
+});
+
+describe("unscheduled and the Sắp tới heading", () => {
+  const list = [
+    task({ id: "U-1", summary: "chưa có ngày", ...me, startDate: null, dueDate: null }),
+    task({ id: "U-2", summary: "đang làm không ngày", ...me, statusCategory: "indeterminate", startDate: null, dueDate: null }),
+    task({ id: "U-3", summary: "xong không ngày", ...me, statusCategory: "done", startDate: null, dueDate: null }),
+    task({ id: "U-4", summary: "của người khác", ...chi, startDate: null, dueDate: null }),
+    task({ id: "U-5", summary: "epic", ...me, issueType: "Epic", startDate: null, dueDate: null }),
+  ];
+  it("lists my open undated work that no other section claims", () => {
+    const r = buildToday(list, "me", TODAY);
+    assert.deepEqual(r.unscheduled.map((t) => t.id), ["U-1"]);
+    assert.deepEqual(r.today.map((t) => t.id), ["U-2"]);
+  });
+  it("the group heading says it is the start day", () => {
+    assert.equal(upcomingHeading("2026-11-11", TODAY), "Bắt đầu T4 11/11");
+    assert.equal(upcomingHeading("2027-01-04", TODAY), "Bắt đầu T2 4/1/2027");
   });
 });

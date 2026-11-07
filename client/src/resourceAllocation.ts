@@ -180,6 +180,35 @@ export function findOverlaps(tasks: Task[]): Overlap[] {
   return overlaps;
 }
 
+/** A day that is over what the person can do: more than capacity, or work on a day off. */
+const isOverDay = (d: DayLoad) => d.band === "over" || d.band === "off-violation";
+
+/** Over-capacity days inside an inclusive window (the badge by a name counts the next two weeks, not the project). */
+export function overloadedDaysIn(days: readonly DayLoad[], from: string, to: string): number {
+  return days.filter((d) => d.date >= from && d.date <= to && isOverDay(d)).length;
+}
+
+/** The first over-capacity day on or after `from` (any window end), else null. */
+export function firstOverloadedDate(days: readonly DayLoad[], from: string): string | null {
+  return days.find((d) => d.date >= from && isOverDay(d))?.date ?? null;
+}
+
+/** Hours given and hours available inside an inclusive window, for the one-line summary of an opened person. */
+export function loadInRange(days: readonly DayLoad[], from: string, to: string): { allocatedHours: number; capacityHours: number; utilisation: number } {
+  let allocated = 0;
+  let capacity = 0;
+  for (const d of days) {
+    if (d.date < from || d.date > to) continue;
+    allocated += d.allocatedHours;
+    capacity += d.capacityHours;
+  }
+  return {
+    allocatedHours: Math.round(allocated * 10) / 10,
+    capacityHours: Math.round(capacity * 10) / 10,
+    utilisation: capacity > 0 ? allocated / capacity : 0,
+  };
+}
+
 /** The dates a scheduled task actually occupies, ignoring the display window. */
 export function taskSpan(task: Task): string[] {
   if (!task.startDate) return [];

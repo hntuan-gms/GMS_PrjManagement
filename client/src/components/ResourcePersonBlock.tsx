@@ -1,9 +1,27 @@
-import { useMemo } from "react";
-import { aggregateMonths, aggregateWeeks, type Granularity, type PersonLoad } from "../resourceAllocation";
+import { useMemo, useState } from "react";
+import {
+  aggregateMonths,
+  aggregateWeeks,
+  overloadedDaysIn,
+  loadInRange,
+  type Granularity,
+  type PersonLoad,
+  type ResourceLoad,
+} from "../resourceAllocation";
 import { pct, placeBar, shortDate, taskBarDates, type ColumnSpan } from "../resourceColumns";
 import { cellTooltip } from "../resourceTimeline";
-import type { Task } from "../types";
+import type { JiraUser, Task } from "../types";
+import type { WorkCalendar } from "../workCalendar";
 import { Icon } from "./Icons";
+import Avatar from "./Avatar";
+import PersonPicker from "./PersonPicker";
+import StatusGlyph from "./StatusGlyph";
+
+/** One unit on the bars: hours. No Jira estimate means days × the person's hours a day. */
+function taskBarHours(task: Task, capacityPerDay: number): number {
+  const h = task.estimateHours ?? task.durationDays * capacityPerDay;
+  return Math.round(h * 10) / 10;
+}
 
 interface Props {
   person: PersonLoad;
@@ -15,9 +33,16 @@ interface Props {
   onToggle: () => void;
   onOpenProfile: () => void;
   onOpenEdit: (task: Task) => void;
-  /** Who a task can be handed to from the row's "Chuyển…" picker. */
-  members: Array<{ accountId: string; displayName: string }>;
+  /** Who a task can be handed to from the row's "Chuyển…" picker, with the load that says who is free. */
+  people: JiraUser[];
+  load: Pick<ResourceLoad, "people">;
+  calendar: WorkCalendar;
   onAssign: (taskId: string, accountId: string | null) => void;
+  /** The two weeks the red badge counts, and the window the opened summary is measured over. */
+  overloadWindow: { from: string; to: string };
+  summary: { from: string; to: string; label: string };
+  /** The red badge: open this person and bring their first over-capacity day into view. */
+  onJumpOverload: () => void;
   /** Dragging a task row out of here is how work is taken off this person. */
   onDragTask: (task: Task) => void;
   droppable: boolean;
@@ -43,14 +68,22 @@ export default function PersonBlock({
   onToggle,
   onOpenProfile,
   onOpenEdit,
-  members,
+  people,
+  load,
+  calendar,
   onAssign,
+  overloadWindow,
+  summary,
+  onJumpOverload,
   onDragTask,
   droppable,
   isDropTarget,
   onDragOverPerson,
   onDropOnPerson,
 }: Props) {
+  // The red number is what to act on now: over-capacity days in the next two weeks. An 85-day project-wide
+  // count made every busy person look the same; that figure stays in the tooltip.
+  const soon = overloadedDaysIn(person.days, overloadWindow.from, overloadWindow.to);
   const cells =
     granularity !== "day"
       ? (granularity === "month" ? aggregateMonths(person.days) : aggregateWeeks(person.days)).map((w) => ({
@@ -81,7 +114,8 @@ export default function PersonBlock({
 
   return (
     <div
-      className={`rv-block${expanded ? " is-expanded" : ""}${droppable ? " is-droppable" : ""}${isDropTarget ? " is-drop-target" : ""}`}
+      data-person={person.accountId}
+      className={`rv-block${expanded ? " is-expanded" : ""}${soon > 0 ? " is-overloaded" : ""}${droppable ? " is-droppable" : ""}${isDropTarget ? " is-drop-target" : ""}`}
       // preventDefault on dragover is what marks an element as a drop target at
       // all; without it the browser refuses the drop and fires nothing.
       onDragOver={(e) => {
@@ -101,11 +135,7 @@ export default function PersonBlock({
               click that bubbles to it, so the keyboard needs no handler of its own. */}
           <button type="button" className="rv-person-toggle" aria-expanded={expanded} aria-controls={bodyId}>
             <Icon name="chevronRight" size={14} className="rv-person-caret" />
-            {person.avatarUrl ? (
-              <img src={person.avatarUrl} alt="" className="rv-avatar" />
-            ) : (
-              <span className="rv-avatar rv-avatar-empty">{person.displayName.slice(0, 1)}</span>
-            )}
+            <Avatar name={person.displayName} avatarUrl={person.avatarUrl} className="rv-avatar rv-avatar-empty" decorative />
             <span className="rv-person-text">
               <b>{person.displayName}</b>
               <small>
@@ -119,9 +149,18 @@ export default function PersonBlock({
             </span>
           </button>
           {person.overloadedDays > 0 && (
-            <span className="rv-badge-over" title={`${person.overloadedDays} ngày quá tải`}>
-              {person.overloadedDays} ngày
-            </span>
+            <button
+              type="button"
+              className={`rv-badge-over${soon > 0 ? "" : " is-later"}`}
+              title={`${person.overloadedDays} ngày quá tải trong cả khoảng đang xem${soon > 0 ? `, ${soon} ngày trong 2 tuần tới` : ", chưa có ngày nào trong 2 tuần tới"}. Bấm để xem.`}
+              aria-label={`${person.displayName}: ${person.overloadedDays} ngày quá tải`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onJumpOverload();
+              }}
+            >
+              {soon > 0 ? soon : person.overloadedDays} ngày
+            </button>
           )}
           <button
             type="button"
@@ -160,8 +199,12 @@ export default function PersonBlock({
           spans={spans}
           onOpenProfile={onOpenProfile}
           onOpenEdit={onOpenEdit}
-          members={members}
+          people={people}
+          load={load}
+          calendar={calendar}
           onAssign={onAssign}
+          summary={summary}
+          overloaded={soon > 0}
           onDragTask={onDragTask}
         />
       )}
@@ -177,12 +220,20 @@ function PersonTasks({
   spans,
   onOpenProfile,
   onOpenEdit,
-  members,
+  people,
+  load,
+  calendar,
   onAssign,
+  summary,
+  overloaded,
   onDragTask,
-}: Pick<Props, "person" | "granularity" | "today" | "spans" | "onOpenProfile" | "onOpenEdit" | "members" | "onAssign" | "onDragTask"> & {
+}: Pick<Props, "person" | "granularity" | "today" | "spans" | "onOpenProfile" | "onOpenEdit" | "people" | "load" | "calendar" | "onAssign" | "summary" | "onDragTask"> & {
   id: string;
+  /** Overloaded in the next two weeks: "Chuyển…" is shown on every row, not only the hovered one. */
+  overloaded: boolean;
 }) {
+  const [picker, setPicker] = useState<{ task: Task; rect: DOMRect } | null>(null);
+  const inSummary = useMemo(() => loadInRange(person.days, summary.from, summary.to), [person.days, summary.from, summary.to]);
   const conflictIds = useMemo(() => new Set(person.overlaps.flatMap((o) => [o.aId, o.bId])), [person.overlaps]);
 
   // Consecutive days off become one shaded band rather than one element per day: a 120-day
@@ -227,7 +278,7 @@ function PersonTasks({
       <div className="rv-expand-head">
         <div className="rv-meta">
           <span>
-            {person.allocatedHours}h đã giao / {person.capacityHours}h khả dụng · {pct(person.utilisation)} mức sử dụng
+            {summary.label}: {inSummary.allocatedHours}h / {inSummary.capacityHours}h · {pct(inSummary.utilisation)}
           </span>
           <button type="button" className="rv-profile-text" onClick={onOpenProfile}>
             <Icon name="edit" size={13} />
@@ -264,35 +315,24 @@ function PersonTasks({
                 onDragTask(task);
               }}
               onClick={() => onOpenEdit(task)}
-              title={`${task.id} · ${task.summary}\nKéo sang người khác để chuyển, kéo xuống “bỏ gán” để bỏ gán`}
+              title={`${task.id} · ${task.summary} (${task.statusName})\nKéo sang người khác để chuyển, kéo xuống “bỏ gán” để bỏ gán`}
             >
               <div className="rv-name rv-task-name">
                 {conflict && <Icon name="alert" size={13} className="rv-warn" />}
+                <StatusGlyph category={task.statusCategory} percent={task.percentComplete} name={task.statusName} size={13} title={task.statusName} />
                 <span className="rv-tl-key">{task.id}</span>
                 <span className="rv-tl-summary">{task.summary}</span>
-                <span className="rv-task-side">
-                  <span className={`wbs-status is-${task.statusCategory} rv-tl-status`}>{task.statusName}</span>
-                  <select
-                    className="rv-assign-select"
-                    value=""
-                    onClick={(e) => e.stopPropagation()}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      if (v) onAssign(task.id, v === "__none__" ? null : v);
-                    }}
-                    aria-label={`Chuyển ${task.id} cho người khác`}
-                  >
-                    <option value="">Chuyển…</option>
-                    <option value="__none__">Bỏ gán</option>
-                    {members
-                      .filter((m) => m.accountId !== person.accountId)
-                      .map((m) => (
-                        <option key={m.accountId} value={m.accountId}>
-                          {m.displayName}
-                        </option>
-                      ))}
-                  </select>
-                </span>
+                <button
+                  type="button"
+                  className={`rv-assign-btn${overloaded ? " is-shown" : ""}`}
+                  aria-label={`Chuyển ${task.id} cho người khác`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setPicker({ task, rect: e.currentTarget.getBoundingClientRect() });
+                  }}
+                >
+                  Chuyển…
+                </button>
               </div>
               <div className="rv-task-track">
                 {/* Shading sits inside every track rather than once behind the grid: the track is
@@ -317,8 +357,11 @@ function PersonTasks({
                     style={{ left: share(place.left), width: share(place.width) }}
                   >
                     {task.percentComplete > 0 && <span className="rv-tl-progress" style={{ width: `${task.percentComplete}%` }} />}
-                    <span className="rv-tl-bar-label">
-                      {task.estimateHours != null ? `${task.estimateHours}h` : `${task.durationDays}n`}
+                    <span
+                      className="rv-tl-bar-label"
+                      title={task.estimateHours != null ? undefined : `ước tính: ${task.durationDays} ngày × ${person.capacityHoursPerDay}h/ngày`}
+                    >
+                      {taskBarHours(task, person.capacityHoursPerDay)}h
                     </span>
                   </span>
                 ) : (
@@ -336,6 +379,23 @@ function PersonTasks({
             </div>
           );
         })
+      )}
+      {picker && (
+        <PersonPicker
+          anchor={picker.rect}
+          people={people}
+          task={picker.task}
+          load={load}
+          calendar={calendar}
+          currentAccountId={person.accountId}
+          placeholder="Chuyển cho"
+          onPick={(accountId) => {
+            const t = picker.task;
+            setPicker(null);
+            onAssign(t.id, accountId);
+          }}
+          onClose={() => setPicker(null)}
+        />
       )}
     </div>
   );

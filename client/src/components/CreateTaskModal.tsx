@@ -1,11 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import DateField from "./DateField";
 import { api } from "../api";
 import { isAssignableType } from "../types";
+import { analyzeLine, mergeFormFields, type FormFields } from "../createForm";
+import type { QuickAddContext } from "../quickAdd";
 import type { BulkTaskCreateInput, BulkTaskCreateResult, IssueTypeName, JiraUser, Task } from "../types";
 import { filesFromClipboard, hasPending, NO_ATTACHMENTS, uploadPending, type PendingAttachments } from "../attachments";
 import { endDateOf, HOURS_PER_DAY, localToday, roundHours, shortDate } from "../taskForm";
 import AttachmentPicker from "./AttachmentPicker";
+import { Icon } from "./Icons";
 import DurationHint from "./DurationHint";
 import LabelsInput from "./LabelsInput";
 import NumberInput from "./NumberInput";
@@ -17,11 +20,13 @@ interface Props {
   onCreate: (input: BulkTaskCreateInput) => Promise<BulkTaskCreateResult>;
   /** Opened from "+ Sub-task": the parent is chosen and the type defaults to a sub-task type. */
   initialParentId?: string;
+  /** The signed-in person: what "@tôi" in a name box means. Without it that word stays in the title. */
+  meAccountId?: string;
 }
 
 const ISSUE_TYPES: IssueTypeName[] = ["Task", "Story", "Epic", "Bug", "Sub-task"];
 
-export default function CreateTaskModal({ tasks, users, onClose, onCreate, initialParentId }: Props) {
+export default function CreateTaskModal({ tasks, users, onClose, onCreate, initialParentId, meAccountId = "" }: Props) {
   // Input modes: "list" (interactive row-by-row) or "bulk" (multi-line text)
   const [mode, setMode] = useState<"list" | "bulk">("list");
   const [taskItems, setTaskItems] = useState<string[]>([""]);
@@ -106,24 +111,56 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate, initi
     setMode(nextMode);
   }
 
-  function getEffectiveSummaries(): string[] {
-    if (mode === "list") {
-      return taskItems.map((s) => s.trim()).filter(Boolean);
-    }
-    return bulkText
-      .split("\n")
-      .map((s) => s.trim())
-      .filter(Boolean);
-  }
-
-  const effectiveSummaries = getEffectiveSummaries();
+  // The name boxes speak Ctrl K's words (createForm.ts): "Dựng API @Chi t6 3n" is a title and three fields.
+  const quickCtx = useMemo<QuickAddContext>(
+    () => ({
+      today: localToday(),
+      users,
+      meAccountId,
+      tasks,
+      issueTypes: projectTypes?.map((t) => t.name) ?? [],
+      priorities: priorityOptions,
+      projectKey: tasks[0]?.id.replace(/-\d+$/, "") ?? "",
+    }),
+    [users, meAccountId, tasks, projectTypes, priorityOptions]
+  );
+  const rawKey = (mode === "list" ? taskItems : bulkText.split("\n")).join("\n");
+  const lines = useMemo(() => rawKey.split("\n").map((l) => analyzeLine(l, quickCtx)), [rawKey, quickCtx]);
+  const effectiveSummaries = lines.map((l) => l.title).filter(Boolean);
   const taskCount = effectiveSummaries.length;
+
+  // A word that names a field fills it, once, when that word first appears or changes; after that the field
+  // below is the person's to edit. (The last line to name a field wins; labels add up.) Done where the text
+  // is typed, not in an effect: it is a consequence of that change, not something to keep in sync.
+  const prevDerived = useRef<FormFields>({});
+  function absorb(nextLines: string[]) {
+    const d = mergeFormFields(nextLines.map((l) => analyzeLine(l, quickCtx).fields));
+    const prev = prevDerived.current;
+    prevDerived.current = d;
+    if (d.issueType && d.issueType !== prev.issueType) setIssueType(d.issueType);
+    if (d.assigneeAccountId && d.assigneeAccountId !== prev.assigneeAccountId) setAssigneeAccountId(d.assigneeAccountId);
+    if (d.startDate && d.startDate !== prev.startDate) setStartDate(d.startDate);
+    if (d.durationDays !== undefined && d.durationDays !== prev.durationDays) {
+      const days = d.durationDays;
+      setDurationDays(days);
+      if (!Number.isInteger(days)) setEstimate((cur) => cur ?? roundHours(days * HOURS_PER_DAY));
+    }
+    if (d.estimateHours !== undefined && d.estimateHours !== prev.estimateHours) {
+      setEstimate(d.estimateHours);
+      setEstimateTouched(true);
+    }
+    if (d.priority && d.priority !== prev.priority) setPriority(d.priority);
+    if (d.parentId && d.parentId !== prev.parentId) setWbsParentId(d.parentId);
+    const labels = d.labels ?? [];
+    if (labels.length > 0 && labels.join("\n") !== (prev.labels ?? []).join("\n")) setLabels((cur) => [...new Set([...cur, ...labels])]);
+  }
   const endDate = endDateOf(startDate, durationDays);
 
   function handleTaskItemChange(index: number, value: string) {
     const updated = [...taskItems];
     updated[index] = value;
     setTaskItems(updated);
+    absorb(updated);
   }
 
   function handleAddTaskItem() {
@@ -133,9 +170,12 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate, initi
   function handleRemoveTaskItem(index: number) {
     if (taskItems.length === 1) {
       setTaskItems([""]);
+      absorb([""]);
       return;
     }
-    setTaskItems(taskItems.filter((_, i) => i !== index));
+    const rest = taskItems.filter((_, i) => i !== index);
+    setTaskItems(rest);
+    absorb(rest);
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>, index: number) {
@@ -150,7 +190,7 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate, initi
 
   async function handleCreate() {
     if (effectiveSummaries.length === 0) {
-      setError("Vui lòng nhập ít nhất một tên công việc.");
+      setError("Vui lòng nhập ít nhất một tên việc.");
       return;
     }
 
@@ -185,7 +225,7 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate, initi
         onClose();
       }
     } catch (e: any) {
-      setError(e.message || "Tạo task thất bại.");
+      setError(e.message || "Tạo việc thất bại.");
     } finally {
       setSaving(false);
     }
@@ -198,17 +238,16 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate, initi
         <div className="modal" onClick={(e) => e.stopPropagation()}>
           <div className="modal-header">
             <div className="modal-title-wrap">
-              <span className="modal-id">Kết quả tạo task</span>
-              <p className="modal-subtitle">Báo cáo quá trình đồng bộ lên Jira</p>
+              <span className="modal-id">Kết quả tạo việc</span>
             </div>
             <button className="modal-close" onClick={onClose} aria-label="Đóng">
-              ✕
+              <Icon name="x" size={16} />
             </button>
           </div>
 
           <div className="import-result-summary">
             Đã tạo thành công <strong>{result.created.length}</strong> /{" "}
-            <strong>{result.created.length + result.errors.length}</strong> task trên Jira.
+            <strong>{result.created.length + result.errors.length}</strong> việc trên Jira.
           </div>
 
           {(result.warnings?.length ?? 0) > 0 && (
@@ -224,7 +263,7 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate, initi
 
           {result.errors.length > 0 && (
             <div className="import-errors-wrap">
-              <div className="import-errors-title">Công việc chưa tạo được ({result.errors.length}):</div>
+              <div className="import-errors-title">Việc chưa tạo được ({result.errors.length}):</div>
               <ul className="import-error-list">
                 {result.errors.map((e, i) => (
                   <li key={i}>
@@ -262,25 +301,24 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate, initi
       >
         <div className="modal-header">
           <div className="modal-title-wrap">
-            <span className="modal-id">
-              <span className="modal-title-icon">+</span> Task mới
-            </span>
-            <p className="modal-subtitle">Thêm một hoặc nhiều công việc vào dự án và đồng bộ với Jira</p>
+            <span className="modal-id">Tạo việc</span>
           </div>
           <button className="modal-close" onClick={onClose} aria-label="Đóng">
-            ✕
+            <Icon name="x" size={16} />
           </button>
         </div>
 
-        {/* Header and footer stay put; only this body scrolls, so "Huỷ" / "Tạo task" are always on screen. */}
+        {/* Header and footer stay put; only this body scrolls, so "Huỷ" / "Tạo" are always on screen. */}
         <div className="mc-body">
         {/* Mode Switcher */}
         <div className="input-mode-header">
           <span className="field-label-text">
-            Danh sách công việc{" "}
-            <span className={`task-count-badge${taskCount === 0 ? " is-empty" : ""}`} aria-live="polite">
-              {taskCount > 0 ? `${taskCount} task sẵn sàng` : "Chưa có task"}
-            </span>
+            Việc
+            {taskCount > 0 && (
+              <span className="task-count-badge" aria-live="polite">
+                {taskCount}
+              </span>
+            )}
           </span>
           <div className="segmented-control mode-tabs">
             <button
@@ -288,14 +326,14 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate, initi
               className={`segmented-btn ${mode === "list" ? "active" : ""}`}
               onClick={() => handleModeChange("list")}
             >
-              Từng task
+              Từng dòng
             </button>
             <button
               type="button"
               className={`segmented-btn ${mode === "bulk" ? "active" : ""}`}
               onClick={() => handleModeChange("bulk")}
             >
-              Nhập nhanh theo dòng
+              Dán nhiều dòng
             </button>
           </div>
         </div>
@@ -305,7 +343,8 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate, initi
           <div className="task-items-container">
             <div className="task-input-list">
               {taskItems.map((item, index) => (
-                <div key={index} className="task-input-row">
+                <div key={index} className="task-input-item">
+                <div className="task-input-row">
                   <span className="task-input-badge">{index + 1}</span>
                   <input
                     autoFocus={index === 0}
@@ -314,13 +353,7 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate, initi
                     value={item}
                     onChange={(e) => handleTaskItemChange(index, e.target.value)}
                     onKeyDown={(e) => handleKeyDown(e, index)}
-                    placeholder={
-                      index === 0
-                        ? "Ví dụ: Thiết kế màn hình đăng nhập..."
-                        : index === 1
-                        ? "Ví dụ: Xây dựng API xác thực..."
-                        : "Nhập tên công việc tiếp theo..."
-                    }
+                    placeholder={index === 0 ? "Dựng API @Chi t6 3n" : "Tên việc"}
                   />
                   {/* A lone empty row has nothing to remove; the spacer keeps the input's width steady
                       when the button appears with the first character typed. */}
@@ -332,17 +365,27 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate, initi
                       title={taskItems.length > 1 ? "Xoá dòng này" : "Xoá nội dung"}
                       aria-label={taskItems.length > 1 ? "Xoá dòng này" : "Xoá nội dung"}
                     >
-                      ✕
+                      <Icon name="x" size={14} />
                     </button>
                   ) : (
                     <span className="task-remove-spacer" aria-hidden="true" />
                   )}
                 </div>
+                {(lines[index]?.chips.length ?? 0) > 0 && (
+                  <span className="task-chips">
+                    {lines[index].chips.map((c, k) => (
+                      <span key={k} className={`qa-chip qa-${c.kind}${c.warn ? " is-warn" : ""}`}>
+                        {c.label}
+                      </span>
+                    ))}
+                  </span>
+                )}
+                </div>
               ))}
             </div>
             <div className="task-list-actions">
               <button type="button" className="add-task-row-btn" onClick={handleAddTaskItem}>
-                + Thêm task khác <span className="kbd-hint">(hoặc nhấn Enter)</span>
+                + Thêm dòng
               </button>
             </div>
           </div>
@@ -353,19 +396,19 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate, initi
                 autoFocus
                 rows={5}
                 value={bulkText}
-                onChange={(e) => setBulkText(e.target.value)}
-                placeholder={"Thiết kế màn hình đăng nhập\nViết API xác thực\nViết unit test cho auth service\nTích hợp giao diện"}
+                onChange={(e) => {
+                  setBulkText(e.target.value);
+                  absorb(e.target.value.split("\n"));
+                }}
+                placeholder={"Thiết kế màn hình đăng nhập\nDựng API @Chi t6 3n\nViết unit test"}
               />
             </label>
-            <div className="field-hint">
-              Mỗi dòng tương ứng 1 task. Bạn có thể sao chép và dán nhanh danh sách từ Excel, Sheets hoặc ghi chú vào đây.
-            </div>
           </div>
         )}
 
         {/* Everything below is one set of values stamped on every task named above. */}
         <div className="form-section-label" role="separator">
-          <span>{taskCount > 1 ? "Thiết lập áp dụng chung" : "Thông tin chung"}</span>
+          <span>{taskCount > 1 ? "Áp dụng chung" : "Thông tin"}</span>
         </div>
 
         <label className="field">
@@ -374,7 +417,7 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate, initi
             rows={2}
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="Mô tả chi tiết hoặc ghi chú (không bắt buộc)..."
+            placeholder="Không bắt buộc"
           />
         </label>
 
@@ -390,7 +433,7 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate, initi
             </select>
           </label>
           <label className="field">
-            <span className="field-label-text">Thuộc task cha (WBS)</span>
+            <span className="field-label-text">Thuộc việc cha (WBS)</span>
             <select value={wbsParentId} onChange={(e) => setWbsParentId(e.target.value)}>
               <option value="">Không có</option>
               {tasks.map((t) => (
@@ -488,13 +531,6 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate, initi
         {error && <div className="modal-error mc-error">{error}</div>}
 
         <div className="modal-footer">
-          <div className="footer-summary">
-            {taskCount > 0 && (
-              <span className="footer-count">
-                Sẽ tạo <strong>{taskCount}</strong> task trên Jira
-              </span>
-            )}
-          </div>
           <div className="spacer" />
           <button type="button" onClick={onClose} disabled={saving}>
             Huỷ
@@ -505,11 +541,7 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate, initi
             onClick={handleCreate}
             disabled={saving || taskCount === 0}
           >
-            {saving
-              ? "Đang tạo..."
-              : taskCount <= 1
-              ? "Tạo task & đẩy lên Jira"
-              : `Tạo ${taskCount} task & đẩy lên Jira`}
+            {saving ? "Đang tạo..." : taskCount <= 1 ? "Tạo" : `Tạo ${taskCount} việc`}
           </button>
         </div>
       </div>

@@ -17,6 +17,9 @@ import ReportCompare from "./ReportCompare";
 import { PeopleBars, PhaseBars, ProgressGauge, ScheduleTimeline, StatusDonut, type WorkState } from "./progressCharts";
 import { useDialogs } from "./dialogContext";
 import { pulseDecisions, pulseHeadline, type PulseDecision } from "../projectPulse";
+import { scopeFromTaskFilter } from "../reportScope";
+import type { TaskFilter } from "../taskFilter";
+import { Icon } from "./Icons";
 import { toast } from "../toast";
 
 interface Props {
@@ -41,6 +44,13 @@ interface Props {
   users?: JiraUser[];
   onAssign?: (taskId: string, accountId: string) => Promise<void>;
   onOpenResources?: () => void;
+  /**
+   * "Xem lịch Anh" on an overload row: Nhân lực, that person opened, scrolled to the first overloaded day.
+   * Without it the row falls back to onOpenResources (the tab, no person).
+   */
+  onOpenPersonLoad?: (accountId: string, date?: string) => void;
+  /** The plan's filter: what it holds that the report can say (one person, one Epic, types) is where this page starts. */
+  taskFilter?: TaskFilter;
 }
 
 /**
@@ -95,11 +105,18 @@ function signed(n: number): string {
   return v > 0 ? `+${v}` : `${v}`;
 }
 
-export default function ProgressReportView({ tasks, focusReportId, canGenerate, onOpenEdit, cacheScope, projectKey, refreshing, sla = null, users, onAssign, onOpenResources }: Props) {
+export default function ProgressReportView({ tasks, focusReportId, canGenerate, onOpenEdit, cacheScope, projectKey, refreshing, sla = null, users, onAssign, onOpenResources, onOpenPersonLoad, taskFilter }: Props) {
   const dialogs = useDialogs();
-  // The last figures this tab showed for today's unscoped view, so reopening it paints at once.
+  // Where the page starts: the plan's filter, as far as the report can say it (reportScope.ts). Read once.
+  const [start] = useState(() => scopeFromTaskFilter(taskFilter));
+  // The last figures this tab showed for the scope it opens on, so reopening it paints at once.
   const [overview, setOverview] = useState<ProgressOverview | null>(
-    () => readViewCache<ProgressOverview>(cacheScope, "progress", overviewParams(todayIso(), { types: [] })) ?? null
+    () =>
+      readViewCache<ProgressOverview>(
+        cacheScope,
+        "progress",
+        overviewParams(todayIso(), { assignee: start.assignee || undefined, epic: start.epic || undefined, types: start.types })
+      ) ?? null
   );
   const [loadError, setLoadError] = useState<string | null>(null);
   const [shown, setShown] = useState<ProgressReport | null>(null);
@@ -112,9 +129,9 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
   // project as of its own day; only the live figures follow these.
   const today = useMemo(() => todayIso(), []);
   const [asOf, setAsOf] = useState(today);
-  const [assignee, setAssignee] = useState("");
-  const [epic, setEpic] = useState("");
-  const [types, setTypes] = useState<Set<string>>(new Set());
+  const [assignee, setAssignee] = useState(start.assignee);
+  const [epic, setEpic] = useState(start.epic);
+  const [types, setTypes] = useState<Set<string>>(() => new Set(start.types));
   const [reloadTick, setReloadTick] = useState(0);
   const [comparing, setComparing] = useState(false);
   const [linkNote, setLinkNote] = useState<string | null>(null);
@@ -125,6 +142,11 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
   const scoped = !!(assignee || epic || types.size > 0);
 
   const taskById = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
+  // The "Cần bạn quyết" rows, worked out here because the quality chips below must not repeat one of them.
+  const decisions = useMemo(
+    () => (overview ? pulseDecisions(overview.metrics, tasks, users ?? [], todayIso()) : []),
+    [overview, tasks, users]
+  );
   const critical = useMemo(() => computeCriticalPath(tasks), [tasks]);
 
   // Refetched whenever the workspace's tasks change — an edit in the Gantt or a
@@ -290,17 +312,15 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
   // Anything that makes the charts less trustworthy, as clickable chips.
   const quality = [
     m.counts.undated > 0 && { kind: "undated" as const, text: `${m.counts.undated} việc chưa có ngày`, hint: "không được tính vào %" },
-    m.counts.noBaseline > 0 && {
+    m.counts.noBaseline > 0 && !decisions.some((d) => d.kind === "no-baseline") && {
       kind: "noBaseline" as const,
       text: `${m.counts.noBaseline} việc chưa có baseline`,
       hint: "kế hoạch đo theo lịch hiện tại nên không bao giờ hiện là chậm",
     },
   ].filter((x): x is { kind: "undated" | "noBaseline"; text: string; hint: string } => !!x);
 
-  const topAttention = m.overdue.slice(0, 5);
-
   return (
-    <div className="progress-view">
+    <div className={`progress-view${report || generating ? "" : " is-solo"}`}>
       <div className="pr-main">
         <header className="pr-header">
           <div>
@@ -308,9 +328,17 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
             <span className="pr-sub">
               {fmtDate(m.asOf)} · {m.counts.total} việc
             </span>
+            {start.note && <span className="pr-sub pr-scope-note">{start.note}</span>}
           </div>
           {/* The verdict is the pulse sentence below; a coloured badge beside it said it twice. */}
           <div className="pr-header-tools">
+            {/* No analysis yet: the offer is a button here, not a panel taking a third of the page. */}
+            {canGenerate && !report && (
+              <button className="pr-analyze" onClick={() => void generate()} disabled={generating}>
+                <span className="ai-tag">AI</span>
+                {generating ? "Đang phân tích…" : "Phân tích ngay"}
+              </button>
+            )}
             <button className="text-btn" onClick={() => setShowReasons((v) => !v)} aria-expanded={showReasons}>
               {showReasons ? "Ẩn lý do" : "Vì sao?"}
             </button>
@@ -324,12 +352,21 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
                 Sao chép liên kết
               </button>
             )}
-            <button className="text-btn" onClick={() => window.print()} title="In hoặc lưu PDF">
-              In
+            <button className="text-btn pr-print" onClick={() => window.print()} aria-label="In" title="In">
+              <Icon name="print" size={15} />
             </button>
           </div>
         </header>
-        <PulseBlock metrics={m} tasks={tasks} users={users ?? []} onOpenEdit={onOpenEdit} onAssign={onAssign} onOpenResources={onOpenResources} />
+        <PulseBlock
+          metrics={m}
+          tasks={tasks}
+          decisions={decisions}
+          onOpenEdit={onOpenEdit}
+          onAssign={onAssign}
+          onOpenResources={onOpenResources}
+          onOpenPersonLoad={onOpenPersonLoad}
+        />
+        {genError && !report && <div className="rv-notice rv-notice-error">{genError}</div>}
         {linkNote && (
           <div className="rv-notice" role="status">
             {linkNote}
@@ -430,7 +467,7 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
             <h3>Thời hạn</h3>
             <ScheduleTimeline schedule={m.schedule} asOf={m.asOf} />
             <div className="pr-tiles">
-              {attention.map((a) => (
+              {attention.filter((a) => a.value > 0).map((a) => (
                 <button
                   key={a.kind}
                   className={`pr-tile ${a.value > 0 ? `pr-tile-${a.tone}` : "pr-tile-zero"}`}
@@ -459,32 +496,6 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
               </button>
             ))}
           </div>
-        )}
-
-        {topAttention.length > 0 && (
-          <section className="pr-card">
-            <div className="pr-card-head">
-              <h3>Cần xử lý ngay</h3>
-              {m.counts.overdue > topAttention.length && (
-                <button className="ai-link" onClick={() => setDrill({ kind: "overdue" })}>
-                  Xem tất cả {m.counts.overdue} →
-                </button>
-              )}
-            </div>
-            <ul className="pr-attn">
-              {topAttention.map((t) => (
-                <li key={t.id}>
-                  {issueLink(t.id)}
-                  <span className="pr-attn-summary" title={t.summary}>
-                    {t.summary}
-                  </span>
-                  {t.critical && <span className="pr-critical">găng</span>}
-                  <span className="pr-attn-who">{t.assignee ?? "chưa gán"}</span>
-                  <span className="pr-late">trễ {t.daysLate}n</span>
-                </li>
-              ))}
-            </ul>
-          </section>
         )}
 
         <div className="pr-columns">
@@ -837,23 +848,24 @@ function resolveDrill(drill: Drill, tasks: Task[], asOf: string, scope: Progress
 function PulseBlock({
   metrics,
   tasks,
-  users,
+  decisions,
   onOpenEdit,
   onAssign,
   onOpenResources,
+  onOpenPersonLoad,
 }: {
   metrics: ProgressMetrics;
   tasks: Task[];
-  users: JiraUser[];
+  decisions: PulseDecision[];
   onOpenEdit: (task: Task) => void;
   onAssign?: (taskId: string, accountId: string) => Promise<void>;
   onOpenResources?: () => void;
+  onOpenPersonLoad?: (accountId: string, date?: string) => void;
 }) {
-  const head = useMemo(() => pulseHeadline(metrics), [metrics]);
-  const decisions = useMemo(() => pulseDecisions(metrics, tasks, users, todayIso()), [metrics, tasks, users]);
+  // The sentence leaves out a cause that is already one of the rows below it (projectPulse.ts, H6).
+  const head = useMemo(() => pulseHeadline(metrics, decisions), [metrics, decisions]);
   const [done, setDone] = useState<Set<string>>(new Set());
   const byId = new Map(tasks.map((t) => [t.id, t]));
-  const rest = head.lead.slice(head.leadKey.length);
   const keyOf = (d: PulseDecision) => `${d.kind}:${d.taskIds.join(",")}`;
 
   async function act(d: PulseDecision) {
@@ -869,7 +881,10 @@ function PulseBlock({
       }
       return;
     }
-    if (a.kind === "rebalance" && onOpenResources) return onOpenResources();
+    if (a.kind === "rebalance") {
+      if (a.accountId && onOpenPersonLoad) return onOpenPersonLoad(a.accountId, a.date);
+      if (onOpenResources) return onOpenResources();
+    }
     const t = first ? byId.get(first) : undefined;
     if (t) onOpenEdit(t);
   }
@@ -878,10 +893,8 @@ function PulseBlock({
   const shown = decisions.filter((d) => !done.has(keyOf(d)));
   return (
     <section className="pulse" aria-label="Nhịp dự án">
-      <p className="pulse-lead">
-        <span className={`pulse-key ${verdictClass}`}>{head.leadKey}</span>
-        {rest}
-      </p>
+      {/* One colour for the whole sentence, by level: it used to be two (orange "Có rủi ro chậm", black "tiến độ."). */}
+      <p className={`pulse-lead ${verdictClass}`}>{head.lead}</p>
       {head.detail && <p className="pulse-detail">{head.detail}</p>}
       {shown.length > 0 && (
         <>
@@ -898,7 +911,7 @@ function PulseBlock({
                     <p>{d.body}</p>
                   </div>
                   <div className="pulse-actions">
-                    {d.action.kind !== "open" && first && byId.get(first) && (
+                    {d.action.kind === "assign" && first && byId.get(first) && (
                       <button type="button" className="text-btn" onClick={() => onOpenEdit(byId.get(first)!)}>
                         Mở {first}
                       </button>

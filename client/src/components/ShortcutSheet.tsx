@@ -1,10 +1,12 @@
 import { useEffect, useRef } from "react";
+import { useLayer } from "../useLayer";
 import { SHORTCUTS, type Shortcut } from "../shortcuts";
 import { Icon } from "./Icons";
 
 /** "?" — every shortcut, grouped, from the same list the command bar and tooltips read. */
 export default function ShortcutSheet({ onClose }: { onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
+  useLayer("shortcuts", true, { onEscape: onClose });
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
     ref.current?.focus();

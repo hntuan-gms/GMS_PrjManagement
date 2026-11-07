@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode, type Ref } from "react";
 import { priorityRank, summarize } from "../boardModel";
 import { EMPTY_TASK_FILTER, facetCount, isTaskFiltering, type TaskFilter } from "../taskFilter";
 import type { Task } from "../types";
@@ -72,6 +72,21 @@ interface Props {
   /** Extra class on the row, for callers (and tests) that name it. */
   className?: string;
   jql?: JqlControl;
+  /** Class and ref for the search box itself (the board's "/" shortcut and its tests find it there). */
+  searchInputClassName?: string;
+  searchInputRef?: Ref<HTMLInputElement>;
+  /** What the "12/80" counter counts; "công việc" unless the view says otherwise (the board's "thẻ"). */
+  countLabel?: string;
+  /** More sections at the foot of the "Bộ lọc" panel, for what only one view has (the board's own quick filters). */
+  panelExtras?: ReactNode;
+  /** How many of those are switched on: they light the button and count in its badge. */
+  panelExtrasActive?: number;
+  /** Something outside `filter` is narrowing the view too, so the chip line shows (the board's "Bị chặn"). */
+  extraActive?: boolean;
+  /** Chips for that outside narrowing, shown with the facet chips. */
+  activeExtras?: ReactNode;
+  /** Also called by "Xoá lọc", to reset what lives outside `filter`. */
+  onClearExtras?: () => void;
 }
 
 const ALL_FACETS: FilterFacet[] = ["people", "statuses", "types", "epics", "labels", "priorities", "components", "versions", "sprints", "overdue"];
@@ -239,6 +254,14 @@ export default function FilterBar({
   showSearch,
   className,
   jql,
+  searchInputClassName,
+  searchInputRef,
+  countLabel = "công việc",
+  panelExtras,
+  panelExtrasActive = 0,
+  extraActive,
+  activeExtras,
+  onClearExtras,
 }: Props) {
   const has = (f: FilterFacet) => facets.includes(f);
   const [jqlOpen, setJqlOpen] = useState(false);
@@ -298,11 +321,11 @@ export default function FilterBar({
   }, [tasks]);
 
   const mine = filter.people.has(myAccountId);
-  const filtering = isTaskFiltering(filter);
+  const filtering = isTaskFiltering(filter) || !!extraActive;
 
   // Components, versions and sprints only earn a place once the project uses them.
   const shown = SET_FACETS.filter((f) => has(f) && (!["components", "versions", "sprints"].includes(f) || options[f].length > 0));
-  const activeCount = shown.filter((f) => filter[f].size > 0).length;
+  const activeCount = shown.filter((f) => filter[f].size > 0).length + panelExtrasActive;
 
   function labelOf(f: SetFacet, value: string): string {
     return options[f].find((o) => o.value === value)?.label ?? value;
@@ -329,6 +352,8 @@ export default function FilterBar({
             <div className="tf-search">
               <Icon name="search" size={14} className="tf-search-icon" />
               <input
+                ref={searchInputRef}
+                className={searchInputClassName}
                 type="search"
                 value={filter.text}
                 onChange={(e) => onChange({ ...filter, text: e.target.value })}
@@ -418,7 +443,7 @@ export default function FilterBar({
               title="Việc của tôi"
             >
               <Icon name="user" size={14} />
-              Của tôi
+              <span className="fb-label">Của tôi</span>
             </button>
           )}
           {has("overdue") && (
@@ -430,11 +455,11 @@ export default function FilterBar({
               title="Quá hạn và chưa xong"
             >
               <Icon name="alert" size={14} />
-              Quá hạn
+              <span className="fb-label">Quá hạn</span>
             </button>
           )}
           {extras}
-          {shown.length > 0 && (
+          {(shown.length > 0 || panelExtras) && (
             <Popover
               className="tf-btn tf-add"
               caret={false}
@@ -445,7 +470,7 @@ export default function FilterBar({
               label={
                 <>
                   <Icon name="plus" size={14} />
-                  Bộ lọc
+                  <span className="fb-label">Bộ lọc</span>
                   {activeCount > 0 && <span className="tf-badge">{activeCount}</span>}
                 </>
               }
@@ -456,6 +481,7 @@ export default function FilterBar({
                 onOpenChange={(k) => setOpenFacet(k as SetFacet | null)}
                 onChange={(k, next) => onChange({ ...filter, [k]: next })}
               />
+              {panelExtras}
             </Popover>
           )}
         </div>
@@ -471,6 +497,7 @@ export default function FilterBar({
               </button>
             </span>
           ))}
+          {activeExtras}
           {jql && filter.jql && (
             <span className={`tf-chip${jql.state.error ? " is-error" : ""}`} title={jql.state.error ?? `JQL: ${filter.jql}`}>
               <button type="button" className="tf-chip-label tf-chip-open" onClick={() => setJqlOpen(true)}>
@@ -492,10 +519,13 @@ export default function FilterBar({
           )}
           {matched !== undefined && total !== undefined && (
             <span className="tf-count" role="status" aria-atomic="true">
-              {matched}/{total} công việc
+              {matched}/{total} {countLabel}
             </span>
           )}
-          <button type="button" className="text-btn tf-clear" onClick={() => onChange(EMPTY_TASK_FILTER)}>
+          <button type="button" className="text-btn tf-clear" onClick={() => {
+              onChange(EMPTY_TASK_FILTER);
+              onClearExtras?.();
+            }}>
             Xoá lọc{facetCount(filter) > 0 ? ` (${facetCount(filter)})` : ""}
           </button>
         </div>

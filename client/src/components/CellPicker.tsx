@@ -9,6 +9,8 @@ export interface PickItem {
   lead?: ReactNode;
   /** Muted text after the label ("hiện tại", "gợi ý"). */
   hint?: string;
+  /** "risk" colours the hint as a warning (a conflict), "ok" as a calm positive. */
+  tone?: "risk" | "ok";
 }
 
 /**
@@ -24,6 +26,8 @@ export default function CellPicker({
   placeholder,
   onPick,
   onClose,
+  search,
+  className,
 }: {
   anchor: DOMRect;
   items: PickItem[] | null;
@@ -31,6 +35,10 @@ export default function CellPicker({
   placeholder: string;
   onPick: (item: PickItem) => void;
   onClose: () => void;
+  /** Replaces the built-in filter (label + hint contain the folded query): ranking, limits. Gets every item and the raw query. */
+  search?: (items: PickItem[], query: string) => PickItem[];
+  /** Added to the panel, e.g. "is-wide". */
+  className?: string;
 }) {
   const [q, setQ] = useState("");
   const [active, setActive] = useState(0);
@@ -40,8 +48,9 @@ export default function CellPicker({
   const shown = useMemo(() => {
     const f = fold(q);
     const list = items ?? [];
+    if (search) return search(list, q);
     return f ? list.filter((i) => fold(`${i.label} ${i.hint ?? ""}`).includes(f)) : list;
-  }, [items, q]);
+  }, [items, q, search]);
 
   // Keep the panel inside the window: flip above the cell when there is no room below.
   useLayoutEffect(() => {
@@ -65,7 +74,7 @@ export default function CellPicker({
   return createPortal(
     <div
       ref={panelRef}
-      className="cell-picker"
+      className={`cell-picker${className ? ` ${className}` : ""}`}
       style={{ top: pos.top, left: pos.left }}
       role="dialog"
       aria-label={placeholder}
@@ -117,7 +126,7 @@ export default function CellPicker({
             >
               {it.lead}
               <span className="cell-picker-label">{it.label}</span>
-              {it.hint && <span className="cell-picker-hint">{it.hint}</span>}
+              {it.hint && <span className={`cell-picker-hint${it.tone ? ` is-${it.tone}` : ""}`}>{it.hint}</span>}
             </div>
           ))
         )}

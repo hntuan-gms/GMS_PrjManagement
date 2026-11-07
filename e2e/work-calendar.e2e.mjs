@@ -5,6 +5,7 @@
 // a project admin may save it. The stand-in API runs the server's own validator (validateCalendar).
 import assert from "node:assert/strict";
 import { chromium } from "playwright-core";
+import { fillDate, openSettings, openTimesheet, setGranularity } from "./toolbar.mjs";
 
 const APP = process.env.E2E_APP ?? "http://localhost:5173/";
 const API = process.env.E2E_API ?? "http://localhost:4000";
@@ -46,10 +47,6 @@ let m = 7;
 while (weekdayOf(localDay(m)) !== 1) m++;
 const MONDAY = localDay(m);
 
-const openMenuItem = async (label) => {
-  await page.locator(".project-switch").click();
-  await page.locator("[role=menuitem]", { hasText: label }).click();
-};
 const cal = () => page.locator(".cal-modal");
 
 await api("POST", "/api/__restore");
@@ -57,8 +54,8 @@ await page.goto(APP);
 await page.waitForSelector(".wbs-row");
 
 console.log("\n== Lịch làm việc & ngày lễ ==");
-await step("menu dự án → 'Lịch làm việc & ngày lễ…' mở hộp thoại, mặc định T2–T6", async () => {
-  await openMenuItem("Lịch làm việc & ngày lễ");
+await step("menu dự án → Cài đặt dự án → Lịch làm việc, mặc định T2–T6", async () => {
+  await openSettings(page, "Lịch làm việc");
   await cal().waitFor();
   const checked = await cal()
     .locator(".sla-check")
@@ -67,10 +64,10 @@ await step("menu dự án → 'Lịch làm việc & ngày lễ…' mở hộp th
 });
 
 await step("thêm ngày lễ theo khoảng: một dòng gom 13 ngày", async () => {
-  const dates = cal().locator(".cal-add-range input[type=date]");
-  await dates.nth(0).fill(HOLIDAY_FROM);
-  await dates.nth(1).fill(HOLIDAY_TO);
-  await cal().locator(".cal-add-range input[type=text]").fill("Nghỉ lễ thử");
+  const dates = cal().locator(".cal-add-range .date-field input[type=text]");
+  await fillDate(dates.nth(0), HOLIDAY_FROM);
+  await fillDate(dates.nth(1), HOLIDAY_TO);
+  await cal().locator(".cal-add-range input[placeholder^='vd']").fill("Nghỉ lễ thử");
   await cal().locator(".cal-add-range button", { hasText: "Thêm" }).click();
   const row = cal().locator(".cal-list li", { hasText: "Nghỉ lễ thử" });
   await row.waitFor();
@@ -78,19 +75,19 @@ await step("thêm ngày lễ theo khoảng: một dòng gom 13 ngày", async () 
 });
 
 await step("ngày làm bù: ngày thường bị cảnh báo, Thứ 7 thì thêm được", async () => {
-  const date = cal().locator(".cal-add-single input[type=date]");
-  await date.fill(MONDAY);
+  const date = cal().locator(".cal-add-single .date-field input[type=text]");
+  await fillDate(date, MONDAY);
   await cal().locator(".cal-error", { hasText: "vốn đã là ngày làm việc" }).waitFor();
   assert.equal(await cal().locator(".cal-add-single button", { hasText: "Thêm" }).isDisabled(), true);
-  await date.fill(SATURDAY);
-  await cal().locator(".cal-add-single input[type=text]").fill("Làm bù thử");
+  await fillDate(date, SATURDAY);
+  await cal().locator(".cal-add-single input[placeholder^='vd']").fill("Làm bù thử");
   await cal().locator(".cal-add-single button", { hasText: "Thêm" }).click();
   await cal().locator(".cal-list li", { hasText: "Làm bù thử" }).waitFor();
 });
 
-await step("lưu: hộp thoại đóng, máy chủ giữ 13 ngày lễ và 1 ngày làm bù", async () => {
+await step("lưu: nút Lưu tắt lại, máy chủ giữ 13 ngày lễ và 1 ngày làm bù", async () => {
   await cal().locator("button.primary", { hasText: "Lưu lịch" }).click();
-  await cal().waitFor({ state: "detached" });
+  await page.waitForFunction(() => document.querySelector(".cal-modal button.primary")?.disabled);
   const { calendar } = await (await api("GET", "/api/calendar")).json();
   assert.equal(calendar.holidays.length, 13);
   assert.deepEqual(calendar.makeUpDays, [{ date: SATURDAY, name: "Làm bù thử" }]);
@@ -100,7 +97,7 @@ console.log("\n== Các màn hình đọc lịch ==");
 await step("Nguồn lực: ngày lễ ghi 'Ngày lễ: …', Thứ 7 làm bù có công suất 8h", async () => {
   await page.locator(".toolbar-tabs button", { hasText: "Nhân lực" }).click();
   await page.waitForSelector(".resource-view .rv-row-person");
-  await page.locator(".rv-granularity").selectOption("day");
+  await setGranularity(page, "day");
   const titles = await page.locator(".rv-row-person").first().locator(".rv-cell").evaluateAll((els) => els.map((e) => e.title));
   const today = titles.find((t) => t.startsWith(dmy(localDay(0))));
   assert.ok(today, "không thấy ô của hôm nay");
@@ -111,7 +108,7 @@ await step("Nguồn lực: ngày lễ ghi 'Ngày lễ: …', Thứ 7 làm bù c�
 });
 
 await step("Chấm công: cả tuần là ngày lễ — không ô 'chưa ghi', giờ kỳ vọng 0h", async () => {
-  await page.locator("[data-view=timesheet]").click();
+  await openTimesheet(page);
   await page.waitForSelector(".ts-grid tbody tr");
   const heads = await page.locator(".ts-grid thead th.is-holiday").count();
   assert.equal(heads, 7, `${heads} cột ngày lễ`);
@@ -120,24 +117,23 @@ await step("Chấm công: cả tuần là ngày lễ — không ô 'chưa ghi', 
 });
 
 console.log("\n== SLA dùng chung lịch ==");
-await step("hộp SLA chỉ tóm tắt lịch và mở được hộp Lịch làm việc", async () => {
-  await openMenuItem("Cài đặt SLA");
+await step("mục SLA chỉ tóm tắt lịch và chuyển được sang mục Lịch làm việc", async () => {
+  await openSettings(page, "SLA");
   await page.waitForSelector(".sla-modal");
   const summary = page.locator(".sla-calendar-summary");
   assert.match(await summary.textContent(), /T2–T6 · 13 ngày lễ · 1 ngày làm bù/);
   await summary.locator("button", { hasText: "Mở Lịch làm việc" }).click();
   await cal().waitFor();
-  assert.equal(await page.locator(".sla-modal:not(.cal-modal)").count(), 0);
-  await page.keyboard.press("Escape");
-  await cal().waitFor({ state: "detached" });
+  assert.equal(await page.locator(".sla-modal:not(.cal-modal)").count(), 0, "mục SLA không còn hiện");
+  assert.equal(await page.locator(".settings-nav-item.active").textContent(), "Lịch làm việc");
 });
 
 await step("lưu SLA không xoá ngày lễ đã lưu", async () => {
-  await openMenuItem("Cài đặt SLA");
+  await openSettings(page, "SLA");
   await page.waitForSelector(".sla-modal");
   await page.locator(".sla-switch input").check();
   await page.locator(".sla-modal button.primary", { hasText: "Lưu cài đặt" }).click();
-  await page.waitForSelector(".sla-modal", { state: "detached" });
+  await page.waitForFunction(() => document.querySelector(".sla-modal button.primary")?.disabled);
   const { calendar } = await (await api("GET", "/api/calendar")).json();
   assert.equal(calendar.holidays.length, 13);
   assert.equal(calendar.makeUpDays.length, 1);
@@ -147,12 +143,11 @@ await step("người không phải quản trị dự án: chỉ xem, không có 
   await api("POST", "/api/__sla-canedit", { canEdit: false });
   await page.reload();
   await page.waitForSelector(".toolbar-tabs");
-  await openMenuItem("Lịch làm việc & ngày lễ");
+  await openSettings(page, "Lịch làm việc");
   await cal().waitFor();
-  await cal().locator(".sla-note", { hasText: "chỉ xem được" }).waitFor();
+  await cal().locator(".sla-note", { hasText: "Chỉ quản trị dự án được sửa" }).waitFor();
   assert.notEqual(await cal().locator("fieldset").getAttribute("disabled"), null);
   assert.equal(await cal().locator("button.primary").count(), 0);
-  await page.keyboard.press("Escape");
 });
 
 await api("POST", "/api/__restore");

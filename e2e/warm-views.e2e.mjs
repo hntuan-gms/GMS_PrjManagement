@@ -3,6 +3,7 @@
 // an edit) makes the tab ask afresh.
 import assert from "node:assert/strict";
 import { chromium } from "playwright-core";
+import { openTimesheet } from "./toolbar.mjs";
 
 const browser = await chromium.launch({ channel: "chrome", headless: true });
 const page = await browser.newPage({ viewport: { width: 1500, height: 900 } });
@@ -44,7 +45,7 @@ await step("Bảng hiện thẻ ngay, không có request mới", async () => {
   await page.waitForSelector(".bd-card", { timeout: 1000 });
 });
 await step("Chấm công hiện bảng ngay, không có request mới", async () => {
-  await page.locator("[data-view=timesheet]").click();
+  await openTimesheet(page, { wait: false });
   await page.waitForSelector(".ts-wrap .ts-grid tbody tr", { timeout: 1000 });
 });
 await step("Báo cáo hiện số liệu ngay, không có request mới", async () => {

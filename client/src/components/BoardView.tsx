@@ -1,21 +1,17 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ApiError, api } from "../api";
+import { matchesFilter, nextSprintName, rankTarget, reorder, tzOffsetMinutes, unitLabel, type BoardFilter, type Swimlane } from "../boardModel";
 import {
-  EMPTY_FILTER,
-  initials,
-  isFiltering,
-  matchesFilter,
-  nextSprintName,
-  priorityRank,
-  rankTarget,
-  reorder,
-  summarize,
-  tzOffsetMinutes,
-  unitLabel,
-  type BoardFilter,
-  type Swimlane,
-} from "../boardModel";
-import { todayIso } from "../resourceAllocation";
+  boardFilterFrom,
+  EMPTY_BOARD_ONLY,
+  isBoardFiltering,
+  isBoardOnlyActive,
+  splitBoardFilter,
+  taskOnlyKeys,
+  type BoardOnly,
+} from "../boardFilter";
+import { EMPTY_TASK_FILTER, type TaskFilter } from "../taskFilter";
+import { buildResourceLoad, todayIso } from "../resourceAllocation";
 import {
   CARD_FIELDS,
   COLOR_SCHEMES,
@@ -33,6 +29,8 @@ import type {
   BoardSnapshot,
   EstimateSuggestion,
   JiraUser,
+  ResourceAbsence,
+  ResourceProfile,
   Session,
   Sprint,
   SprintInsight,
@@ -42,8 +40,10 @@ import type {
   TransitionField,
 } from "../types";
 import BacklogView, { type SectionId } from "./BacklogView";
-import { FacetAccordion, type Option } from "./FilterBar";
+import FilterBar, { type FilterFacet } from "./FilterBar";
 import { Icon } from "./Icons";
+import { AssignContext, type AssignContextValue } from "./assignContext";
+import { useWorkCalendar } from "./workCalendarContext";
 import Popover from "./Popover";
 import type { QuickOptions } from "./QuickCreateOptions";
 import KanbanBoard from "./KanbanBoard";
@@ -66,8 +66,21 @@ interface Props {
    * that starts empty on every visit to the tab, so one sent while the board was
    * not showing is handed over here and taken once.
    */
-  incomingFilter: BoardFilter | null;
-  onIncomingFilterTaken: () => void;
+  incomingFilter?: BoardFilter | null;
+  onIncomingFilterTaken?: () => void;
+  /**
+   * The filter shared with Kế hoạch and Nhân lực (plan E1). Both together switch the board onto it;
+   * without them this tab keeps a filter of its own, as before. "Bị chặn" and the board's Jira
+   * quick filters stay local either way: only this tab has them.
+   */
+  taskFilter?: TaskFilter;
+  onFilterChange?: (f: TaskFilter) => void;
+  /** What the shared filter's JQL and Trễ SLA switch resolve to, which ProjectWorkspace works out. */
+  filterContext?: { jqlKeys?: Set<string> | null; slaBreached?: Set<string> | null };
+  /** After the search box, in the filter bar: the saved-filter menu, as on the other lenses. */
+  filterLeading?: ReactNode;
+  /** Capacity and leave, so the person picker's hints use real hours; without them everyone has the default day. */
+  resourceData?: { profiles: ResourceProfile[]; absences: ResourceAbsence[] };
   /**
    * The workspace is still showing its saved copy of the tasks while the fresh one loads.
    * Reading the board now would be answered twice — once for each copy — so it waits.
@@ -96,7 +109,21 @@ type Modal =
 const storageKey = storedBoardKey;
 const readStoredBoard = readStoredBoardId;
 
-export default function BoardView({ session, tasks, users, onOpenEdit, onTasksChanged, incomingFilter, onIncomingFilterTaken, refreshing }: Props) {
+export default function BoardView({
+  session,
+  tasks,
+  users,
+  onOpenEdit,
+  onTasksChanged,
+  incomingFilter = null,
+  onIncomingFilterTaken,
+  refreshing,
+  taskFilter,
+  onFilterChange,
+  filterContext,
+  filterLeading,
+  resourceData,
+}: Props) {
   const projectKey = session.project?.key ?? "";
   const cacheScope = viewCacheScope(session.site.cloudId, session.user.accountId, projectKey);
   const [boardId, setBoardId] = useState<number | null>(() => readStoredBoard(projectKey));
@@ -109,13 +136,26 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
   // The tab the Scrum segmented control last chose. Not what is shown: a Kanban board has
   // no such control, so `view` below is only ever "board" there (see the comment on it).
   const [scrumView, setView] = useState<"board" | "backlog">("board");
-  const [openFacet, setOpenFacet] = useState<string | null>(null);
-  const [filter, setFilter] = useState<BoardFilter>(incomingFilter ?? EMPTY_FILTER);
+  // The workspace's shared TaskFilter when it hands one over, else a copy of this tab's own.
+  const shared = taskFilter !== undefined && onFilterChange !== undefined;
+  const [localFilter, setLocalFilter] = useState<TaskFilter>(() => (incomingFilter ? splitBoardFilter(incomingFilter).task : EMPTY_TASK_FILTER));
+  const tf = shared ? taskFilter : localFilter;
+  const setTf = (f: TaskFilter) => {
+    if (shared) onFilterChange(f);
+    else setLocalFilter(f);
+  };
+  const [boardOnly, setBoardOnly] = useState<BoardOnly>(() => (incomingFilter ? splitBoardFilter(incomingFilter).boardOnly : EMPTY_BOARD_ONLY));
+  // A filter the assistant set while another tab was showing. On the shared filter the assistant has
+  // already written the common part; only what belongs to this tab is taken from it.
   useEffect(() => {
     if (!incomingFilter) return;
-    setFilter(incomingFilter);
-    onIncomingFilterTaken();
-  }, [incomingFilter, onIncomingFilterTaken]);
+    const split = splitBoardFilter(incomingFilter);
+    setBoardOnly(split.boardOnly);
+    if (!shared) setLocalFilter(split.task);
+    onIncomingFilterTaken?.();
+  }, [incomingFilter, onIncomingFilterTaken, shared]);
+  const filter = useMemo(() => boardFilterFrom(tf, boardOnly), [tf, boardOnly]);
+  const filtering = isBoardFiltering(tf, boardOnly);
   const [swimlane, setSwimlane] = useState<Swimlane>("none");
   const [activeSprintId, setActiveSprintId] = useState<number | null>(null);
   const [modal, setModal] = useState<Modal | null>(null);
@@ -287,38 +327,20 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
     if (scrum) return activeSprint ? snapshot.issues.filter((i) => i.sprintId === activeSprint.id) : [];
     return snapshot.issues;
   }, [snapshot, scrum, activeSprint]);
-  const shown = useMemo(() => scoped.filter((i) => matchesFilter(i, filter, today, quickKeys)), [scoped, filter, today, quickKeys]);
-  const plannable = useMemo(
-    () => (snapshot ? snapshot.issues.filter((i) => !i.subtask && matchesFilter(i, filter, today, quickKeys)) : []),
-    [snapshot, filter, today, quickKeys]
+  // Components, sprint, JQL and Trễ SLA are not on a card: they are answered from the workspace's tasks.
+  const extraKeys = useMemo(
+    () => taskOnlyKeys(tasks, tf, { today, jqlKeys: filterContext?.jqlKeys, slaBreached: filterContext?.slaBreached }),
+    [tasks, tf, today, filterContext]
   );
+  const passes = useCallback(
+    (i: BoardIssue) => matchesFilter(i, filter, today, quickKeys) && (!extraKeys || extraKeys.has(i.key)),
+    [filter, today, quickKeys, extraKeys]
+  );
+  const shown = useMemo(() => scoped.filter(passes), [scoped, passes]);
+  const plannable = useMemo(() => (snapshot ? snapshot.issues.filter((i) => !i.subtask && passes(i)) : []), [snapshot, passes]);
   // Sub-tasks come from the whole board, so a card lists its own even when a filter hides them.
   const subtasks = useMemo(() => subtasksByParent(snapshot?.issues ?? []), [snapshot]);
   const boardCards = useMemo(() => withoutMergedSubtasks(shown, cardOptions.mergeSubtasks), [shown, cardOptions.mergeSubtasks]);
-
-  // Offered on every filter dropdown, built from the whole board so an option
-  // doesn't vanish the moment it is ticked.
-  const filterOptions = useMemo(() => {
-    const issues = snapshot?.issues ?? [];
-    const plain = (vals: Iterable<string>): Option[] =>
-      [...new Set(vals)].sort((a, b) => a.localeCompare(b, "vi")).map((v) => ({ value: v, label: v }));
-    const epics = new Map<string, string>();
-    for (const i of issues) if (i.epicKey) epics.set(i.epicKey, i.epicSummary ?? i.epicKey);
-    const priorities = [...new Set(issues.map((i) => i.priority ?? "none"))].sort(
-      (a, b) => priorityRank(a === "none" ? null : a) - priorityRank(b === "none" ? null : b) || a.localeCompare(b)
-    );
-    return {
-      types: plain(issues.map((i) => i.issueType)),
-      statuses: plain(issues.map((i) => i.statusName)),
-      epics: [
-        ...[...epics].sort((a, b) => a[1].localeCompare(b[1], "vi")).map(([value, label]) => ({ value, label: `${value} · ${label}` })),
-        { value: "none", label: "Không thuộc Epic" },
-      ],
-      labels: plain(issues.flatMap((i) => i.labels)),
-      versions: plain([...(snapshot?.versions.map((v) => v.name) ?? []), ...issues.flatMap((i) => i.fixVersions)]),
-      priorities: priorities.map((p) => ({ value: p, label: p === "none" ? "Không đặt" : p })),
-    };
-  }, [snapshot]);
 
   // Types the quick-create box offers: what this project's board already uses,
   // minus sub-tasks (they need a parent), so a site that renamed "Task" still works.
@@ -327,13 +349,6 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
     return seen.size > 0 ? [...seen] : ["Task"];
   }, [snapshot]);
   const members = useMemo(() => users.map((u) => ({ accountId: u.accountId, displayName: u.displayName })), [users]);
-
-  const people = useMemo(() => {
-    const src = view === "backlog" ? plannable : scoped;
-    const map = new Map<string, string>();
-    for (const i of src) map.set(i.assigneeAccountId ?? "none", i.assigneeName ?? "Chưa gán");
-    return [...map.entries()].sort((a, b) => (a[0] === "none" ? 1 : b[0] === "none" ? -1 : a[1].localeCompare(b[1], "vi")));
-  }, [scoped, plannable, view]);
 
   const defaultWeeks = useMemo(() => {
     const v = snapshot?.velocity.at(-1);
@@ -463,6 +478,43 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
   }
 
   const getTasks = useCallback((keys: string[]) => keys.map((k) => taskByKey.get(k)).filter((t): t is Task => !!t), [taskByKey]);
+
+  /** Dates for tasks dropped into a sprint without any (the toast's "Xếp"): one write each, through the same update path. */
+  function scheduleIssues(items: { key: string; startDate: string; durationDays: number }[]) {
+    return mutate(
+      null,
+      async () => {
+        for (const it of items) await api.updateTask(it.key, { startDate: it.startDate, durationDays: it.durationDays });
+      },
+      { failure: "Không xếp được lịch", touchesTasks: true }
+    );
+  }
+
+  // What the avatar's person picker measures a hint from (assignContext.ts).
+  const calendar = useWorkCalendar();
+  const meAccountId = session.user.accountId;
+  const assignCtx = useMemo<AssignContextValue>(
+    () => ({
+      people: users,
+      taskFor: (key) => taskByKey.get(key),
+      loadFor: (task) =>
+        task.startDate
+          ? buildResourceLoad({
+              tasks,
+              users,
+              profiles: resourceData?.profiles ?? [],
+              absences: resourceData?.absences ?? [],
+              from: task.startDate,
+              to: task.dueDate && task.dueDate >= task.startDate ? task.dueDate : task.startDate,
+              includeIdle: true,
+              calendar,
+            })
+          : null,
+      calendar,
+      meAccountId,
+    }),
+    [users, taskByKey, tasks, resourceData, calendar, meAccountId]
+  );
 
   function flagIssues(keys: string[], flagged: boolean) {
     const set = new Set(keys);
@@ -651,28 +703,32 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
   // A project with only Kanban boards has no sprints to offer (see the ⓘ beside the kind badge).
   const kanbanOnly = agile && !snapshot.boards.some((b) => b.type === "scrum");
 
-  // The value pickers behind the "Bộ lọc" panel. The board's columns already are statuses, so
-  // that facet is left out there — and offered again on the Backlog, which has no columns, or
-  // while a status filter is on (the assistant can set one) so it can still be seen and cleared.
-  const facets: { key: "types" | "statuses" | "epics" | "labels" | "priorities" | "versions"; label: string; options: Option[]; selected: Set<string> }[] = [
-    { key: "types", label: "Loại", options: filterOptions.types, selected: filter.types },
-    ...(view === "backlog" || filter.statuses.size > 0
-      ? [{ key: "statuses" as const, label: "Trạng thái", options: filterOptions.statuses, selected: filter.statuses }]
-      : []),
-    { key: "epics", label: "Epic", options: filterOptions.epics, selected: filter.epics },
-    { key: "labels", label: "Nhãn", options: filterOptions.labels, selected: filter.labels },
-    { key: "priorities", label: "Ưu tiên", options: filterOptions.priorities, selected: filter.priorities },
-    ...(filterOptions.versions.length > 0
-      ? [{ key: "versions" as const, label: "Phiên bản", options: filterOptions.versions, selected: filter.versions }]
-      : []),
+  // Which pickers the "Bộ lọc" panel offers. The board's columns already are statuses, so that facet
+  // is left out there, and offered again on the Backlog (which has no columns) or while a status
+  // filter is on (from the Gantt or the assistant) so it can still be seen and cleared.
+  const barFacets: FilterFacet[] = [
+    "people",
+    ...(view === "backlog" || tf.statuses.size > 0 ? (["statuses"] as FilterFacet[]) : []),
+    "types",
+    "epics",
+    "labels",
+    "priorities",
+    "components",
+    "versions",
+    "sprints",
+    "overdue",
   ];
-  const facetsActive = facets.filter((f) => f.selected.size > 0).length;
-  const chips = facets
-    .filter((f) => f.selected.size > 0)
-    .map((f) => {
-      const labels = [...f.selected].map((v) => f.options.find((o) => o.value === v)?.label ?? v);
-      return { key: f.key, name: f.label, text: `${f.label}: ${summarize(labels)}`, full: `${f.label}: ${labels.join(", ")}` };
-    });
+  const quickOn = snapshot.quickFilters.filter((q) => boardOnly.quick.has(String(q.id)));
+  const toggleQuick = (id: string) => {
+    const next = new Set(boardOnly.quick);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setBoardOnly({ ...boardOnly, quick: next });
+  };
+  const clearFilters = () => {
+    setTf(EMPTY_TASK_FILTER);
+    setBoardOnly(EMPTY_BOARD_ONLY);
+  };
 
   const lastThroughput = snapshot.throughput.at(-1)?.count ?? 0;
   const avgThroughput = snapshot.throughput.length
@@ -680,6 +736,7 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
     : 0;
 
   return (
+    <AssignContext.Provider value={assignCtx}>
     <div className="bd-view">
       <div className="bd-top">
         <div className="bd-top-left">
@@ -888,129 +945,70 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
       )}
 
       <div className="bd-filters">
-        <input
-          ref={searchRef}
-          className="bd-search"
-          value={filter.text}
-          placeholder="Tìm việc…  ( / )"
-          onChange={(e) => setFilter({ ...filter, text: e.target.value })}
-        />
-        <div className="bd-people">
-          {people.map(([id, name]) => {
-            const on = filter.people.has(id);
-            return (
-              <button
-                key={id}
-                className={`bd-avatar bd-person ${id === "none" ? "is-none" : ""} ${on ? "is-on" : ""}`}
-                title={name}
-                aria-pressed={on}
-                onClick={() => {
-                  const next = new Set(filter.people);
-                  if (on) next.delete(id);
-                  else next.add(id);
-                  setFilter({ ...filter, people: next });
-                }}
-              >
-                {id === "none" ? "?" : initials(name)}
-              </button>
-            );
-          })}
-        </div>
-        <button
-          className={`bd-chipbtn ${filter.people.has(session.user.accountId) && filter.people.size === 1 ? "is-on" : ""}`}
-          onClick={() =>
-            setFilter({
-              ...filter,
-              people: filter.people.has(session.user.accountId) && filter.people.size === 1 ? new Set() : new Set([session.user.accountId]),
-            })
-          }
-        >
-          Của tôi
-        </button>
-        <button className={`bd-chipbtn ${filter.onlyBlocked ? "is-on" : ""}`} onClick={() => setFilter({ ...filter, onlyBlocked: !filter.onlyBlocked })}>
-          <Icon name="lock" size={13} />
-          Bị chặn
-        </button>
-        <button className={`bd-chipbtn ${filter.onlyOverdue ? "is-on" : ""}`} onClick={() => setFilter({ ...filter, onlyOverdue: !filter.onlyOverdue })}>
-          Quá hạn
-        </button>
-        {/* The board's own quick filters (Board settings → Quick filters): Jira runs their JQL. */}
-        {snapshot.quickFilters.map((q) => {
-          const on = filter.quick.has(String(q.id));
-          return (
+        <FilterBar
+          tasks={tasks}
+          filter={tf}
+          onChange={setTf}
+          myAccountId={session.user.accountId}
+          facets={barFacets}
+          matched={shown.length}
+          total={scoped.length}
+          countLabel="thẻ"
+          showSearch
+          searchInputClassName="bd-search"
+          searchInputRef={searchRef}
+          leading={filterLeading}
+          extras={
             <button
-              key={q.id}
-              className={`bd-chipbtn bd-quick-filter ${on ? "is-on" : ""}`}
-              aria-pressed={on}
-              title={q.description ?? `Bộ lọc nhanh của board: ${q.name}`}
-              onClick={() => {
-                const next = new Set(filter.quick);
-                if (on) next.delete(String(q.id));
-                else next.add(String(q.id));
-                setFilter({ ...filter, quick: next });
-              }}
+              type="button"
+              className={`tf-btn${boardOnly.onlyBlocked ? " is-on" : ""}`}
+              aria-pressed={boardOnly.onlyBlocked}
+              onClick={() => setBoardOnly({ ...boardOnly, onlyBlocked: !boardOnly.onlyBlocked })}
+              title="Chờ việc đi trước hoặc đã gắn cờ"
             >
-              {q.name}
+              <Icon name="lock" size={14} />
+              Bị chặn
             </button>
-          );
-        })}
-        <Popover
-          className="tf-btn tf-add"
-          caret={false}
-          active={facetsActive > 0}
-          menuLabel="Bộ lọc"
-          menuClassName="tf-menu tf-filter-menu"
-          title="Lọc theo loại, Epic, nhãn, ưu tiên…"
-          label={
-            <>
-              <Icon name="plus" size={14} />
-              Bộ lọc
-              {facetsActive > 0 && <span className="tf-badge">{facetsActive}</span>}
-            </>
           }
-        >
-          <FacetAccordion
-            facets={facets}
-            openKey={openFacet}
-            onOpenChange={setOpenFacet}
-            onChange={(key, next) => setFilter({ ...filter, [key]: next })}
-          />
-        </Popover>
-        <span className="bd-spacer" />
-        {view === "board" && (
-          <label className="bd-lanepick">
-            Nhóm theo
-            <select value={swimlane} onChange={(e) => setSwimlane(e.target.value as Swimlane)}>
-              <option value="none">Không</option>
-              <option value="assignee">Người phụ trách</option>
-              <option value="epic">Epic</option>
-            </select>
-          </label>
-        )}
-        {/* Only present while something is filtering, so an idle board spends no row on it. */}
-        {isFiltering(filter) && (
-          <div className="tf-active">
-            {chips.map((c) => (
-              <span key={c.key} className="tf-chip" title={c.full}>
-                <span className="tf-chip-label">{c.text}</span>
-                <button
-                  type="button"
-                  className="tf-chip-x"
-                  aria-label={`Bỏ lọc ${c.name}`}
-                  onClick={() => setFilter({ ...filter, [c.key]: new Set<string>() })}
-                >
-                  <Icon name="x" size={12} />
-                </button>
-              </span>
-            ))}
-            <span className="tf-count" role="status" aria-atomic="true">
-              {shown.length}/{scoped.length} thẻ
+          // The board's own quick filters (Board settings, Quick filters; Jira runs their JQL) live in
+          // the panel, so they no longer stand beside "Của tôi" looking like the same thing.
+          panelExtras={
+            snapshot.quickFilters.length > 0 && (
+              <div className="bd-quick-section">
+                <div className="menu-heading">Của board</div>
+                {snapshot.quickFilters.map((q) => (
+                  <label key={q.id} className="col-chooser-item bd-quick-filter" title={q.description ?? `Bộ lọc nhanh của board: ${q.name}`}>
+                    <input type="checkbox" checked={boardOnly.quick.has(String(q.id))} onChange={() => toggleQuick(String(q.id))} />
+                    <span className="tf-item-label">{q.name}</span>
+                  </label>
+                ))}
+              </div>
+            )
+          }
+          panelExtrasActive={boardOnly.quick.size}
+          extraActive={isBoardOnlyActive(boardOnly)}
+          activeExtras={quickOn.map((q) => (
+            <span key={q.id} className="tf-chip" title={`Bộ lọc của board: ${q.name}`}>
+              <span className="tf-chip-label">Của board: {q.name}</span>
+              <button type="button" className="tf-chip-x" aria-label={`Bỏ bộ lọc ${q.name}`} onClick={() => toggleQuick(String(q.id))}>
+                <Icon name="x" size={12} />
+              </button>
             </span>
-            <button type="button" className="text-btn tf-clear" onClick={() => setFilter(EMPTY_FILTER)}>
-              Xoá lọc
-            </button>
-          </div>
-        )}
+          ))}
+          onClearExtras={() => setBoardOnly(EMPTY_BOARD_ONLY)}
+          trailing={
+            view === "board" ? (
+              <label className="bd-lanepick">
+                Nhóm theo
+                <select value={swimlane} onChange={(e) => setSwimlane(e.target.value as Swimlane)}>
+                  <option value="none">Không</option>
+                  <option value="assignee">Người phụ trách</option>
+                  <option value="epic">Epic</option>
+                </select>
+              </label>
+            ) : undefined
+          }
+        />
       </div>
 
       {view === "board" && scrum && activeSprint && (
@@ -1030,15 +1028,15 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
         />
       )}
 
-      {view === "board" && isFiltering(filter) && scoped.length > 0 && shown.length === 0 && (
+      {view === "board" && filtering && scoped.length > 0 && shown.length === 0 && (
         <div className="bd-empty">
           <b>Không có thẻ nào khớp bộ lọc.</b>
-          <button className="primary" onClick={() => setFilter(EMPTY_FILTER)}>Xoá lọc</button>
+          <button className="primary" onClick={clearFilters}>Xoá lọc</button>
         </div>
       )}
 
       {view === "board" &&
-        !(isFiltering(filter) && scoped.length > 0 && shown.length === 0) &&
+        !(filtering && scoped.length > 0 && shown.length === 0) &&
         (scrum && !activeSprint ? (
           <div className="bd-empty">
             <b>Chưa có sprint nào đang chạy.</b>
@@ -1079,8 +1077,11 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
           onEditSprint={(sprint) => setModal({ kind: "edit", sprint })}
           onPlanSprint={openPlan}
           onLoadCapacity={(sprint) => api.getSprintCapacity(snapshot.board!.id, sprint.id, clock())}
-          filter={filter}
-          onFilterChange={setFilter}
+          epics={tf.epics}
+          versions={tf.versions}
+          onFacetChange={(field, next) => setTf({ ...tf, [field]: next })}
+          today={today}
+          onSchedule={scheduleIssues}
           getTasks={getTasks}
           onBulkAssign={(keys, accountId) => void bulkAssign(keys, accountId)}
           onBulkStatus={(statusName, keys, values) => void bulkStatus(statusName, keys, values)}
@@ -1187,5 +1188,6 @@ export default function BoardView({ session, tasks, users, onOpenEdit, onTasksCh
         />
       )}
     </div>
+    </AssignContext.Provider>
   );
 }

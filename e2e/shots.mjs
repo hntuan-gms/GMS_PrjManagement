@@ -8,6 +8,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
+import { openTimesheet } from "./toolbar.mjs";
 
 const APP = (process.env.E2E_APP ?? "http://localhost:5173/").replace(/\?.*$/, "");
 const OUT = path.resolve(process.argv[2] ?? path.join(path.dirname(fileURLToPath(import.meta.url)), "shots", "ui"));
@@ -46,8 +47,7 @@ for (const scheme of ["light", "dark"]) {
       await page.waitForSelector(sel).catch(() => {});
       await shot(name);
     }
-    await page.locator("[data-view=timesheet]").click();
-    await page.waitForSelector(".ts-grid");
+    await openTimesheet(page);
     await shot("08-gio-lam");
     await ctx.close();
   }

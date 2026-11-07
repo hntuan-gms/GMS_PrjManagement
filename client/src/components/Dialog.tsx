@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useLayer } from "../useLayer";
 import { DialogContext, type Dialogs, type Pending } from "./dialogContext";
 
 /**
@@ -52,6 +53,8 @@ function DialogView({ pending, onDone }: { pending: Pending; onDone: () => void 
     },
     [pending, text, onDone]
   );
+
+  useLayer("dialog", true, { onEscape: () => answer(false) });
 
   // Focus lands on the answer a stray Enter should give: Cancel for something destructive.
   useEffect(() => {

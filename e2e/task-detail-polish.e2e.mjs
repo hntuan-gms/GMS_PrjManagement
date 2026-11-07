@@ -1,6 +1,6 @@
-// The task detail window's second pass: a title that wraps, counts instead of empty boxes, attachments
-// you can open / download / delete, a link form that stays folded, quick time-logging behind a button,
-// and the classification facts one per line. Client against the stand-in API.
+// The task detail panel: a title that wraps, counts instead of empty boxes (an empty section is one "+"
+// button), attachments you can open / download / delete, a link form that stays folded, quick time-logging
+// behind a button, and the facts one per line in a single column. Client against the stand-in API.
 import assert from "node:assert/strict";
 import { chromium } from "playwright-core";
 
@@ -49,11 +49,13 @@ await step("tiêu đề dài xuống dòng, không bị cắt, và Enter không 
 
 console.log("\n== Các thẻ bên trái ==");
 await openTask();
-await step("số đếm nằm ở tiêu đề thẻ; không còn nhãn lặp và ô 'Không có'", async () => {
+await step("số đếm nằm ở tiêu đề thẻ; thẻ trống không có mặt (chỉ có nút +); không còn nhãn lặp", async () => {
   assert.equal(await hint("Đính kèm"), "2");
-  // A zero count is not shown: the empty section already says so.
-  assert.equal(await section("Phụ thuộc lịch").locator(".td-section-hint").count(), 0);
+  await section("Liên kết Jira").locator(".td-section-hint").waitFor();
   assert.equal(await hint("Liên kết Jira"), "1");
+  // A section with nothing in it is not drawn: one "+" button stands for it.
+  assert.equal(await section("Phụ thuộc lịch").count(), 0);
+  assert.equal(await page.locator(".td-add-row button", { hasText: "Phụ thuộc" }).count(), 1);
   const text = await page.locator(".td-main").innerText();
   for (const gone of ["Phụ thuộc (predecessors)", "Liên kết Jira (issue links)", "Không có"]) assert.ok(!text.includes(gone), `còn "${gone}"`);
 });
@@ -64,6 +66,20 @@ await step("form liên kết gập sẵn; bấm '+ Thêm liên kết' mới mở
   await page.keyboard.press("Escape");
   assert.equal(await page.locator(".att-link-add").count(), 0);
   assert.equal(await page.locator(".modal-detail").count(), 1, "Esc đã đóng cả cửa sổ chi tiết");
+});
+
+await openTask("DEMO-1");
+await step("việc không có gì: ba nút '+' thay cho ba form; bấm mới mở đúng phần đó", async () => {
+  assert.equal(await page.locator(".td-add-row button").count(), 3);
+  assert.equal(await page.locator(".att-drop, .pred-add, .att-add-link").count(), 0, "form trống vẫn chiếm chỗ");
+  await page.locator(".td-add-row button", { hasText: "Phụ thuộc" }).click();
+  await page.locator(".pred-add").waitFor();
+  assert.equal(await page.locator(".td-add-row button").count(), 2);
+  await page.locator(".td-add-row button", { hasText: "Đính kèm" }).click();
+  await page.locator(".att-drop").waitFor();
+  await page.locator(".td-add-row button", { hasText: "Liên kết" }).click();
+  await section("Liên kết Jira").locator(".pred-add").waitFor();
+  assert.equal(await page.locator(".td-add-row").count(), 0, "cả ba đã mở thì không còn hàng nút");
 });
 
 console.log("\n== Tệp đính kèm ==");
@@ -139,27 +155,57 @@ await step("ghi giờ: form gập sẵn, mở bằng '+ Ghi giờ' ngay cạnh '
   await page.locator(".td-logtoggle").click();
   await page.locator("#td-logform .log-hours").waitFor();
 });
-await step("trạng thái không lặp nhãn; ngày kết thúc là giá trị tính ra, không phải ô nhập; ước lượng và đã ghi cùng một hàng", async () => {
-  assert.equal(await page.locator(".td-group", { hasText: "Trạng thái" }).first().locator("label:not(.sr-only)").count(), 0);
-  assert.equal(await page.locator(".td-calc").evaluate((el) => el.tagName), "OUTPUT");
-  const est = await page.locator(".td-pair.is-effort .field").first().boundingBox();
-  const spent = await page.locator(".td-pair.is-effort .field").nth(1).boundingBox();
-  assert.ok(Math.abs(est.y - spent.y) < 4 && spent.x > est.x + est.width - 2, JSON.stringify([est, spent]));
+await step("Kết thúc sửa được: đổi thì thời lượng đổi theo; ước lượng và đã ghi cùng một hàng", async () => {
+  assert.equal(await page.locator(".td-calc").count(), 0, "Kết thúc không còn là giá trị chỉ đọc");
+  const start = page.locator(".field:has(> span:text-is('Lịch')) input[aria-label='Ngày bắt đầu']");
+  const end = page.locator(".field:has(> span:text-is('Lịch')) input[aria-label='Ngày kết thúc']");
+  const dur = page.locator(".field:has(> span:text-is('Lịch')) input[aria-label='Thời lượng (ngày)']");
+  const [d, m, y] = (await start.inputValue()).split("/").map(Number);
+  const plus = (n) => {
+    const t = new Date(Date.UTC(y, m - 1, d + n));
+    return `${String(t.getUTCDate()).padStart(2, "0")}/${String(t.getUTCMonth() + 1).padStart(2, "0")}/${t.getUTCFullYear()}`;
+  };
+  await end.fill(plus(6));
+  await end.press("Tab");
+  assert.equal(await dur.inputValue(), "7", "đổi Kết thúc phải đổi thời lượng");
+  await dur.fill("3");
+  await dur.press("Tab");
+  assert.equal(await end.inputValue(), plus(2), "đổi thời lượng phải đổi Kết thúc");
+  const est = await page.locator(".td-effort .td-est").boundingBox();
+  const spent = await page.locator(".td-effort .td-spent-row").boundingBox();
+  assert.ok(Math.abs(est.y - spent.y) < 12 && spent.x > est.x + est.width - 2, JSON.stringify([est, spent]));
 });
-await step("phân loại: tên và giá trị cùng một dòng", async () => {
-  for (const label of ["Độ ưu tiên", "Nhãn", "Loại công việc", "Sprint"]) {
+await step("facts: tên và giá trị cùng một dòng", async () => {
+  for (const label of ["Ưu tiên", "Nhãn", "Loại", "Sprint"]) {
     const row = page.locator(".td-row", { has: page.locator(":scope > span", { hasText: new RegExp("^" + label + "$") }) });
     const name = await row.locator(":scope > span").first().boundingBox();
     const value = await row.locator(":scope > :not(span:first-child)").first().boundingBox();
-    assert.ok(value.x > name.x + 40 && Math.abs(value.y + value.height / 2 - (name.y + name.height / 2)) < 20, `${label}: ${JSON.stringify([name, value])}`);
+    assert.ok(value.x > name.x + 30 && Math.abs(value.y + value.height / 2 - (name.y + name.height / 2)) < 20, `${label}: ${JSON.stringify([name, value])}`);
   }
 });
-await step("hai thanh cuộn của cửa sổ là loại mảnh", async () => {
-  for (const sel of [".td-main", ".td-side"]) assert.equal(await page.locator(sel).evaluate((el) => getComputedStyle(el).scrollbarWidth), "thin", sel);
+await step("một ô cuộn: .td-body cuộn (thanh mảnh), .td-main và .td-side không có thanh riêng", async () => {
+  assert.equal(await page.locator(".td-body").evaluate((el) => getComputedStyle(el).scrollbarWidth), "thin");
+  for (const sel of [".td-main", ".td-side"]) assert.equal(await page.locator(sel).evaluate((el) => getComputedStyle(el).overflowY), "visible", sel);
+});
+await step("ở 440px nhãn vẫn đứng cùng dòng với giá trị và không tràn ngang", async () => {
+  await page.setViewportSize({ width: 440, height: 900 });
+  await page.waitForTimeout(200);
+  const over = await page.locator(".peek-panel").evaluate((el) => el.scrollWidth - el.clientWidth);
+  assert.ok(over <= 1, `panel tràn ngang ${over}px`);
+  for (const label of ["Người", "Hoàn thành", "Nhãn"]) {
+    const row = page.locator(".td-row", { has: page.locator(":scope > span", { hasText: new RegExp("^" + label + "$") }) });
+    const name = await row.locator(":scope > span").first().boundingBox();
+    const value = await row.locator(":scope > :not(span:first-child)").first().boundingBox();
+    assert.ok(value.x > name.x + 30 && Math.abs(value.y + value.height / 2 - (name.y + name.height / 2)) < 24, `${label}: ${JSON.stringify([name, value])}`);
+  }
+  await page.setViewportSize({ width: 1400, height: 900 });
 });
 
 console.log("\n== Ô nhập ==");
 await step("ô mô tả và ô bình luận cùng kiểu ô nhập của ứng dụng: tự giãn theo chữ, không có nút kéo, không gạch đỏ chính tả", async () => {
+  // An empty description is one dim line until it is clicked.
+  await page.locator(".td-ghost", { hasText: "Thêm mô tả" }).click();
+  await page.locator(".td-main .field textarea").first().waitFor();
   for (const sel of [".td-main .field textarea", ".td-box textarea"]) {
     const t = page.locator(sel).first();
     const c = await t.evaluate((el) => ({ resize: getComputedStyle(el).resize, spell: el.spellcheck }));

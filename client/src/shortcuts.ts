@@ -1,3 +1,4 @@
+import { isOpen as layersOpen } from "./layers";
 /**
  * The keyboard layer: one list of every shortcut, so the "?" sheet, the hints in the command
  * bar and the tooltips all say the same thing (plan §7). Pure data and pure matching — the
@@ -38,6 +39,7 @@ export const SHORTCUTS: Shortcut[] = [
   { id: "assign-me", keys: "I", label: "Giao cho tôi", group: "Việc đang chọn" },
   { id: "shift-back", keys: "Alt ←", label: "Dời lùi 1 ngày", group: "Việc đang chọn" },
   { id: "shift-fwd", keys: "Alt →", label: "Dời tới 1 ngày", group: "Việc đang chọn" },
+  { id: "card-column", keys: "Shift H  Shift L", label: "Bảng: chuyển thẻ sang cột trái, phải", group: "Việc đang chọn" },
   { id: "copy-key", keys: "Ctrl .", label: "Sao chép mã", group: "Việc đang chọn" },
   { id: "delete", keys: "Delete", label: "Xoá (có hỏi lại)", group: "Việc đang chọn" },
   { id: "today", keys: "T", label: "Cuộn tới hôm nay", group: "Kế hoạch" },
@@ -64,7 +66,8 @@ export function isTypingTarget(el: EventTarget | null): boolean {
 
 /** A dialog, modal or open menu is on screen: letter shortcuts stand down so they never act behind it. */
 export function overlayOpen(): boolean {
-  return !!document.querySelector(".modal-overlay, .dlg-overlay, .cmdk-overlay, .popover-menu, .shortcut-sheet, .side-sheet");
+  // layers.ts is the owner; the selector list still catches a modal that has not registered yet.
+  return layersOpen() || !!document.querySelector(".modal-overlay, .dlg-overlay, .cmdk-overlay, .popover-menu, .shortcut-sheet, .side-sheet");
 }
 
 /**

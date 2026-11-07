@@ -199,14 +199,15 @@
   line-height: 1.35;
   color: var(--ink);
 }
-.pulse-lead .pulse-key.is-bad {
+/* One colour for the whole sentence, by level (plan H7). */
+.pulse-lead.is-bad {
   color: var(--risk-text);
 }
-.pulse-lead .pulse-key.is-watch {
+.pulse-lead.is-watch {
   color: var(--warn-text);
 }
-.pulse-lead .pulse-key.is-good {
-  color: var(--ok-text);
+.pulse-lead.is-good {
+  color: var(--ink);
 }
 .pulse-detail {
   margin: 0;
@@ -471,4 +472,330 @@ button.ai-generate:hover:not(:disabled) {
 }
 .pr-card-hero .pr-hero-meta {
   justify-content: flex-start;
+}
+
+/* ==========================================================================
+   Bảng và Backlog (plan E, G): the shared filter bar on the board, the one-line sprint header,
+   column heads with a unit, avatars that open the person picker.
+   ========================================================================== */
+
+/* The board's filter row is the same FilterBar the other lenses use; its own row chrome (border,
+   padding) would double the one the board view already has. */
+.bd-filters > .tf-bar {
+  flex: 1 1 100%;
+  min-width: 0;
+  padding: 0;
+  border-bottom: 0;
+  background: transparent;
+}
+.bd-filters .tf-search .bd-search {
+  width: 0;
+  height: 100%;
+  padding: 0 8px 0 30px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.bd-filters .tf-search .bd-search:focus {
+  outline: none;
+  box-shadow: none;
+}
+.bd-filters .bd-lanepick {
+  font-size: var(--font-size-md);
+  color: var(--ink-3);
+}
+.bd-filters .bd-lanepick select {
+  height: 28px;
+}
+.bd-quick-section {
+  border-top: 1px solid var(--line);
+  margin-top: 4px;
+  padding-top: 4px;
+}
+
+/* Column head: name, then "5 việc · 12 điểm" in the muted ink; a WIP breach turns the count red. */
+.bd-colhead .bd-colname {
+  margin-right: auto;
+}
+.bd-colhead .bd-colcount {
+  padding: 0;
+  background: none;
+  font-weight: 600;
+  color: var(--ink-3);
+}
+.bd-colhead .bd-colcount.is-over {
+  color: var(--risk-text);
+}
+.bd-colhead .bd-colweight {
+  margin-left: 0;
+  white-space: nowrap;
+}
+
+/* An unassigned avatar on a card appears with the card's hover or focus, so a card without an owner
+   does not carry a grey disc; it is still there to press. */
+button.bd-assignee {
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  height: auto;
+  min-width: 0;
+  border-radius: var(--radius-full);
+}
+.bd-card .bd-assignee.is-empty {
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+.bd-card:hover .bd-assignee.is-empty,
+.bd-card:focus-within .bd-assignee.is-empty,
+.bd-card .bd-assignee.is-empty:focus-visible {
+  opacity: 1;
+}
+@media (hover: none) {
+  .bd-card .bd-assignee.is-empty {
+    opacity: 1;
+  }
+}
+
+/* Sprint header: one line. The goal is a second line only when there is one. */
+.sh-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 40px;
+  padding: 6px 12px;
+}
+.sh-name {
+  font-size: var(--font-size-lead);
+  white-space: nowrap;
+}
+.sh-when {
+  white-space: nowrap;
+}
+.sh-meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  box-shadow: none;
+}
+.sh-meter .sh-bar {
+  display: inline-flex;
+  width: 96px;
+  height: 8px;
+  border-radius: 4px;
+  overflow: visible;
+}
+.sh-meter b {
+  font-variant-numeric: tabular-nums;
+}
+.sh-burn-pop {
+  width: 280px;
+  padding: 10px 12px;
+}
+.sh-burn-head {
+  margin-bottom: 6px;
+  font-size: var(--font-size-md);
+  color: var(--ink-2);
+}
+.sh > .sh-goal {
+  margin: 0;
+  padding: 0 12px 8px;
+  color: var(--ink-2);
+}
+.bl-more-menu .menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.bl-more-menu .menu-item-danger {
+  color: var(--risk-text);
+}
+.bl-action .ai-tag {
+  margin-left: 6px;
+}
+
+/* ---- Nhân lực (Đợt F) ---- */
+/* F9: "Ngày nghỉ" in the legend is a solid block, not a hatched box that reads as a checkbox. */
+.rv-swatch.band-off {
+  background: var(--line-strong);
+  box-shadow: none;
+}
+/* F2: the red number by a name is a button that takes you to the first over-capacity day. */
+button.rv-badge-over {
+  height: auto;
+  border: 0;
+  box-shadow: none;
+  background: none;
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+}
+button.rv-badge-over:hover:not(:disabled) {
+  background: none;
+  box-shadow: none;
+  text-decoration: underline;
+}
+button.rv-badge-over.is-later {
+  color: var(--ink-3);
+  font-weight: 500;
+}
+/* F1/F4: a task row is status glyph, key, the whole name; "Chuyển…" floats over its right end on hover. */
+.rv-task-row .rv-name.rv-task-name {
+  position: sticky;
+}
+button.rv-assign-btn {
+  flex: none;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--sheet);
+  box-shadow: none;
+  color: var(--ink-2);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+}
+button.rv-assign-btn:hover:not(:disabled) {
+  background: var(--raised);
+  color: var(--ink);
+}
+.rv-task-name > button.rv-assign-btn {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  opacity: 0;
+}
+.rv-task-row:hover .rv-task-name > button.rv-assign-btn,
+.rv-task-name > button.rv-assign-btn:focus-visible,
+.rv-task-name > button.rv-assign-btn.is-shown {
+  opacity: 1;
+}
+/* An overloaded person's rows always show it, and keep the room for it. */
+.rv-task-name > button.rv-assign-btn.is-shown {
+  position: static;
+  transform: none;
+}
+@media (hover: none) {
+  .rv-task-name > button.rv-assign-btn {
+    opacity: 1;
+  }
+}
+.rv-task-row .status-glyph {
+  flex: none;
+}
+/* F3: dates of the unassigned task under the pointer, and the band they mark on the people grid. */
+.rv-un-when {
+  flex: none;
+  color: var(--ink-3);
+  font-size: var(--font-size-sm);
+  font-variant-numeric: tabular-nums;
+}
+.rv-grid {
+  position: relative;
+}
+.rv-hover-band {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 1;
+  left: calc(var(--rv-name-w) + (100% - var(--rv-name-w)) * var(--from) / var(--cols));
+  width: calc((100% - var(--rv-name-w)) * var(--len) / var(--cols));
+  background: color-mix(in srgb, var(--son) 12%, transparent);
+  box-shadow: inset 1px 0 0 var(--son), inset -1px 0 0 var(--son);
+  pointer-events: none;
+}
+
+/* ---- Nhịp dự án: không có nhận định thì không có khung AI (H9), nút In là icon (H8) ---- */
+.progress-view.is-solo {
+  grid-template-columns: minmax(0, 1fr);
+}
+.pr-header-tools {
+  align-items: center;
+}
+button.pr-analyze {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--raised);
+  color: var(--ink);
+  font-size: var(--font-size-md);
+}
+button.pr-analyze:hover:not(:disabled) {
+  background: var(--sunken);
+}
+button.pr-print {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  padding: 0;
+}
+.pr-scope-note {
+  display: block;
+  margin-top: 2px;
+}
+/* F7: the profile drawer is a side sheet like the task panel: no dimmer, under the header, closing saves. */
+.rv-drawer {
+  z-index: var(--z-peek);
+  top: var(--header-h);
+  border-left: 1px solid var(--line);
+  background: var(--raised);
+}
+.rv-drawer-foot .primary kbd {
+  background: transparent;
+  border-color: color-mix(in srgb, var(--on-strong) 30%, transparent);
+  color: color-mix(in srgb, var(--on-strong) 75%, transparent);
+  margin-left: 4px;
+}
+.rv-drawer-foot .primary:disabled {
+  opacity: 1;
+  background: var(--sunken);
+  border-color: var(--line);
+  color: var(--ink-3);
+}
+.rv-drawer-foot .primary:disabled kbd {
+  display: none;
+}
+
+/* F5: an empty day of your own row is an input; the picker for the task opens on it after Enter. */
+.ts-grid td.ts-cell {
+  position: relative;
+}
+.ts-grid .ts-inline {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  cursor: text;
+}
+.ts-grid .ts-inline:hover {
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+}
+.ts-grid .ts-inline:focus,
+.ts-grid .ts-inline.is-filled {
+  background: var(--sheet);
+  box-shadow: inset 0 0 0 2px var(--ink);
+  outline: none;
+}
+.ts-grid .ts-inline.is-bad {
+  box-shadow: inset 0 0 0 2px var(--risk);
+  color: var(--risk-text);
 }

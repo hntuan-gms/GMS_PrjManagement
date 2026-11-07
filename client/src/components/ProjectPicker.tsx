@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { fold } from "../csvImport";
 import { api } from "../api";
 import type { ProjectSummary, Session } from "../types";
+import { useLayer } from "../useLayer";
 import { readViewCache, viewCacheScope, writeViewCache } from "../viewCache";
 
 interface Props {
@@ -17,6 +18,8 @@ export default function ProjectPicker({ session, variant, onSelect, onCancel, on
   // The list this account saw last time (viewCache.ts, survives F5) is shown at once while the fresh one is
   // fetched: with hundreds of projects the listing is several Jira pages, and "Đổi dự án" waited for all of
   // them every time.
+  // Esc and the keys behind it: a modal picker is a layer like any other (layers.ts).
+  useLayer("project-picker", variant === "modal", { onEscape: onCancel });
   const cacheScope = viewCacheScope(session.site.cloudId, session.user.accountId, "");
   const [projects, setProjects] = useState<ProjectSummary[] | null>(
     () => readViewCache<ProjectSummary[]>(cacheScope, "projects", "") ?? null
@@ -25,6 +28,7 @@ export default function ProjectPicker({ session, variant, onSelect, onCancel, on
   const [filter, setFilter] = useState("");
   const [choosing, setChoosing] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+  const [active, setActive] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -52,6 +56,7 @@ export default function ProjectPicker({ session, variant, onSelect, onCancel, on
       return [];
     }
   });
+  const isRecent = (k: string) => recent.includes(k);
   const visible = useMemo(() => {
     if (!projects) return [];
     const q = fold(filter);
@@ -84,7 +89,6 @@ export default function ProjectPicker({ session, variant, onSelect, onCancel, on
       <div className="modal-header">
         <div>
           <h2 className="picker-title">Chọn dự án</h2>
-          <p className="auth-sub">Chọn dự án Jira bạn muốn lập kế hoạch.</p>
         </div>
         {onCancel && (
           <button className="modal-close" onClick={onCancel} aria-label="Đóng">
@@ -98,7 +102,22 @@ export default function ProjectPicker({ session, variant, onSelect, onCancel, on
         <input
           autoFocus
           value={filter}
-          onChange={(e) => setFilter(e.target.value)}
+          onChange={(e) => {
+            setFilter(e.target.value);
+            setActive(0);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowDown") {
+              e.preventDefault();
+              setActive((a) => Math.min(visible.length - 1, a + 1));
+            } else if (e.key === "ArrowUp") {
+              e.preventDefault();
+              setActive((a) => Math.max(0, a - 1));
+            } else if (e.key === "Enter" && visible[active] && choosing === null) {
+              e.preventDefault();
+              void choose(visible[active].key);
+            }
+          }}
           placeholder="Tìm theo tên hoặc mã dự án..."
         />
       </label>
@@ -119,11 +138,15 @@ export default function ProjectPicker({ session, variant, onSelect, onCancel, on
 
       {visible.length > 0 && (
         <div className="project-list">
-          {visible.map((p) => (
+          {visible.map((p, i) => (
+            <Fragment key={p.id}>
+              {!filter && i === 0 && isRecent(p.key) && <div className="project-group-label">Gần đây</div>}
+              {!filter && i > 0 && !isRecent(p.key) && isRecent(visible[i - 1].key) && <div className="project-group-label">Tất cả</div>}
             <div
-              key={p.id}
-              className="project-row clickable-row"
+              className={`project-row clickable-row ${i === active ? "is-active" : ""}`}
+              ref={i === active ? (el) => el?.scrollIntoView({ block: "nearest" }) : undefined}
               onClick={() => choosing === null && choose(p.key)}
+              onMouseMove={() => i !== active && setActive(i)}
             >
               {p.avatarUrl ? (
                 <img className="project-avatar" src={p.avatarUrl} alt="" />
@@ -134,6 +157,7 @@ export default function ProjectPicker({ session, variant, onSelect, onCancel, on
               <span className="project-name">{p.name}</span>
               {choosing === p.key && <span className="muted-inline">Đang mở...</span>}
             </div>
+            </Fragment>
           ))}
         </div>
       )}
@@ -144,7 +168,7 @@ export default function ProjectPicker({ session, variant, onSelect, onCancel, on
         </span>
         <div className="spacer" />
         {error && <button onClick={() => setReloadToken((t) => t + 1)}>Thử lại</button>}
-        <button onClick={onLogout}>Đăng xuất</button>
+        {variant === "page" && <button onClick={onLogout}>Đăng xuất</button>}
       </div>
     </>
   );

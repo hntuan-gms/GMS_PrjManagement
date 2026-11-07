@@ -5,7 +5,9 @@ import { useAppearance } from "../useAppearance";
 import { Icon, type IconName } from "./Icons";
 import { useDialogs } from "./dialogContext";
 import Popover from "./Popover";
+import { initialsOf as initials } from "../avatar";
 
+import { dismissForNavigation } from "../layers";
 import { LENSES, type SyncState, type WorkspaceView } from "../lenses";
 
 interface Props {
@@ -14,27 +16,15 @@ interface Props {
   onViewChange: (v: WorkspaceView) => void;
   /** People overloaded in the near-term window — badged on the Nhân lực lens. */
   overloadedPeople: number;
-  /** False hides the Nhân lực lens: only project admins get an accurate member list. */
-  showResources: boolean;
   onAddTask: () => void;
   onSync: () => void;
   sync: SyncState;
   onSwitchProject: () => void;
-  onOpenSla: () => void;
-  onOpenCalendar: () => void;
+  onOpenSettings: () => void;
   onOpenCommand: () => void;
   onOpenShortcuts: () => void;
   onOpenAssistant?: () => void;
   onLogout: () => void;
-}
-
-function initials(name: string): string {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(-2)
-    .map((part) => part[0]?.toUpperCase() ?? "")
-    .join("");
 }
 
 function RailButton({
@@ -62,9 +52,16 @@ function RailButton({
       aria-current={active ? "page" : undefined}
       data-view={view}
       data-tip={keys ? `${label}  ${keys}` : label}
-      onClick={onClick}
+      onClick={() => {
+        // A side sheet that is open closes (saving what it saves) before the button does its own job.
+        dismissForNavigation();
+        onClick();
+      }}
     >
       <Icon name={icon} size={18} />
+      <span className="rail-label" aria-hidden="true">
+        {label}
+      </span>
       {badge}
     </button>
   );
@@ -110,13 +107,11 @@ export default function Toolbar({
   view,
   onViewChange,
   overloadedPeople,
-  showResources,
   onAddTask,
   onSync,
   sync,
   onSwitchProject,
-  onOpenSla,
-  onOpenCalendar,
+  onOpenSettings,
   onOpenCommand,
   onOpenShortcuts,
   onOpenAssistant,
@@ -139,12 +134,15 @@ export default function Toolbar({
       </span>
     );
 
-  const lenses = LENSES.filter((l) => l.id !== "resource" || showResources);
+  const lenses = LENSES;
 
   return (
     <>
       <nav className="app-rail" aria-label="Điều hướng">
-        <button type="button" className="rail-mark" aria-label="GMS · về Hôm nay" data-tip="Về Hôm nay  G H" onClick={() => onViewChange("today")}>
+        <button type="button" className="rail-mark" aria-label="GMS · về Hôm nay" data-tip="Về Hôm nay  G H" onClick={() => {
+            dismissForNavigation();
+            onViewChange("today");
+          }}>
           <span aria-hidden="true">G</span>
         </button>
         <RailButton icon="plus" label="Tạo việc" keys="C" onClick={onAddTask} />
@@ -158,11 +156,8 @@ export default function Toolbar({
           active={lensView !== null}
           onClick={() => onViewChange(lensView ?? "gantt")}
         />
-        <RailButton icon="clock" label="Giờ làm" keys="G T" view="timesheet" active={view === "timesheet"} onClick={() => onViewChange("timesheet")} />
         <span className="rail-fill" />
         {onOpenAssistant && <RailButton icon="chat" label="Trợ lý" onClick={onOpenAssistant} />}
-        <RailButton icon="search" label="Tìm, tạo, hỏi" keys="Ctrl K" onClick={onOpenCommand} />
-        <RailButton icon="keyboard" label="Phím tắt" keys="?" onClick={onOpenShortcuts} />
         <Popover
           className="rail-btn rail-avatar"
           role="menu"
@@ -219,6 +214,19 @@ export default function Toolbar({
                 type="button"
                 role="menuitem"
                 className="menu-item"
+                onClick={() => {
+                  close();
+                  onOpenShortcuts();
+                }}
+              >
+                <Icon name="keyboard" />
+                <span className="menu-item-text">Phím tắt</span>
+                <kbd className="menu-kbd">?</kbd>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="menu-item"
                 onClick={async () => {
                   close();
                   if (sync.kind === "reading" && !(await dialogs.confirm({ message: "Đang đọc dữ liệu từ Jira. Vẫn đăng xuất?", confirmLabel: "Đăng xuất" })))
@@ -266,30 +274,18 @@ export default function Toolbar({
                     <kbd className="menu-kbd">Ctrl P</kbd>
                   </button>
                   <div className="menu-sep" role="separator" />
-                  <div className="menu-heading">Cài đặt dự án</div>
                   <button
                     type="button"
                     role="menuitem"
                     className="menu-item"
                     onClick={() => {
                       close();
-                      onOpenSla();
+                      onOpenSettings();
                     }}
                   >
-                    <Icon name="clock" />
-                    Cài đặt SLA…
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="menu-item"
-                    onClick={() => {
-                      close();
-                      onOpenCalendar();
-                    }}
-                  >
-                    <Icon name="calendar" />
-                    Lịch làm việc & ngày lễ…
+                    <Icon name="settings" />
+                    <span className="menu-item-text">Cài đặt dự án</span>
+                    <kbd className="menu-kbd">G S</kbd>
                   </button>
                 </>
               )}
@@ -310,9 +306,9 @@ export default function Toolbar({
             >
               {l.label}
               {l.id === "resource" && overloadedPeople > 0 && (
-                <span className="tab-badge" title={`${overloadedPeople} thành viên đang quá tải`}>
+                <span className="tab-badge" title={`${overloadedPeople} người quá tải trong 2 tuần tới`}>
                   {overloadedPeople}
-                  <span className="sr-only"> thành viên đang quá tải</span>
+                  <span className="sr-only"> người quá tải trong 2 tuần tới</span>
                 </span>
               )}
             </button>

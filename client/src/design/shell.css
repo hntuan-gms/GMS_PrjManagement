@@ -4,7 +4,7 @@
    Loaded after App.css (main.tsx), so equal-specificity rules here win.
    ========================================================================== */
 
-/* ---- Rail: 48px, fixed, dimmed — content leads. ---- */
+/* ---- Rail: 56px, fixed, dimmed — content leads. Icon with a 10px label under it. ---- */
 .app-rail {
   position: fixed;
   inset: 0 auto 0 0;
@@ -48,13 +48,28 @@
 }
 button.rail-btn {
   position: relative;
-  width: 36px;
-  height: 36px;
+  width: 46px;
+  height: 44px;
   padding: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
   border: none;
   border-radius: var(--radius-md);
   background: transparent;
   color: var(--ink-3);
+}
+.rail-label {
+  font-size: 10px;
+  line-height: 1;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+button.rail-btn.rail-avatar {
+  height: auto;
+  padding: 2px 0;
 }
 button.rail-btn:hover:not(:disabled) {
   background: var(--sunken);
@@ -70,9 +85,9 @@ button.rail-btn.is-active::before {
   /* A son tick on the rail's edge: "you are here". */
   content: "";
   position: absolute;
-  left: -6px;
-  top: 9px;
-  bottom: 9px;
+  left: -5px;
+  top: 10px;
+  bottom: 10px;
   width: 2px;
   border-radius: 2px;
   background: var(--son);
@@ -696,16 +711,24 @@ body:has(.selection-bar) .toaster {
   stroke-linecap: round;
 }
 
-/* Phone width: keep the lenses reachable. The project name, the sync label and the fake search
-   box (the rail has Tìm) give way; the lenses scroll sideways if they still do not fit. */
+/* Phone width: keep the lenses reachable. The project name and the sync label give way and the fake
+   search box shrinks to its icon (the rail no longer has a Tìm of its own); the lenses scroll sideways if
+   they still do not fit. */
 @media (max-width: 640px) {
   .toolbar {
     gap: 8px;
   }
   .toolbar .proj-name,
   .toolbar .sync-text,
-  .toolbar .cmdk-trigger {
+  .toolbar .cmdk-trigger span,
+  .toolbar .cmdk-trigger kbd {
     display: none;
+  }
+  button.cmdk-trigger {
+    min-width: 28px;
+    width: 28px;
+    padding: 0;
+    justify-content: center;
   }
   .toolbar-left {
     min-width: 0;

@@ -4,6 +4,7 @@
 // trend, Agile charts). What reaches Jira for real is on the manual checklist (section E).
 import assert from "node:assert/strict";
 import { chromium } from "playwright-core";
+import { fillDate, openFilterPanel, openTimesheet, setGranularity } from "./toolbar.mjs";
 
 const API = process.env.E2E_API ?? "http://localhost:4000";
 const browser = await chromium.launch({ channel: "chrome", headless: true });
@@ -72,17 +73,18 @@ await step("sửa kỳ nghỉ: thêm rồi đổi ngày kết thúc (PATCH, khô
   const from = isoIn(3);
   const to = isoIn(4);
   const later = isoIn(6);
-  await page.locator(".rv-drawer input[type=date]").nth(0).fill(from);
-  await page.locator(".rv-drawer input[type=date]").nth(1).fill(to);
-  await page.locator(".rv-drawer-foot button.primary", { hasText: "Lưu thay đổi" }).click();
+  const dates = () => page.locator(".rv-drawer .date-field input[type=text]");
+  await fillDate(dates().nth(0), from);
+  await fillDate(dates().nth(1), to);
+  await page.locator(".rv-drawer-foot button.primary").click();
   await page.waitForSelector(".rv-drawer", { state: "detached" });
   await openProfile();
   await page.waitForSelector(".rv-abs-chip");
   await reset();
   await page.locator(".rv-abs-chip button[aria-label='Sửa kỳ nghỉ']").click();
-  assert.equal(await page.locator(".rv-drawer input[type=date]").nth(1).inputValue(), to);
-  await page.locator(".rv-drawer input[type=date]").nth(1).fill(later);
-  await page.locator(".rv-drawer-foot button.primary", { hasText: "Lưu thay đổi" }).click();
+  assert.equal(await dates().nth(1).inputValue(), `${to.slice(8, 10)}/${to.slice(5, 7)}/${to.slice(0, 4)}`);
+  await fillDate(dates().nth(1), later);
+  await page.locator(".rv-drawer-foot button.primary").click();
   const patch = await waitLog((l) => l.m === "PATCH" && l.p.startsWith("/api/resources/absences/"));
   assert.equal(patch.b.to, later);
   await page.waitForSelector(".rv-drawer", { state: "detached" });
@@ -94,7 +96,7 @@ await step("kỹ năng + ghi chú lưu cùng một nút 'Lưu thay đổi'", asy
   await page.keyboard.press("Enter");
   await page.locator(".rv-notes-field textarea").fill("chỉ làm buổi sáng");
   await reset();
-  await page.locator(".rv-drawer-foot button.primary", { hasText: "Lưu thay đổi" }).click();
+  await page.locator(".rv-drawer-foot button.primary").click();
   const put = await waitLog((l) => l.m === "PUT" && l.p.startsWith("/api/resources/"));
   assert.ok(put.b.skills.includes("SQL"), JSON.stringify(put.b));
   assert.equal(put.b.notes, "chỉ làm buổi sáng");
@@ -103,15 +105,14 @@ await step("'Tháng này' (trong menu Khoảng) + cột theo tháng", async () =
   await page.locator(".rv-preset").click();
   await page.locator(".rv-preset-item", { hasText: "Tháng này" }).click();
   assert.ok((await page.locator(".rv-preset").textContent()).includes("Tháng này"), "nhãn nút phải theo khoảng đang chọn");
-  await page.locator(".rv-granularity").selectOption("month");
-  assert.ok((await page.locator(".rv-head-cell").first().textContent()).startsWith("Thg"));
-  await page.locator(".rv-granularity").selectOption("week");
+  await setGranularity(page, "month");
+  assert.ok((await page.locator(".rv-head-cell").first().textContent()).match(/^T\d+$/), "cột tháng ghi T11, không còn Thg");
+  await setGranularity(page, "week");
 });
 
 console.log("\n== Chấm công: sửa giờ ==");
 await step("sửa giờ của mình: chỉ gửi phần đã đổi", async () => {
-  await page.locator("[data-view=timesheet]").click();
-  await page.waitForSelector(".ts-grid");
+  await openTimesheet(page);
   await page.locator(".ts-person-filter").selectOption("me");
   await page.locator(".ts-person-btn").first().click();
   await page.waitForSelector(".ts-entries li");
@@ -132,11 +133,14 @@ await step("bộ lọc nhanh của board hiện thành nút; bật 'Chỉ lỗi'
   await tab("Bảng");
   await page.waitForSelector(".bd-card");
   const before = await page.locator(".bd-card").count();
+  // The board's quick filters sit in the "Bộ lọc" panel, under "Của board".
+  await openFilterPanel(page);
   assert.equal(await page.locator(".bd-quick-filter").count(), 2);
   await page.locator(".bd-quick-filter", { hasText: "Chỉ lỗi" }).click();
   await page.waitForFunction((n) => document.querySelectorAll(".bd-card").length < n, before);
   await page.locator(".bd-quick-filter", { hasText: "Chỉ lỗi" }).click();
   await page.waitForFunction((n) => document.querySelectorAll(".bd-card").length === n, before);
+  await page.keyboard.press("Escape");
 });
 await step("thẻ cha liệt kê sub-task: 1/2, bấm mở danh sách", async () => {
   const toggle = page.locator(".bd-subtasks-toggle").first();
@@ -214,7 +218,8 @@ await step("'Năng lực' của sprint: bảng từng người, người nghỉ 
 });
 await step("xoá sprint chưa chạy: hỏi trong app rồi DELETE", async () => {
   await reset();
-  await page.locator(".bl-section", { hasText: "Sprint 8" }).locator("button[aria-label='Xoá sprint']").click();
+  await page.locator(".bl-section", { hasText: "Sprint 8" }).locator("button[aria-label^='Tuỳ chọn']").click();
+  await page.locator("[role=menuitem]", { hasText: "Xoá sprint" }).click();
   await page.waitForSelector(".dlg");
   await page.locator(".dlg button.danger-solid").click();
   await waitLog((l) => l.m === "DELETE" && l.p === "/api/board/sprints/8");

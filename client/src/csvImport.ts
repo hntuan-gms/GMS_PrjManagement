@@ -1,4 +1,8 @@
 import type { ImportRow } from "./types";
+import { fold } from "./fold";
+
+/** Kept exported from here: older callers import it from the CSV module. */
+export { fold };
 
 /**
  * Turning a pasted or uploaded sheet into import rows — pure, so the awkward part
@@ -40,17 +44,6 @@ export const FIELD_LABELS: Record<ImportField, string> = {
 };
 
 export const FIELD_ORDER = Object.keys(FIELD_LABELS) as ImportField[];
-
-/** Lowercase, no diacritics, single spaces. */
-export function fold(s: string): string {
-  return s
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/[đĐ]/g, "d")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-}
 
 /* ------------------------------------------------------------------ parsing */
 

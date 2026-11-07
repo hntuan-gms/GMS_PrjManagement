@@ -12,8 +12,20 @@ import { orderByWbs, resolveRanges, toGanttTasks, type BarColorBy, type OrderedT
 import { readPalette, withAlpha } from "../themeColors";
 import { useAppearance } from "../useAppearance";
 import { ROW_HEIGHTS, getDensity } from "../theme";
-import { isAssignableType, type DependencyType, type JiraUser, type ProjectVersion, type Task, type TaskTransition } from "../types";
-import { isMilestone } from "../timelineGeometry";
+import { isAssignableType, type DependencyType, type JiraUser, type ProjectVersion, type ResourcePool, type Task, type TaskTransition, type TaskUpdateInput } from "../types";
+import { anchorDay, isMilestone, shiftDay, weekAxisStart } from "../timelineGeometry";
+import { weekColumnLabel } from "../dateLabels";
+import { toast } from "../toast";
+import { changeSchedule, scheduleOf } from "../scheduleFields";
+import { formatPredecessors, parsePredecessors } from "../predecessorsText";
+import { predecessorProblem } from "../predecessorCheck";
+import { KIND_OF_COLUMN, editableKinds, neighbourStop, nextRowFor, stopsFor, type CellKind } from "../wbsCells";
+import { buildResourceLoad } from "../resourceAllocation";
+import { isTypingTarget, overlayOpen } from "../shortcuts";
+import { useWorkCalendar } from "./workCalendarContext";
+import PersonPicker from "./PersonPicker";
+import UnscheduledLayer from "./UnscheduledLayer";
+import WbsCellEditor, { type EditValue, type Move } from "./WbsCellEditor";
 import { zoomByWheel } from "../timeZoom";
 import { SLA_STATE_LABEL, slaIds, slaSentence, slaShortText, type SlaView } from "../sla";
 import { overlayCsvCells, overlayCsvHeader } from "../wbsExport";
@@ -24,6 +36,7 @@ import CellPicker, { type PickItem } from "./CellPicker";
 import { api } from "../api";
 import PriorityMark from "./PriorityMark";
 import StatusGlyph from "./StatusGlyph";
+import Avatar from "./Avatar";
 import { priorityTone } from "../boardModel";
 import { Icon, type IconName } from "./Icons";
 import Popover from "./Popover";
@@ -69,6 +82,8 @@ const MIN_CHART_WIDTH = 240;
 // gantt-task-react always renders its own horizontal scrollbar strip under the
 // chart rows; reserve room for it so the fixed-height layout below doesn't clip it.
 const SCROLLBAR_RESERVE = 24;
+/** The longest a name drawn beside a bar may be before it is cut with an ellipsis (plan C7). */
+const MAX_OUTSIDE_LABEL = 240;
 const DAY_MS = 86_400_000;
 
 /**
@@ -263,7 +278,7 @@ function pickScale(pixelsPerDay: number): { viewMode: ViewMode; columnWidth: num
 
 /* ---------------------------------------------------------------- columns */
 
-type ColumnId = "type" | "status" | "priority" | "labels" | "components" | "versions" | "sprint" | "assignee" | "start" | "due" | "sla" | "duration" | "estimate" | "spent" | "pct";
+type ColumnId = "type" | "status" | "priority" | "labels" | "components" | "versions" | "sprint" | "assignee" | "start" | "due" | "sla" | "duration" | "predecessors" | "estimate" | "spent" | "pct";
 
 interface ColumnDef {
   id: ColumnId;
@@ -341,9 +356,7 @@ const COLUMNS: ColumnDef[] = [
     cell: (t) =>
       t.assigneeName ? (
         <span className="wbs-person" title={t.assigneeName}>
-          <span className="wbs-avatar" aria-hidden="true">
-            {initialsOf(t.assigneeName)}
-          </span>
+          <Avatar name={t.assigneeName} avatarUrl={t.assigneeAvatarUrl} className="wbs-avatar" decorative />
           <span className="wbs-person-name">{t.assigneeName}</span>
         </span>
       ) : (
@@ -388,7 +401,22 @@ const COLUMNS: ColumnDef[] = [
     long: "Thời lượng",
     width: 66,
     align: "right",
-    cell: (t, r) => `${r ? spanDays(r) : t.durationDays}d`,
+    // A row with no date has no duration worth showing: the stored one is only a default.
+    cell: (t, r) => (r ? `${spanDays(r)}d` : t.startDate ? `${t.durationDays}d` : "—"),
+  },
+  {
+    id: "predecessors",
+    label: "Phụ thuộc",
+    long: "Phụ thuộc lịch",
+    width: 96,
+    cell: (t) =>
+      t.predecessors.length > 0 ? (
+        <span className="wbs-preds" title={t.predecessors.map((p) => `${p.taskId} ${p.type}${p.lagDays ? (p.lagDays > 0 ? "+" : "") + p.lagDays : ""}`).join(", ")}>
+          {formatPredecessors(t.predecessors)}
+        </span>
+      ) : (
+        "—"
+      ),
   },
   { id: "estimate", label: "Ước lượng", long: "Ước lượng", width: 76, align: "right", cell: (t) => hours(t.estimateHours) },
   {
@@ -437,7 +465,9 @@ function csvValue(id: ColumnId, t: Task, r: { start: string; end: string } | und
       return res && sla ? `${SLA_STATE_LABEL[res.state]}. ${slaSentence(res, sla.settings, sla.nowMs)}` : "";
     }
     case "duration":
-      return r ? spanDays(r) : t.durationDays;
+      return r ? spanDays(r) : t.startDate ? t.durationDays : "";
+    case "predecessors":
+      return formatPredecessors(t.predecessors);
     case "estimate":
       return t.estimateHours;
     case "spent":
@@ -453,13 +483,10 @@ function csvValue(id: ColumnId, t: Task, r: { start: string; end: string } | und
 // so neither needs a column of its own (plan §6.1.2): a column of "Medium" was 180px of nothing.
 const DEFAULT_COLUMNS: ColumnId[] = ["status", "assignee", "pct"];
 
-function initialsOf(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  return (parts.at(-1)?.[0] ?? "").toUpperCase();
-}
 const COLUMNS_KEY = "gms.gantt.columns";
 const KEY_COL_WIDTH = 64;
 const MIN_NAME_WIDTH = 180;
+const MIN_NAME_FLOOR = 120;
 
 function loadColumns(): ColumnId[] {
   try {
@@ -545,14 +572,14 @@ interface Props {
   onOpenEdit: (task: Task) => void;
   onScheduleChange: (id: string, startDate: string, durationDays: number) => void;
   onProgressChange: (id: string, percentComplete: number) => void;
-  onAddDependency: (successorId: string, predecessorId: string, type: DependencyType) => void;
+  onAddDependency: (successorId: string, predecessorId: string, type: DependencyType) => void | Promise<void>;
   onEditDependency: (
     successorId: string,
     predecessorId: string,
     currentType: DependencyType,
     next: { type: DependencyType; lagDays: number }
   ) => void;
-  onDeleteDependency: (successorId: string, predecessorId: string, type: DependencyType) => void;
+  onDeleteDependency: (successorId: string, predecessorId: string, type: DependencyType) => void | Promise<void>;
   /** Releases to draw as lines on the timeline. */
   versions: ProjectVersion[];
   /** Issue keys Jira returned for `filter.jql`; null until they arrive. */
@@ -574,6 +601,10 @@ interface Props {
   onTransition?: (task: Task, transitionId: string, toStatusName: string) => void;
   /** Bản nháp: the plan before the draft began; changed bars get a dashed ghost of where they were. */
   draftBase?: Task[] | null;
+  /** One field-level write (name, predecessors) with the workspace's staleness guard; throws when Jira refuses. */
+  onUpdate?: (id: string, patch: TaskUpdateInput) => Promise<void>;
+  /** Leave and capacity, so the assignee picker can say who is free inside a task's dates. Names only without it. */
+  pool?: ResourcePool | null;
 }
 
 function toIso(d: Date): string {
@@ -666,6 +697,8 @@ export default function GanttView({
   onAssign,
   onTransition,
   draftBase,
+  onUpdate,
+  pool,
 }: Props) {
   // The one zoom variable everything else derives from — see pickScale.
   const [pixelsPerDay, setPixelsPerDay] = useState(DEFAULT_PIXELS_PER_DAY[ViewMode.Week]);
@@ -674,6 +707,9 @@ export default function GanttView({
   const [showCriticalPath, setShowCriticalPath] = useState(false);
   const [showDependencies, setShowDependencies] = useState(true);
   const [showBaseline, setShowBaseline] = useState(loadShowBaseline);
+  // "Chưa có ngày" as a filter: only the rows that have no date (and their parents). Local, kept nowhere.
+  const [onlyUnscheduled, setOnlyUnscheduled] = useState(false);
+  const calendar = useWorkCalendar();
   const [colorBy, setColorBy] = useState<BarColorBy>(loadColorBy);
   const appearance = useAppearance();
   ROW_HEIGHT = ROW_HEIGHTS[appearance.density];
@@ -741,10 +777,14 @@ export default function GanttView({
     return Math.max(KEY_COL_WIDTH, Math.ceil(longest * 7.3) + 18);
   }, [tasks]);
   const neededListWidth = keyColWidth + MIN_NAME_WIDTH + columnsWidth;
-  // Just what the chosen columns and a readable name need, so the divider sits well to the left
-  // and the chart gets the rest. It used to start at half the window whatever the columns were.
-  const defaultListWidth = neededListWidth + 60;
-  const maxListWidth = Math.max(MIN_LIST_WIDTH, bodySize.width - MIN_CHART_WIDTH);
+  // What the chosen columns and a readable name need, but never more than 45% of the window, so on a
+  // narrow screen the time axis still gets most of it. The name keeps a floor of 120px.
+  const defaultListWidth = Math.min(
+    neededListWidth + 60,
+    Math.max(Math.floor(bodySize.width * 0.45), keyColWidth + MIN_NAME_FLOOR + columnsWidth)
+  );
+  // A dragged divider is respected, but not past 60% of the window.
+  const maxListWidth = Math.min(Math.max(MIN_LIST_WIDTH, bodySize.width - MIN_CHART_WIDTH), Math.floor(bodySize.width * 0.6));
   const listWidth = Math.min(maxListWidth, Math.max(MIN_LIST_WIDTH, listWidthOverride ?? defaultListWidth));
   const ganttHeight = Math.max(ROW_HEIGHT, bodySize.height - HEADER_HEIGHT - SCROLLBAR_RESERVE);
 
@@ -856,6 +896,14 @@ export default function GanttView({
     () => filterTaskIds(tasks, filter, { today, epicOf, jqlKeys, slaBreached }),
     [tasks, filter, today, epicOf, jqlKeys, slaBreached]
   );
+  // Tasks with no resolvable date (not even an Epic's rollup): they keep their row, the bar is drawn by dragging.
+  const unscheduledIds = useMemo(
+    () => new Set(tasks.filter((t) => !ranges.has(t.id) && (!matchIds || matchIds.has(t.id))).map((t) => t.id)),
+    [tasks, ranges, matchIds]
+  );
+  // Switched off by itself when nothing is left to schedule, so a stale toggle cannot hide the whole plan.
+  const unscheduledOnly = onlyUnscheduled && unscheduledIds.size > 0;
+  const shownIds = unscheduledOnly ? unscheduledIds : matchIds;
 
   /**
    * Matches plus their ancestors. Keeping matches alone would strip a matched
@@ -863,9 +911,9 @@ export default function GanttView({
    * indentation that make the remaining depth values look arbitrary.
    */
   const searchKeep = useMemo(() => {
-    if (!matchIds) return null;
+    if (!shownIds) return null;
     const keep = new Set<string>();
-    for (const id of matchIds) {
+    for (const id of shownIds) {
       let cur: string | null = id;
       // Doubles as a cycle guard: a malformed parent chain would otherwise spin
       // here and hang the render thread rather than fail visibly.
@@ -875,7 +923,7 @@ export default function GanttView({
       }
     }
     return keep;
-  }, [matchIds, byId]);
+  }, [shownIds, byId]);
 
   const visible = useMemo(() => {
     // While searching, collapse state is bypassed: a hit sitting inside a collapsed
@@ -897,15 +945,9 @@ export default function GanttView({
   // Rows actually rendered: gantt-task-react positions its chart bars purely by
   // index within the array passed to <Gantt>, so the custom WBS table below must
   // render this exact same filtered list, in this exact order, or the two panes
-  // drift out of row alignment (a task without a resolvable date can't get a bar).
-  const rows = useMemo(() => visible.filter((v) => ranges.has(v.task.id)), [visible, ranges]);
-
-  // Tasks with no resolvable date have no bar, so without this list a task whose
-  // start was cleared simply vanishes from the Gantt with nowhere to find it.
-  const unscheduled = useMemo(
-    () => ordered.map((o) => o.task).filter((t) => !ranges.has(t.id) && (!matchIds || matchIds.has(t.id))),
-    [ordered, ranges, matchIds]
-  );
+  // drift out of row alignment. A task without a date is a row too: its bar is an
+  // invisible placeholder (toGanttTasks), which keeps one bar per row.
+  const rows = visible;
   const parentIds = useMemo(
     () => [...new Set(tasks.map((t) => t.wbsParentId).filter((id): id is string => !!id))],
     [tasks]
@@ -919,23 +961,28 @@ export default function GanttView({
     const timer = window.setTimeout(() => setTodayNote(null), 5000);
     return () => window.clearTimeout(timer);
   }, [todayNote]);
-  function goToToday() {
+  // Pixels one day is wide at this zoom, and the width of the time pane: today is placed a third of the way
+  // in, not on the left edge where the library puts a scrolled-to column.
+  const pxPerDay = scale.columnWidth / DAYS_PER_COLUMN[viewMode];
+  const chartPaneWidth = Math.max(0, bodySize.width - listWidth - 24);
+  function goToToday(quiet = false) {
     let first: string | null = null;
     let last: string | null = null;
     for (const row of rows) {
-      const r = ranges.get(row.task.id)!;
+      const r = ranges.get(row.task.id);
+      if (!r) continue;
       if (!first || r.start < first) first = r.start;
       if (!last || r.end > last) last = r.end;
     }
     if (first && today < first) {
-      setTodayNote("Hôm nay nằm trước thanh đầu tiên của biểu đồ.");
+      if (!quiet) setTodayNote("Hôm nay nằm trước thanh đầu tiên của biểu đồ.");
       scrollToDate(first);
     } else if (last && today > last) {
-      setTodayNote("Hôm nay nằm sau thanh cuối cùng của biểu đồ.");
+      if (!quiet) setTodayNote("Hôm nay nằm sau thanh cuối cùng của biểu đồ.");
       scrollToDate(last);
     } else {
       setTodayNote(null);
-      scrollToDate(today);
+      scrollToDate(pxPerDay > 0 ? shiftDay(today, -Math.round(chartPaneWidth / 3 / pxPerDay)) : today);
     }
   }
 
@@ -978,6 +1025,14 @@ export default function GanttView({
     () =>
       function GanttTooltip({ task }: { task: GanttTaskT; fontSize: string; fontFamily: string }) {
         const full = byId.get(task.id);
+        if (full && !ranges.has(full.id)) {
+          return (
+            <div className="gantt-tip">
+              <b>{task.id}</b> · {full.summary}
+              <div>Chưa có ngày · kéo để xếp lịch</div>
+            </div>
+          );
+        }
         const days = Math.max(1, Math.round((task.end.getTime() - task.start.getTime()) / DAY_MS));
         const fmt = (d: Date) => `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
         // `end` is exclusive (see toGanttTasks), so the last day is one before it.
@@ -997,7 +1052,7 @@ export default function GanttView({
           </div>
         );
       },
-    [byId]
+    [byId, ranges]
   );
   // Where each bar was before the draft, for the ones the draft moved.
   const draftGhosts = useMemo(() => {
@@ -1022,6 +1077,19 @@ export default function GanttView({
     for (const id of bracketIds) m.delete(id);
     return m;
   }, [baselines, bracketIds]);
+  // The day the invisible bars of undated rows sit on: today, kept inside what the dated bars span so the
+  // library's date axis (sized from every task it is given) is exactly what it would be without them.
+  const placeholderDay = useMemo(() => {
+    let first: string | null = null;
+    let last: string | null = null;
+    for (const r of rows) {
+      const range = ranges.get(r.task.id);
+      if (!range) continue;
+      if (!first || range.start < first) first = range.start;
+      if (!last || range.end > last) last = range.end;
+    }
+    return anchorDay(today, first, last);
+  }, [rows, ranges, today]);
   const allGanttTasks = useMemo(() => {
     const palette = readPalette();
     // Category order is stable and meaningful: people by name, Epics in WBS order — never a hash.
@@ -1037,25 +1105,31 @@ export default function GanttView({
       }
       return null;
     };
-    const base = toGanttTasks(rows, ranges, {
-      colorBy,
-      palette,
-      today,
-      categoryOf: (t) => {
-        if (colorBy === "person") return t.assigneeName ? (personIndex.get(t.assigneeName) ?? null) : null;
-        const e = epicOf(t);
-        return e ? (epicIndex.get(e) ?? null) : null;
+    const base = toGanttTasks(
+      rows,
+      ranges,
+      {
+        colorBy,
+        palette,
+        today,
+        categoryOf: (t) => {
+          if (colorBy === "person") return t.assigneeName ? (personIndex.get(t.assigneeName) ?? null) : null;
+          const e = epicOf(t);
+          return e ? (epicIndex.get(e) ?? null) : null;
+        },
       },
-    });
+      placeholderDay
+    );
     if (!showCriticalPath) return base;
     // Critical path: the chain that sets the end date is drawn in son ("this is what decides
     // the date"), everything else steps back to the quietest tone.
     const crit = { backgroundColor: palette.sonWash, backgroundSelectedColor: palette.sonWash, progressColor: palette.son, progressSelectedColor: palette.son };
     const dim = { backgroundColor: palette.sunken, backgroundSelectedColor: palette.line, progressColor: palette.lineStrong, progressSelectedColor: palette.lineStrong };
-    return base.map((t) => ({ ...t, styles: criticalIds.has(t.id) ? crit : dim }));
+    // The invisible bars of undated rows keep their own transparent style.
+    return base.map((t) => (!ranges.has(t.id) ? t : { ...t, styles: criticalIds.has(t.id) ? crit : dim }));
     // appearance.theme: re-read the palette when the theme flips.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, ranges, showCriticalPath, criticalIds, colorBy, today, appearance.theme]);
+  }, [rows, ranges, showCriticalPath, criticalIds, colorBy, today, appearance.theme, placeholderDay]);
 
   // Month view's axis is short: gantt-task-react ends it at the start of the year after the
   // last task's end, so a project inside one year draws a handful of columns and leaves the
@@ -1076,9 +1150,16 @@ export default function GanttView({
     return Math.max(scale.columnWidth, Math.floor(available / columns));
   }, [viewMode, allGanttTasks, scale.columnWidth, bodySize.width, listWidth]);
 
-  /* ---- in-place cell editing: Người and Trạng thái ---- */
+  /* ---- in-place cell editing (plan C4) ---- */
+  // Status and assignee open a list; name, dates, duration, % and predecessors open a small box over the cell.
   const [cellEdit, setCellEdit] = useState<{ task: Task; kind: "assignee" | "status"; rect: DOMRect } | null>(null);
   const [cellTransitions, setCellTransitions] = useState<TaskTransition[] | null>(null);
+  const [boxEdit, setBoxEdit] = useState<{ id: string; kind: Exclude<CellKind, "assignee">; rect: DOMRect } | null>(null);
+  // The cell Enter edits next: where an edit last ended, for the row that is still selected.
+  const [cursor, setCursor] = useState<{ id: string; kind: CellKind } | null>(null);
+  const pendingEdit = useRef<number | undefined>(undefined);
+  const tasksRef = useRef(tasks);
+  tasksRef.current = tasks;
   const openCellEditor = (task: Task, kind: "assignee" | "status", rect: DOMRect) => {
     setCellEdit({ task, kind, rect });
     setCellTransitions(null);
@@ -1086,47 +1167,251 @@ export default function GanttView({
       api.getTaskTransitions(task.id).then(setCellTransitions, () => setCellTransitions([]));
     }
   };
-  const cellItems: PickItem[] | null = !cellEdit
-    ? null
-    : cellEdit.kind === "assignee"
-      ? [
-          { id: "__none__", label: "Bỏ giao", hint: cellEdit.task.assigneeAccountId ? undefined : "hiện tại" },
-          ...(users ?? []).map((u) => ({
-            id: u.accountId,
-            label: u.displayName,
-            lead: (
-              <span className="wbs-avatar" aria-hidden="true">
-                {initialsOf(u.displayName)}
-              </span>
-            ),
-            hint: u.accountId === cellEdit.task.assigneeAccountId ? "hiện tại" : u.accountId === myAccountId ? "bạn" : undefined,
-          })),
-        ]
-      : cellTransitions === null
-        ? null
-        : cellTransitions
-            .filter((t) => t.toStatusName !== cellEdit.task.statusName)
-            .map((t) => ({
-              id: t.id,
-              label: t.toStatusName,
-              lead: <StatusGlyph category={t.toCategory} />,
-              hint: t.fields.some((f) => !f.optional) ? "cần nhập thêm" : t.name !== t.toStatusName ? t.name : undefined,
-            }));
-  const cellEditor = cellEdit && (
-    <CellPicker
-      anchor={cellEdit.rect}
-      items={cellItems}
-      loading={cellEdit.kind === "status" && cellTransitions === null}
-      placeholder={cellEdit.kind === "assignee" ? `Giao ${cellEdit.task.id} cho…` : `Chuyển ${cellEdit.task.id} sang…`}
-      onClose={() => setCellEdit(null)}
-      onPick={(it) => {
-        const { task, kind } = cellEdit;
-        setCellEdit(null);
-        if (kind === "assignee") onAssign?.(task.id, it.id === "__none__" ? null : it.id);
-        else onTransition?.(task, it.id, it.label);
+  const kindsOf = useCallback(
+    (row: Pick<WbsRow, "task" | "hasChildren">) =>
+      editableKinds({
+        issueType: row.task.issueType,
+        hasChildren: row.hasChildren,
+        canAssign: !!onAssign && isAssignableType(row.task.issueType),
+        canUpdate: !!onUpdate,
+        canSchedule: true,
+        canProgress: true,
+      }),
+    [onAssign, onUpdate]
+  );
+  const rowById = useMemo(() => new Map(rows.map((r) => [r.task.id, r])), [rows]);
+  const rowOrder = useMemo(() => rows.map((r) => r.task.id), [rows]);
+
+  /** Opens the editor for one cell of a row that is on screen; a row outside the drawn window has no cell to open. */
+  function openCell(id: string, kind: CellKind) {
+    const el = document.querySelector<HTMLElement>(`.wbs-row[data-row-id="${CSS.escape(id)}"] [data-cell="${kind}"]`);
+    const task = byId.get(id);
+    if (!el || !task) return;
+    openCellAt(task, kind, el.getBoundingClientRect());
+  }
+  function openCellAt(task: Task, kind: CellKind, rect: DOMRect) {
+    setCursor({ id: task.id, kind });
+    if (kind === "assignee") {
+      setBoxEdit(null);
+      openCellEditor(task, "assignee", rect);
+    } else {
+      setCellEdit(null);
+      setBoxEdit({ id: task.id, kind, rect });
+    }
+  }
+  // A click on a cell of an already selected row starts the edit, but a beat later: the second click of a
+  // double-click lands on the same cell and must still open the task (the row handler cancels this).
+  function armEdit(task: Task, kind: CellKind, el: HTMLElement) {
+    window.clearTimeout(pendingEdit.current);
+    pendingEdit.current = window.setTimeout(() => {
+      pendingEdit.current = undefined;
+      if (el.isConnected) openCellAt(task, kind, el.getBoundingClientRect());
+    }, 300);
+  }
+  const cancelArmedEdit = () => {
+    window.clearTimeout(pendingEdit.current);
+    pendingEdit.current = undefined;
+  };
+
+  function writeField(id: string, patch: TaskUpdateInput) {
+    onUpdate?.(id, patch).catch((e) => toast(e instanceof Error ? e.message : "Không lưu được thay đổi.", { tone: "error" }));
+  }
+
+  /** Saves what was typed into a cell; a returned sentence means "refused", and the box stays open on it. */
+  function saveCell(task: Task, kind: CellKind, value: EditValue): string | void {
+    if (value === null) return;
+    if (kind === "summary") {
+      const summary = String(value).trim();
+      if (!summary) return "Tên việc không được để trống.";
+      writeField(task.id, { summary });
+    } else if (kind === "start" || kind === "due" || kind === "duration") {
+      const res = changeSchedule(scheduleOf(task.startDate, task.durationDays), kind, value);
+      if (res.rejected === "due-before-start") return "Kết thúc trước ngày bắt đầu.";
+      if (res.rejected) return "Giá trị không hợp lệ.";
+      if (!res.start) return "Đặt ngày bắt đầu trước.";
+      onScheduleChange(task.id, res.start, Math.max(1, Math.ceil(res.durationDays)));
+    } else if (kind === "pct") {
+      onProgressChange(task.id, Math.max(0, Math.min(100, Math.round(Number(value)))));
+    } else if (kind === "predecessors") {
+      const prefix = task.id.includes("-") ? task.id.slice(0, task.id.lastIndexOf("-")) : "";
+      const parsed = parsePredecessors(String(value), prefix);
+      if (!parsed.ok) return parsed.error;
+      const problem = predecessorProblem(tasksRef.current, task.id, parsed.predecessors);
+      if (problem) return problem;
+      writeField(task.id, { predecessors: parsed.predecessors });
+    }
+  }
+
+  function commitBox(edit: { id: string; kind: Exclude<CellKind, "assignee"> }, value: EditValue, move: Move): string | void {
+    const task = byId.get(edit.id);
+    if (!task) {
+      setBoxEdit(null);
+      return;
+    }
+    const refused = saveCell(task, edit.kind, value);
+    if (refused) return refused;
+    setBoxEdit(null);
+    setCursor({ id: edit.id, kind: edit.kind });
+    if (move === "stay") return;
+    const row = rowById.get(edit.id);
+    if (move === "down") {
+      const next = nextRowFor(rowOrder, edit.id, (id) => {
+        const r = rowById.get(id);
+        return !!r && kindsOf(r).has(edit.kind);
+      });
+      if (!next) return;
+      onSelect(next, { toggle: false, range: false }, rowOrder);
+      requestAnimationFrame(() => openCell(next, edit.kind));
+    } else if (row) {
+      const stop = neighbourStop(stopsFor(kindsOf(row), columnIds), edit.kind, move === "next" ? 1 : -1);
+      if (stop) requestAnimationFrame(() => openCell(edit.id, stop));
+    }
+  }
+
+  /** What each box starts with. */
+  function initialOf(task: Task, kind: Exclude<CellKind, "assignee">): string | number | null {
+    const sched = scheduleOf(task.startDate, task.durationDays);
+    switch (kind) {
+      case "summary":
+        return task.summary;
+      case "start":
+        return task.startDate ?? "";
+      case "due":
+        return sched.due;
+      case "duration": {
+        const r = ranges.get(task.id);
+        return r ? spanDays(r) : task.durationDays;
+      }
+      case "pct":
+        return task.percentComplete;
+      case "predecessors":
+        return formatPredecessors(task.predecessors);
+    }
+  }
+
+  // Who the picker offers, ranked by who is free inside this task's dates. Only worked out while it is open.
+  const assignLoad = useMemo(() => {
+    const t = cellEdit?.kind === "assignee" ? cellEdit.task : null;
+    if (!t?.startDate || !users) return null;
+    return buildResourceLoad({
+      tasks,
+      users,
+      profiles: pool?.profiles ?? [],
+      absences: pool?.absences ?? [],
+      defaultCapacityHours: pool?.defaultCapacityHours,
+      from: t.startDate,
+      to: t.dueDate && t.dueDate >= t.startDate ? t.dueDate : t.startDate,
+      includeIdle: true,
+      calendar,
+    });
+  }, [cellEdit, tasks, users, pool, calendar]);
+
+  const cellItems: PickItem[] | null =
+    !cellEdit || cellEdit.kind === "assignee" || cellTransitions === null
+      ? null
+      : cellTransitions
+          .filter((t) => t.toStatusName !== cellEdit.task.statusName)
+          .map((t) => ({
+            id: t.id,
+            label: t.toStatusName,
+            lead: <StatusGlyph category={t.toCategory} />,
+            hint: t.fields.some((f) => !f.optional) ? "cần nhập thêm" : t.name !== t.toStatusName ? t.name : undefined,
+          }));
+  const cellEditor =
+    cellEdit &&
+    (cellEdit.kind === "assignee" ? (
+      <PersonPicker
+        anchor={cellEdit.rect}
+        people={users ?? null}
+        task={assignLoad ? cellEdit.task : null}
+        load={assignLoad}
+        calendar={calendar}
+        currentAccountId={cellEdit.task.assigneeAccountId}
+        meAccountId={myAccountId}
+        placeholder={`Giao ${cellEdit.task.id} cho…`}
+        onClose={() => setCellEdit(null)}
+        onPick={(accountId) => {
+          const { task } = cellEdit;
+          setCellEdit(null);
+          onAssign?.(task.id, accountId);
+        }}
+      />
+    ) : (
+      <CellPicker
+        anchor={cellEdit.rect}
+        items={cellItems}
+        loading={cellTransitions === null}
+        placeholder={`Chuyển ${cellEdit.task.id} sang…`}
+        onClose={() => setCellEdit(null)}
+        onPick={(it) => {
+          const { task } = cellEdit;
+          setCellEdit(null);
+          onTransition?.(task, it.id, it.label);
+        }}
+      />
+    ));
+  const boxTask = boxEdit ? byId.get(boxEdit.id) : undefined;
+  const boxEditor = boxEdit && boxTask && (
+    <WbsCellEditor
+      key={`${boxEdit.id}:${boxEdit.kind}`}
+      kind={boxEdit.kind}
+      anchor={boxEdit.rect}
+      initial={initialOf(boxTask, boxEdit.kind)}
+      base={boxEdit.kind === "due" ? (boxTask.startDate ?? undefined) : undefined}
+      onCommit={(value, move) => commitBox(boxEdit, value, move)}
+      onCancel={() => {
+        setBoxEdit(null);
+        setCursor({ id: boxEdit.id, kind: boxEdit.kind });
       }}
     />
   );
+
+  // F2 edits the name (or the cell the last edit ended on) of the selected row; Enter does the same once there
+  // is such a cell, and opens the task otherwise. Never while typing or with a layer open.
+  const keyState = useRef({ selectedId, selectedIds, cursor, columnIds, onOpenEdit });
+  keyState.current = { selectedId, selectedIds, cursor, columnIds, onOpenEdit };
+  const cellKeys = useRef({ rowById, kindsOf, openCell });
+  cellKeys.current = { rowById, kindsOf, openCell };
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "F2" && e.key !== "Enter") return;
+      if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+      if (isTypingTarget(e.target) || overlayOpen()) return;
+      if (e.key === "Enter" && (e.target as HTMLElement | null)?.closest?.("button, a, summary, [role=menuitem]")) return;
+      const k = keyState.current;
+      const id = k.selectedId;
+      if (!id || k.selectedIds.size > 1) return;
+      const row = cellKeys.current.rowById.get(id);
+      if (!row) return;
+      const stops = stopsFor(cellKeys.current.kindsOf(row), k.columnIds);
+      const here = k.cursor && k.cursor.id === id && stops.includes(k.cursor.kind) ? k.cursor.kind : null;
+      if (e.key === "F2" || here) {
+        const kind = here ?? stops[0];
+        if (!kind) return;
+        e.preventDefault();
+        cellKeys.current.openCell(id, kind);
+      } else {
+        e.preventDefault();
+        k.onOpenEdit(row.task);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // A connection made by dragging from the dot at a bar end: say what was joined, with the way back.
+  async function connect(successorId: string, predecessorId: string, type: DependencyType) {
+    const already = tasksRef.current.find((t) => t.id === successorId)?.predecessors.some((p) => p.taskId === predecessorId && p.type === type);
+    await onAddDependency(successorId, predecessorId, type);
+    if (already) return;
+    // The workspace applies the answer to its state a tick after its promise settles.
+    await new Promise((r) => setTimeout(r, 0));
+    const joined = tasksRef.current.find((t) => t.id === successorId)?.predecessors.some((p) => p.taskId === predecessorId && p.type === type);
+    if (!joined) return;
+    toast(`Đã nối ${predecessorId} → ${successorId} (${type})`, {
+      action: { label: "Hoàn tác", run: () => void onDeleteDependency(successorId, predecessorId, type) },
+    });
+  }
 
   // "T" anywhere in the workspace (ProjectWorkspace's keyboard layer) scrolls the chart to today.
   const goToTodayRef = useRef(goToToday);
@@ -1136,6 +1421,13 @@ export default function GanttView({
     window.addEventListener("gms:gantt-today", onToday);
     return () => window.removeEventListener("gms:gantt-today", onToday);
   }, []);
+  // The first time the plan is on screen it opens at today (a third of the way in), not at the oldest bar.
+  const openedAtToday = useRef(false);
+  useEffect(() => {
+    if (openedAtToday.current || bodySize.width <= 0 || rows.length === 0) return;
+    openedAtToday.current = true;
+    goToTodayRef.current(true);
+  }, [bodySize.width, rows.length]);
 
   /* ---- a big list is drawn a window at a time (ganttWindow.ts) ---- */
   const windowed = isWindowed(rows.length);
@@ -1196,6 +1488,79 @@ export default function GanttView({
     [windowed, allGanttTasks, drawn]
   );
 
+  // Week view's axis says "W44", an ISO week number in English. Each column is named by the date its week
+  // starts on instead ("02/11"), the same as the resource tab's week columns. The library numbers a column by
+  // its position, and its first column is a fixed distance before the earliest bar (weekAxisStart).
+  const weekOrigin = useMemo(() => {
+    let min: Date | null = null;
+    for (const t of ganttTasks) if (!min || t.start < min) min = t.start;
+    return min ? weekAxisStart(toIso(min)) : null;
+  }, [ganttTasks]);
+  useEffect(() => {
+    if (!bodyEl || viewMode !== ViewMode.Week || !weekOrigin) return;
+    const skipEvery = columnWidth < 46 ? 2 : 1;
+    function relabel() {
+      bodyEl!.querySelectorAll<SVGTextElement>("text._9w8d5").forEach((el) => {
+        const raw = el.dataset.fullLabel ?? el.textContent ?? "";
+        if (!/^W\d+$/.test(raw)) return;
+        if (!el.dataset.fullLabel) el.dataset.fullLabel = raw;
+        const i = Math.round(parseFloat(el.getAttribute("x") ?? "0") / columnWidth);
+        const next = i % skipEvery === 0 ? weekColumnLabel(shiftDay(weekOrigin!, 7 * i)) : "";
+        if (el.textContent !== next) el.textContent = next;
+      });
+    }
+    relabel();
+    const observer = new MutationObserver(relabel);
+    observer.observe(bodyEl, { subtree: true, childList: true, characterData: true });
+    return () => observer.disconnect();
+  }, [bodyEl, viewMode, weekOrigin, columnWidth]);
+
+  // A label drawn beside a short bar runs on until it meets whatever lies to its right. It is cut at
+  // MAX_OUTSIDE_LABEL px with an ellipsis; the whole name stays in the tooltip and the table.
+  useEffect(() => {
+    if (!bodyEl) return;
+    let frame = 0;
+    // Measuring a text forces layout, and the label only depends on its own text: one that still reads what
+    // this wrote last needs no second look (measuring all of them on every scroll made frames 600 ms long).
+    function clip() {
+      frame = 0;
+      bodyEl!.querySelectorAll<SVGTextElement>("text._3KcaM").forEach((el) => {
+        const cur = el.textContent ?? "";
+        if (el.dataset.clipped !== undefined && cur === el.dataset.clipped) return;
+        // What React last wrote is the full name; what this wrote last is the cut one.
+        const full = el.dataset.full === undefined || (cur !== el.dataset.clipped && cur !== el.dataset.full) ? cur : el.dataset.full;
+        let next = full;
+        if (full.length > 0 && el.getComputedTextLength() > MAX_OUTSIDE_LABEL) {
+          let n = full.length;
+          do {
+            n = Math.max(1, n - Math.max(1, Math.ceil(n / 8)));
+            next = full.slice(0, n).trimEnd() + "…";
+            el.textContent = next;
+          } while (n > 1 && el.getComputedTextLength() > MAX_OUTSIDE_LABEL);
+        }
+        el.dataset.full = full;
+        el.dataset.clipped = next;
+        if (el.textContent !== next) el.textContent = next;
+      });
+    }
+    const schedule = () => {
+      if (!frame)
+        frame = requestAnimationFrame(() => {
+          clip();
+          observer.takeRecords();
+        });
+    };
+    const observer = new MutationObserver(schedule);
+    observer.observe(bodyEl, { subtree: true, childList: true, characterData: true });
+    clip();
+    // What clip() itself wrote is not news.
+    observer.takeRecords();
+    return () => {
+      observer.disconnect();
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, [bodyEl]);
+
   // Bumped whenever a bar's actual on-screen position could have changed, so
   // DependencyOverlay knows when to re-measure. Own dates in ms rather than
   // object identity, since ganttTasks gets a new array/Date identity on every
@@ -1240,12 +1605,25 @@ export default function GanttView({
   const buildTable = useCallback(
     (list: WbsRow[]) => (
     <div className="wbs-rows" style={{ width: listWidth }}>
-      {list.map(({ task, depth, hasChildren }) => (
+      {list.map((row) => {
+        const { task, depth, hasChildren } = row;
+        const rowSelected = selectedIds.has(task.id) || task.id === selectedId;
+        const kinds = kindsOf(row);
+        const loneSelected = rowSelected && selectedIds.size <= 1;
+        const cursorKind = rowSelected && cursor?.id === task.id ? cursor.kind : boxEdit?.id === task.id ? boxEdit.kind : null;
+        /** A click on a cell of the row that was already selected edits it; on any other row it only selects. */
+        const editClick = (kind: CellKind) => (e: React.MouseEvent<HTMLElement>) => {
+          if (!loneSelected || e.ctrlKey || e.metaKey || e.shiftKey || !kinds.has(kind)) return;
+          e.stopPropagation();
+          armEdit(task, kind, e.currentTarget);
+        };
+        return (
         <div
           key={task.id}
-          className={`wbs-row ${matchIds?.has(task.id) ? "wbs-row-match" : ""} ${
-            selectedIds.has(task.id) || task.id === selectedId ? "wbs-row-selected" : ""
-          } ${showCriticalPath && criticalIds.has(task.id) ? "wbs-row-critical" : ""}`}
+          data-row-id={task.id}
+          className={`wbs-row ${matchIds?.has(task.id) ? "wbs-row-match" : ""} ${rowSelected ? "wbs-row-selected" : ""} ${
+            showCriticalPath && criticalIds.has(task.id) ? "wbs-row-critical" : ""
+          }${unscheduledIds.has(task.id) ? " is-unscheduled" : ""}`}
           style={{ height: ROW_HEIGHT }}
           onClick={(e) =>
             onSelect(
@@ -1254,14 +1632,23 @@ export default function GanttView({
               rows.map((r) => r.task.id)
             )
           }
-          onDoubleClick={() => onOpenEdit(task)}
+          onDoubleClick={() => {
+            cancelArmedEdit();
+            setBoxEdit(null);
+            onOpenEdit(task);
+          }}
         >
           <div className="wbs-col wbs-col-key">
             <a href={task.jiraUrl} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
               {task.id}
             </a>
           </div>
-          <div className="wbs-col wbs-col-name" style={{ paddingLeft: depth * INDENT_STEP }}>
+          <div
+            className={`wbs-col wbs-col-name${cursorKind === "summary" ? " wbs-cell-cursor" : ""}`}
+            data-cell="summary"
+            style={{ paddingLeft: depth * INDENT_STEP }}
+            onClick={editClick("summary")}
+          >
             <span className="wbs-expander-slot">
               {hasChildren && (
                 <button
@@ -1290,10 +1677,15 @@ export default function GanttView({
           </div>
           {columns.map((c) => {
             const editable = (c.id === "assignee" && onAssign && isAssignableType(task.issueType)) || (c.id === "status" && onTransition);
+            const kind = KIND_OF_COLUMN[c.id];
+            const boxKind = !editable && kind && kinds.has(kind) ? kind : null;
             return (
               <div
                 key={c.id}
-                className={`wbs-col wbs-col-extra wbs-cell-${c.id} ${c.align === "right" ? "is-right" : ""}${editable ? " is-editable" : ""}`}
+                data-cell={c.id}
+                className={`wbs-col wbs-col-extra wbs-cell-${c.id} ${c.align === "right" ? "is-right" : ""}${editable ? " is-editable" : ""}${
+                  cursorKind !== null && cursorKind === kind ? " wbs-cell-cursor" : ""
+                }`}
                 style={{ width: c.width }}
                 title={editable ? (c.id === "assignee" ? "Bấm để giao người" : "Bấm để đổi trạng thái") : undefined}
                 onClick={
@@ -1302,7 +1694,9 @@ export default function GanttView({
                         e.stopPropagation();
                         openCellEditor(task, c.id as "assignee" | "status", (e.currentTarget as HTMLElement).getBoundingClientRect());
                       }
-                    : undefined
+                    : boxKind
+                      ? editClick(boxKind)
+                      : undefined
                 }
                 // A double-click still opens the task (the row's handler — CLAUDE.md: double-click
                 // anywhere on a row must open it); the picker its first click opened goes away.
@@ -1313,12 +1707,13 @@ export default function GanttView({
             );
           })}
         </div>
-      ))}
+        );
+      })}
     </div>
     ),
-    // openCellEditor only sets state; onAssign/onTransition decide whether a cell is editable.
+    // openCellEditor and the edit helpers only set state; onAssign/onTransition/onUpdate decide what is editable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [rows, matchIds, selectedIds, selectedId, showCriticalPath, criticalIds, listWidth, columns, collapsed, ranges, today, sla, onSelect, onOpenEdit, onToggleCollapse, onAssign, onTransition]
+    [rows, matchIds, selectedIds, selectedId, showCriticalPath, criticalIds, listWidth, columns, collapsed, ranges, today, sla, onSelect, onOpenEdit, onToggleCollapse, onAssign, onTransition, onUpdate, unscheduledIds, cursor, boxEdit]
   );
   const table = useMemo(() => (windowed ? null : buildTable(rows)), [windowed, buildTable, rows]);
   const rowIndex = useMemo(() => (windowed ? new Map(rows.map((r, i) => [r.task.id, i])) : null), [windowed, rows]);
@@ -1358,41 +1753,17 @@ export default function GanttView({
                 Trễ SLA{slaBreached ? ` (${slaBreached.size})` : ""}
               </button>
             )}
-            {unscheduled.length > 0 && (
-            <Popover
-              className="tf-btn warning-pill"
-              role="menu"
-              menuLabel="Công việc chưa có ngày"
-              title="Việc chưa có ngày bắt đầu"
-              label={
-                <>
-                  <Icon name="alert" size={14} />
-                  Chưa có ngày ({unscheduled.length})
-                </>
-              }
-            >
-              {({ close }) => (
-                <>
-                  <div className="menu-heading">Chưa có ngày</div>
-                  <div className="menu-scroll">
-                    {unscheduled.map((t) => (
-                      <button
-                        key={t.id}
-                        type="button"
-                        role="menuitem"
-                        className="unscheduled-item"
-                        onClick={() => {
-                          close();
-                          onOpenEdit(t);
-                        }}
-                      >
-                        <b>{t.id}</b> {t.summary}
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
-            </Popover>
+            {(unscheduledIds.size > 0 || onlyUnscheduled) && (
+              <button
+                type="button"
+                className={`tf-btn warning-pill${unscheduledOnly ? " is-on" : ""}`}
+                aria-pressed={unscheduledOnly}
+                onClick={() => setOnlyUnscheduled((v) => !v)}
+                title="Chỉ hiện việc chưa có ngày"
+              >
+                <Icon name="alert" size={14} />
+                <span className="fb-label">Chưa có ngày</span> ({unscheduledIds.size})
+              </button>
             )}
           </>
         }
@@ -1412,8 +1783,9 @@ export default function GanttView({
               ))}
             </div>
             <span className="tb-today">
-              <button type="button" className="tb-btn" onClick={goToToday} title="Hôm nay (T)">
-                Hôm nay
+              <button type="button" className="tb-btn" onClick={() => goToToday()} title="Cuộn tới hôm nay (T)">
+                <Icon name="calendar" size={14} className="tb-today-icon" />
+                <span className="fb-label">Về hôm nay</span>
               </button>
               {todayNote && (
                 <span className="gantt-today-note" role="status">
@@ -1658,9 +2030,7 @@ export default function GanttView({
       <div className="gantt-body" ref={bodyRef} style={{ "--wbs-key-w": `${keyColWidth}px` } as React.CSSProperties}>
         {rows.length === 0 ? (
           <div className="empty-state">
-            {matchIds?.size === 0
-              ? "Không có công việc nào khớp bộ lọc."
-              : "Chưa có task nào có ngày bắt đầu để hiển thị trên Gantt. Hãy tạo task hoặc đặt ngày bắt đầu cho task hiện có."}
+            {matchIds?.size === 0 ? "Không có công việc nào khớp bộ lọc." : "Chưa có việc nào trong dự án."}
           </div>
         ) : (
           bodySize.width > 0 && (
@@ -1729,6 +2099,7 @@ export default function GanttView({
                 onMouseDown={startDrag}
               />
               {cellEditor}
+              {boxEditor}
               {onQuickCreate && !windowed && HEADER_HEIGHT + (rows.length + 1) * ROW_HEIGHT < bodySize.height && (
                 <AddRow
                   top={HEADER_HEIGHT + rows.length * ROW_HEIGHT}
@@ -1753,7 +2124,8 @@ export default function GanttView({
                 rows={rowTasks}
                 showArrows={showDependencies}
                 measureKey={measureKey}
-                onAddDependency={onAddDependency}
+                hidden={unscheduledIds}
+                onAddDependency={connect}
                 onEditDependency={onEditDependency}
                 onDeleteDependency={onDeleteDependency}
                 onFixViolation={(id, start) => {
@@ -1761,6 +2133,18 @@ export default function GanttView({
                   if (t) onScheduleChange(id, start, Math.max(1, t.durationDays));
                 }}
               />
+              {unscheduledIds.size > 0 && (
+                <UnscheduledLayer
+                  bodyEl={bodyEl}
+                  rows={rowTasks}
+                  ranges={ranges}
+                  anchor={placeholderDay}
+                  rowHeight={ROW_HEIGHT}
+                  pxPerDay={columnWidth / DAYS_PER_COLUMN[viewMode]}
+                  measureKey={measureKey}
+                  onSchedule={onScheduleChange}
+                />
+              )}
               {showBaseline && (
                 <BaselineOverlay
                   bodyEl={bodyEl}

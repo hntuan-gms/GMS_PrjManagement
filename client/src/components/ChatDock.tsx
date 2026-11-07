@@ -4,6 +4,7 @@ import { ACCEPT, addFiles, encodeFile, formatSize, mimeOf } from "../chatAttachm
 import { streamChat, type RetryMode } from "../chatStream";
 import type { ViewFilterSpec } from "../viewFilter";
 import ChatMarkdown from "./ChatMarkdown";
+import { Icon } from "./Icons";
 import type { ChatMessage, ChatSessionSummary, Money, UsageStats } from "../types";
 import { useDialogs } from "./dialogContext";
 
@@ -453,18 +454,18 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
           title="Các cuộc trò chuyện của bạn"
           aria-expanded={showSessions}
         >
-          <span aria-hidden="true">☰</span>
+          <Icon name="menu" size={14} />
           <span className="chat-session-title">{currentTitle}</span>
         </button>
         <div className="chat-dock-header-actions">
           <button className="chat-icon-btn" onClick={newChat} title="Cuộc trò chuyện mới" aria-label="Cuộc trò chuyện mới">
-            ＋
+            <Icon name="plus" size={14} />
           </button>
-          <button className="chat-icon-btn" onClick={() => setShowUsage((v) => !v)} title="Thống kê token">
-            ◷
+          <button className="chat-icon-btn" onClick={() => setShowUsage((v) => !v)} title="Thống kê token" aria-label="Thống kê token">
+            <Icon name="clock" size={14} />
           </button>
-          <button className="chat-icon-btn" onClick={() => setOpen(false)} title="Thu gọn">
-            ▾
+          <button className="chat-icon-btn" onClick={() => setOpen(false)} title="Thu gọn" aria-label="Thu gọn">
+            <Icon name="chevronDown" size={14} />
           </button>
         </div>
       </div>
@@ -506,10 +507,10 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
                     </button>
                   )}
                   <button className="chat-icon-btn" onClick={() => setRenaming(x.id)} title="Đổi tên" aria-label="Đổi tên">
-                    ✎
+                    <Icon name="edit" size={14} />
                   </button>
                   <button className="chat-icon-btn" onClick={() => deleteSession(x.id)} title="Xoá" aria-label="Xoá">
-                    ✕
+                    <Icon name="x" size={14} />
                   </button>
                 </li>
               ))}
@@ -611,7 +612,7 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
               <ul className="chat-files">
                 {m.attachments!.map((a, i) => (
                   <li key={i} title={`${a.mimeType} · ${formatSize(a.size)}`}>
-                    <span aria-hidden="true">📎</span> {a.name}
+                    <Icon name="paperclip" size={12} /> {a.name}
                   </li>
                 ))}
               </ul>
@@ -653,7 +654,9 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
             )}
             {m.reportId && (
               <button className="chat-plan-card chat-report-card" onClick={() => onOpenReport(m.reportId!)}>
-                <span className="chat-plan-icon">▤</span>
+                <span className="chat-plan-icon">
+                  <Icon name="pulse" size={16} />
+                </span>
                 <span>
                   <strong>Báo cáo tiến độ · {HEALTH_TEXT[m.reportHealth ?? ""] ?? ""}</strong>
                   <br />
@@ -663,7 +666,9 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
             )}
             {m.planRunId && (
               <button className="chat-plan-card" onClick={() => onOpenPlan(m.planRunId!)}>
-                <span className="chat-plan-icon">▦</span>
+                <span className="chat-plan-icon">
+                  <Icon name="plan" size={16} />
+                </span>
                 <span>
                   <strong>Kế hoạch đã sẵn sàng</strong>
                   <br />
@@ -694,7 +699,9 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
             )}
             {live.report && (
               <button className="chat-plan-card chat-report-card" onClick={() => onOpenReport(live.report!.id)}>
-                <span className="chat-plan-icon">▤</span>
+                <span className="chat-plan-icon">
+                  <Icon name="pulse" size={16} />
+                </span>
                 <span>
                   <strong>Báo cáo tiến độ · {HEALTH_TEXT[live.report.health ?? ""] ?? ""}</strong>
                   <br />
@@ -704,7 +711,9 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
             )}
             {live.planRunId && (
               <button className="chat-plan-card" onClick={() => onOpenPlan(live.planRunId!)}>
-                <span className="chat-plan-icon">▦</span>
+                <span className="chat-plan-icon">
+                  <Icon name="plan" size={16} />
+                </span>
                 <span>
                   <strong>{live.planItemCount} công việc đã dựng</strong>
                   <br />
@@ -729,7 +738,7 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
             <ul className="chat-files">
               {pending.map((f, i) => (
                 <li key={`${f.name}-${i}`} title={`${mimeOf(f)} · ${formatSize(f.size)}`}>
-                  <span aria-hidden="true">📎</span> {f.name} <small>{formatSize(f.size)}</small>
+                  <Icon name="paperclip" size={12} /> {f.name} <small>{formatSize(f.size)}</small>
                   <button
                     className="chat-file-remove"
                     onClick={() => {
@@ -738,7 +747,7 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
                     }}
                     aria-label={`Bỏ ${f.name}`}
                   >
-                    ✕
+                    <Icon name="x" size={14} />
                   </button>
                 </li>
               ))}
@@ -767,7 +776,7 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
           title="Đính kèm ảnh, PDF hoặc văn bản (tối đa 4 tệp, 5 MB mỗi tệp). Tệp chỉ dùng cho tin nhắn này và không được lưu."
           aria-label="Đính kèm tệp"
         >
-          📎
+          <Icon name="paperclip" size={16} />
         </button>
         <textarea
           rows={1}
@@ -794,8 +803,8 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
             ■
           </button>
         ) : (
-          <button className="chat-send primary" onClick={send} disabled={!input.trim() && pending.length === 0}>
-            ➤
+          <button className="chat-send primary" onClick={send} disabled={!input.trim() && pending.length === 0} title="Gửi" aria-label="Gửi">
+            <Icon name="send" size={16} />
           </button>
         )}
       </div>
@@ -814,7 +823,7 @@ function ThinkingBlock({ text, live = false }: { text: string; live?: boolean })
     <div className={`chat-thinking ${live ? "chat-thinking-live" : ""}`}>
       <button className="chat-thinking-toggle" onClick={() => setExpanded((v) => !v)}>
         {live && <span className="chat-spinner" />}
-        {expanded ? "▾" : "▸"} Suy nghĩ
+        <Icon name={expanded ? "chevronDown" : "chevronRight"} size={13} /> Suy nghĩ
       </button>
       {expanded ? (
         <pre className="chat-thinking-full">{text}</pre>

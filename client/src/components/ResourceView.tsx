@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { buildResourceLoad, todayIso, type Granularity } from "../resourceAllocation";
+import { assignHints } from "../assignHints";
+import { monthLabels, shortRange, weekColumnLabel } from "../dateLabels";
+import { buildResourceLoad, firstOverloadedDate, todayIso, type Granularity } from "../resourceAllocation";
 import {
   columnSpans,
   currentPreset,
@@ -7,24 +9,31 @@ import {
   sortPeople,
   PEOPLE_SORT_LABEL,
   type PeopleSort,
+  overloadWindow,
   pct,
   peopleCounts,
   placeBar,
   RANGE_PRESETS,
   rangeForPreset,
+  summaryWindow,
+  taskBarDates,
   type ColumnSpan,
   type PeopleView,
   type RangePresetId,
 } from "../resourceColumns";
+import { toast } from "../toast";
 import { formatDate, monthLabel, scrubExtent, type MonthLabel } from "../resourceTimeline";
 import { DEFAULT_PIXELS_PER_DAY, pickScale, zoomByWheel } from "../timeZoom";
 import type { JiraUser, ResourceAbsence, ResourceProfile, ResourcePool, Task } from "../types";
 import { csvName, downloadCsv } from "../csv";
 import { buildEpicIndex, isTaskFiltering, matchesTaskFilter, type TaskFilter } from "../taskFilter";
 import FilterBar from "./FilterBar";
+import DateField from "./DateField";
 import { Icon } from "./Icons";
 import InfoTip from "./InfoTip";
 import Popover from "./Popover";
+import ResourceModes from "./ResourceModes";
+import type { ResourceMode } from "../lenses";
 import ResourcePersonBlock from "./ResourcePersonBlock";
 import ResourceProfileDrawer from "./ResourceProfileDrawer";
 import ResourceUnassigned, { type DragState } from "./ResourceUnassigned";
@@ -49,6 +58,9 @@ interface Props {
   myAccountId: string;
   /** Issue keys Jira returned for the filter's JQL (null until they arrive). */
   jqlKeys?: Set<string> | null;
+  /** Which of the lens's modes is showing; "Giờ đã ghi" is drawn by the workspace, not here. */
+  mode: "load" | "skills";
+  onModeChange: (m: ResourceMode) => void;
 }
 
 /** Sentinel for the "remove from whoever holds it" drop zone. */
@@ -97,6 +109,8 @@ export default function ResourceView({
   jqlKeys,
   onFilterChange,
   myAccountId,
+  mode,
+  onModeChange,
 }: Props) {
   const [drag, setDrag] = useState<DragState | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
@@ -110,8 +124,8 @@ export default function ResourceView({
   const [query, setQuery] = useState("");
   const [range, setRange] = useState<{ from: string; to: string } | null>(null);
   const [unassignedOpen, setUnassignedOpen] = useState(false);
-  // The heatmap (load over time) or the skills matrix (who can do what): two views of the same people.
-  const [mode, setMode] = useState<"load" | "skills">("load");
+  // The unassigned row under the pointer: its dates are marked on the people grid, to see who is free.
+  const [hoverTask, setHoverTask] = useState<Task | null>(null);
   // The one zoom variable (timeZoom.ts): which of day / week / month columns show, and how wide they
   // are, both come from it — the same gesture and the same mechanism as the Gantt's.
   const [pixelsPerDay, setPixelsPerDay] = useState(DEFAULT_PIXELS_PER_DAY.week);
@@ -188,12 +202,33 @@ export default function ResourceView({
 
   const profilePerson = load.people.find((p) => p.accountId === profileId) ?? null;
 
-  // Everyone on the project, not just the rows on screen: with "Có việc" on,
-  // the idle members are exactly who you would hand something to.
-  const assignable = useMemo(
-    () => users.map((u) => ({ accountId: u.accountId, displayName: u.displayName })),
-    [users]
-  );
+  const soonWindow = useMemo(() => overloadWindow(today), [today]);
+  const summary = useMemo(() => summaryWindow(range, today), [range, today]);
+  const hoverBand = useMemo(() => {
+    const dates = hoverTask ? taskBarDates(hoverTask) : null;
+    return dates ? placeBar(spans, dates.start, dates.end) : null;
+  }, [hoverTask, spans]);
+
+  /**
+   * Every assignment from this tab goes through here. It is not blocked and not asked about (as with the
+   * assistant's auto-assign, nobody is ruled out for being busy), but handing work to someone who is
+   * already full inside its dates says so, with the one click that undoes it.
+   */
+  function assign(taskId: string, accountId: string | null) {
+    const t = tasks.find((x) => x.id === taskId);
+    const previous = t?.assigneeAccountId ?? null;
+    let note: string | null = null;
+    if (t && accountId && accountId !== previous) {
+      const who = users.find((u) => u.accountId === accountId) ?? load.people.find((p) => p.accountId === accountId);
+      const h = who ? assignHints(t, [{ accountId, displayName: who.displayName, avatarUrl: null }], load, calendar)[0] : undefined;
+      const dates = taskBarDates(t);
+      if (who && h && h.ranged && h.conflictDays > 0 && dates) {
+        note = `${who.displayName} đã kín ${h.conflictDays} ngày trong ${shortRange(dates.start, dates.end)}`;
+      }
+    }
+    onAssign(taskId, accountId);
+    if (note) toast(note, { action: { label: "Hoàn tác", run: () => onAssign(taskId, previous) } });
+  }
 
   function exportCsv() {
     const header = ["Thành viên", "Vai trò", "Giờ/ngày", ...load.dates];
@@ -272,6 +307,24 @@ export default function ResourceView({
     setPixelsPerDay(DEFAULT_PIXELS_PER_DAY[g]);
   }
 
+  /** The red badge by a name: open the person and bring their first over-capacity day (from today on, else the first at all) into view. */
+  function jumpToOverload(accountId: string) {
+    const p = load.people.find((x) => x.accountId === accountId);
+    setExpanded((cur) => (cur.has(accountId) ? cur : new Set(cur).add(accountId)));
+    if (!p) return;
+    const first = firstOverloadedDate(p.days, today) ?? firstOverloadedDate(p.days, span.from);
+    const sc = scrollRef.current;
+    if (!sc) return;
+    if (first) scrollToDate(sc, first);
+    // Vertical after the row has opened: the person's row goes just under the sticky header.
+    requestAnimationFrame(() => {
+      const block = sc.querySelector<HTMLElement>(`[data-person="${CSS.escape(accountId)}"]`);
+      const head = sc.querySelector<HTMLElement>(".rv-header");
+      if (!block) return;
+      sc.scrollTop += block.getBoundingClientRect().top - sc.getBoundingClientRect().top - (head?.offsetHeight ?? 0);
+    });
+  }
+
   const skillSuggestions = useMemo(
     () => [...new Set((pool?.profiles ?? []).flatMap((p) => p.skills))].sort((a, b) => a.localeCompare(b, "vi")),
     [pool]
@@ -329,7 +382,7 @@ export default function ResourceView({
   }
 
   function dropOn(accountId: string | null) {
-    if (drag && canDropOn(accountId)) onAssign(drag.taskId, accountId);
+    if (drag && canDropOn(accountId)) assign(drag.taskId, accountId);
     endDrag();
   }
 
@@ -351,24 +404,7 @@ export default function ResourceView({
         total={tasks.length}
         leading={
           <>
-            <div className="segmented-control rv-modes" role="tablist" aria-label="Kiểu xem nguồn lực">
-              <button
-                role="tab"
-                aria-selected={mode === "load"}
-                className={`segmented-btn ${mode === "load" ? "active" : ""}`}
-                onClick={() => setMode("load")}
-              >
-                Mức tải
-              </button>
-              <button
-                role="tab"
-                aria-selected={mode === "skills"}
-                className={`segmented-btn ${mode === "skills" ? "active" : ""}`}
-                onClick={() => setMode("skills")}
-              >
-                Kỹ năng
-              </button>
-            </div>
+            <ResourceModes mode={mode} onChange={onModeChange} canPlan />
             {mode === "load" && (
               <div className="tf-search rv-member-search">
                 <Icon name="search" size={14} className="tf-search-icon" />
@@ -391,13 +427,32 @@ export default function ResourceView({
         trailing={
           mode === "load" ? (
             <div className="rv-range">
+              <div
+                className="seg-group rv-granularity"
+                role="group"
+                aria-label="Chia theo"
+                title="Mỗi cột là một ngày, tuần hay tháng. Ctrl + cuộn (hoặc chụm hai ngón) để phóng to / thu nhỏ trục thời gian."
+              >
+                {GRANULARITIES.map((g) => (
+                  <button
+                    key={g.value}
+                    type="button"
+                    data-g={g.value}
+                    className={granularity === g.value ? "active" : ""}
+                    aria-pressed={granularity === g.value}
+                    onClick={() => chooseGranularity(g.value)}
+                  >
+                    {g.label}
+                  </button>
+                ))}
+              </div>
               <button
                 type="button"
                 className="tb-btn"
                 onClick={() => scrollEl && scrollToDate(scrollEl, today)}
                 title="Cuộn bảng tới ngày hôm nay"
               >
-                Hôm nay
+                Về hôm nay
               </button>
               <Popover
                 className="tf-btn rv-preset"
@@ -428,38 +483,26 @@ export default function ResourceView({
                     <div className="rv-exact">
                       <label>
                         <span>Từ</span>
-                        <input
-                          type="date"
+                        <DateField
                           value={span.from}
+                          ariaLabel="Khoảng từ"
                           // Either end dragged past the other takes the other with it, rather than being refused.
-                          onChange={(e) => e.target.value && setRange({ from: e.target.value, to: e.target.value > span.to ? e.target.value : span.to })}
+                          onChange={(iso) => iso && setRange({ from: iso, to: iso > span.to ? iso : span.to })}
                         />
                       </label>
                       <label>
                         <span>Đến</span>
-                        <input
-                          type="date"
+                        <DateField
                           value={span.to}
-                          onChange={(e) => e.target.value && setRange({ from: e.target.value < span.from ? e.target.value : span.from, to: e.target.value })}
+                          ariaLabel="Khoảng đến"
+                          base={span.from}
+                          onChange={(iso) => iso && setRange({ from: iso < span.from ? iso : span.from, to: iso })}
                         />
                       </label>
                     </div>
                   </>
                 )}
               </Popover>
-              <select
-                className="rv-granularity"
-                value={granularity}
-                onChange={(e) => chooseGranularity(e.target.value as Granularity)}
-                aria-label="Mỗi cột là"
-                title="Mỗi cột của bản đồ nhiệt là một ngày, tuần hay tháng. Ctrl + cuộn (hoặc chụm hai ngón) để phóng to / thu nhỏ trục thời gian."
-              >
-                {GRANULARITIES.map((g) => (
-                  <option key={g.value} value={g.value}>
-                    Cột: {g.label}
-                  </option>
-                ))}
-              </select>
               <button
                 type="button"
                 className="tb-btn"
@@ -493,7 +536,8 @@ export default function ResourceView({
                   aria-pressed={peopleView === p.view}
                   onClick={() => setPeopleView(p.view)}
                 >
-                  {p.label} ({p.n})
+                  {p.label}
+                  {p.n > 0 ? ` (${p.n})` : ""}
                 </button>
               ))}
             </div>
@@ -562,6 +606,13 @@ export default function ResourceView({
                   today={today}
                   memberNote={<MemberSourceTip pool={pool} count={load.people.length} />}
                 />
+                {hoverBand && (
+                  <div
+                    className="rv-hover-band"
+                    aria-hidden="true"
+                    style={{ "--from": hoverBand.left, "--len": hoverBand.width } as React.CSSProperties}
+                  />
+                )}
                 {visiblePeople.map((person) => (
                   <ResourcePersonBlock
                     key={person.accountId}
@@ -573,8 +624,13 @@ export default function ResourceView({
                     onToggle={() => toggleExpanded(person.accountId)}
                     onOpenProfile={() => setProfileId(person.accountId)}
                     onOpenEdit={onOpenEdit}
-                    members={assignable}
-                    onAssign={onAssign}
+                    people={users}
+                    load={load}
+                    calendar={calendar}
+                    onAssign={assign}
+                    overloadWindow={soonWindow}
+                    summary={summary}
+                    onJumpOverload={() => jumpToOverload(person.accountId)}
                     onDragTask={beginDrag}
                     droppable={canDropOn(person.accountId)}
                     isDropTarget={dropTarget === person.accountId}
@@ -592,12 +648,15 @@ export default function ResourceView({
             onClose={() => setUnassignedOpen(false)}
             anchorRef={unassignedBtn}
             tasks={load.unassigned}
-            members={assignable}
+            people={users}
+            load={load}
+            calendar={calendar}
+            onHoverTask={setHoverTask}
             drag={drag}
             canDropUnassigned={canDropOn(null)}
             isDropTarget={dropTarget === UNASSIGNED_ZONE}
             onDragStartTask={beginDrag}
-            onAssign={onAssign}
+            onAssign={assign}
             onOpenEdit={onOpenEdit}
             onDragOverZone={() => setDropTarget(UNASSIGNED_ZONE)}
             onDragLeaveZone={() => setDropTarget((cur) => (cur === UNASSIGNED_ZONE ? null : cur))}
@@ -761,11 +820,7 @@ function HeatmapHeader({
               className={`rv-cell rv-head-cell ${today >= start && today <= end ? "is-today" : ""} ${holiday ? "is-holiday" : ""}`}
               title={holiday ? `${when} · Ngày lễ: ${holiday}` : holidays > 0 ? `${when} · ${holidays} ngày lễ` : when}
             >
-              {granularity === "week"
-                ? `${start.slice(8, 10)}/${start.slice(5, 7)}`
-                : granularity === "month"
-                  ? `Thg ${Number(start.slice(5, 7))}`
-                  : start.slice(8, 10)}
+              {granularity === "week" ? weekColumnLabel(start) : granularity === "month" ? monthLabels(start).tiny : start.slice(8, 10)}
             </div>
           );
         })}

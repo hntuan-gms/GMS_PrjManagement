@@ -1,0 +1,66 @@
+/* Shared pickers and inputs (plan Đợt 0): Avatar, TaskPicker, PersonPicker, TimeInput. Tokens only. */
+
+/* Zero specificity, so the class a spot already uses (bd-avatar, wbs-avatar, rv-avatar) keeps its size and ring. */
+:where(.avatar) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-full);
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--ink-2);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  line-height: 1;
+  overflow: hidden;
+  vertical-align: middle;
+}
+.avatar > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.avatar.is-none {
+  color: var(--ink-3);
+}
+
+.cell-picker.is-wide {
+  width: 320px;
+}
+.tp-key {
+  flex: none;
+  min-width: 56px;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  color: var(--ink-3);
+}
+.pp-avatar {
+  width: 20px;
+  height: 20px;
+}
+.cell-picker-hint {
+  white-space: nowrap;
+}
+.cell-picker-hint.is-risk {
+  color: var(--risk-text);
+}
+.cell-picker-hint.is-ok {
+  color: var(--ok-text);
+}
+
+input.time-input {
+  width: 6ch;
+  min-width: 6ch;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+input.time-input.is-invalid {
+  border-color: var(--risk-line);
+  background: var(--risk-wash);
+  color: var(--risk-text);
+}

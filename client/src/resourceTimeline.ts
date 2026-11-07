@@ -1,4 +1,5 @@
 import { addDays, diffDays, type Granularity } from "./resourceAllocation";
+import { monthLabels } from "./dateLabels";
 import { pct } from "./resourceColumns";
 import type { Task } from "./types";
 
@@ -58,7 +59,8 @@ export function monthLabel(start: string, granularity: Granularity): MonthLabel 
   const year = start.slice(0, 4);
   if (granularity === "month") return { key: year, full: `Năm ${year}`, mid: year, min: `’${year.slice(2)}` };
   const m = Number(start.slice(5, 7));
-  return { key: `${year}-${m}`, full: `Thg ${m}/${year}`, mid: `T${m}/${year.slice(2)}`, min: `T${m}` };
+  const { full, short, tiny } = monthLabels(start);
+  return { key: `${year}-${m}`, full, mid: short, min: tiny };
 }
 
 /* ------------------------------------------------------------ the time axis */

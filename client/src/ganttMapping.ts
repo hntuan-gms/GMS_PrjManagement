@@ -112,7 +112,7 @@ export function resolveRanges(ordered: OrderedTask[]): Map<string, DateRange> {
   return ranges;
 }
 
-function nextDayIso(iso: string): string {
+export function nextDayIso(iso: string): string {
   const d = new Date(iso + "T00:00:00");
   d.setDate(d.getDate() + 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -141,11 +141,24 @@ function nextDayIso(iso: string): string {
  * Anchoring both edges to the same 00:00 keeps them at the identical time-of-day
  * after an equal shift, so the day-count between them can no longer drift.
  */
-export function toGanttTasks(ordered: OrderedTask[], ranges: Map<string, DateRange>, colors?: BarColorContext): GanttTask[] {
+export function toGanttTasks(
+  ordered: OrderedTask[],
+  ranges: Map<string, DateRange>,
+  colors?: BarColorContext,
+  /**
+   * A task with no resolvable date normally has no bar. With this day set it gets an invisible, undraggable
+   * one-day bar there instead, so the library keeps one bar per row and every overlay that reads bars by row
+   * index stays aligned with the table. GanttView passes a day inside the dated bars' span (anchorDay), so the
+   * placeholder never widens the date axis; computeCriticalPath, progress and the cascade never see it
+   * because they read `tasks`, not these.
+   */
+  placeholderDay?: string
+): GanttTask[] {
   return ordered
-    .filter((o) => ranges.has(o.task.id))
+    .filter((o) => placeholderDay !== undefined || ranges.has(o.task.id))
     .map(({ task, hasChildren }) => {
-      const range = ranges.get(task.id)!;
+      const range = ranges.get(task.id);
+      if (!range) return placeholderTask(task, placeholderDay!);
       return {
         id: task.id,
         name: task.summary,
@@ -162,6 +175,28 @@ export function toGanttTasks(ordered: OrderedTask[], ranges: Map<string, DateRan
         ...(colors ? { styles: barStyles(task, hasChildren, colors, range.end) } : {}),
       };
     });
+}
+
+/** Marks a row without dates in the library's own task list: `name` is empty so no label is drawn beside it. */
+export const UNSCHEDULED_BAR_STYLE = {
+  backgroundColor: "transparent",
+  backgroundSelectedColor: "transparent",
+  progressColor: "transparent",
+  progressSelectedColor: "transparent",
+};
+
+function placeholderTask(task: Task, day: string): GanttTask {
+  return {
+    id: task.id,
+    name: "",
+    start: new Date(day + "T00:00:00"),
+    end: new Date(nextDayIso(day) + "T00:00:00"),
+    progress: 0,
+    type: "task",
+    dependencies: [],
+    isDisabled: true,
+    styles: UNSCHEDULED_BAR_STYLE,
+  };
 }
 
 /**

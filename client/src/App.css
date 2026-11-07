@@ -2102,7 +2102,7 @@ button.infotip-btn.is-warn {
 .rv-month-min {
   display: none;
 }
-@container (max-width: 84px) {
+@container (max-width: 96px) {
   .rv-month-full {
     display: none;
   }
@@ -2978,6 +2978,16 @@ button.rv-un-main:active {
 
 .project-row:last-child {
   border-bottom: none;
+}
+
+.project-row.is-active {
+  background: var(--color-sunken);
+}
+
+.project-group-label {
+  padding: 6px 14px 2px;
+  font-size: var(--font-size-sm);
+  color: var(--ink-3);
 }
 
 .project-avatar {
@@ -6376,7 +6386,7 @@ button.bl-toggle:hover:not(:disabled) {
 .bl-goal {
   margin: -4px 12px 8px 30px;
   font-size: var(--font-size-md);
-  color: var(--color-text-secondary);
+  color: var(--ink-2);
 }
 .bl-rows {
   padding: 0 6px 6px;
@@ -10708,7 +10718,8 @@ button.ts-entry-edit:hover:not(:disabled) {
 .sla-period > span:first-child {
   width: 52px;
 }
-.sla-period input[type="time"] {
+.sla-period input[type="time"],
+.sla-period input.time-input {
   width: 120px;
 }
 .sla-remove,

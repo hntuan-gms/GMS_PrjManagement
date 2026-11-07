@@ -1,6 +1,7 @@
 import { useRef, useState, type DragEvent } from "react";
 import { api } from "../api";
-import { canonicalIssueType, idleDays, initials, isOverdue, lanesOf, shortDate, totalWeight, type Swimlane } from "../boardModel";
+import { canonicalIssueType, idleDays, initials, isOverdue, lanesOf, shortDate, totalWeight, unitLabel, type Swimlane } from "../boardModel";
+import { toast } from "../toast";
 import { cardAccent, subtaskProgress, type CardOptions } from "../cardOptions";
 import AssigneePicker, { type Member } from "./AssigneePicker";
 import { Icon } from "./Icons";
@@ -131,6 +132,42 @@ export default function KanbanBoard({ snapshot, issues, swimlane, today, onMove,
     setHint(null);
   }
 
+  /**
+   * Shift+H / Shift+L on a focused card: one column left or right (plan G8). The server resolves
+   * the column to the first of its statuses the workflow lets this issue reach, the same as a
+   * drop; the workflow is asked first so a column it cannot reach says so instead of failing.
+   */
+  async function shiftCard(issue: BoardIssue, dir: -1 | 1) {
+    const from = columnOf(issue);
+    const target = from < 0 ? undefined : columns[from + dir];
+    if (!target) return;
+    const cacheKey = `${issue.key}:${issue.statusId}`;
+    let allowed = transitionCache.current.get(cacheKey) ?? null;
+    if (!allowed) {
+      try {
+        const ts = await api.getTransitions(issue.key);
+        allowed = new Set([issue.statusId, ...ts.map((t) => t.toStatusId)]);
+        transitionCache.current.set(cacheKey, allowed);
+      } catch {
+        // Unknown transitions: try it, and let the server say no.
+      }
+    }
+    if (allowed && !target.statusIds.some((s) => allowed!.has(s))) {
+      toast(`Quy trình không cho chuyển ${issue.key} sang “${target.name}”`);
+      return;
+    }
+    setFold(target.name, false);
+    onMove(issue.key, target, null, undefined);
+    // The card is rebuilt inside its new column; give it focus back there so the next press works.
+    let tries = 0;
+    const refocus = () => {
+      const el = document.querySelector<HTMLElement>(`.bd-card[data-card-key="${CSS.escape(issue.key)}"]`);
+      if (el) el.focus();
+      else if (++tries < 10) requestAnimationFrame(refocus);
+    };
+    requestAnimationFrame(refocus);
+  }
+
   const canDrop = (column: BoardColumn) => !drag || !drag.allowed || column.statusIds.some((s) => drag.allowed!.has(s));
 
   function overCard(e: DragEvent, column: number, lane: string, issue: BoardIssue, list: BoardIssue[]) {
@@ -218,16 +255,18 @@ export default function KanbanBoard({ snapshot, issues, swimlane, today, onMove,
                 {c.name}
                 {c.unmapped && <span className="bd-unmapped-tag">chưa gắn cột</span>}
               </span>
-              <span className="bd-colcount" title={c.max !== null ? `Giới hạn WIP: tối đa ${c.max}` : undefined}>
+              <span className={`bd-colcount${over ? " is-over" : ""}`} title={c.max !== null ? `Giới hạn WIP: tối đa ${c.max}` : undefined}>
                 {inCol}
-                {c.max !== null && <span className="bd-wip">/{c.max}</span>}
+                {c.max !== null && <span className="bd-wip">/{c.max}</span>} việc
               </span>
               {snapshot.estimation && inCol > 0 && (
                 <span className="bd-colweight" title="Tổng ước lượng">
+                  ·{" "}
                   {totalWeight(
                     issues.filter((i) => columnOf(i) === ci),
                     snapshot
-                  )}
+                  )}{" "}
+                  {unitLabel(snapshot)}
                 </span>
               )}
               {over && <span className="bd-wip-flag">Vượt giới hạn</span>}
@@ -315,6 +354,7 @@ export default function KanbanBoard({ snapshot, issues, swimlane, today, onMove,
                             onDragStart={(e) => startDrag(e, issue)}
                             onDragEnd={endDrag}
                             onDragOver={(e) => overCard(e, ci, lane.id, issue, list)}
+                            onShiftColumn={(dir) => void shiftCard(issue, dir)}
                           />
                         </div>
                       ))}
@@ -383,7 +423,9 @@ function Card({
   onDragStart,
   onDragEnd,
   onDragOver,
+  onShiftColumn,
 }: {
+  onShiftColumn: (dir: -1 | 1) => void;
   members: Member[];
   options: CardOptions;
   subs: BoardIssue[];
@@ -413,12 +455,19 @@ function Card({
       className={`bd-card ${accent ? "has-accent" : ""} ${dragging ? "is-dragging" : ""} ${blocked ? "is-blocked" : ""} ${issue.flagged ? "is-flagged" : ""} ${issue.statusCategory === "done" ? "is-done" : ""}`}
       draggable
       tabIndex={0}
+      data-card-key={issue.key}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onDragOver={onDragOver}
       onClick={onOpen}
       onKeyDown={(e) => {
         if (e.key === "Enter") return onOpen();
+        if (e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && (e.key === "H" || e.key === "L")) {
+          e.preventDefault();
+          e.stopPropagation();
+          onShiftColumn(e.key === "H" ? -1 : 1);
+          return;
+        }
         if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
         // j/k (↓/↑) within a column, h/l (←/→) to the same row of the next column — the keys every
         // list in the app uses (plan §6.6). Pure focus movement over the DOM the board drew.
@@ -535,13 +584,14 @@ function Card({
         )}
         <span className="bd-spacer" />
         {show.priority && <PriorityMark priority={issue.priority} />}
-        {show.estimate && snapshot.estimation && (
-          <span className={`bd-est ${issue.estimate === null ? "is-empty" : ""}`} title={snapshot.estimation.name}>
-            {issue.estimate ?? "–"}
+        {show.estimate && snapshot.estimation && issue.estimate !== null && (
+          <span className="bd-est" title={snapshot.estimation.name}>
+            {issue.estimate}
           </span>
         )}
         {show.assignee && (
           <AssigneePicker
+            issueKey={issue.key}
             issueType={issue.issueType}
             accountId={issue.assigneeAccountId}
             name={issue.assigneeName}

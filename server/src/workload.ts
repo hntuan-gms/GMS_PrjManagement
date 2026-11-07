@@ -148,6 +148,9 @@ export interface Candidate {
  * wrong one — someone at 40% for the month can still be double-booked in exactly
  * the week this task needs, and a month-long average hides that completely.
  *
+ * The client's assignHints (client/src/assignHints.ts) uses the same leading rule for the picker's
+ * order. Change both.
+ *
  * Nobody is filtered out for being busy. A fully-booked team still has to do the
  * work, and returning an empty list would just make the caller invent something;
  * the conflict cost is reported instead so the decision is visible.

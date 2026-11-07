@@ -4,3 +4,4 @@ dist/
 server/data/
 *.log
 e2e/shots/
+.playwright-mcp/

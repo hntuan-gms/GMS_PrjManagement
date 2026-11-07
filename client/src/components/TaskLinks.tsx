@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import type { IssueLink, LinkType, Task } from "../types";
-import SuggestInput from "./SuggestInput";
+import TaskPicker from "./TaskPicker";
+import { Icon } from "./Icons";
 
 interface Props {
   task: Task;
@@ -9,7 +10,12 @@ interface Props {
   allTasks: Task[];
   /** The number of links once known, for the count in the section's header. */
   onCount?: (n: number | null) => void;
+  /** Keeps loading (so the count is known) while the section is not shown. */
+  hidden?: boolean;
 }
+
+/** A Jira key, possibly of another project: links may cross projects, unlike our own dependencies. */
+const KEY_RE = /^[A-Za-z][A-Za-z0-9]*-\d+$/;
 
 /** Every way to say a link: each type has two texts, one per end ("blocks" / "is blocked by"). */
 interface Way {
@@ -32,13 +38,14 @@ const waysOf = (types: LinkType[]): Way[] =>
  * and no lag, and does not move a bar, so listing it among the dependencies would
  * promise scheduling it does not do; the note says where to schedule instead.
  */
-export default function TaskLinks({ task, allTasks, onCount }: Props) {
+export default function TaskLinks({ task, allTasks, onCount, hidden }: Props) {
   const [links, setLinks] = useState<IssueLink[] | null>(null);
   const [types, setTypes] = useState<LinkType[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [way, setWay] = useState("");
-  const [otherKey, setOtherKey] = useState("");
   const [busy, setBusy] = useState(false);
+  const [pickRect, setPickRect] = useState<DOMRect | null>(null);
+  const pickRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     onCount?.(links === null ? null : links.length);
@@ -68,13 +75,13 @@ export default function TaskLinks({ task, allTasks, onCount }: Props) {
   // A key for the browse link of an issue in ANOTHER project: same site, so only the key differs.
   const urlOf = (key: string) => task.jiraUrl.replace(/[^/]+$/, key);
 
-  async function add() {
+  async function add(otherKey: string) {
     if (!chosen || !otherKey.trim()) return;
+    setPickRect(null);
     setBusy(true);
     setError(null);
     try {
-      setLinks(await api.addIssueLink(task.id, { typeName: chosen.typeName, otherKey: otherKey.trim(), direction: chosen.direction }));
-      setOtherKey("");
+      setLinks(await api.addIssueLink(task.id, { typeName: chosen.typeName, otherKey: otherKey.trim().toUpperCase(), direction: chosen.direction }));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Không tạo được liên kết.");
     } finally {
@@ -94,6 +101,7 @@ export default function TaskLinks({ task, allTasks, onCount }: Props) {
     }
   }
 
+  if (hidden) return null;
   return (
     <div className="td-stack">
       {links === null && <span className="muted">Đang tải…</span>}
@@ -125,22 +133,33 @@ export default function TaskLinks({ task, allTasks, onCount }: Props) {
               </option>
             ))}
           </select>
-          <SuggestInput
-            value={otherKey}
-            onChange={setOtherKey}
-            suggestions={allTasks.filter((t) => t.id !== task.id).slice(0, 300).map((t) => ({ value: t.id, hint: t.summary.slice(0, 50) }))}
-            placeholder="Mã, ví dụ ABC-12"
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                add();
-              }
-            }}
-          />
-          <button type="button" onClick={add} disabled={busy || !otherKey.trim()}>
-            + Liên kết
+          {/* Pick from the project, or type a key (another project's too: Jira links cross projects). */}
+          <button
+            ref={pickRef}
+            type="button"
+            className="td-add-btn"
+            disabled={busy}
+            onClick={() => setPickRect(pickRef.current?.getBoundingClientRect() ?? null)}
+          >
+            <Icon name="plus" size={13} />
+            Chọn việc
           </button>
         </div>
+      )}
+      {pickRect && (
+        <TaskPicker
+          anchor={pickRect}
+          tasks={allTasks}
+          exclude={[task.id]}
+          placeholder="Mã hoặc tên việc"
+          typed={(q) => {
+            const key = q.trim().toUpperCase();
+            return KEY_RE.test(key) && !allTasks.some((t) => t.id === key) ? { value: key, label: "Dùng mã này" } : null;
+          }}
+          onPickTyped={(key) => void add(key)}
+          onPick={(t) => void add(t.id)}
+          onClose={() => setPickRect(null)}
+        />
       )}
       {error && <small className="field-note is-error">{error}</small>}
     </div>

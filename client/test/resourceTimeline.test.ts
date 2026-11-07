@@ -36,7 +36,7 @@ describe("resource tab labels", () => {
   });
 
   it("gives the month band three lengths, and the year band when columns are months", () => {
-    assert.deepEqual(monthLabel("2026-10-28", "day"), { key: "2026-10", full: "Thg 10/2026", mid: "T10/26", min: "T10" });
+    assert.deepEqual(monthLabel("2026-10-28", "day"), { key: "2026-10", full: "Tháng 10/2026", mid: "T10/26", min: "T10" });
     assert.equal(monthLabel("2026-10-28", "week").key, monthLabel("2026-10-31", "week").key);
     assert.deepEqual(monthLabel("2026-10-01", "month"), { key: "2026", full: "Năm 2026", mid: "2026", min: "’26" });
   });
