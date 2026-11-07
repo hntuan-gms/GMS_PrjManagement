@@ -113,19 +113,18 @@ await step("'Tháng này' (trong menu Khoảng) + cột theo tháng", async () =
 console.log("\n== Chấm công: sửa giờ ==");
 await step("sửa giờ của mình: chỉ gửi phần đã đổi", async () => {
   await openTimesheet(page);
-  await page.locator(".ts-person-filter").selectOption("me");
-  await page.locator(".ts-person-btn").first().click();
-  await page.waitForSelector(".ts-entries li");
+  await page.locator("[data-scope=mine]").click();
+  await page.waitForSelector(".ts-mine");
+  const cells = page.locator(".ts-mine input[data-key='DEMO-3']");
+  const idx = await cells.evaluateAll((els) => els.findIndex((e) => e.value === "4"));
+  assert.ok(idx >= 0, "không thấy ô 4h của DEMO-3");
   await reset();
-  await page.locator(".ts-entry-edit").first().click();
-  assert.ok((await page.textContent(".modal-id")).includes("Sửa giờ đã ghi"));
-  assert.equal(await page.locator(".modal select").first().isDisabled(), true, "không đổi được việc khi sửa");
-  // By its label, not by position: the date is a DateField (a text box plus a hidden picker).
-  await page.locator(".modal .field:has(> span:text-is('Số giờ')) input").fill("5");
-  await page.locator(".modal-footer .primary", { hasText: "Lưu thay đổi" }).click();
+  await cells.nth(idx).fill("5");
+  await cells.nth(idx).press("Enter");
   const put = await waitLog((l) => l.m === "PUT" && l.p.startsWith("/api/timesheet/worklogs/"));
   assert.equal(put.b.hours, 5);
   assert.equal("date" in put.b, false, "cùng ngày thì không gửi ngày");
+  assert.equal("comment" in put.b, false, "không đổi ghi chú thì không gửi ghi chú");
 });
 
 console.log("\n== Bảng: thẻ, lọc, sub-task, cờ ==");

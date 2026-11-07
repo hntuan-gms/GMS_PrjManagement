@@ -70,6 +70,14 @@ let comments: Record<string, any[]> = {
 let cid = 100;
 const log: any[] = [];
 let chatAborts = 0;
+// Worklogs of the stand-in Jira: the timesheet reads, creates, edits and deletes these (reset by __restore).
+const seedWorklogs = () => [
+  { id: "w1", issueKey: "DEMO-3", summary: "Phân tích yêu cầu", issueType: "Story", authorAccountId: "me", authorName: "Tuấn Test", date: TODAY, hours: 4, comment: "họp", mine: true },
+  { id: "w2", issueKey: "DEMO-4", summary: "Viết tài liệu BRD", issueType: "Task", authorAccountId: "anh", authorName: "Nguyễn Anh", date: TODAY, hours: 6, comment: null, mine: false },
+];
+let worklogs: any[] = seedWorklogs();
+let worklogSeq = 100;
+let failWorklogWrites = false;
 
 const app = express();
 app.use(express.json());
@@ -89,6 +97,8 @@ app.post("/api/__restore", (_q, r) => {
   profiles = [];
   absences = [];
   listDelayMs = 0;
+  worklogs = seedWorklogs();
+  failWorklogWrites = false;
   sessionProject = "DEMO";
   tasksSeen = [];
   attachmentsOf5 = seedFiles();
@@ -355,16 +365,32 @@ app.get("/api/timesheet", (req, res) => {
   res.json({
     from, to,
     people: users.map((u) => ({ accountId: u.accountId, displayName: u.displayName, avatarUrl: null, capacityHoursPerDay: 8, absences: [], outsider: false })),
-    entries: [
-      { id: "w1", issueKey: "DEMO-3", summary: "Phân tích yêu cầu", issueType: "Story", authorAccountId: "me", authorName: "Tuấn Test", date: TODAY, hours: 4, comment: "họp", mine: true },
-      { id: "w2", issueKey: "DEMO-4", summary: "Viết tài liệu BRD", issueType: "Task", authorAccountId: "anh", authorName: "Nguyễn Anh", date: TODAY, hours: 6, comment: null, mine: false },
-    ],
+    entries: worklogs.filter((w) => w.date >= from && w.date <= to),
   });
 });
-app.delete("/api/timesheet/worklogs/:k/:id", (_q, r) => r.status(204).end());
-app.put("/api/timesheet/worklogs/:k/:id", (req, res) => {
+app.post("/api/__worklogs/fail", (req, r) => { failWorklogWrites = !!req.body?.on; r.json({}); });
+app.post("/api/timesheet/worklogs", (req, res) => {
+  if (failWorklogWrites) return res.status(400).json({ error: "Jira từ chối ghi giờ" });
   const b = req.body ?? {};
-  res.json({ id: req.params.id, issueKey: req.params.k, summary: "Phân tích yêu cầu", issueType: "Story", authorAccountId: "me", authorName: "Tuấn Test", date: b.date ?? TODAY, hours: b.hours ?? 4, comment: b.comment === undefined ? "họp" : b.comment, mine: true });
+  const t = tasks.find((x: any) => x.id === b.issueKey);
+  const w = { id: `w${++worklogSeq}`, issueKey: b.issueKey, summary: t?.summary ?? b.issueKey, issueType: t?.issueType ?? "Task", authorAccountId: "me", authorName: "Tuấn Test", date: b.date, hours: b.hours, comment: b.comment ?? null, mine: true };
+  worklogs.push(w);
+  res.status(201).json(w);
+});
+app.delete("/api/timesheet/worklogs/:k/:id", (req, r) => {
+  if (failWorklogWrites) return r.status(400).json({ error: "Jira từ chối xoá" });
+  worklogs = worklogs.filter((w) => w.id !== req.params.id);
+  r.status(204).end();
+});
+app.put("/api/timesheet/worklogs/:k/:id", (req, res) => {
+  if (failWorklogWrites) return res.status(400).json({ error: "Jira từ chối sửa" });
+  const b = req.body ?? {};
+  const w = worklogs.find((x) => x.id === req.params.id);
+  if (!w) return res.status(404).json({ error: "Không có worklog này" });
+  if (b.date !== undefined) w.date = b.date;
+  if (b.hours !== undefined) w.hours = b.hours;
+  if (b.comment !== undefined) w.comment = b.comment;
+  res.json(w);
 });
 
 // --- phase 2 / stage 2: components, versions, links, watchers, JQL, baselines, import, saved filters ---

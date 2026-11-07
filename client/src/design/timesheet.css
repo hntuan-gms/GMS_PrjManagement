@@ -1,0 +1,770 @@
+/* ==========================================================================
+   Giờ đã ghi (Nhân lực › Giờ đã ghi): "Của tôi" is a grid you type into, "Cả nhóm" a grid you read.
+   One scale of ink says how much of a day a cell holds; red/warm is only for more than the day; the son edge is
+   today and "you". Tokens only (noRawColors).
+   ========================================================================== */
+.ts-wrap {
+  --ts-row: calc(var(--row-h) + 4px);
+  --ts-first: 340px;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--paper);
+}
+.ts-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex: none;
+}
+.ts-toolbar .seg-group button {
+  padding-inline: 10px;
+}
+.ts-range {
+  min-width: 0;
+  padding: 0 4px;
+  text-align: center;
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.tf-bar button.tb-btn.ts-nav {
+  width: 28px;
+  padding: 0;
+  justify-content: center;
+}
+.tf-search.ts-member-search {
+  flex: 0 1 190px;
+  min-width: 96px;
+}
+/* A figure that filters the table: lit while it does. */
+.ts-tiles .metric.is-on .metric-label {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.ts-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-4) var(--space-3);
+}
+.ts-tiles {
+  flex: none;
+  padding-inline: 2px;
+}
+.ts-grid-scroll {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow: auto;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+}
+.ts-empty-row {
+  padding: var(--space-5) var(--space-4);
+  text-align: center;
+  color: var(--ink-3);
+}
+.ts-none {
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+}
+
+/* ---- the table ---- */
+.ts-grid {
+  width: 100%;
+  min-width: calc(var(--ts-first) + 7 * 64px + 150px);
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--font-size-md);
+}
+.ts-grid.is-month {
+  min-width: calc(var(--ts-first) + 31 * 38px + 100px);
+  font-size: var(--font-size-sm);
+}
+.ts-grid th,
+.ts-grid td {
+  padding: 0;
+  height: var(--ts-row);
+  border-bottom: 1px solid var(--line);
+  font-weight: 400;
+}
+.ts-grid tbody tr:last-child > *,
+.ts-grid tbody tr.ts-add-row > * {
+  border-bottom: 0;
+}
+
+/* The head: weekday over date; sticky so a long team keeps its dates. */
+.ts-grid thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  height: 44px;
+  background: var(--sheet);
+  color: var(--ink-3);
+  text-align: center;
+}
+.ts-wd,
+.ts-dd {
+  display: block;
+  line-height: 1.25;
+}
+.ts-wd {
+  font-size: var(--font-size-xs);
+}
+.ts-dd {
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.ts-grid.is-month .ts-dd {
+  font-size: var(--font-size-sm);
+}
+.ts-grid th.is-weekend {
+  background: var(--sunken);
+}
+/* A holiday of the project's calendar: shaded like a weekend, and marked so it does not read as one. */
+.ts-grid th.is-holiday {
+  box-shadow: inset 0 -2px 0 var(--warn-line);
+}
+.ts-grid th.is-today {
+  box-shadow: inset 0 2px 0 var(--son);
+}
+.ts-grid th.is-today .ts-dd {
+  color: var(--son-text);
+  font-weight: 600;
+}
+.ts-grid th.is-holiday.is-today {
+  box-shadow: inset 0 2px 0 var(--son), inset 0 -2px 0 var(--warn-line);
+}
+
+/* First column and last column stay while the days scroll. */
+.ts-grid .ts-task,
+.ts-grid .ts-person,
+.ts-grid .ts-task-h,
+.ts-grid .ts-person-h {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  width: var(--ts-first);
+  min-width: var(--ts-first);
+  max-width: var(--ts-first);
+  background: var(--raised);
+  text-align: left;
+}
+.ts-grid .ts-task-h,
+.ts-grid .ts-person-h {
+  z-index: 4;
+  padding-left: var(--space-4);
+  background: var(--sheet);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--ink-3);
+}
+.ts-grid .ts-total,
+.ts-grid .ts-total-h {
+  position: sticky;
+  right: 0;
+  z-index: 2;
+  min-width: 120px;
+  padding: 0 var(--space-4) 0 var(--space-3);
+  background: var(--raised);
+  box-shadow: inset 1px 0 0 var(--line);
+  text-align: right;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.ts-grid .ts-total-h {
+  z-index: 4;
+  background: var(--sheet);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--ink-3);
+}
+.ts-team .ts-total,
+.ts-team .ts-total-h {
+  min-width: 232px;
+}
+
+/* ---- a row's name ---- */
+.ts-task-in {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--ts-row);
+  padding: 0 var(--space-3) 0 var(--space-4);
+  min-width: 0;
+}
+.ts-glyph-none {
+  width: 14px;
+  flex: none;
+}
+button.ts-key {
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+button.ts-key:hover:not(:disabled) {
+  color: var(--ink);
+  text-decoration: underline;
+}
+button.ts-key:disabled {
+  cursor: default;
+}
+.ts-sum {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+}
+.ts-muted {
+  color: var(--ink-3);
+}
+.ts-hint {
+  flex: none;
+  padding: 0 6px;
+  border-radius: var(--radius-full);
+  background: var(--sunken);
+  color: var(--ink-3);
+  font-size: var(--font-size-xs);
+}
+button.ts-dismiss {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--ink-3);
+  font-size: var(--font-size-lead);
+  line-height: 1;
+  opacity: 0;
+  cursor: pointer;
+}
+.ts-row:hover button.ts-dismiss,
+button.ts-dismiss:focus-visible {
+  opacity: 1;
+}
+button.ts-dismiss:hover {
+  background: var(--sunken);
+  color: var(--ink);
+}
+button.ts-add {
+  margin-left: var(--space-3);
+  height: 26px;
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--ink-2);
+  font-size: var(--font-size-md);
+  cursor: pointer;
+}
+button.ts-add:hover {
+  background: var(--sunken);
+  color: var(--ink);
+}
+
+/* ---- a cell ---- */
+.ts-cell {
+  position: relative;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  /* One scale of ink: --p is this cell's share of a day (0–1). Over a base colour, so a weekend keeps its shade. */
+  background-image: linear-gradient(color-mix(in srgb, var(--ink) calc(var(--p, 0) * 20%), transparent), color-mix(in srgb, var(--ink) calc(var(--p, 0) * 20%), transparent));
+  box-shadow: inset 1px 0 0 var(--raised);
+}
+.ts-cell.is-weekend {
+  background-color: var(--sunken);
+}
+.ts-cell.is-away {
+  background-color: transparent;
+  background-image: repeating-linear-gradient(135deg, var(--sunken) 0 6px, var(--line) 6px 8px);
+}
+.ts-cell.is-today {
+  box-shadow: inset 1px 0 0 var(--son), inset -1px 0 0 var(--son);
+}
+.ts-cell.has-hours {
+  font-weight: 500;
+}
+.ts-cell.is-over {
+  background-image: none;
+  background-color: var(--warn-wash);
+  color: var(--warn-text);
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px var(--warn-line);
+}
+.ts-cell.is-pending {
+  opacity: 0.65;
+}
+.ts-away {
+  font-family: var(--font-sans);
+  font-size: var(--font-size-xs);
+  color: var(--ink-3);
+}
+.ts-cell-val,
+.ts-cell-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 100%;
+  height: 100%;
+  min-height: var(--ts-row);
+}
+.ts-sub {
+  color: var(--ink-2);
+  font-size: var(--font-size-sm);
+}
+button.ts-cell-btn {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+button.ts-cell-btn:hover {
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+/* The field itself: borderless until it is pointed at, then one ring (the detail panel's rule). */
+.ts-grid .ts-in {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  cursor: text;
+}
+.ts-grid .ts-in::placeholder {
+  color: transparent;
+}
+.ts-grid .ts-in:hover::placeholder {
+  color: var(--ink-4);
+}
+.ts-grid .ts-in:focus::placeholder {
+  color: transparent;
+}
+.ts-grid .ts-in:hover {
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+}
+.ts-grid .ts-in:focus {
+  outline: none;
+  background: var(--raised);
+  color: var(--ink);
+  box-shadow: inset 0 0 0 2px var(--ink);
+}
+.ts-grid .ts-in.is-bad {
+  background: var(--risk-wash);
+  box-shadow: inset 0 0 0 2px var(--risk);
+  color: var(--risk-text);
+}
+button.ts-multi {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+button.ts-multi:hover,
+button.ts-multi:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--ink);
+  outline: none;
+}
+button.ts-multi sup {
+  margin-left: 1px;
+  font-family: var(--font-sans);
+  font-size: var(--font-size-xs);
+  color: var(--ink-3);
+}
+/* "⋯" opens the list of a cell's worklogs (note, delete); a dot says a note is there. */
+button.ts-more {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  z-index: 1;
+  width: 16px;
+  height: 14px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--ink-3);
+  font-size: var(--font-size-sm);
+  line-height: 10px;
+  opacity: 0;
+  cursor: pointer;
+}
+.ts-cell:hover button.ts-more,
+.ts-cell:focus-within button.ts-more {
+  opacity: 1;
+}
+button.ts-more:hover {
+  background: var(--sunken);
+  color: var(--ink);
+}
+.ts-grid.is-month button.ts-more {
+  display: none;
+}
+.ts-note {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 5px;
+  height: 5px;
+  border-radius: var(--radius-full);
+  background: var(--ink-3);
+  pointer-events: none;
+}
+
+/* ---- totals ---- */
+.ts-total b {
+  font-weight: 600;
+}
+.ts-total-line {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  height: var(--ts-row);
+}
+.ts-meter {
+  position: absolute;
+  left: var(--space-3);
+  right: var(--space-4);
+  bottom: 4px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--line);
+  overflow: hidden;
+}
+.ts-meter span {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--ink-2);
+}
+.ts-owes,
+.ts-odd {
+  padding: 0 6px;
+  border-radius: var(--radius-full);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+}
+.ts-owes {
+  background: var(--warn-wash);
+  color: var(--warn-text);
+}
+.ts-odd {
+  color: var(--warn-text);
+  text-decoration: underline dotted;
+}
+.ts-grid tfoot th,
+.ts-grid tfoot td {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  background: var(--sheet);
+  border-bottom: 0;
+  border-top: 1px solid var(--line-strong);
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.ts-grid tfoot th.ts-task {
+  z-index: 5;
+  padding-left: var(--space-4);
+  font-size: var(--font-size-sm);
+  color: var(--ink-3);
+}
+.ts-grid tfoot td.ts-total {
+  z-index: 5;
+}
+.ts-foot {
+  text-align: center;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.ts-foot.is-weekend {
+  background: var(--sunken);
+}
+.ts-foot.is-today {
+  box-shadow: inset 1px 0 0 var(--son), inset -1px 0 0 var(--son);
+}
+.ts-foot small {
+  font-size: var(--font-size-xs);
+  font-weight: 400;
+  color: var(--ink-4);
+}
+.ts-foot.st-missing b {
+  color: var(--warn-text);
+}
+.ts-foot.st-full b {
+  color: var(--ok-text);
+}
+.ts-foot.st-over {
+  color: var(--warn-text);
+}
+.ts-grid.is-month .ts-foot small {
+  display: none;
+}
+
+/* ---- team rows ---- */
+.ts-prow.is-me .ts-person {
+  box-shadow: inset 2px 0 0 var(--son);
+}
+button.ts-person-btn {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--space-2);
+  width: 100%;
+  height: var(--ts-row);
+  padding: 0 var(--space-3) 0 var(--space-3);
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--ink);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+button.ts-person-btn:hover {
+  background: var(--sunken);
+}
+.ts-caret {
+  width: 10px;
+  flex: none;
+  color: var(--ink-3);
+  font-size: var(--font-size-xs);
+}
+.ts-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+}
+.ts-tag {
+  flex: none;
+  padding: 0 6px;
+  border-radius: var(--radius-full);
+  background: var(--sunken);
+  color: var(--ink-3);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+}
+.ts-prow.is-open .ts-person,
+.ts-prow.is-open .ts-total {
+  background: var(--sunken);
+}
+.ts-trow .ts-task,
+.ts-trow .ts-total {
+  background: var(--sheet);
+}
+.ts-trow .ts-task-in {
+  padding-left: 46px;
+  font-size: var(--font-size-sm);
+}
+.ts-trow .ts-sum {
+  color: var(--ink-2);
+}
+.ts-trow th,
+.ts-trow td {
+  height: calc(var(--ts-row) - 6px);
+}
+.ts-trow .ts-total b {
+  font-size: var(--font-size-sm);
+  color: var(--ink-2);
+}
+
+/* ---- legend ---- */
+.ts-legend {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px var(--space-4);
+  color: var(--ink-3);
+  font-size: var(--font-size-sm);
+}
+.ts-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.ts-legend i {
+  display: inline-block;
+  width: 22px;
+  height: 10px;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.ts-sw-tint {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--ink) 3%, transparent), color-mix(in srgb, var(--ink) 20%, transparent));
+}
+.ts-sw-over {
+  background: var(--warn-wash);
+  box-shadow: inset 0 0 0 1px var(--warn-line) !important;
+}
+.ts-sw-away {
+  background: repeating-linear-gradient(135deg, var(--sunken) 0 4px, var(--line) 4px 6px);
+}
+.ts-sw-off {
+  background: var(--sunken);
+}
+
+/* ---- the list of one cell's worklogs ---- */
+.ts-list {
+  position: fixed;
+  z-index: var(--z-popover);
+  width: 372px;
+  padding: var(--space-3);
+  background: var(--menu-bg);
+  border: 1px solid var(--menu-border);
+  border-radius: var(--menu-radius);
+  box-shadow: var(--menu-shadow);
+  font-size: var(--font-size-md);
+}
+.ts-list-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.ts-list-key {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+.ts-list-sum {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ts-list-date {
+  margin: 2px 0 var(--space-2);
+  color: var(--ink-3);
+  font-size: var(--font-size-sm);
+}
+.ts-list-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.ts-list-rows li,
+.ts-list-new {
+  display: grid;
+  grid-template-columns: 64px 1fr 28px;
+  gap: var(--space-1);
+  align-items: center;
+}
+.ts-list-new {
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--line);
+  grid-template-columns: 64px 1fr auto;
+}
+.ts-list-rows li.is-pending {
+  opacity: 0.6;
+}
+.ts-list input {
+  height: 30px;
+  min-width: 0;
+}
+.ts-list .ts-list-hours {
+  text-align: center;
+  font-family: var(--font-mono);
+}
+.ts-list .ts-list-hours.is-bad {
+  border-color: var(--risk);
+  background: var(--risk-wash);
+}
+button.ts-list-del {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+button.ts-list-del:hover:not(:disabled) {
+  background: var(--risk-wash);
+  color: var(--risk-text);
+}
+button.ts-list-add {
+  height: 30px;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--ink);
+  color: var(--on-strong);
+  font-size: var(--font-size-md);
+  cursor: pointer;
+}
+button.ts-list-add:disabled {
+  background: var(--sunken);
+  color: var(--ink-3);
+  cursor: default;
+}
+
+@media (max-width: 767px) {
+  .ts-wrap {
+    --ts-first: 190px;
+  }
+  .ts-body {
+    padding: var(--space-3);
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ts-grid .ts-in,
+  button.ts-person-btn {
+    transition: background var(--d-1) var(--e-out), box-shadow var(--d-1) var(--e-out);
+  }
+}

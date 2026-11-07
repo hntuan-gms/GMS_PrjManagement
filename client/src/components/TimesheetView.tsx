@@ -1,57 +1,38 @@
-import { ratioBand } from "../resourceAllocation";
-import Metric, { MetricRow } from "./Metric";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import DateField from "./DateField";
-import Avatar from "./Avatar";
-import { api, ApiError } from "../api";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { csvName, downloadCsv } from "../csv";
 import { localToday, roundHours } from "../taskForm";
-import type { Session, Task, Timesheet, TimesheetPerson, WorklogEntry } from "../types";
-import { addDays, rangeOf, weekday, type TimesheetMode } from "../timesheetRange";
-import { isViewFresh, readViewCache, viewCacheScope, writeViewCache } from "../viewCache";
-import { warmInFlight } from "../warmViews";
-import NumberInput from "./NumberInput";
+import type { Session, Task } from "../types";
+import { addDays, dm, eachDay, rangeOf, type TimesheetMode } from "../timesheetRange";
+import { viewCacheScope } from "../viewCache";
+import { buildTeamRows, filterTeam, fmtHours, teamCounts, type TeamFilter } from "../timesheetModel";
+import { useTimesheet } from "../useTimesheet";
 import { Icon } from "./Icons";
-import TaskPicker from "./TaskPicker";
-import { orderTasksForLogging, parseHours } from "../parseHours";
-import { dayClass, expectation, isAway } from "../timesheetDays";
-import { dayLabel } from "../workCalendar";
+import Metric, { MetricRow } from "./Metric";
+import Spinner from "./Spinner";
+import TimesheetMine from "./TimesheetMine";
+import TimesheetTeam from "./TimesheetTeam";
 import { useWorkCalendar } from "./workCalendarContext";
 
 /**
- * Timesheet: hours each member logged in Jira, per day, against their capacity.
+ * Giờ đã ghi: the hours logged in Jira, per day, against capacity.
  *
- * Everything shown is Jira's worklogs (server/src/timesheet.ts) — logging here
- * is logging in Jira, under the signed-in user's name, which is the only author
- * Jira will accept. Capacity and leave come from the Nguồn lực tab's profiles,
- * defaulting to a full working day; which days are worked comes from the project's
- * calendar (holidays expect nothing, make-up days expect a day's work).
+ * Everything here is Jira's worklogs (server/src/timesheet.ts) and logging here is logging in Jira, under the
+ * signed-in user's name — the only author Jira accepts. So the page has two faces:
+ *   Của tôi   — the grid you fill in: task × day, each cell a field (TimesheetMine).
+ *   Cả nhóm   — who has logged and who is behind, read-only (TimesheetTeam).
+ * Capacity and leave come from the Mức tải lens's profiles (8h by default); which days are worked comes from the
+ * project's calendar (a holiday expects nothing, a make-up day expects a day's work).
  */
 
-type Mode = TimesheetMode;
-type Selection = { accountId: string; date: string | null } | null;
+type Scope = "mine" | "team";
 
-const WEEKDAYS = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
-
-const dm = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
-
-function eachDay(from: string, to: string): string[] {
-  const out: string[] = [];
-  for (let d = from; d <= to; d = addDays(d, 1)) out.push(d);
-  return out;
-}
-
-const away = (p: TimesheetPerson, d: string) => isAway(p, d);
-
-/** Sequential ramp over the share of a day's capacity; "over" is a state, not a darker blue. */
-function band(hours: number, capacity: number): "none" | "low" | "mid" | "full" | "over" {
-  if (hours <= 0) return "none";
-  const r = hours / Math.max(capacity, 0.01);
-  // The thresholds are the heatmap's (resourceAllocation.ratioBand); "healthy" splits into short of the day and the whole day.
-  const b = ratioBand(r);
-  if (b === "over") return "over";
-  if (b === "light") return "low";
-  return r >= 1 - 1e-9 ? "full" : "mid";
+const scopeKey = (session: Session) => `gms.ts.scope.${session.site.cloudId}.${session.project?.key ?? ""}`;
+function readScope(session: Session): Scope {
+  try {
+    return localStorage.getItem(scopeKey(session)) === "team" ? "team" : "mine";
+  } catch {
+    return "mine";
+  }
 }
 
 export default function TimesheetView({
@@ -70,128 +51,37 @@ export default function TimesheetView({
 }) {
   const today = localToday();
   const calendar = useWorkCalendar();
-  const [mode, setMode] = useState<Mode>("week");
+  const me = session.user.accountId;
+  const [scope, setScopeState] = useState<Scope>(() => readScope(session));
+  const [mode, setMode] = useState<TimesheetMode>("week");
   const [anchor, setAnchor] = useState(today);
   const { from, to } = rangeOf(mode, anchor);
-  const [selection, setSelection] = useState<Selection>(null);
-  const [logFor, setLogFor] = useState<{ date: string; issueKey?: string; editing?: WorklogEntry } | null>(null);
-  const [reloadKey, setReloadKey] = useState(0);
-  const me = session.user.accountId;
-  // "" = everyone, "me" = only the signed-in user, otherwise an account id.
-  const [personFilter, setPersonFilter] = useState("");
-  // Deleting a worklog asks first, in the app rather than in a browser dialog.
-  const [confirmDelete, setConfirmDelete] = useState<WorklogEntry | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-  // Hours typed into a cell of your own row, waiting for the task they belong to (plan F5).
-  const [logPick, setLogPick] = useState<{ date: string; hours: number; rect: DOMRect } | null>(null);
-
-  // Loading and error are derived from which request the last result answered,
-  // rather than reset in the effect. A reload of the same range keeps showing
-  // the old figures until the new ones land; a new range starts blank.
   const range = `${from}|${to}`;
-  const cacheScope = viewCacheScope(session.site.cloudId, session.user.accountId, session.project?.key ?? "");
-  const requestKey = `${range}|${reloadKey}`;
-  const [result, setResult] = useState<{ key: string; sheet?: Timesheet; error?: string } | null>(null);
-  useEffect(() => {
-    let alive = true;
-    // Fetched ahead when the project opened (warmViews.ts) and nothing changed since: no second read of Jira.
-    const showAhead = () => {
-      if (reloadKey !== 0 || !isViewFresh(cacheScope, "timesheet", range)) return false;
-      const ahead = readViewCache<Timesheet>(cacheScope, "timesheet", range);
-      if (!ahead) return false;
-      setResult({ key: requestKey, sheet: ahead });
-      return true;
-    };
-    const fetchNow = () =>
-      api
-        .getTimesheet(from, to)
-        .then((sheet) => {
-          writeViewCache(cacheScope, "timesheet", range, sheet);
-          if (alive) setResult({ key: requestKey, sheet });
-        })
-        .catch(
-          (e) =>
-            alive &&
-            setResult({ key: requestKey, error: e instanceof ApiError || e instanceof Error ? e.message : "Không tải được timesheet." })
-        );
-    if (showAhead()) return;
-    // Still on its way: wait for that answer rather than send the same request again.
-    const pending = reloadKey === 0 ? warmInFlight(cacheScope, "timesheet", range) : null;
-    if (pending) void pending.then(() => alive && !showAhead() && fetchNow());
-    else void fetchNow();
-    return () => {
-      alive = false;
-    };
-  }, [from, to, range, requestKey, reloadKey, cacheScope]);
-  const loading = result?.key !== requestKey;
-  // Until this range's answer lands, the last one seen for it (viewCache.ts) beats a blank page.
-  const sheet =
-    result?.sheet && result.key.startsWith(`${range}|`) ? result.sheet : (readViewCache<Timesheet>(cacheScope, "timesheet", range) ?? null);
-  const error = result?.key === requestKey ? (result.error ?? null) : null;
+  const month = mode === "month";
+  const [text, setText] = useState("");
+  const [teamFilter, setTeamFilter] = useState<TeamFilter>("all");
+  const [focusDate, setFocusDate] = useState<string | null>(null);
 
-  const days = useMemo(() => eachDay(from, to), [from, to]);
-  const byId = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
-
-  const grid = useMemo(() => {
-    const cell = new Map<string, number>();
-    const dayTotal = new Map<string, number>();
-    const shown = (id: string | null) => !personFilter || id === (personFilter === "me" ? me : personFilter);
-    for (const e of sheet?.entries ?? []) {
-      if (!shown(e.authorAccountId)) continue;
-      const k = `${e.authorAccountId}|${e.date}`;
-      cell.set(k, (cell.get(k) ?? 0) + e.hours);
-      dayTotal.set(e.date, (dayTotal.get(e.date) ?? 0) + e.hours);
-    }
-    // "Expected" counts only working days already reached (timesheetDays.expectation): a Wednesday view of
-    // this week shouldn't call Thursday and Friday missing, nor a holiday anybody's gap.
-    const rows = (sheet?.people ?? []).filter((p) => shown(p.accountId)).map((p) => {
-      const hoursOn = (d: string) => cell.get(`${p.accountId}|${d}`) ?? 0;
-      const total = days.reduce((sum, d) => sum + hoursOn(d), 0);
-      const { expected, missing } = expectation(p, days, today, hoursOn, calendar);
-      return { person: p, total: roundHours(total), expected, missing };
-    });
-    return { cell, dayTotal, rows };
-  }, [sheet, days, today, personFilter, me, calendar]);
-
-  const totals = useMemo(() => {
-    const logged = grid.rows.reduce((s, r) => s + r.total, 0);
-    const expected = grid.rows.reduce((s, r) => s + r.expected, 0);
-    const withGaps = grid.rows.filter((r) => !r.person.outsider && r.missing.length > 0).length;
-    let overDays = 0;
-    for (const r of grid.rows) {
-      for (const d of days) {
-        if (band(grid.cell.get(`${r.person.accountId}|${d}`) ?? 0, r.person.capacityHoursPerDay) === "over") overDays++;
-      }
-    }
-    return { logged: roundHours(logged), expected, withGaps, overDays };
-  }, [grid, days]);
-
-  const detail = useMemo(() => {
-    if (!selection || !sheet) return null;
-    const person = sheet.people.find((p) => p.accountId === selection.accountId);
-    if (!person) return null;
-    const entries = sheet.entries.filter(
-      (e) => e.authorAccountId === selection.accountId && (!selection.date || e.date === selection.date)
-    );
-    return { person, entries };
-  }, [selection, sheet]);
-
-  // The picker lists your last logged task first, then your work in progress (parseHours.orderTasksForLogging).
-  const loggable = useMemo(() => orderTasksForLogging(tasks, me, sheet?.entries ?? []), [tasks, me, sheet]);
-
-  async function logInline(t: Task) {
-    const pick = logPick;
-    if (!pick) return;
-    setLogPick(null);
-    setActionError(null);
+  const setScope = (s: Scope) => {
+    setScopeState(s);
     try {
-      await api.logWork({ issueKey: t.id, date: pick.date, hours: pick.hours, comment: null });
-      setReloadKey((k) => k + 1);
-      onTasksChanged();
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Không ghi được giờ.");
+      localStorage.setItem(scopeKey(session), s);
+    } catch {
+      /* private window: the choice just is not remembered */
     }
-  }
+  };
+
+  const cacheScope = viewCacheScope(session.site.cloudId, me, session.project?.key ?? "");
+  const { sheet, loading, error, ops } = useTimesheet({ from, to, cacheScope, me, meName: session.user.displayName, onTasksChanged });
+  const days = useMemo(() => eachDay(from, to), [from, to]);
+
+  const allRows = useMemo(
+    () => (sheet ? buildTeamRows({ people: sheet.people, entries: sheet.entries, days, today, calendar, me }) : []),
+    [sheet, days, today, calendar, me]
+  );
+  const counts = useMemo(() => teamCounts(allRows), [allRows]);
+  const teamRows = useMemo(() => filterTeam(allRows, text, teamFilter), [allRows, text, teamFilter]);
+  const logged = useMemo(() => roundHours(allRows.reduce((s, r) => s + r.total, 0)), [allRows]);
 
   function shift(dir: -1 | 1) {
     if (mode === "week") setAnchor(addDays(from, dir * 7));
@@ -200,445 +90,138 @@ export default function TimesheetView({
       d.setUTCMonth(d.getUTCMonth() + dir);
       setAnchor(d.toISOString().slice(0, 10));
     }
-    setSelection(null);
-  }
-
-  async function removeEntry(e: WorklogEntry) {
-    setConfirmDelete(null);
-    setActionError(null);
-    try {
-      await api.deleteWorklog(e.issueKey, e.id);
-      setReloadKey((k) => k + 1);
-      onTasksChanged();
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Không xoá được.");
-    }
   }
 
   function exportCsv() {
     const header = ["Thành viên", ...days, "Tổng (giờ)", "Kỳ vọng (giờ)"];
-    const rows = grid.rows.map((r) => [
+    const rows = (scope === "team" ? teamRows : allRows).map((r) => [
       r.person.displayName,
-      ...days.map((d) => roundHours(grid.cell.get(`${r.person.accountId}|${d}`) ?? 0)),
+      ...days.map((d) => roundHours(r.hoursByDay.get(d) ?? 0)),
       r.total,
       r.expected,
     ]);
     downloadCsv(csvName("cham-cong", from), [header, ...rows]);
   }
 
-  const rangeLabel = mode === "week" ? `${dm(from)} – ${dm(to)}/${to.slice(0, 4)}` : `Tháng ${Number(from.slice(5, 7))}/${from.slice(0, 4)}`;
-  const pct = totals.expected > 0 ? Math.round((totals.logged / totals.expected) * 100) : null;
+  const onFocusDone = useCallback(() => setFocusDate(null), []);
+  const rangeLabel = month ? `Tháng ${Number(from.slice(5, 7))}/${from.slice(0, 4)}` : `${dm(from)} – ${dm(to)}/${to.slice(0, 4)}`;
+  const includesToday = today >= from && today <= to;
 
   return (
     <div className="ts-wrap">
-      <div className="ts-toolbar">
+      <div className="tf-bar ts-toolbar">
         {modeSwitch}
-        <div className="segmented-control">
-          <button className={`segmented-btn ${mode === "week" ? "active" : ""}`} onClick={() => setMode("week")}>
-            Tuần
+        <div className="seg-group" role="tablist" aria-label="Phạm vi">
+          <button role="tab" data-scope="mine" aria-selected={scope === "mine"} className={scope === "mine" ? "active" : ""} onClick={() => setScope("mine")}>
+            Của tôi
           </button>
-          <button className={`segmented-btn ${mode === "month" ? "active" : ""}`} onClick={() => setMode("month")}>
-            Tháng
+          <button role="tab" data-scope="team" title="Chỉ xem. Jira chỉ cho mỗi người tự ghi giờ của mình" aria-selected={scope === "team"} className={scope === "team" ? "active" : ""} onClick={() => setScope("team")}>
+            Cả nhóm
           </button>
         </div>
-        <button onClick={() => shift(-1)} aria-label="Kỳ trước">‹</button>
+        <div className="seg-group" role="group" aria-label="Độ dài kỳ">
+          <button className={mode === "week" ? "active" : ""} onClick={() => setMode("week")}>Tuần</button>
+          <button className={mode === "month" ? "active" : ""} onClick={() => setMode("month")}>Tháng</button>
+        </div>
+        <button className="tb-btn ts-nav" onClick={() => shift(-1)} aria-label="Kỳ trước">
+          <Icon name="chevronLeft" size={14} />
+        </button>
         <b className="ts-range">{rangeLabel}</b>
-        <button onClick={() => shift(1)} aria-label="Kỳ sau">›</button>
-        <button onClick={() => setAnchor(today)} disabled={today >= from && today <= to} title="Về kỳ chứa hôm nay">
-          Về hôm nay
+        <button className="tb-btn ts-nav" onClick={() => shift(1)} aria-label="Kỳ sau">
+          <Icon name="chevronRight" size={14} />
         </button>
-        <select
-          className="ts-person-filter"
-          value={personFilter}
-          onChange={(e) => {
-            setPersonFilter(e.target.value);
-            setSelection(null);
-          }}
-          aria-label="Lọc theo thành viên"
-        >
-          <option value="">Mọi người</option>
-          <option value="me">Của tôi</option>
-          {(sheet?.people ?? []).map((p) => (
-            <option key={p.accountId} value={p.accountId}>
-              {p.displayName}
-            </option>
-          ))}
-        </select>
+        <button className="tb-btn" onClick={() => setAnchor(today)} disabled={includesToday} title="Về kỳ chứa hôm nay">
+          Hôm nay
+        </button>
+        {scope === "team" && (
+          <>
+            <div className="tf-search ts-member-search">
+              <Icon name="search" size={14} className="tf-search-icon" />
+              <input type="search" value={text} onChange={(e) => setText(e.target.value)} placeholder="Tìm thành viên…" aria-label="Tìm thành viên" />
+            </div>
+          </>
+        )}
         <span className="bd-spacer" />
-        {loading && <span className="bd-muted">Đang tải từ Jira...</span>}
-        <button onClick={exportCsv} disabled={!sheet || grid.rows.length === 0} title="Tải bảng chấm công về file CSV mở được bằng Excel">
+        {loading && sheet && <span className="bd-muted">Đang tải từ Jira…</span>}
+        <button className="tb-btn" onClick={exportCsv} disabled={!sheet || allRows.length === 0} title="Tải bảng chấm công về file CSV mở được bằng Excel">
           Xuất CSV
-        </button>
-        <button onClick={() => setLogFor({ date: today >= from && today <= to ? today : from })}>
-          + Ghi giờ
         </button>
       </div>
 
-      {error && <div className="notice notice-error"><span>{error}</span></div>}
-      {actionError && (
-        <div className="notice notice-error">
-          <span>{actionError}</span>
-          <button className="link-btn" onClick={() => setActionError(null)}>Đóng</button>
-        </div>
-      )}
-
-      {sheet && (
-        <>
-          <MetricRow className="ts-tiles">
-            <Metric value={`${totals.logged}h`} label="Đã ghi" sub={pct !== null ? `${pct}% / ${totals.expected}h` : undefined} />
-            {totals.withGaps > 0 && <Metric value={totals.withGaps} label="người còn ngày chưa ghi" tone="warn" />}
-            {totals.overDays > 0 && <Metric value={totals.overDays} label="ngày-người vượt công suất" tone="serious" />}
-          </MetricRow>
-
-          <div className="ts-grid-scroll">
-            <table className={`ts-grid ${mode === "month" ? "is-month" : ""}`}>
-              <thead>
-                <tr>
-                  <th className="ts-person-h">Thành viên</th>
-                  {days.map((d) => (
-                    <th
-                      key={d}
-                      className={`${dayClass(d, calendar)} ${d === today ? "is-today" : ""}`}
-                      title={dayLabel(d, calendar) || undefined}
-                    >
-                      <span className="ts-wd">{WEEKDAYS[weekday(d)]}</span>
-                      <span className="ts-dd">{mode === "week" ? dm(d) : d.slice(8, 10)}</span>
-                    </th>
-                  ))}
-                  <th className="ts-total-h">Tổng / kỳ vọng</th>
-                </tr>
-              </thead>
-              <tbody>
-                {grid.rows.map(({ person: p, total, expected, missing }) => (
-                  <tr key={p.accountId} className={selection?.accountId === p.accountId ? "is-selected" : ""}>
-                    <th className="ts-person">
-                      <button className="ts-person-btn" onClick={() => setSelection({ accountId: p.accountId, date: null })}>
-                        <Avatar name={p.displayName} avatarUrl={p.avatarUrl} className="bd-avatar" decorative />
-                        <span className="ts-name">{p.displayName}</span>
-                        {p.accountId === me && <span className="ts-tag">bạn</span>}
-                        {p.outsider && <span className="ts-tag" title="Có ghi giờ nhưng không nằm trong danh sách thành viên dự án">ngoài DA</span>}
-                      </button>
-                    </th>
-                    {days.map((d) => {
-                      const h = roundHours(grid.cell.get(`${p.accountId}|${d}`) ?? 0);
-                      const off = away(p, d);
-                      const b = band(h, p.capacityHoursPerDay);
-                      const gap = missing.includes(d);
-                      const selected = selection?.accountId === p.accountId && selection.date === d;
-                      return (
-                        <td
-                          key={d}
-                          className={`ts-cell band-${b} ${dayClass(d, calendar)} ${off ? "is-away" : ""} ${
-                            d === today ? "is-today" : ""
-                          } ${selected ? "is-selected" : ""}`}
-                          onClick={() => setSelection({ accountId: p.accountId, date: d })}
-                          title={
-                            off
-                              ? "Nghỉ phép"
-                              : gap
-                                ? "Chưa ghi giờ"
-                                : h > 0
-                                  ? `${h}h / ${p.capacityHoursPerDay}h${b === "over" ? ", vượt công suất" : ""}`
-                                  : dayLabel(d, calendar) || undefined
-                          }
-                        >
-                          {h > 0 ? (
-                            <>
-                              {b === "over" && <span aria-hidden="true">▲</span>}
-                              {h}
-                            </>
-                          ) : off ? (
-                            <span className="ts-away">Nghỉ</span>
-                          ) : (
-                            <>
-                              {gap && (
-                                <span className="ts-gap" aria-label="Chưa ghi giờ">
-                                  ●
-                                </span>
-                              )}
-                              {/* Your own row: an empty day takes hours straight away. Jira only accepts time logged
-                                  under the signed-in user, so other people's rows stay read-only. */}
-                              {p.accountId === me && (
-                                <InlineHours date={d} onCommit={(hours, rect) => setLogPick({ date: d, hours, rect })} />
-                              )}
-                            </>
-                          )}
-                        </td>
-                      );
-                    })}
-                    <td className="ts-total">
-                      <b>{total}h</b>
-                      <span className="bd-muted"> / {expected}h</span>
-                      <span className="ts-meter" aria-hidden="true">
-                        <span style={{ width: `${expected > 0 ? Math.min(100, (total / expected) * 100) : 0}%` }} />
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr>
-                  <th className="ts-person">Cả nhóm</th>
-                  {days.map((d) => (
-                    <td key={d} className={dayClass(d, calendar)}>
-                      {roundHours(grid.dayTotal.get(d) ?? 0) || ""}
-                    </td>
-                  ))}
-                  <td className="ts-total">
-                    <b>{totals.logged}h</b>
-                  </td>
-                </tr>
-              </tfoot>
-            </table>
+      <div className="ts-body">
+        {error && (
+          <div className="notice notice-error">
+            <span>{error}</span>
           </div>
+        )}
+        {!sheet && !error && <Spinner block label="Đang tải giờ đã ghi" />}
 
-          <div className="ts-legend">
-            <span><i className="band-low" /> dưới 50% công suất</span>
-            <span><i className="band-mid" /> 50% đến dưới 100%</span>
-            <span><i className="band-full" /> đủ ngày</span>
-            <span><i className="band-over" />▲ vượt công suất</span>
-            <span><span className="ts-gap">●</span> ngày làm việc chưa ghi</span>
-            <span><i className="ts-away-swatch" /> nghỉ phép</span>
-          </div>
+        {sheet && scope === "mine" && (
+          <TimesheetMine
+            sheet={sheet}
+            days={days}
+            month={month}
+            today={today}
+            me={me}
+            tasks={tasks}
+            ops={ops}
+            focusDate={focusDate}
+            onFocusDone={onFocusDone}
+            onOpenTask={onOpenEdit}
+            rangeKey={range}
+          />
+        )}
 
-          {detail && (
-            <div className="ts-detail">
-              <div className="ts-detail-head">
-                <b>{detail.person.displayName}</b>
-                <span className="bd-muted">
-                  {selection?.date ? `${WEEKDAYS[weekday(selection.date)]} ${dm(selection.date)}` : rangeLabel} ·{" "}
-                  {roundHours(detail.entries.reduce((s, e) => s + e.hours, 0))}h
-                </span>
-                <span className="bd-spacer" />
-                {detail.person.accountId === me && (
-                  <button onClick={() => setLogFor({ date: selection?.date ?? today })}>+ Ghi giờ {selection?.date ? "ngày này" : ""}</button>
-                )}
-                <button className="text-btn" onClick={() => setSelection(null)}>Đóng</button>
-              </div>
-              {detail.entries.length === 0 ? (
-                <div className="bd-muted ts-empty">
-                  Không có giờ nào được ghi.
-                  {detail.person.accountId !== me && " Jira chỉ cho mỗi người tự ghi giờ của mình."}
-                </div>
-              ) : (
-                <ul className="ts-entries">
-                  {detail.entries.map((e) => {
-                    const task = byId.get(e.issueKey);
-                    return (
-                      <li key={e.id}>
-                        {!selection?.date && <span className="ts-entry-date">{dm(e.date)}</span>}
-                        <button className="text-btn ts-key" onClick={() => task && onOpenEdit(task)} disabled={!task}>
-                          {e.issueKey}
-                        </button>
-                        <span className="ts-entry-sum" title={e.summary}>{e.summary}</span>
-                        {e.comment && <span className="ts-entry-comment" title={e.comment}>“{e.comment}”</span>}
-                        <b className="ts-entry-h">{e.hours}h</b>
-                        {e.mine && (
-                          <button
-                            className="ts-entry-edit"
-                            onClick={() => setLogFor({ date: e.date, issueKey: e.issueKey, editing: e })}
-                            aria-label="Sửa giờ đã ghi"
-                            title="Sửa"
-                          >
-                            <Icon name="edit" size={14} />
-                          </button>
-                        )}
-                        {e.mine && (
-                          <button className="att-remove" onClick={() => setConfirmDelete(e)} aria-label="Xoá giờ đã ghi" title="Xoá">
-                            ✕
-                          </button>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
+        {sheet && scope === "team" && (
+          <>
+            <MetricRow className="ts-tiles">
+              <Metric value={`${fmtHours(logged)}h`} label="Cả nhóm đã ghi" />
+              {counts.missing > 0 && (
+                <Metric
+                  value={counts.missing}
+                  label="người còn ngày chưa ghi"
+                  tone="warn"
+                  className={`ts-tile-missing${teamFilter === "missing" ? " is-on" : ""}`}
+                  title={teamFilter === "missing" ? "Xem tất cả" : "Chỉ xem người còn thiếu"}
+                  onClick={() => setTeamFilter(teamFilter === "missing" ? "all" : "missing")}
+                />
               )}
-            </div>
-          )}
-        </>
-      )}
+              {counts.overDays > 0 && (
+                <Metric
+                  value={counts.overDays}
+                  label="ngày-người vượt công suất"
+                  tone="serious"
+                  className={`ts-tile-over${teamFilter === "over" ? " is-on" : ""}`}
+                  title={teamFilter === "over" ? "Xem tất cả" : "Chỉ xem người vượt"}
+                  onClick={() => setTeamFilter(teamFilter === "over" ? "all" : "over")}
+                />
+              )}
+            </MetricRow>
+            <TimesheetTeam
+              sheet={sheet}
+              rows={teamRows}
+              days={days}
+              month={month}
+              today={today}
+              me={me}
+              tasks={tasks}
+              onOpenTask={onOpenEdit}
+              onEditMine={(d) => {
+                setScope("mine");
+                setFocusDate(d);
+              }}
+            />
+          </>
+        )}
 
-      {confirmDelete && (
-        <div className="modal-overlay" onClick={() => setConfirmDelete(null)}>
-          <div className="modal modal-confirm" onClick={(e) => e.stopPropagation()} role="alertdialog" aria-label="Xoá giờ đã ghi">
-            <p>
-              Xoá <b>{confirmDelete.hours}h</b> đã ghi cho <b>{confirmDelete.issueKey}</b> ngày {dm(confirmDelete.date)}? Việc này xoá luôn trên Jira.
-            </p>
-            <div className="modal-footer">
-              <div className="spacer" />
-              <button onClick={() => setConfirmDelete(null)}>Huỷ</button>
-              <button className="danger" onClick={() => removeEntry(confirmDelete)}>
-                Xoá
-              </button>
-            </div>
+        {sheet && (
+          <div className="ts-legend">
+            <span><i className="ts-sw-tint" /> đậm dần theo số giờ trong ngày</span>
+            <span><i className="ts-sw-over" />▲ vượt công suất</span>
+            <span><i className="ts-sw-away" /> nghỉ phép</span>
+            <span><i className="ts-sw-off" /> ngày nghỉ của dự án</span>
           </div>
-        </div>
-      )}
-
-      {logPick && (
-        <TaskPicker
-          anchor={logPick.rect}
-          tasks={loggable}
-          placeholder={`Ghi ${logPick.hours}h ngày ${dm(logPick.date)} cho việc`}
-          onPick={(t) => void logInline(t)}
-          onClose={() => setLogPick(null)}
-        />
-      )}
-
-      {logFor && (
-        <LogWorkModal
-          tasks={tasks}
-          me={me}
-          initialDate={logFor.date}
-          editing={logFor.editing}
-          onClose={() => setLogFor(null)}
-          onLogged={() => {
-            setReloadKey((k) => k + 1);
-            onTasksChanged();
-          }}
-        />
-      )}
-    </div>
-  );
-}
-
-/**
- * The input in an empty day of your own row: type 4, 1.5 or 2h30 and press Enter; the task is asked next.
- * Not a number field: "2h30" must be typeable. A value that is not a duration stays and turns red.
- */
-function InlineHours({ date, onCommit }: { date: string; onCommit: (hours: number, rect: DOMRect) => void }) {
-  const [text, setText] = useState("");
-  const [bad, setBad] = useState(false);
-  return (
-    <input
-      className={`ts-inline${text ? " is-filled" : ""}${bad ? " is-bad" : ""}`}
-      value={text}
-      inputMode="decimal"
-      autoComplete="off"
-      aria-label={`Ghi giờ ngày ${dm(date)}`}
-      aria-invalid={bad || undefined}
-      title={bad ? "Nhập số giờ, ví dụ 4, 1,5 hoặc 2h30" : undefined}
-      onClick={(e) => e.stopPropagation()}
-      onChange={(e) => {
-        setText(e.target.value);
-        setBad(false);
-      }}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          const hours = parseHours(text);
-          if (hours === null) setBad(true);
-          else onCommit(hours, e.currentTarget.getBoundingClientRect());
-        } else if (e.key === "Escape" && text) {
-          // A draft is dropped first; a second Esc is the app's.
-          e.stopPropagation();
-          setText("");
-          setBad(false);
-        }
-      }}
-    />
-  );
-}
-
-function LogWorkModal({
-  tasks,
-  me,
-  initialDate,
-  editing,
-  onClose,
-  onLogged,
-}: {
-  tasks: Task[];
-  me: string;
-  initialDate: string;
-  /** Set when changing an entry that already exists: the issue is then fixed, only day, hours and note move. */
-  editing?: WorklogEntry;
-  onClose: () => void;
-  onLogged: () => void;
-}) {
-  // Your own open work first — that is what you are logging against nine times in ten.
-  const options = useMemo(() => {
-    const open = tasks.filter((t) => t.issueType.toLowerCase() !== "epic");
-    const rank = (t: Task) => (t.assigneeAccountId === me ? 0 : 1) + (t.statusCategory === "done" ? 2 : 0);
-    return [...open].sort((a, b) => rank(a) - rank(b) || a.id.localeCompare(b.id, undefined, { numeric: true }));
-  }, [tasks, me]);
-  const [issueKey, setIssueKey] = useState(editing?.issueKey ?? options[0]?.id ?? "");
-  const [date, setDate] = useState(initialDate);
-  const [hours, setHours] = useState<number | null>(editing?.hours ?? null);
-  const [comment, setComment] = useState(editing?.comment ?? "");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function submit() {
-    if (!issueKey || !hours) return;
-    setSaving(true);
-    setError(null);
-    try {
-      if (editing) {
-        // Only what changed goes out: a same-day edit must not re-stamp the start time.
-        await api.updateWorklog(editing.issueKey, editing.id, {
-          ...(date !== editing.date ? { date } : {}),
-          ...(hours !== editing.hours ? { hours } : {}),
-          ...(comment.trim() !== (editing.comment ?? "") ? { comment: comment.trim() || null } : {}),
-        });
-      } else {
-        await api.logWork({ issueKey, date, hours, comment: comment || null });
-      }
-      onLogged();
-      onClose();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Không ghi được giờ.");
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal bd-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <span className="modal-id">{editing ? `Sửa giờ đã ghi · ${editing.issueKey}` : "Ghi giờ làm việc"}</span>
-          <button className="modal-close" onClick={onClose}>✕</button>
-        </div>
-        <label className="field">
-          <span>Việc</span>
-          <select value={issueKey} onChange={(e) => setIssueKey(e.target.value)} disabled={!!editing}>
-            {editing && !options.some((t) => t.id === editing.issueKey) && (
-              <option value={editing.issueKey}>
-                {editing.issueKey} · {editing.summary.slice(0, 60)}
-              </option>
-            )}
-            {options.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.assigneeAccountId === me ? "★ " : ""}
-                {t.id} · {t.summary.slice(0, 60)}
-                {t.statusCategory === "done" ? " (đã xong)" : ""}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="field-row">
-          <label className="field">
-            <span>Ngày</span>
-            <DateField value={date} onChange={setDate} ariaLabel="Ngày ghi giờ" />
-          </label>
-          <label className="field">
-            <span>Số giờ</span>
-            <NumberInput autoFocus value={hours} min={0.02} max={24} allowEmpty placeholder="VD: 1,5" onChange={setHours} />
-          </label>
-        </div>
-        <label className="field">
-          <span>Ghi chú</span>
-          <textarea rows={2} value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Đã làm gì (không bắt buộc)" />
-        </label>
-        <p className="bd-muted">Giờ ghi dưới tên bạn.</p>
-        {error && <div className="modal-error">{error}</div>}
-        <div className="modal-footer">
-          <span className="bd-spacer" />
-          <button onClick={onClose}>Huỷ</button>
-          <button className="primary" onClick={submit} disabled={saving || !hours || !issueKey}>
-            {saving ? "Đang ghi..." : editing ? "Lưu thay đổi" : "Ghi giờ"}
-          </button>
-        </div>
+        )}
       </div>
     </div>
   );

@@ -346,17 +346,26 @@ await step("bấm tile mở danh sách chi tiết: có tìm kiếm, sắp xếp,
 });
 
 console.log("\n== Chấm công ==");
-await step("đổi tên tab + lọc 'Của tôi' chỉ còn 1 dòng", async () => {
+await step("Giờ đã ghi: 'Cả nhóm' tìm theo tên chỉ còn một người", async () => {
   await openTimesheet(page);
-  await page.locator(".ts-person-filter").selectOption("me");
-  await page.waitForFunction(() => document.querySelectorAll(".ts-grid tbody tr").length === 1);
+  await page.locator("[data-scope=team]").click();
+  await page.waitForSelector(".ts-prow");
+  await page.fill("input[aria-label='Tìm thành viên']", "tuan");
+  await page.waitForFunction(() => document.querySelectorAll(".ts-prow").length === 1);
+  await page.fill("input[aria-label='Tìm thành viên']", "");
 });
-await step("xoá giờ đã ghi dùng hộp thoại trong app (không dùng confirm của trình duyệt)", async () => {
-  await page.locator(".ts-person-btn").first().click();
-  await page.locator(".att-remove").first().click();
-  await page.waitForSelector(".modal-confirm");
-  await page.locator(".modal-confirm button", { hasText: "Huỷ" }).click();
+await step("xoá giờ đã ghi: xoá ô, không hộp thoại nào, có 'Hoàn tác' ghi lại giờ cũ", async () => {
+  await page.locator("[data-scope=mine]").click();
+  await page.waitForSelector(".ts-mine");
+  const cells = page.locator(".ts-mine input[data-key='DEMO-3']");
+  const idx = await cells.evaluateAll((els) => els.findIndex((e) => e.value === "4"));
+  assert.ok(idx >= 0, "không thấy ô 4h của DEMO-3");
+  await cells.nth(idx).fill("");
+  await cells.nth(idx).press("Tab");
+  await page.waitForFunction(async () => (await (await fetch("/api/__log")).json()).log.some((l) => l.m === "DELETE" && l.p.startsWith("/api/timesheet/worklogs/")));
   assert.equal(dialogs.length, 0, "đã bật hộp thoại của trình duyệt: " + dialogs);
+  await page.locator(".toast button, .toaster button", { hasText: "Hoàn tác" }).first().click();
+  await page.waitForFunction(async () => (await (await fetch("/api/__log")).json()).log.some((l) => l.m === "POST" && l.p === "/api/timesheet/worklogs" && l.b.hours === 4));
 });
 await step("xuất CSV chấm công", async () => {
   const [dl] = await Promise.all([page.waitForEvent("download"), page.locator(".ts-toolbar button", { hasText: "Xuất CSV" }).click()]);

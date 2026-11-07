@@ -170,18 +170,6 @@
   padding-block: 10px;
 }
 
-/* ---- Giờ làm ---- */
-.timesheet-view,
-.ts-view {
-  background: var(--sheet);
-}
-.ts-gap,
-.ts-missing,
-.ts-dot {
-  /* "chưa ghi" is a neutral dashed outline, not an accusing orange dot (plan §6.9). */
-  color: var(--ink-4) !important;
-  background: transparent !important;
-}
 
 /* ---- Nhịp dự án (report) ---- */
 .progress-view {
@@ -447,15 +435,6 @@ button.ai-generate:hover:not(:disabled) {
 .rv-cap-odd {
   color: var(--warn-text);
   text-decoration: underline dotted;
-}
-
-/* Giờ làm: today is a thin son edge like every other view, not a heavy box around each cell
-   (that box was the darkest thing on the page). */
-.ts-cell.is-today {
-  box-shadow: inset 1px 0 0 var(--son), inset -1px 0 0 var(--son);
-}
-.ts-cell.is-today.is-selected {
-  box-shadow: inset 0 0 0 2px var(--ink);
 }
 
 /* The card has a fixed height in the glance row; without this the 8px bars shrink to nothing. */
@@ -765,41 +744,6 @@ button.pr-print {
   display: none;
 }
 
-/* F5: an empty day of your own row is an input; the picker for the task opens on it after Enter. */
-.ts-grid td.ts-cell {
-  position: relative;
-}
-.ts-grid .ts-inline {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-  color: var(--ink);
-  font: inherit;
-  font-variant-numeric: tabular-nums;
-  text-align: center;
-  cursor: text;
-}
-.ts-grid .ts-inline:hover {
-  background: color-mix(in srgb, var(--ink) 5%, transparent);
-}
-.ts-grid .ts-inline:focus,
-.ts-grid .ts-inline.is-filled {
-  background: var(--sheet);
-  box-shadow: inset 0 0 0 2px var(--ink);
-  outline: none;
-}
-.ts-grid .ts-inline.is-bad {
-  box-shadow: inset 0 0 0 2px var(--risk);
-  color: var(--risk-text);
-}
-
 /* One bar per person: the done / doing / to-do pieces side by side on one line, filling the middle column.
    (It used to share .pr-stack, which is a column for the status card, so the pieces wrapped onto two lines.) */
 .pr-person-stack {
@@ -845,11 +789,6 @@ button.pr-print {
   color: var(--ink-2);
 }
 
-/* Giờ đã ghi: the leave swatch in the legend is a sample cell, not a word. */
-.ts-legend i.ts-away-swatch {
-  background: var(--sunken);
-  box-shadow: inset 0 0 0 1px var(--line-strong);
-}
 .bcs-board {
   display: inline-flex;
   margin-bottom: var(--space-3, 12px);
@@ -880,29 +819,6 @@ button.pr-print {
 }
 .pr-timeline-plan {
   background: var(--line-strong);
-}
-.ts-cell.band-low {
-  background: var(--sunken);
-  color: var(--ink-3);
-}
-.ts-cell.band-mid {
-  background: var(--line-strong);
-  color: var(--ink-2);
-}
-.ts-cell.band-full {
-  background: var(--ink-2);
-  color: var(--on-strong);
-  font-weight: 600;
-}
-.ts-legend i.band-low {
-  background: var(--sunken);
-  box-shadow: inset 0 0 0 1px var(--line-strong);
-}
-.ts-legend i.band-mid {
-  background: var(--line-strong);
-}
-.ts-legend i.band-full {
-  background: var(--ink-2);
 }
 .release-line line {
   stroke: var(--ink-3);

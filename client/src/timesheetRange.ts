@@ -19,3 +19,16 @@ export function rangeOf(mode: TimesheetMode, anchor: string): { from: string; to
   next.setUTCMonth(next.getUTCMonth() + 1);
   return { from, to: addDays(next.toISOString().slice(0, 10), -1) };
 }
+
+export const WEEKDAYS = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
+export const WEEKDAYS_LONG = ["Chủ nhật", "Thứ hai", "Thứ ba", "Thứ tư", "Thứ năm", "Thứ sáu", "Thứ bảy"];
+
+/** "03/11" from "2026-11-03". */
+export const dm = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
+
+/** Every date from `from` to `to`, both included. */
+export function eachDay(from: string, to: string): string[] {
+  const out: string[] = [];
+  for (let d = from; d <= to; d = addDays(d, 1)) out.push(d);
+  return out;
+}

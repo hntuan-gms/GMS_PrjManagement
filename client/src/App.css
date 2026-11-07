@@ -7224,353 +7224,6 @@ button.att-remove:hover:not(:disabled) {
   vertical-align: middle;
 }
 
-/* ==========================================================================
-   Timesheet
-   ========================================================================== */
-.ts-wrap {
-  flex: 1;
-  overflow: auto;
-  padding: 16px 20px 32px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  background: var(--color-bg);
-}
-.ts-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.ts-range {
-  min-width: 150px;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-}
-.ts-tiles {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 12px;
-}
-.ts-tile {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  padding: 12px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.ts-tile-label {
-  font-size: var(--font-size-sm);
-  color: var(--color-text-muted);
-  font-weight: 600;
-}
-.ts-tile-value {
-  font-size: var(--font-size-page);
-  color: var(--color-text-primary);
-  font-variant-numeric: tabular-nums;
-}
-.ts-tile-sub {
-  font-size: var(--font-size-sm);
-  color: var(--color-text-muted);
-}
-.ts-tile.is-warn .ts-tile-value span {
-  color: var(--son-text);
-}
-.ts-tile.is-over .ts-tile-value span {
-  color: var(--warn-text);
-}
-.ts-grid-scroll {
-  overflow-x: auto;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-}
-.ts-grid {
-  border-collapse: separate;
-  border-spacing: 0;
-  width: 100%;
-  font-size: var(--font-size-md);
-  font-variant-numeric: tabular-nums;
-}
-.ts-grid th,
-.ts-grid td {
-  border-bottom: 1px solid var(--color-border);
-  padding: 0;
-  text-align: center;
-  height: 40px;
-  min-width: 56px;
-}
-.ts-grid.is-month th,
-.ts-grid.is-month td {
-  min-width: 34px;
-  font-size: var(--font-size-sm);
-}
-.ts-grid thead th {
-  height: 46px;
-  font-weight: 600;
-  color: var(--color-text-muted);
-  background: var(--color-sheet);
-}
-.ts-wd,
-.ts-dd {
-  display: block;
-  line-height: 1.3;
-}
-.ts-wd {
-  font-size: var(--font-size-xs);
-}
-.ts-dd {
-  color: var(--color-text-primary);
-}
-.ts-grid th.is-today .ts-dd {
-  color: var(--color-primary);
-}
-.ts-grid .ts-person,
-.ts-grid .ts-person-h {
-  position: sticky;
-  left: 0;
-  z-index: 1;
-  background: var(--color-surface);
-  text-align: left;
-  min-width: 200px;
-  border-right: 1px solid var(--color-border);
-}
-.ts-grid .ts-person-h {
-  background: var(--color-sheet);
-  padding-left: 12px;
-  z-index: 2;
-}
-.ts-grid tfoot .ts-person {
-  padding-left: 12px;
-  font-weight: 600;
-  color: var(--color-text-muted);
-}
-.ts-grid tfoot td,
-.ts-grid tfoot th {
-  background: var(--color-sheet);
-  font-weight: 600;
-  color: var(--color-text-secondary);
-}
-button.ts-person-btn {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 8px;
-  width: 100%;
-  height: 40px;
-  border: none;
-  border-radius: 0;
-  background: none;
-  padding: 0 12px;
-  cursor: pointer;
-  text-align: left;
-  white-space: nowrap;
-}
-button.ts-person-btn:hover:not(:disabled) {
-  background: var(--color-sunken);
-}
-.ts-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-weight: 500;
-  color: var(--color-text-primary);
-}
-.ts-tag {
-  font-size: var(--font-size-xs);
-  font-weight: 600;
-  padding: 0 6px;
-  border-radius: var(--radius-full);
-  background: var(--color-sunken);
-  color: var(--color-text-muted);
-}
-tr.is-selected .ts-person {
-  box-shadow: inset 3px 0 0 var(--color-primary);
-}
-.ts-cell {
-  cursor: pointer;
-  border-left: 2px solid var(--color-surface);
-  transition: filter var(--transition-fast);
-}
-.ts-cell:hover {
-  filter: brightness(0.96);
-}
-.ts-grid .is-weekend {
-  background: var(--color-sunken);
-}
-/* A holiday of the project's calendar: shaded like a weekend, and marked so it does not read as one. */
-.ts-grid th.is-holiday {
-  background: var(--color-warning-light);
-  box-shadow: inset 0 2px 0 var(--color-warning-border);
-}
-.ts-cell.band-low {
-  background: var(--info-soft);
-  color: var(--info-text);
-}
-.ts-cell.band-mid {
-  background: var(--info-line);
-  color: var(--info-text);
-}
-.ts-cell.band-full {
-  background: var(--info);
-  color: var(--color-on-strong);
-  font-weight: 600;
-}
-.ts-cell.band-over {
-  background: var(--warn-line);
-  color: var(--warn-text);
-  font-weight: 600;
-  box-shadow: inset 0 0 0 1.5px var(--warn);
-}
-.ts-cell.is-away {
-  background: repeating-linear-gradient(135deg, var(--color-sunken) 0 6px, var(--color-border) 6px 8px);
-}
-.ts-cell.is-today {
-  box-shadow: inset 0 0 0 2px var(--color-primary);
-}
-.ts-cell.is-selected {
-  box-shadow: inset 0 0 0 2px var(--color-text-primary);
-}
-.ts-gap {
-  color: var(--son-text);
-  font-size: var(--font-size-xs);
-}
-.ts-away {
-  font-size: var(--font-size-xs);
-  color: var(--color-text-muted);
-}
-.ts-grid .ts-total,
-.ts-grid .ts-total-h {
-  min-width: 150px;
-  padding: 0 12px;
-  text-align: right;
-  white-space: nowrap;
-  border-left: 1px solid var(--color-border);
-}
-.ts-meter {
-  display: block;
-  height: 4px;
-  margin-top: 4px;
-  border-radius: 2px;
-  background: var(--color-border);
-  overflow: hidden;
-}
-.ts-meter span {
-  display: block;
-  height: 100%;
-  background: var(--info);
-  border-radius: 2px;
-}
-.ts-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 14px;
-  font-size: var(--font-size-sm);
-  color: var(--color-text-muted);
-}
-.ts-legend span {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-.ts-legend i {
-  display: inline-block;
-  width: 14px;
-  height: 10px;
-  border-radius: 2px;
-}
-.ts-legend i.band-low {
-  background: var(--info-soft);
-}
-.ts-legend i.band-mid {
-  background: var(--info-line);
-}
-.ts-legend i.band-full {
-  background: var(--info);
-}
-.ts-legend i.band-over {
-  background: var(--warn-line);
-  box-shadow: inset 0 0 0 1.5px var(--warn);
-}
-.ts-detail {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  padding: 12px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.ts-detail-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-.ts-empty {
-  padding: 4px 0;
-}
-.ts-entries {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-}
-.ts-entries li {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 7px 0;
-  border-top: 1px solid var(--color-border);
-  font-size: var(--font-size-md);
-}
-.ts-entry-date {
-  color: var(--color-text-muted);
-  width: 44px;
-  flex: none;
-}
-.ts-key {
-  font-family: var(--font-mono);
-  font-weight: 600;
-  flex: none;
-}
-.ts-entry-sum {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ts-entry-comment {
-  flex: 0 1 30%;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--color-text-muted);
-  font-style: italic;
-}
-.ts-entry-h {
-  flex: none;
-  width: 52px;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-@media (max-width: 720px) {
-  .ts-wrap {
-    padding: 12px 16px 24px;
-  }
-  .ts-grid .ts-person,
-  .ts-grid .ts-person-h {
-    min-width: 140px;
-  }
-  .ts-entry-comment {
-    display: none;
-  }
-}
-
 /* A neutral text action — .link-btn is the red "gỡ / xoá" style. */
 .text-btn {
   border: none;
@@ -8461,16 +8114,7 @@ button.tf-chip-x:hover:not(:disabled) {
   background: var(--color-surface);
 }
 
-/* --- timesheet: person filter, confirm dialog --- */
-.ts-person-filter {
-  padding: 4px 8px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--color-border);
-  background: var(--color-surface);
-  font: inherit;
-  font-size: var(--font-size-md);
-  max-width: 200px;
-}
+/* --- confirm dialog --- */
 .modal-confirm {
   max-width: 420px;
 }
@@ -8949,41 +8593,35 @@ button.tf-chip-x:hover:not(:disabled) {
    share one look now, the same language as .field: rounded 1px border, a chevron we
    draw ourselves on selects, a blue ring on focus. 32px, like the toolbar buttons.
    ========================================================================== */
-.ts-toolbar select,
 .pr-filter select,
 .pr-filter input,
 .rv-range input[type="date"],
 .bd-search,
 .bd-lanepick select,
 .selection-select,
-.selection-shift input,
-.ts-person-filter {
+.selection-shift input {
   height: var(--control-h);
   padding: 0 10px;
   border: 1px solid var(--color-border-hover);
   border-radius: var(--radius-md);
   box-shadow: none;
 }
-.ts-toolbar select:hover,
 .pr-filter select:hover,
 .pr-filter input:hover,
 .rv-range input[type="date"]:hover,
 .bd-search:hover,
 .bd-lanepick select:hover,
 .selection-select:hover,
-.selection-shift input:hover,
-.ts-person-filter:hover {
+.selection-shift input:hover {
   border-color: var(--control-border-hover);
 }
-.ts-toolbar select:focus,
 .pr-filter select:focus,
 .pr-filter input:focus,
 .rv-range input[type="date"]:focus,
 .bd-search:focus,
 .bd-lanepick select:focus,
 .selection-select:focus,
-.selection-shift input:focus,
-.ts-person-filter:focus {
+.selection-shift input:focus {
   outline: none;
   border-color: var(--control-border-focus);
   box-shadow: var(--control-ring);
@@ -9910,21 +9548,6 @@ button.primary.tonal:disabled {
   opacity: 0.5;
   cursor: progress;
 }
-button.ts-entry-edit {
-  flex: none;
-  padding: 2px 6px;
-  border: none;
-  border-radius: 4px;
-  background: none;
-  color: var(--color-text-muted);
-  font-size: var(--font-size-sm);
-  cursor: pointer;
-}
-button.ts-entry-edit:hover:not(:disabled) {
-  background: var(--color-primary-light);
-  color: var(--color-primary);
-}
-
 /* ------------------------------------------- Năng lực nhóm trong sprint */
 .cap {
   display: flex;

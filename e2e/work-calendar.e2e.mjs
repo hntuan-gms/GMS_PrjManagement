@@ -109,11 +109,12 @@ await step("Nguồn lực: ngày lễ ghi 'Ngày lễ: …', Thứ 7 làm bù c�
 
 await step("Chấm công: cả tuần là ngày lễ — không ô 'chưa ghi', giờ kỳ vọng 0h", async () => {
   await openTimesheet(page);
-  await page.waitForSelector(".ts-grid tbody tr");
+  await page.locator("[data-scope=team]").click();
+  await page.waitForSelector(".ts-prow");
   const heads = await page.locator(".ts-grid thead th.is-holiday").count();
   assert.equal(heads, 7, `${heads} cột ngày lễ`);
-  assert.equal(await page.locator(".ts-grid .ts-gap").count(), 0);
-  assert.match(await page.locator(".ts-grid tbody tr").first().locator(".ts-total").textContent(), /\/ 0h/);
+  assert.equal(await page.locator(".ts-owes").count(), 0, "ngày lễ không phải ngày thiếu");
+  assert.match(await page.locator(".ts-prow").first().locator(".ts-total").textContent(), /\/ 0h/);
 });
 
 console.log("\n== SLA dùng chung lịch ==");
