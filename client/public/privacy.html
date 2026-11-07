@@ -75,6 +75,21 @@
           <td>Được làm mới mỗi lần bạn mở dự án</td>
         </tr>
         <tr>
+          <td>Bình luận của issue: nội dung, tên hiển thị và ảnh đại diện của người viết, giờ viết, người được nhắc tên (không có email). Bình luận bị giới hạn cho một nhóm hoặc vai trò trong Jira <strong>không</strong> được lưu</td>
+          <td>Cơ sở dữ liệu PostgreSQL trên Google Cloud SQL, gắn theo mã issue của Jira (xem mục 3)</td>
+          <td>Tối đa 10 phút kể từ lần đọc, và bỏ ngay khi issue thay đổi trên Jira hoặc có người viết bình luận qua ứng dụng; xoá cùng issue</td>
+        </tr>
+        <tr>
+          <td>Danh sách tệp đính kèm và liên kết web của issue: tên tệp, kích thước, loại tệp, người tải lên, giờ tải lên, địa chỉ liên kết và tên liên kết. <strong>Nội dung tệp không được lưu</strong></td>
+          <td>Cơ sở dữ liệu PostgreSQL trên Google Cloud SQL, gắn theo mã issue của Jira (xem mục 3)</td>
+          <td>Như bình luận: tối đa 10 phút, bỏ ngay khi có thay đổi</td>
+        </tr>
+        <tr>
+          <td>Danh sách dùng chung của dự án: mức ưu tiên, loại issue, nhãn, thành phần, phiên bản, loại liên kết</td>
+          <td>Cơ sở dữ liệu PostgreSQL trên Google Cloud SQL, gắn theo dự án</td>
+          <td>10 phút, sau đó đọc lại từ Jira (tối đa 1 ngày khi Jira từ chối vì quá giới hạn gọi)</td>
+        </tr>
+        <tr>
           <td>Danh sách thành viên dự án: tên hiển thị, ảnh đại diện, accountId (không có email)</td>
           <td>Cơ sở dữ liệu PostgreSQL trên Google Cloud SQL</td>
           <td>1 giờ, sau đó đọc lại từ Jira</td>
@@ -98,21 +113,33 @@
 
       <h2>3. Nội dung Jira</h2>
       <p>
-        Để giảm số lần gọi Jira, máy chủ lưu một bản sao các trường issue mà ứng dụng hiển thị
-        (tiêu đề, mô tả, trạng thái, người phụ trách, ngày tháng, nhãn, sprint) trong cơ sở dữ
-        liệu PostgreSQL trên Google Cloud SQL (khu vực <code>asia-southeast1</code>, Singapore).
-        Bình luận, lịch sử thay đổi và tệp đính kèm <strong>không</strong> được lưu — chúng vẫn
-        được đọc trực tiếp từ Jira.
+        Để giảm số lần gọi Jira, máy chủ lưu một bản sao nội dung issue mà ứng dụng hiển thị trong
+        cơ sở dữ liệu PostgreSQL trên Google Cloud SQL (khu vực <code>asia-southeast1</code>,
+        Singapore): tiêu đề, mô tả, trạng thái, người phụ trách, ngày tháng, nhãn, sprint; và, khi
+        có người mở chi tiết một issue, <strong>bình luận</strong> cùng <strong>danh sách tệp đính
+        kèm và liên kết web</strong> của issue đó (không phải nội dung tệp), cộng với các danh
+        sách dùng chung của dự án nêu ở mục 1. Bình luận và danh sách tệp được giữ không quá 10 phút và bỏ
+        ngay khi issue thay đổi.
+      </p>
+      <p>
+        Vẫn <strong>không</strong> được lưu, và luôn đọc trực tiếp từ Jira: lịch sử thay đổi,
+        nội dung tệp đính kèm, người theo dõi, các bước chuyển trạng thái mà quy trình cho phép,
+        và các liên kết giữa các issue. Các mục này phụ thuộc vào người đang xem hoặc vào những
+        issue bạn có thể không được xem.
       </p>
       <p>
         Bản sao <strong>không quyết định ai được xem gì</strong>: mỗi lần bạn mở trang, ứng dụng
         hỏi Jira bằng chính tài khoản của bạn những issue bạn có quyền xem, và chỉ hiển thị
-        những issue đó.
+        những issue đó. Mô tả, bình luận và tệp đính kèm chỉ được lấy từ bản sao khi danh sách đó
+        (đọc bằng tài khoản của bạn, trong vòng 10 phút) có issue; issue có mức bảo mật riêng luôn
+        được đọc trực tiếp từ Jira. Một bình luận bị giới hạn cho nhóm hoặc vai trò trong Jira
+        không bao giờ được lưu, và issue có bình luận như vậy luôn được đọc trực tiếp từ Jira.
       </p>
       <p>
-        Bản sao được giữ cho đến khi issue bị xoá khỏi Jira. Jira luôn là nơi lưu bản gốc, nên
-        xoá bản sao bất cứ lúc nào cũng không làm mất dữ liệu. Dữ liệu lịch trình nêu ở mục 1
-        chỉ gồm ngày tháng và con số, gắn với mã issue.
+        Bản sao nội dung issue được giữ cho đến khi issue bị xoá khỏi Jira; bình luận và tệp
+        đính kèm bị xoá cùng issue. Jira luôn là nơi lưu bản gốc, nên xoá bản sao bất cứ lúc nào
+        cũng không làm mất dữ liệu. Dữ liệu lịch trình nêu ở mục 1 chỉ gồm ngày tháng và con số,
+        gắn với mã issue.
       </p>
 
       <h2>4. Nhật ký hệ thống</h2>

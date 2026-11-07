@@ -3,6 +3,8 @@ import { adfToText, textToAdf } from "./adf.js";
 import { isRateLimited, searchProjectIssues, shareInflight, type ProjectSearchResult } from "./parallelSearch.js";
 import { cacheFields, issueCacheEnabled, readCachedProject } from "./issueCache.js";
 import { pgIssueCache } from "./issueCacheStore.js";
+import { cachedDescription } from "./detailCache.js";
+import { pgDetailStore } from "./detailCacheStore.js";
 import { quotaView } from "./jiraQuota.js";
 import { ensureProjectWebhook, LIVE_DELTA_INTERVAL_MS, webhookLive } from "./jiraWebhooks.js";
 import { loadAuthConfig } from "./auth/config.js";
@@ -287,8 +289,13 @@ export class TaskService {
   /** The description of one issue, as plain text — what the list leaves out. */
   async getDescription(id: string): Promise<string | null> {
     this.assertOwnKey(id);
-    const issue = await this.jira.getIssue(id, ["description"]);
-    return issue.fields?.description ? adfToText(issue.fields.description) : null;
+    // From the issue copy when it is current and this person's own id list names the issue (detailCache.ts).
+    const adf = await cachedDescription(
+      pgDetailStore,
+      { cloudId: this.ctx.cloudId, projectKey: this.ctx.projectKey, accountId: this.ctx.accountId, key: id },
+      async () => (await this.jira.getIssue(id, ["description"])).fields?.description ?? null
+    );
+    return adf ? adfToText(adf) : null;
   }
 
   /**

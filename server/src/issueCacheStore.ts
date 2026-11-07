@@ -131,6 +131,8 @@ export const pgIssueCache: IssueCacheStore = {
 
   async remove(cloudId, issueIds) {
     if (issueIds.length === 0) return;
+    // What was held about these issues' comments and attachments (detailCache.ts) goes with them.
+    await db().query(`DELETE FROM issue_detail_cache WHERE cloud_id = $1 AND issue_id = ANY($2)`, [cloudId, issueIds]);
     await db().query(`DELETE FROM jira_issue_cache WHERE cloud_id = $1 AND issue_id = ANY($2)`, [cloudId, issueIds]);
   },
 
@@ -201,6 +203,11 @@ export async function applyWriteToCache(
       );
     }
     if (effect.deleted.length > 0) {
+      await db().query(
+        `DELETE FROM issue_detail_cache d USING jira_issue_cache c
+          WHERE d.cloud_id = $1 AND c.cloud_id = d.cloud_id AND c.issue_id = d.issue_id AND (c.issue_key = ANY($2) OR c.issue_id = ANY($2))`,
+        [cloudId, effect.deleted]
+      );
       await db().query(`DELETE FROM jira_issue_cache WHERE cloud_id = $1 AND (issue_key = ANY($2) OR issue_id = ANY($2))`, [
         cloudId,
         effect.deleted,

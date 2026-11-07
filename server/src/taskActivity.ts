@@ -1,12 +1,14 @@
 import { adfToCommentText, commentToAdf } from "./adf.js";
 import { badRequest } from "./errors.js";
 import type { JiraClient } from "./jiraClient.js";
+import { cachedDetail, forgetDetail, type DetailStore } from "./detailCache.js";
 
 /**
  * What the task detail adds on top of the schedule: the conversation (comments)
- * and the history (changelog). Both live only in Jira — no table of ours — for
- * the same reason the timesheet has none: a second copy would disagree with the
- * one people already read in Jira.
+ * and the history (changelog). Jira owns both. Comments are also kept in Postgres
+ * (detailCache.ts) so one person's read serves the next, under the same permission
+ * gate as the issue copy; a comment restricted to a group or role is never kept,
+ * and the history is always read from Jira.
  *
  * Mentions travel as `@[Name](accountId)` in the text this API speaks, which
  * `commentToAdf` turns into a real ADF mention node. Jira, not this app, then
@@ -25,6 +27,15 @@ export interface TaskComment {
   updated: string;
   /** Written by the signed-in user — the only ones Jira lets them edit or delete. */
   mine: boolean;
+  /** Restricted to a group or role in Jira. Present (true) only then; such a comment is never kept in the copy. */
+  restricted?: boolean;
+}
+
+/** Where comments are kept between readers; absent = every read goes to Jira. */
+export interface CommentCache {
+  store: DetailStore;
+  cloudId: string;
+  projectKey: string;
 }
 
 export interface ActivityChange {
@@ -64,7 +75,8 @@ function hours(seconds: string | null): string | null {
 export class TaskActivity {
   constructor(
     private readonly jira: JiraClient,
-    private readonly accountId: string
+    private readonly accountId: string,
+    private readonly cache?: CommentCache
   ) {}
 
   private toComment(c: any): TaskComment {
@@ -77,24 +89,51 @@ export class TaskActivity {
       created: c.created,
       updated: c.updated ?? c.created,
       mine: !!c.author?.accountId && c.author.accountId === this.accountId,
+      ...(c.visibility ? { restricted: true } : {}),
     };
   }
 
   /** Newest first, as Jira's own issue view lists them. */
   async listComments(key: string): Promise<TaskComment[]> {
-    return (await this.jira.getComments(key)).map((c) => this.toComment(c));
+    const read = async () => (await this.jira.getComments(key)).map((c) => this.toComment(c));
+    const cache = this.cache;
+    if (!cache) return read();
+    return cachedDetail<TaskComment[]>(
+      cache.store,
+      { cloudId: cache.cloudId, projectKey: cache.projectKey, accountId: this.accountId, key },
+      "comments",
+      read,
+      {
+        // `mine` is about the reader, so it is not stored; a restricted comment is not stored at all.
+        split: (list) => ({
+          data: list.filter((c) => !c.restricted).map((c) => ({ ...c, mine: false })),
+          restricted: list.some((c) => c.restricted),
+        }),
+        join: (data) => (data as TaskComment[]).map((c) => ({ ...c, mine: !!c.authorAccountId && c.authorAccountId === this.accountId })),
+      }
+    );
+  }
+
+  /** This app wrote to the issue's comments: what is held about them is no longer true. */
+  private async forget(key: string): Promise<void> {
+    if (this.cache) await forgetDetail(this.cache.store, this.cache.cloudId, key, ["comments"]);
   }
 
   async addComment(key: string, text: string): Promise<TaskComment> {
-    return this.toComment(await this.jira.addComment(key, commentToAdf(this.checked(text))));
+    const created = this.toComment(await this.jira.addComment(key, commentToAdf(this.checked(text))));
+    await this.forget(key);
+    return created;
   }
 
   async updateComment(key: string, commentId: string, text: string): Promise<TaskComment> {
-    return this.toComment(await this.jira.updateComment(key, commentId, commentToAdf(this.checked(text))));
+    const updated = this.toComment(await this.jira.updateComment(key, commentId, commentToAdf(this.checked(text))));
+    await this.forget(key);
+    return updated;
   }
 
   async deleteComment(key: string, commentId: string): Promise<void> {
     await this.jira.deleteComment(key, commentId);
+    await this.forget(key);
   }
 
   private checked(text: string): string {

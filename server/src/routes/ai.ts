@@ -1,3 +1,4 @@
+import { pgDetailStore } from "../detailCacheStore.js";
 import { Router } from "express";
 import { TaskActivity } from "../taskActivity.js";
 import { TaskExtras } from "../taskExtras.js";
@@ -259,7 +260,7 @@ aiRouter.post("/chat", requireProject, express.json({ limit: CHAT_BODY_LIMIT }),
       projectKey: session.projectKey!,
       accountId: session.accountId,
       boardService: boardServiceFor(req),
-      activity: new TaskActivity(req.auth!.jira, session.accountId),
+      activity: new TaskActivity(req.auth!.jira, session.accountId, { store: pgDetailStore, cloudId: session.cloudId, projectKey: session.projectKey! }),
       extras: new TaskExtras(req.auth!.jira, { projectKey: session.projectKey!, accountId: session.accountId }),
       timesheet: new TimesheetService(req.auth!.jira, {
         cloudId: session.cloudId,

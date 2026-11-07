@@ -1,3 +1,5 @@
+import { cachedDetail, cachedList, forgetDetail, type ListKind } from "../detailCache.js";
+import { pgDetailStore } from "../detailCacheStore.js";
 import express, { Router } from "express";
 import { aiRouter } from "./ai.js";
 import { resourcesRouter } from "./resources.js";
@@ -75,9 +77,19 @@ apiRouter.get("/users", requireProject, async (req, res, next) => {
   }
 });
 
+/**
+ * A project's own list (priorities, issue types, labels, components, versions, link types): the same answer for
+ * everyone who can browse the project, so it is read from Jira once per ten minutes and kept (detailCache.ts).
+ * requireProject has already confirmed this user can browse the project.
+ */
+function listOf<T>(req: express.Request, kind: ListKind, read: () => Promise<T>): Promise<T> {
+  const { cloudId, projectKey } = req.auth!.session;
+  return cachedList(pgDetailStore, { cloudId, projectKey: projectKey! }, kind, read);
+}
+
 apiRouter.get("/priorities", requireProject, async (req, res, next) => {
   try {
-    res.json(await req.auth!.taskService!.listPriorities());
+    res.json(await listOf(req, "priorities", () => req.auth!.taskService!.listPriorities()));
   } catch (err) {
     next(err);
   }
@@ -86,7 +98,7 @@ apiRouter.get("/priorities", requireProject, async (req, res, next) => {
 /** The issue types this project really has — a plan row can only be created as one of these. */
 apiRouter.get("/issue-types", requireProject, async (req, res, next) => {
   try {
-    res.json(await req.auth!.taskService!.listIssueTypes());
+    res.json(await listOf(req, "issue-types", () => req.auth!.taskService!.listIssueTypes()));
   } catch (err) {
     next(err);
   }
@@ -94,7 +106,7 @@ apiRouter.get("/issue-types", requireProject, async (req, res, next) => {
 
 apiRouter.get("/labels", requireProject, async (req, res, next) => {
   try {
-    res.json(await req.auth!.taskService!.listLabels());
+    res.json(await listOf(req, "labels", () => req.auth!.taskService!.listLabels()));
   } catch (err) {
     next(err);
   }
@@ -124,7 +136,7 @@ function extrasFor(req: express.Request): TaskExtras {
 
 apiRouter.get("/components", requireProject, async (req, res, next) => {
   try {
-    res.json(await extrasFor(req).components());
+    res.json(await listOf(req, "components", () => extrasFor(req).components()));
   } catch (err) {
     next(err);
   }
@@ -132,7 +144,7 @@ apiRouter.get("/components", requireProject, async (req, res, next) => {
 
 apiRouter.get("/versions", requireProject, async (req, res, next) => {
   try {
-    res.json(await extrasFor(req).versions());
+    res.json(await listOf(req, "versions", () => extrasFor(req).versions()));
   } catch (err) {
     next(err);
   }
@@ -140,7 +152,7 @@ apiRouter.get("/versions", requireProject, async (req, res, next) => {
 
 apiRouter.get("/link-types", requireProject, async (req, res, next) => {
   try {
-    res.json(await extrasFor(req).linkTypes());
+    res.json(await listOf(req, "link-types", () => extrasFor(req).linkTypes()));
   } catch (err) {
     next(err);
   }
@@ -334,7 +346,19 @@ apiRouter.patch("/tasks/:id", requireProject, async (req, res, next) => {
  * the notification when someone is @mentioned.
  */
 function activityFor(req: express.Request): TaskActivity {
-  return new TaskActivity(req.auth!.jira, req.auth!.session.accountId);
+  const { cloudId, projectKey, accountId } = req.auth!.session;
+  return new TaskActivity(req.auth!.jira, accountId, { store: pgDetailStore, cloudId, projectKey: projectKey! });
+}
+
+/** Who is asking about which issue: what the copy's permission gate needs (detailCache.ts). */
+function whoReads(req: express.Request, key: string) {
+  const { cloudId, projectKey, accountId } = req.auth!.session;
+  return { cloudId, projectKey: projectKey!, accountId, key };
+}
+
+/** This app changed the issue's attachments or links: what is held about them is no longer true. */
+function forgetAttachments(req: express.Request, key: string): Promise<void> {
+  return forgetDetail(pgDetailStore, req.auth!.session.cloudId, key, ["attachments"]);
 }
 
 /** Keys outside the session's project are refused up front, as the board routes do. */
@@ -403,23 +427,33 @@ apiRouter.get("/tasks/:id/attachments", requireProject, async (req, res, next) =
     const service = req.auth!.taskService!;
     service.assertOwnKey(req.params.id);
     const jira = req.auth!.jira;
-    const [files, links] = await Promise.all([
-      jira.getAttachments(req.params.id),
-      jira.getRemoteLinks(req.params.id).catch(() => []),
-    ]);
-    res.json({
-      files: files.map((f) => ({
-        id: String(f.id),
-        filename: f.filename,
-        size: f.size,
-        mimeType: f.mimeType,
-        created: f.created,
-        author: f.author?.displayName ?? null,
-      })),
-      links: links
-        .filter((l) => l.object?.url)
-        .map((l) => ({ id: String(l.id), url: l.object!.url!, title: l.object?.title || l.object!.url! })),
-    });
+    const key = req.params.id;
+    type View = { files: Array<{ id: string; filename: string; size: number; mimeType: string; created: string; author: string | null }>; links: Array<{ id: string; url: string; title: string }> };
+    res.json(
+      await cachedDetail<View>(
+        pgDetailStore,
+        whoReads(req, key),
+        "attachments",
+        async () => {
+          const [files, links] = await Promise.all([jira.getAttachments(key), jira.getRemoteLinks(key).catch(() => [])]);
+          return {
+            files: files.map((f) => ({
+              id: String(f.id),
+              filename: f.filename,
+              size: f.size,
+              mimeType: f.mimeType,
+              created: f.created,
+              author: f.author?.displayName ?? null,
+            })),
+            links: links
+              .filter((l) => l.object?.url)
+              .map((l) => ({ id: String(l.id), url: l.object!.url!, title: l.object?.title || l.object!.url! })),
+          };
+        },
+        // Every person who can see the issue sees the same files, so the answer is kept whole.
+        { split: (v) => ({ data: v, restricted: false }), join: (d) => d as View }
+      )
+    );
   } catch (err) {
     next(err);
   }
@@ -465,6 +499,7 @@ apiRouter.delete("/tasks/:id/attachments/:attId", requireProject, async (req, re
   try {
     const file = await ownAttachment(req);
     await req.auth!.jira.deleteAttachment(String(file.id));
+    await forgetAttachments(req, req.params.id);
     res.status(204).end();
   } catch (err) {
     next(err);
@@ -494,6 +529,7 @@ apiRouter.post(
       }
       const type = String(req.get("x-file-type") ?? "") || "application/octet-stream";
       const created = await req.auth!.jira.addAttachment(req.params.id, { name: name.slice(0, 200), type, data });
+      await forgetAttachments(req, req.params.id);
       res.status(201).json(created.map((f) => ({ id: String(f.id), filename: f.filename, size: f.size })));
     } catch (err) {
       next(err);
@@ -508,6 +544,7 @@ apiRouter.post("/tasks/:id/links", requireProject, async (req, res, next) => {
     if (!LINK_URL.test(url)) throw badRequest("Liên kết phải bắt đầu bằng http:// hoặc https://");
     const title = String(req.body?.title ?? "").trim() || url;
     const created = await req.auth!.jira.addRemoteLink(req.params.id, url, title.slice(0, 255));
+    await forgetAttachments(req, req.params.id);
     res.status(201).json({ id: String(created.id), url, title });
   } catch (err) {
     next(err);
