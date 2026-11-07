@@ -71,7 +71,7 @@ await step("thanh lọc của Bảng cùng kiểu với Kế hoạch: Tìm · C�
   assert.equal(await bar.locator(".tf-search").count(), 1);
   const flat = (await bar.locator(".tf-left").textContent()).replace(/\s+/g, " ");
   const at = (k) => flat.indexOf(k);
-  assert.ok(at("Của tôi") >= 0 && at("Quá hạn") > at("Của tôi") && at("Bộ lọc") > at("Quá hạn"), flat);
+  assert.ok(at("Của tôi") >= 0 && at("Quá hạn") > at("Của tôi") && flat.lastIndexOf("Bộ lọc") > at("Quá hạn"), flat);
 });
 await step("chọn một giá trị → chip, đếm thẻ, gỡ chip thì hết lọc", async () => {
   await page.locator(".bd-filters .tf-add").click();

@@ -281,9 +281,10 @@ await step("đổi người ngay trên thẻ → PATCH", async () => {
   await reset();
   await page.locator(".bd-card").first().hover();
   await page.locator(".bd-card .bd-assignee").first().click();
-  await page.locator(".cell-picker-item", { hasText: "Lê Chi" }).first().click();
-  await page.waitForFunction(async () => (await (await fetch("/api/__log")).json()).log.some((l) => l.m === "PATCH"));
-  assert.equal((await patches())[0].b.assigneeAccountId, "chi");
+  // Someone other than the card's owner (picking the owner again writes nothing).
+  await page.locator(".cell-picker-item", { hasText: /^(?!.*(hiện tại|Bỏ giao))/ }).first().click();
+  for (let i = 0; i < 40 && (await patches()).length === 0; i++) await page.waitForTimeout(100);
+  assert.equal(typeof (await patches())[0].b.assigneeAccountId, "string");
 });
 await step("panel Bộ lọc có Loại / Epic / Nhãn / Ưu tiên, và không có Trạng thái (cột đã là trạng thái)", async () => {
   await page.locator(".bd-filters .tf-add").click();

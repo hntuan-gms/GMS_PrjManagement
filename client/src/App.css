@@ -1811,6 +1811,12 @@ kbd {
   flex: none;
   white-space: nowrap;
 }
+.rv-range .rv-granularity {
+  width: max-content;
+}
+.rv-range .rv-granularity button {
+  flex: none;
+}
 /* The "Khoảng" menu: presets, then exact dates. */
 .rv-range .rv-range-menu {
   min-width: 232px;
@@ -1841,9 +1847,6 @@ kbd {
   justify-content: center;
   width: 16px;
   color: var(--color-primary);
-}
-.rv-granularity {
-  max-width: 140px;
 }
 
 /* --- row 2: KPI pills (also the people filter) and the legend --- */

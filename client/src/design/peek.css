@@ -610,3 +610,10 @@ button.td-add-btn:hover:not(:disabled) {
   font-weight: 600;
   pointer-events: none;
 }
+
+/* The link-kind select must not wrap its label into two lines in the narrow panel. */
+.peek-panel .pred-add select {
+  flex: none;
+  min-width: 128px;
+  white-space: nowrap;
+}

@@ -1395,8 +1395,9 @@ export default function GanttView({
         k.onOpenEdit(row.task);
       }
     }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // Capture phase: the library's wrapper (which holds focus after a click) calls preventDefault on every key.
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, []);
 
   // A connection made by dragging from the dot at a bar end: say what was joined, with the way back.

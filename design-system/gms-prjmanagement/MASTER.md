@@ -87,10 +87,14 @@ Mỗi họ tín hiệu có 5 bậc: `-wash` (nền) · `-soft` · `-line` (viề
 
 ## 2. Khung ứng dụng
 
-- **Thanh bên** (`.app-rail`, 48px, cố định trái): logo son (về Hôm nay) · Tạo việc · Hôm nay · Dự án · Giờ làm · … · Trợ lý · Tìm (`Ctrl K`) · Phím tắt · avatar (Giao diện, Mật độ, Đăng xuất). Tooltip ghi kèm phím, hiện sau 400ms. Mục đang ở có dấu son ở mép.
-- **Header** (`.toolbar`, 44px): tên dự án (menu: Đổi dự án `Ctrl P`, Cài đặt SLA, Lịch làm việc) · bốn **lăng kính** chữ `Kế hoạch 1 · Bảng 2 · Nhân lực 3 · Nhịp dự án 4` (gạch mực dưới lăng kính hiện tại) · **chỉ báo đồng bộ** (`● Khớp Jira` / `Đang đọc Jira…` / `Jira đang giới hạn · n phút`; bấm = đọc lại) · nút giả ô tìm `Ctrl K`. **Không có nút đặc nào trong header.**
+- **Thanh bên** (`.app-rail`, 56px, cố định trái, icon kèm nhãn 10px): logo son (về Hôm nay) · Tạo việc · Hôm nay · Dự án · … · Trợ lý · avatar (Giao diện, Mật độ, Phím tắt `?`, Đăng xuất). Rail là của tôi, header là của dự án; một hành động chỉ có một nút (không còn nút Tìm, Giờ làm ở rail). Tooltip ghi kèm phím, hiện sau 400ms. Mục đang ở có dấu son ở mép.
+- **Header** (`.toolbar`, 44px): tên dự án (menu: Đổi dự án `Ctrl P`, Cài đặt dự án `G S`) · bốn **lăng kính** chữ `Kế hoạch 1 · Bảng 2 · Nhân lực 3 · Nhịp dự án 4` (gạch mực dưới lăng kính hiện tại) · **chỉ báo đồng bộ** (`● Khớp Jira` / `Đang đọc Jira…` / `Jira đang giới hạn · n phút`; bấm = đọc lại) · nút giả ô tìm `Ctrl K`. **Không có nút đặc nào trong header.**
 - **Thanh lọc** (`.tf-bar`, 40px, điều khiển 28px): dùng chung cho Kế hoạch và Nhân lực. Bộ lọc đang bật là nền mực.
-- **Trang mặc định** là Hôm nay; sau đó nhớ lăng kính cuối theo dự án (`gms.view.<site>.<project>`). `?view=gantt|board|resource|report|timesheet|today` mở thẳng.
+- **Trang mặc định** là Hôm nay; sau đó nhớ lăng kính cuối theo dự án (`gms.view.<site>.<project>`). `?view=gantt|board|resource|report|settings|today` mở thẳng; `timesheet` là bí danh của Nhân lực · Giờ đã ghi.
+- **Nhân lực có ba chế độ**: Mức tải · Giờ đã ghi · Kỹ năng. Người không được xem danh sách thành viên chỉ có "Giờ đã ghi".
+- **Cài đặt dự án** (`ProjectSettings`): một trang, menu trái (Lịch làm việc, SLA, Nhập KBKT), mỗi mục có nút Lưu ở chân, chỉ bật khi có thay đổi.
+- **Mô hình lưu**: panel và tờ bên (chi tiết việc, hồ sơ nhân lực, tờ ghi giờ) **đóng là lưu**, lỗi thì ở lại và nói lý do. Hộp thoại có hậu quả (xoá, hoàn thành sprint): nút rõ ràng, Esc = huỷ không hỏi. Trang Cài đặt: Lưu ở chân mục.
+- **Lớp phủ** đăng ký ở `layers.ts` (`useLayer`): Esc đóng lớp trên cùng, phím tắt đứng yên phía sau.
 
 ## 3. Thành phần
 
@@ -98,6 +102,8 @@ Mỗi họ tín hiệu có 5 bậc: `-wash` (nền) · `-soft` · `-line` (viề
 - **Phím tắt**: một danh sách duy nhất trong `shortcuts.ts`; bảng `?` đọc từ đó. Phím chữ không chạy khi đang gõ hoặc có lớp nào mở.
 - **Toast** (`toast()` + `Toaster`): góc dưới trái, nền mực, 5 giây, dừng khi rê chuột, có "Hoàn tác"/"Mở". Lỗi ghi Jira là toast đỏ, không phải dải chèn đẩy bảng xuống.
 - **Khung chi tiết** (`TaskEditModal` dạng `.peek-panel`): trượt từ phải, **không lớp phủ**, kế hoạch vẫn dùng được. **Đóng là lưu** (không hỏi "Bỏ thay đổi?"); mở việc khác khi khung đang mở thì lưu việc cũ trước (`closeRequest`). Nút "Lưu `Ctrl ⏎`" ở chân, "Đã lưu" khi không có gì đổi.
+- **Người**: `Avatar` (chữ tắt = chữ đầu của từ cuối + chữ đầu của từ đầu: "Nguyễn Anh" → AN), một cách vẽ ở mọi màn. Chọn người: `PersonPicker` (kèm rảnh / trùng n ngày trong khoảng của việc). Chọn một việc bằng tìm kiếm: `TaskPicker`. Giờ trong ngày: `TimeInput` (HH:mm, 24h).
+- **Cách viết ngày** (`dateLabels.ts`): tháng `Tháng 10/2026` · `T10/26` · `T10`; cột tuần là ngày đầu tuần `02/11`; khoảng `02/11 – 08/11/2026`; ngày đơn trong câu `16/9` (khác năm: `16/9/2027`). Không còn "W44".
 - **Ô ngày**: dùng `DateField` (luôn DD/MM/YYYY, nhận "t6", "mai", "+3n", "15/11"). Không dùng `<input type="date">` trần cho ngày người dùng đọc lại (nó hiện theo ngôn ngữ trình duyệt: "10/29/2026").
 - **Trạng thái**: `StatusGlyph` + tên workflow mờ. **Ưu tiên**: `PriorityMark` (chỉ hiện cạnh tên khi cao/thấp). **Loại**: `IssueTypeIcon` nét mảnh một màu.
 - **Ô nhập**: mặc định từ `controls.css` (`:where()`), cao 34px trong cửa sổ, 28–30px trên thanh. `<select>` dùng `appearance: base-select`. Không `<datalist>` (dùng `SuggestInput`). Không `window.confirm/prompt` (dùng `useDialogs()`).

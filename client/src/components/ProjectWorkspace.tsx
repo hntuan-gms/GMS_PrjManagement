@@ -1036,7 +1036,6 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
     if (draft) return discardDraft();
     setDraft(startDraft(tasks));
     if (view !== "gantt") setView("gantt");
-    toast("Đang nháp: kéo thả thoải mái, chưa ghi gì lên Jira. Áp dụng khi đã ưng.", { tone: "info" });
   }
   async function discardDraft() {
     if (!draft) return;
@@ -1157,6 +1156,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
     }
   }
 
+  const [focusPerson, setFocusPerson] = useState<{ accountId: string; nonce: number } | null>(null);
   const go = (v: WorkspaceView) => setView(v);
   /** Cài đặt dự án, on a section when one is named (the Ctrl K commands, SLA's link to the calendar). */
   const openSettings = (section?: SettingsSection) => {
@@ -1580,6 +1580,11 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
               onQuickCreate={(text) => quickCreate(text, false)}
               users={users}
               onAssign={(id, acc) => void handleAssign(id, acc)}
+              onUpdate={async (id, patch) => {
+                await updateOne(id, patch);
+                // A new predecessor can move other tasks (the cascade), which only a re-read shows.
+                if (patch.predecessors) void refreshTasks();
+              }}
               onTransition={(t, id, name) => void handleTransition(t, id, name)}
               draftBase={draft?.base ?? null}
             />
@@ -1609,6 +1614,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
             />
           ) : view === "resource" ? (
             <ResourceView
+              focusPerson={focusPerson}
               mode={resourceMode === "skills" ? "skills" : "load"}
               onModeChange={setResourceMode}
               tasks={tasks}
@@ -1650,6 +1656,11 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
               users={users}
               onAssign={(taskId, accountId) => updateOne(taskId, { assigneeAccountId: accountId })}
               onOpenResources={() => go("resource")}
+              onOpenPersonLoad={(accountId) => {
+                setFocusPerson({ accountId, nonce: Date.now() });
+                goResource("load");
+              }}
+              taskFilter={taskFilter}
             />
           )}
         </div>

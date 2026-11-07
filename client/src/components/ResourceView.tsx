@@ -61,6 +61,8 @@ interface Props {
   /** Which of the lens's modes is showing; "Giờ đã ghi" is drawn by the workspace, not here. */
   mode: "load" | "skills";
   onModeChange: (m: ResourceMode) => void;
+  /** Open this person and bring their first overloaded day into view (the report's "Xem lịch …"); a new nonce asks again. */
+  focusPerson?: { accountId: string; nonce: number } | null;
 }
 
 /** Sentinel for the "remove from whoever holds it" drop zone. */
@@ -111,6 +113,7 @@ export default function ResourceView({
   myAccountId,
   mode,
   onModeChange,
+  focusPerson = null,
 }: Props) {
   const [drag, setDrag] = useState<DragState | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
@@ -209,6 +212,8 @@ export default function ResourceView({
     return dates ? placeBar(spans, dates.start, dates.end) : null;
   }, [hoverTask, spans]);
 
+  const latestAssign = useRef(onAssign);
+  latestAssign.current = onAssign;
   /**
    * Every assignment from this tab goes through here. It is not blocked and not asked about (as with the
    * assistant's auto-assign, nobody is ruled out for being busy), but handing work to someone who is
@@ -227,7 +232,9 @@ export default function ResourceView({
       }
     }
     onAssign(taskId, accountId);
-    if (note) toast(note, { action: { label: "Hoàn tác", run: () => onAssign(taskId, previous) } });
+    // The undo runs later, after the workspace has taken the assignment: the handler of *that* render sees the
+    // task as assigned, where this render's would still think it is not and do nothing.
+    if (note) toast(note, { action: { label: "Hoàn tác", run: () => latestAssign.current(taskId, previous) } });
   }
 
   function exportCsv() {
@@ -306,6 +313,20 @@ export default function ResourceView({
     if (scrollEl) anchorAt(scrollEl, nameWidth(scrollEl) + (scrollEl.clientWidth - nameWidth(scrollEl)) / 2);
     setPixelsPerDay(DEFAULT_PIXELS_PER_DAY[g]);
   }
+
+  const focusNonce = useRef(0);
+  useEffect(() => {
+    if (!focusPerson || focusPerson.nonce === focusNonce.current) return;
+    // The scroll box exists a frame after the tab mounts.
+    const id = requestAnimationFrame(() => {
+      if (!scrollRef.current) return;
+      focusNonce.current = focusPerson.nonce;
+      jumpToOverload(focusPerson.accountId);
+    });
+    return () => cancelAnimationFrame(id);
+    // jumpToOverload reads the latest load on its own; only a new request should run it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusPerson, pool, scrollEl]);
 
   /** The red badge by a name: open the person and bring their first over-capacity day (from today on, else the first at all) into view. */
   function jumpToOverload(accountId: string) {
