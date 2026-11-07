@@ -66,12 +66,15 @@ await step("modal hiện thành phần, phiên bản, sprint của task", async 
   assert((await page.textContent(".modal")).includes("Sprint 7 (đang chạy)"));
 });
 await step("Epic không chọn được khi task đang có người phụ trách, kèm lý do", async () => {
-  const opt = page.locator('.modal select option[value="Epic"]');
-  assert.equal(await opt.evaluate((o) => o.disabled), true);
-  assert((await opt.textContent()).includes("đang có người phụ trách"));
+  await page.locator(".modal [data-prop=type] .tdx-val").click();
+  const item = page.locator(".cell-picker-item", { has: page.locator(".cell-picker-label", { hasText: /^Epic$/ }) });
+  assert((await item.textContent()).includes("đang có người phụ trách"));
+  await item.click();
+  await page.waitForTimeout(300);
+  assert.equal((await log()).filter((l) => l.m === "PATCH").length, 0, "không được gửi đổi loại");
 });
 await step("việc cha chỉ gồm việc hợp lệ: không có chính nó và không có Sub-task", async () => {
-  await page.locator(".modal .field:has(> span:text-is('Thuộc')) .td-pick").click();
+  await page.locator(".modal [data-prop=parent] .tdx-val").first().click();
   await page.waitForSelector(".cell-picker-item");
   const opts = (await page.$$eval(".cell-picker-item", (o) => o.map((x) => x.textContent))).join(" | ");
   assert(opts.includes("DEMO-1") && opts.includes("DEMO-2"), opts);
@@ -113,19 +116,23 @@ await step("theo dõi / bỏ theo dõi chính mình", async () => {
   const put = (await log()).find((l) => l.m === "PUT" && l.p.endsWith("/watchers"));
   assert.deepEqual(put.b, { watching: true });
 });
-await step("lưu: chỉ gửi những gì đã đổi (thành phần, việc cha)", async () => {
+await step("mỗi trường lưu riêng: thành phần một yêu cầu, việc cha một yêu cầu, không gửi gì thêm", async () => {
   await reset();
   await page.locator(".name-picker").first().locator("select").selectOption("UI");
-  await page.locator(".modal .field:has(> span:text-is('Thuộc')) .td-pick").click();
+  await page.waitForFunction(async () => (await (await fetch("/api/__log")).json()).log.some((l) => l.m === "PATCH" && l.b.components));
+  await page.locator(".modal [data-prop=parent] .tdx-val").first().click();
   await page.locator(".cell-picker input").fill("DEMO-1");
   await page.locator(".cell-picker-item", { hasText: "DEMO-1" }).first().click();
-  await page.locator(".modal-footer .primary").click();
-  await page.waitForFunction(async () => (await (await fetch("/api/__log")).json()).log.some((l) => l.m === "PATCH"));
-  const patch = (await log()).find((l) => l.m === "PATCH");
-  assert.deepEqual(patch.b.components.sort(), ["Backend", "UI"]);
-  assert.equal(patch.b.parentKey, "DEMO-1");
-  assert.equal(patch.b.fixVersions, undefined, "phiên bản không đổi thì không gửi");
-  assert.equal(patch.b.issueType, undefined);
+  await page.waitForFunction(async () => (await (await fetch("/api/__log")).json()).log.some((l) => l.m === "PATCH" && l.b.parentKey));
+  const patches = (await log()).filter((l) => l.m === "PATCH");
+  assert.equal(patches.length, 2);
+  const comp = patches.find((x) => x.b.components);
+  const par = patches.find((x) => x.b.parentKey);
+  assert.deepEqual(comp.b.components.sort(), ["Backend", "UI"]);
+  assert.deepEqual(Object.keys(comp.b), ["components"]);
+  assert.equal(par.b.parentKey, "DEMO-1");
+  assert.deepEqual(Object.keys(par.b), ["parentKey"]);
+  await page.keyboard.press("Escape");
   await page.waitForSelector(".modal", { state: "detached" });
 });
 await step("task đã nằm dưới Epic mới trên WBS sau khi lưu", async () => {

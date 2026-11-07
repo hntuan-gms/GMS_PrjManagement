@@ -470,8 +470,6 @@ export default function ChatDock({
 
   function openIssue(key: string) {
     onOpenIssue?.(key);
-    // The task panel docks on the right a moment later; step aside if it would sit on the window.
-    window.setTimeout(win.stepAside, 80);
   }
 
   function submit(text: string, mentions: Mentions) {

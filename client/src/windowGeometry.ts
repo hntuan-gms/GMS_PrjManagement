@@ -64,24 +64,6 @@ export function resizeRect(start: Rect, edge: Edge, dx: number, dy: number, vw: 
   return clampRect({ x, y, w, h }, vw, vh);
 }
 
-/** The width the task panel takes on the right (mirrors `--peek-w` and the 1200px breakpoint in peek.css). */
-export function peekWidth(vw: number): number {
-  return Math.min(vw, Math.min(480, Math.max(400, vw * 0.34)));
-}
-
-/**
- * The window moved left of the docked task panel when it would sit on top of it, else null.
- * Opening a task from a reply must not hide the very conversation that pointed at it.
- */
-export function stepAsideOfPeek(r: Rect, vw: number, vh: number): Rect | null {
-  if (vw < 1201) return null;
-  const left = vw - peekWidth(vw);
-  if (r.x + r.w <= left) return null;
-  const x = left - r.w - 12;
-  if (x < 8) return null;
-  return clampRect({ ...r, x }, vw, vh);
-}
-
 /** Full-window size beside the rail, for the "mở rộng" toggle. */
 export function maximizedRect(vw: number, vh: number, railW: number): Rect {
   return clampRect({ x: railW + MARGIN, y: MARGIN, w: vw - railW - MARGIN * 2, h: vh - MARGIN * 2 }, vw, vh);

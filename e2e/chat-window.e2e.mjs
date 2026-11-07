@@ -191,19 +191,21 @@ await step("gửi: tin nhắn mang dòng 'Việc đính kèm', bong bóng hiện
   assert.equal(await page.locator(".chat-msg-user .chat-chip").count(), 2);
   assert.equal(await page.locator(".chat-tray").count(), 0);
 });
-await step("bấm chip trong bong bóng mở chi tiết; cửa sổ chat nhường chỗ, không bị khung chi tiết che", async () => {
+await step("bấm chip trong bong bóng mở chi tiết (lớp giữa màn hình, phủ lên cửa sổ chat); đóng thì cửa sổ chat còn nguyên", async () => {
   await page.locator(".chat-msg-user .chat-chip[data-chip-key='DEMO-5'] .chat-chip-main").click();
   await page.waitForSelector(".modal-detail .modal-id");
   assert((await page.textContent(".modal-detail .modal-id")).includes("DEMO-5"));
   await page.waitForTimeout(300);
   const peek = await page.locator(".modal-detail").boundingBox();
-  const b = await box();
-  assert(b.x + b.width <= peek.x + 1, `chat ${b.x + b.width} > khung chi tiết ${peek.x}`);
-  assert(await dock.isVisible());
-});
-await step("mã việc nằm trong câu trả lời của trợ lý cũng bấm được", async () => {
+  assert(peek.width > 900, `chi tiết chỉ rộng ${peek.width}`);
+  const b0 = await box();
   await page.keyboard.press("Escape");
   await page.waitForSelector(".modal-detail", { state: "detached" });
+  assert(await dock.isVisible());
+  const b1 = await box();
+  assert.deepEqual(b1, b0, "cửa sổ chat bị xê dịch khi mở/đóng chi tiết");
+});
+await step("mã việc nằm trong câu trả lời của trợ lý cũng bấm được", async () => {
   await send("nhanh cho tôi xem DEMO-3");
   await waitReply(2);
   // The model's reply text does not name a key here; the user's own message does.

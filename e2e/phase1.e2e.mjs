@@ -159,11 +159,10 @@ await reset();
 await step("mở modal: ưu tiên, nhãn, bình luận có @mention và link", async () => {
   await page.locator(".wbs-row", { hasText: "DEMO-3" }).dispatchEvent("dblclick");
   await page.waitForSelector(".modal .td");
-  assert.equal(await page.inputValue(".modal select >> nth=3").catch(() => "x") !== undefined, true);
   assert.ok(await page.locator(".label-chip", { hasText: "urgent" }).count() === 1, "thiếu nhãn urgent");
   await page.waitForSelector(".td-comment");
   assert.equal(await page.locator(".td-mention.is-me").count(), 1, "mention của mình phải được tô");
-  assert.equal(await page.locator(".td-body a[href='https://example.com/spec']").count(), 1, "link phải bấm được");
+  assert.equal(await page.locator(".td-ctext a[href='https://example.com/spec']").count(), 1, "link phải bấm được");
 });
 await step("gõ @ → gợi ý người → Enter chèn tên", async () => {
   const box = page.locator(".td-box textarea").first();
@@ -211,16 +210,21 @@ await step("tab 'Lịch sử thay đổi' dịch tên trường", async () => {
   const t = await page.textContent(".td");
   assert.ok(t.includes("Trạng thái") && t.includes("Ước lượng") && t.includes("Người"), t.slice(0, 200));
 });
-await step("đổi ưu tiên + thêm nhãn → PATCH có priority & labels đầy đủ", async () => {
+await step("đổi ưu tiên + thêm nhãn → mỗi trường một PATCH riêng, nhãn gửi đủ bộ", async () => {
   await reset();
-  await page.locator(".modal .field:has(> span:text-is('Ưu tiên')) select").selectOption("Low");
+  await page.locator(".tdx-chip[title='Ưu tiên']").click();
+  await page.locator(".cell-picker-item", { has: page.locator(".cell-picker-label", { hasText: /^Low$/ }) }).click();
+  await page.waitForFunction(async () => (await (await fetch("/api/__log")).json()).log.some((l) => l.m === "PATCH" && l.b.priority === "Low"));
   const lab = page.locator(".labels-input input");
   await lab.click(); await lab.pressSequentially("docs"); await lab.press("Enter");
-  await page.locator(".modal-footer .primary").click();
-  await page.waitForFunction(async () => (await (await fetch("/api/__log")).json()).log.some((l) => l.m === "PATCH"));
-  const p = (await patches())[0];
-  assert.equal(p.b.priority, "Low");
-  assert.deepEqual([...p.b.labels].sort(), ["docs", "urgent"]);
+  await page.waitForFunction(async () => (await (await fetch("/api/__log")).json()).log.some((l) => l.m === "PATCH" && l.b.labels));
+  const all = await patches();
+  const byPriority = all.find((x) => x.b.priority);
+  const byLabels = all.find((x) => x.b.labels);
+  assert.deepEqual(Object.keys(byPriority.b), ["priority"]);
+  assert.equal(byPriority.b.priority, "Low");
+  assert.deepEqual(Object.keys(byLabels.b), ["labels"]);
+  assert.deepEqual([...byLabels.b.labels].sort(), ["docs", "urgent"]);
 });
 await step("'+ Sub-task' mở form có sẵn task cha và loại con của dự án", async () => {
   await page.locator(".wbs-row", { hasText: "DEMO-5" }).dispatchEvent("dblclick");

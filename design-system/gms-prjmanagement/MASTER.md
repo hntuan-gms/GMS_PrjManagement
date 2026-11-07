@@ -93,7 +93,7 @@ Mỗi họ tín hiệu có 5 bậc: `-wash` (nền) · `-soft` · `-line` (viề
 - **Trang mặc định** là Hôm nay; sau đó nhớ lăng kính cuối theo dự án (`gms.view.<site>.<project>`). `?view=gantt|board|resource|report|settings|today` mở thẳng; `timesheet` là bí danh của Nhân lực · Giờ đã ghi.
 - **Nhân lực có ba chế độ**: Mức tải · Giờ đã ghi · Kỹ năng. Người không được xem danh sách thành viên chỉ có "Giờ đã ghi".
 - **Cài đặt dự án** (`ProjectSettings`): một trang, menu trái (Lịch làm việc, SLA, Nhập KBKT, Thẻ trên board), mỗi mục có nút Lưu ở chân, chỉ bật khi có thay đổi.
-- **Mô hình lưu**: panel và tờ bên (chi tiết việc, hồ sơ nhân lực, tờ ghi giờ) **đóng là lưu**, lỗi thì ở lại và nói lý do. Hộp thoại có hậu quả (xoá, hoàn thành sprint): nút rõ ràng, Esc = huỷ không hỏi. Trang Cài đặt: Lưu ở chân mục.
+- **Mô hình lưu**: chi tiết việc lưu **từng trường** khi người dùng xong với nó (rời ô, Enter; Esc trả giá trị cũ), không có nút Lưu và không có "Chưa lưu"; góc trên có "Đang lưu…" / "Đã lưu". Tờ bên (hồ sơ nhân lực, tờ ghi giờ) đóng là lưu. Hộp thoại có hậu quả (xoá, hoàn thành sprint): nút rõ ràng, Esc = huỷ không hỏi. Trang Cài đặt: Lưu ở chân mục.
 - **Lớp phủ** đăng ký ở `layers.ts` (`useLayer`): Esc đóng lớp trên cùng, phím tắt đứng yên phía sau.
 
 ## 3. Thành phần
@@ -101,7 +101,10 @@ Mỗi họ tín hiệu có 5 bậc: `-wash` (nền) · `-soft` · `-line` (viề
 - **Ô lệnh** (`CommandBar`, `Ctrl K`): lệnh (kèm phím), tìm việc không dấu, tạo việc bằng câu (`quickAdd.ts`: `@người`, ngày, `3n`, `4h`, `!cao`, `^DEMO-2`, `sau DEMO-5`, `#nhãn`, `/bug`), hỏi trợ lý (`Tab`). Mở không hiệu ứng. Phím `C` mở thẳng chế độ Tạo.
 - **Phím tắt**: một danh sách duy nhất trong `shortcuts.ts`; bảng `?` đọc từ đó. Phím chữ không chạy khi đang gõ hoặc có lớp nào mở.
 - **Toast** (`toast()` + `Toaster`): góc dưới trái, nền mực, 5 giây, dừng khi rê chuột, có "Hoàn tác"/"Mở". Lỗi ghi Jira là toast đỏ, không phải dải chèn đẩy bảng xuống.
-- **Khung chi tiết** (`TaskEditModal` dạng `.peek-panel`): trượt từ phải, **không lớp phủ**, kế hoạch vẫn dùng được. **Đóng là lưu** (không hỏi "Bỏ thay đổi?"); mở việc khác khi khung đang mở thì lưu việc cũ trước (`closeRequest`). Nút "Lưu `Ctrl ⏎`" ở chân, "Đã lưu" khi không có gì đổi.
+- **Chi tiết việc** (`TaskEditModal`, `design/detail.css`): một **lớp nổi giữa màn hình** trên nền mờ (z 48, dưới menu và bộ chọn), không đẩy kế hoạch sang bên. Rộng nhất có thể (tới 1320px) để khỏi cuộn, chia **hai khung riêng, mỗi khung cuộn riêng**: trái là việc này là gì (tên, mô tả, Liên quan, bình luận), phải là nó đang ở đâu (trạng thái · người · ưu tiên, lịch, thẻ "Chi tiết"). Dưới 900px một cột, khung phải lên trước. Esc, ×, bấm nền mờ: đóng; mở việc khác: đóng cái cũ.
+  - **Giá trị là chữ cho tới khi bấm**: không vẽ ô nhập khi nghỉ; rê chuột thì nền dịu lại, bấm thì thành ô đúng chỗ, đúng cỡ (không làm lệch gì xung quanh). Rời ô hoặc Enter lưu, Esc trả giá trị cũ và **chỉ** thoát ô, không đóng khung. Mô tả đọc như một trang (đoạn, danh sách, liên kết bấm được) và chỉ thành ô sửa khi bấm vào chữ.
+  - Mỗi trường là một yêu cầu riêng, hiện ngay trên kế hoạch (cập nhật lạc quan ở workspace, `taskPatch.ts`); Jira từ chối thì giá trị cũ trở lại và lý do là một toast. Chuyển trạng thái cần ô nhập (RootCause…) thì các ô hiện ngay dưới hàng trạng thái, kèm nút "Chuyển sang …".
+  - Tệp và liên kết đính kèm lên Jira ngay khi thêm.
 - **Người**: `Avatar` (chữ tắt = chữ đầu của từ cuối + chữ đầu của từ đầu: "Nguyễn Anh" → AN), một cách vẽ ở mọi màn. Chọn người: `PersonPicker` (kèm rảnh / trùng n ngày trong khoảng của việc). Chọn một việc bằng tìm kiếm: `TaskPicker`. Giờ trong ngày: `TimeInput` (HH:mm, 24h).
 - **Cách viết ngày** (`dateLabels.ts`): tháng `Tháng 10/2026` · `T10/26` · `T10`; cột tuần là ngày đầu tuần `02/11`; khoảng `02/11 – 08/11/2026`; ngày đơn trong câu `16/9` (khác năm: `16/9/2027`). Không còn "W44".
 - **Ô ngày**: dùng `DateField` (luôn DD/MM/YYYY, nhận "t6", "mai", "+3n", "15/11"). Không dùng `<input type="date">` trần cho ngày người dùng đọc lại (nó hiện theo ngôn ngữ trình duyệt: "10/29/2026").
@@ -142,6 +145,15 @@ Mỗi họ tín hiệu có 5 bậc: `-wash` (nền) · `-soft` · `-line` (viề
 - Tiêu đề viết hoa toàn bộ; bóng đổ trên thẻ khi nghỉ; bo góc > 12px.
 - `transition: all`; hiệu ứng trên thao tác bàn phím lặp lại; hover làm lệch bố cục.
 - Cỡ chữ ngoài thang `--font-size-*` (không 12.5px, 10.5px…).
+
+### Chờ dữ liệu: không bao giờ một vùng trống với một dòng "Đang tải…"
+
+Cái đã biết thì hiện ngay; cái chưa biết giữ chỗ đúng cỡ của nó.
+
+- **Đáp án đã có thì hiện trước, đọc lại phía sau** (`detailCache.ts`, `useDetail`): mô tả, bình luận, đính kèm, liên kết, trạng thái có thể chuyển, người theo dõi giữ trong bộ nhớ theo site + tài khoản + dự án; năm danh sách của dự án (ưu tiên, nhãn, thành phần, phiên bản, loại việc) đọc một lần mỗi 10 phút. Chọn một dòng (250ms) thì tải sẵn, nên cú nhấp đúp sau đó gặp dữ liệu đang về.
+- **Trạng thái, người, ngày, số liệu đã nằm trong danh sách việc thì không được chờ ai**: hiện từ danh sách, không từ lần đọc riêng.
+- **Chỗ chưa có gì để vẽ** là `Skeleton` đúng kích thước (chỉ hiện nếu chờ quá 200ms; trả lời nhanh thì không nháy), hoặc vẽ từ dữ liệu đang có (`BoardPreview`: tab Bảng dựng cột từ trạng thái của các việc trong kế hoạch cho tới khi board của Jira trả lời).
+- Khi dữ liệu về, **không được làm xô lệch** những gì bên dưới.
 
 ### Chữ trên màn hình: ít, ngắn, không giải thích
 

@@ -1,7 +1,11 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { api } from "../api";
+import { TASK_MAX_AGE_MS } from "../detailCache";
+import { readers } from "../taskDetailReads";
+import { useDetail } from "../useDetail";
+import Skeleton from "./Skeleton";
 import { fromTokens, labelFor, toTokens, type Mentions } from "../mentions";
-import type { ActivityEntry, JiraUser, TaskComment } from "../types";
+import type { JiraUser } from "../types";
 
 /**
  * The conversation and history of one task — the two things the schedule fields
@@ -110,7 +114,10 @@ function CommentBox({
   const [active, setActive] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // One line until it is used: a three-line box in front of every comment pushed the discussion off screen.
+  const [focused, setFocused] = useState(!!autoFocus);
   const areaRef = useRef<HTMLTextAreaElement>(null);
+  const open = focused || text.trim() !== "" || !!onCancel;
 
   const candidates = suggest
     ? members.filter((m) => fold(m.displayName).includes(fold(suggest.query))).slice(0, 6)
@@ -155,14 +162,21 @@ function CommentBox({
   }
 
   return (
-    <div className="td-box">
+    <div
+      className={`td-box${open ? "" : " is-collapsed"}`}
+      onFocus={() => setFocused(true)}
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocused(false);
+      }}
+    >
       <textarea
         ref={areaRef}
-        rows={3}
+        rows={open ? 3 : 1}
         spellCheck={false}
         autoFocus={autoFocus}
         value={text}
-        placeholder="Viết bình luận… gõ @ để nhắc tên một người (Ctrl+Enter để gửi)"
+        placeholder="Viết bình luận…"
+        aria-label="Bình luận mới"
         onChange={(e) => onChange(e.target.value, e.target.selectionStart)}
         onKeyDown={(e) => {
           if (suggest && candidates.length > 0) {
@@ -222,7 +236,7 @@ function CommentBox({
         </ul>
       )}
       {error && <div className="td-error">{error}</div>}
-      <div className="td-box-actions">
+      <div className="td-box-actions" hidden={!open}>
         {onCancel && (
           <button type="button" onClick={onCancel} disabled={busy}>
             Huỷ
@@ -241,47 +255,27 @@ function CommentBox({
 
 export default function TaskDiscussion({ taskId, members, myAccountId }: Props) {
   const [tab, setTab] = useState<"comments" | "activity">("comments");
-  const [comments, setComments] = useState<TaskComment[] | null>(null);
-  const [commentsError, setCommentsError] = useState<string | null>(null);
-  const [activity, setActivity] = useState<ActivityEntry[] | null>(null);
-  const [activityError, setActivityError] = useState<string | null>(null);
+  // Both are read through detailCache: reopening a task shows what it showed last time at once, and the
+  // read behind it replaces that. The history is a longer read (paged), so it waits for its tab.
+  const commentsRead = useDetail("comments", taskId, () => readers.comments(taskId), TASK_MAX_AGE_MS);
+  const activityRead = useDetail("activity", taskId, () => api.listActivity(taskId), TASK_MAX_AGE_MS, tab === "activity");
+  const comments = commentsRead.value ?? null;
+  const commentsError = commentsRead.value ? null : commentsRead.error;
+  const activity = activityRead.value ?? null;
+  const activityError = activityRead.value ? null : activityRead.error;
   const [editing, setEditing] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let alive = true;
-    api
-      .listComments(taskId)
-      .then((c) => alive && setComments(c))
-      .catch((e) => alive && setCommentsError(e instanceof Error ? e.message : "Không tải được bình luận."));
-    return () => {
-      alive = false;
-    };
-  }, [taskId]);
-
-  // The history is a longer read (paged), so it waits until someone opens the tab.
-  useEffect(() => {
-    if (tab !== "activity" || activity || activityError) return;
-    let alive = true;
-    api
-      .listActivity(taskId)
-      .then((a) => alive && setActivity(a))
-      .catch((e) => alive && setActivityError(e instanceof Error ? e.message : "Không tải được lịch sử."));
-    return () => {
-      alive = false;
-    };
-  }, [tab, taskId, activity, activityError]);
-
   async function add(text: string) {
     const created = await api.addComment(taskId, text);
-    setComments((prev) => [created, ...(prev ?? [])]);
+    commentsRead.set([created, ...(commentsRead.value ?? [])]);
     // The comment is part of the history in Jira only for field changes, so no refetch is needed.
   }
 
   async function save(id: string, text: string) {
     const updated = await api.updateComment(taskId, id, text);
-    setComments((prev) => (prev ?? []).map((c) => (c.id === id ? updated : c)));
+    commentsRead.set((commentsRead.value ?? []).map((c) => (c.id === id ? updated : c)));
     setEditing(null);
   }
 
@@ -289,7 +283,7 @@ export default function TaskDiscussion({ taskId, members, myAccountId }: Props) 
     setActionError(null);
     try {
       await api.deleteComment(taskId, id);
-      setComments((prev) => (prev ?? []).filter((c) => c.id !== id));
+      commentsRead.set((commentsRead.value ?? []).filter((c) => c.id !== id));
     } catch (e) {
       setActionError(e instanceof Error ? e.message : "Không xoá được bình luận.");
     } finally {
@@ -312,7 +306,7 @@ export default function TaskDiscussion({ taskId, members, myAccountId }: Props) 
         <>
           {commentsError && <div className="td-error">{commentsError}</div>}
           {actionError && <div className="td-error">{actionError}</div>}
-          {!comments && !commentsError && <div className="td-muted">Đang tải bình luận…</div>}
+          {!comments && !commentsError && <Skeleton lines={2} />}
           {comments && comments.length === 0 && <div className="td-muted">Chưa có bình luận nào.</div>}
           <CommentBox members={members} submitLabel="Gửi bình luận" onSubmit={add} />
           <ul className="td-list">
@@ -355,7 +349,7 @@ export default function TaskDiscussion({ taskId, members, myAccountId }: Props) 
                     onCancel={() => setEditing(null)}
                   />
                 ) : (
-                  <div className="td-body">{renderText(c.text, myAccountId)}</div>
+                  <div className="td-ctext">{renderText(c.text, myAccountId)}</div>
                 )}
               </li>
             ))}
@@ -364,7 +358,7 @@ export default function TaskDiscussion({ taskId, members, myAccountId }: Props) 
       ) : (
         <>
           {activityError && <div className="td-error">{activityError}</div>}
-          {!activity && !activityError && <div className="td-muted">Đang tải lịch sử…</div>}
+          {!activity && !activityError && <Skeleton lines={3} />}
           {activity && activity.length === 0 && <div className="td-muted">Chưa có thay đổi nào được ghi lại.</div>}
           <ul className="td-list">
             {(activity ?? []).map((a) => (

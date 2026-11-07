@@ -1,4 +1,5 @@
 import { startTaskDrag } from "../taskDrag";
+import Skeleton from "./Skeleton";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLayer } from "../useLayer";
 import DateField from "./DateField";
@@ -475,7 +476,7 @@ function LogSheet({
       </header>
       <div className="side-sheet-body">
         {logged === null ? (
-          <p className="muted">Đang tải…</p>
+          <Skeleton lines={3} />
         ) : (
           <>
             {rows.length > 0 && (

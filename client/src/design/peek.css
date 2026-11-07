@@ -15,18 +15,9 @@
   display: flex;
   pointer-events: none;
 }
-/* From 1200px the panel docks under the header and the workspace gives it room (padding, not a cover);
-   below that it lies over the plan as it always did. Every lens that opens a task shares .app-body. */
+/* The task detail is a layer over the page (detail.css), not a column beside it: nothing here makes room for it. */
 .app-body {
-  transition: padding-right var(--d-3) var(--e-out);
-}
-@media (min-width: 1201px) {
-  .peek-layer {
-    top: var(--header-h);
-  }
-  body:has(.peek-layer) .app-body {
-    padding-right: var(--peek-w);
-  }
+  transition: none;
 }
 .modal.peek-panel {
   pointer-events: auto;
@@ -222,12 +213,6 @@ button.date-field-pick:hover:not(:disabled) {
   .modal-overlay {
     animation: none;
   }
-}
-
-/* While the panel is open the bulk bar centres on what is left of the plan, not under the panel. */
-body:has(.peek-layer) .selection-bar {
-  left: calc(var(--rail-w) + (100vw - var(--rail-w) - var(--peek-w)) / 2);
-  max-width: calc(100vw - var(--rail-w) - var(--peek-w) - 24px);
 }
 
 /* ==========================================================================

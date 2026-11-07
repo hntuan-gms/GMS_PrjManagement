@@ -1,5 +1,8 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { api } from "../api";
+import { TASK_MAX_AGE_MS } from "../detailCache";
+import { readers } from "../taskDetailReads";
+import { useDetail } from "../useDetail";
 import type { Watchers } from "../types";
 import { Icon } from "./Icons";
 
@@ -13,35 +16,25 @@ import { Icon } from "./Icons";
  * hook (the state and the two calls) rather than a row of its own.
  */
 export function useTaskWatchers(taskId: string) {
-  const [w, setW] = useState<Watchers | null>(null);
+  const read = useDetail("watchers", taskId, () => readers.watchers(taskId), TASK_MAX_AGE_MS);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let alive = true;
-    api
-      .getTaskWatchers(taskId)
-      .then((x) => alive && setW(x))
-      .catch((e) => alive && setError(e instanceof Error ? e.message : "Không tải được người theo dõi."));
-    return () => {
-      alive = false;
-    };
-  }, [taskId]);
+  const [toggleError, setToggleError] = useState<string | null>(null);
+  const w: Watchers | null = read.value ?? null;
 
   async function toggle() {
     if (!w || busy) return;
     setBusy(true);
-    setError(null);
+    setToggleError(null);
     try {
-      setW(await api.setTaskWatching(taskId, !w.isWatching));
+      read.set(await api.setTaskWatching(taskId, !w.isWatching));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Không đổi được trạng thái theo dõi.");
+      setToggleError(e instanceof Error ? e.message : "Không đổi được trạng thái theo dõi.");
     } finally {
       setBusy(false);
     }
   }
 
-  return { watchers: w, busy, error, toggle };
+  return { watchers: w, busy, error: toggleError ?? (w ? null : read.error), toggle };
 }
 
 /** "2" with a tooltip of who, or of why the names are missing. Nothing while unknown or nobody follows. */

@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
+import { LIST_MAX_AGE_MS, TASK_MAX_AGE_MS } from "../detailCache";
+import { projectLists, readers } from "../taskDetailReads";
+import { useDetail } from "../useDetail";
+import Skeleton from "./Skeleton";
 import type { IssueLink, LinkType, Task } from "../types";
 import TaskPicker from "./TaskPicker";
 import { Icon } from "./Icons";
@@ -27,6 +31,9 @@ interface Way {
   label: string;
 }
 
+const NO_LINKS: IssueLink[] = [];
+const NO_TYPES: LinkType[] = [];
+
 const waysOf = (types: LinkType[]): Way[] =>
   types.flatMap((t) => [
     { value: `${t.name}|outward`, typeName: t.name, direction: "outward" as const, label: linkLabel(t.outward) },
@@ -41,9 +48,15 @@ const waysOf = (types: LinkType[]): Way[] =>
  * promise scheduling it does not do; the note says where to schedule instead.
  */
 export default function TaskLinks({ task, allTasks, onCount, hidden }: Props) {
-  const [links, setLinks] = useState<IssueLink[] | null>(null);
-  const [types, setTypes] = useState<LinkType[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  // Held answers show at once on reopening; the read behind them replaces them (detailCache).
+  const linksRead = useDetail("links", task.id, () => readers.links(task.id), TASK_MAX_AGE_MS);
+  const typesRead = useDetail("list:linkTypes", "", () => projectLists.linkTypes(), LIST_MAX_AGE_MS);
+  const links: IssueLink[] | null = linksRead.value ?? (linksRead.error ? NO_LINKS : null);
+  const setLinks = (next: IssueLink[]) => linksRead.set(next);
+  const types: LinkType[] = typesRead.value ?? NO_TYPES;
+  const [actionError, setActionError] = useState<string | null>(null);
+  const error = actionError ?? linksRead.error;
+  const setError = setActionError;
   const [way, setWay] = useState("");
   const [busy, setBusy] = useState(false);
   const [pickRect, setPickRect] = useState<DOMRect | null>(null);
@@ -54,25 +67,6 @@ export default function TaskLinks({ task, allTasks, onCount, hidden }: Props) {
   useEffect(() => {
     onCount?.(links === null ? null : links.length);
   }, [links, onCount]);
-
-  useEffect(() => {
-    let alive = true;
-    api
-      .getIssueLinks(task.id)
-      .then((l) => alive && setLinks(l))
-      .catch((e) => {
-        if (!alive) return;
-        setLinks([]);
-        setError(e instanceof Error ? e.message : "Không tải được liên kết Jira.");
-      });
-    api
-      .listLinkTypes()
-      .then((t) => alive && setTypes(t))
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, [task.id]);
 
   const ways = useMemo(() => waysOf(types), [types]);
   const chosen = ways.find((w) => w.value === (way || ways[0]?.value));
@@ -109,7 +103,7 @@ export default function TaskLinks({ task, allTasks, onCount, hidden }: Props) {
   if (hidden) return null;
   return (
     <div className="td-stack">
-      {links === null && <span className="muted">Đang tải…</span>}
+      {links === null && <Skeleton lines={1} />}
       {links && links.length > 0 && (
       <ul className="pred-list">
         {links.map((l) => (

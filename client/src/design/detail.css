@@ -1,0 +1,699 @@
+/* ==========================================================================
+   The task panel, third pass: values are text until they are pressed.
+   Loaded after peek.css and App.css; every rule is scoped to .peek-panel (or is a new class), so a window
+   that is not the task panel is untouched.
+
+   The rule: no value draws a box at rest. Under the pointer it gets a soft background; pressed, it becomes
+   a field in the same place and at the same size, so nothing around it moves. Saving is the field's own
+   (leave it, or Enter); Esc puts the old value back.
+   ========================================================================== */
+
+/* ---- Waiting: drawn at the size of what is coming, and only if the wait outlasts 200ms ---- */
+.skel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 6px 0;
+  animation: skel-in var(--d-2) var(--e-out) 200ms backwards;
+}
+.skel-line {
+  display: block;
+  height: 12px;
+  border-radius: var(--radius-sm);
+  background: var(--sunken);
+  animation: skel-pulse 1.1s ease-in-out infinite alternate;
+}
+@keyframes skel-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes skel-pulse {
+  from {
+    opacity: 0.55;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skel-line {
+    animation: none;
+  }
+}
+
+/* ---- Header: parent / this task, then the quiet save state ---- */
+.peek-panel .td-header {
+  gap: 6px;
+}
+button.tdx-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 6px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-md);
+  font-weight: 400;
+}
+button.tdx-crumb:hover:not(:disabled) {
+  background: var(--sunken);
+  border-color: transparent;
+  color: var(--ink);
+}
+button.tdx-crumb:disabled {
+  opacity: 1;
+  cursor: default;
+}
+.tdx-crumb-sep {
+  color: var(--ink-4);
+}
+.tdx-save {
+  min-width: 0;
+  color: var(--ink-3);
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity var(--d-1) linear;
+}
+.tdx-save.is-saving,
+.tdx-save.is-saved {
+  opacity: 1;
+}
+.tdx-save.is-saved {
+  color: var(--ok-text);
+}
+
+/* ---- Status · Người · Ưu tiên: the three things looked at most, as quiet chips ---- */
+.tdx-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+button.tdx-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  height: 28px;
+  padding: 0 8px 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: var(--sunken);
+  box-shadow: none;
+  color: var(--ink);
+  font-size: var(--font-size-md);
+  font-weight: 500;
+}
+button.tdx-chip > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+button.tdx-chip .caret {
+  flex: none;
+  color: var(--ink-4);
+}
+button.tdx-chip:hover:not(:disabled) {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--ink) 8%, var(--sunken));
+}
+button.tdx-chip:hover:not(:disabled) .caret {
+  color: var(--ink-2);
+}
+button.tdx-chip.is-indeterminate {
+  background: var(--info-wash);
+  color: var(--info-text);
+}
+button.tdx-chip.is-done {
+  background: var(--ok-wash);
+  color: var(--ok-text);
+}
+button.tdx-chip.is-indeterminate:hover:not(:disabled),
+button.tdx-chip.is-done:hover:not(:disabled) {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+.tdx-placeholder {
+  color: var(--ink-3);
+  font-weight: 400;
+}
+.tdx-note {
+  color: var(--ink-3);
+  font-size: var(--font-size-md);
+}
+
+/* Boxes the workflow wants before a move: in place, under the chips. */
+.peek-panel .td-needs {
+  margin-top: 10px;
+}
+.tdx-needs-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+/* ---- Lịch: 30/10/2026 → 06/11/2026 · 8 ngày · trễ 1 ngày ---- */
+.tdx-sched {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0;
+  margin-top: 8px;
+  color: var(--ink-2);
+  font-size: var(--font-size-md);
+}
+.tdx-sched-icon {
+  margin-right: 6px;
+  color: var(--ink-3);
+}
+.tdx-arrow,
+.tdx-dot {
+  padding: 0 2px;
+  color: var(--ink-4);
+}
+.tdx-late {
+  margin-left: 8px;
+  color: var(--risk-text);
+  font-weight: 500;
+}
+.tdx-sched .tdx-val {
+  margin-left: 0;
+  padding: 0 6px;
+}
+.tdx-sched .tdx-editing .date-field {
+  min-width: 118px;
+  max-width: 138px;
+}
+
+/* ---- A value that is text until pressed (and the field it turns into) ---- */
+button.tdx-val {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  min-height: 28px;
+  margin-left: -8px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--font-size-md);
+  font-weight: 400;
+  text-align: left;
+}
+button.tdx-val:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--sunken);
+}
+button.tdx-val:disabled {
+  opacity: 1;
+  cursor: default;
+}
+.tdx-editing {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  max-width: 100%;
+}
+.tdx-editing input:not([type="range"]) {
+  height: 28px;
+}
+.tdx-num {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-md);
+}
+.tdx-text {
+  color: var(--ink);
+  font-size: var(--font-size-md);
+}
+.tdx-meter {
+  display: inline-block;
+  flex: none;
+  width: 96px;
+  height: 6px;
+  overflow: hidden;
+  border-radius: var(--radius-full);
+  background: var(--line);
+}
+.tdx-meter > span {
+  display: block;
+  height: 100%;
+  background: var(--ink-2);
+}
+
+/* ---- Label and value on one row ---- */
+.tdx-prop {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  align-items: start;
+  column-gap: 8px;
+  min-height: 32px;
+  padding: 2px 0;
+}
+.tdx-label {
+  padding-top: 5px;
+  color: var(--ink-3);
+  font-size: var(--font-size-md);
+}
+.tdx-value {
+  min-width: 0;
+}
+.tdx-prop .td-effort {
+  align-items: flex-start;
+}
+.tdx-effort-line {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+}
+.tdx-prop .td-spent-row {
+  margin-left: 0;
+}
+.tdx-prop .td-value-text {
+  display: inline-block;
+  padding-top: 5px;
+}
+.tdx-prop .td-pick-wrap {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.tdx-prop .td-pick-wrap .tdx-val {
+  flex: 0 1 auto;
+}
+.tdx-prop .tp-key {
+  flex: none;
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+}
+button.tdx-more {
+  margin: 4px 0 0 -8px;
+}
+
+/* Labels, components, versions: chips and a field that shows itself only when the pointer or focus is there. */
+.tdx-prop .labels-input {
+  min-height: 28px;
+  margin-left: -8px;
+  padding: 2px 4px 2px 8px;
+  border-color: transparent;
+  background: transparent;
+}
+.tdx-prop .labels-input:hover:not(:focus-within) {
+  border-color: transparent;
+  background: var(--sunken);
+}
+.tdx-prop .labels-input:focus-within {
+  background: var(--control-bg);
+  border-color: var(--control-border-focus);
+}
+.tdx-prop .labels-input input::placeholder {
+  color: var(--ink-3);
+}
+.tdx-prop .label-chip {
+  background: var(--sunken);
+  color: var(--ink-2);
+}
+.tdx-prop .labels-input:hover .label-chip {
+  background: color-mix(in srgb, var(--ink) 8%, var(--sunken));
+}
+.tdx-prop .name-picker select {
+  height: 24px;
+  border-color: transparent;
+  background-color: transparent;
+  color: var(--ink-3);
+}
+
+/* ---- Mô tả: read as a page; pressed, it is a text area in the same place ---- */
+.tdx-desc {
+  margin: 0 -8px;
+  padding: 6px 8px;
+  min-height: 36px;
+  border-radius: var(--radius-md);
+  color: var(--ink);
+  font-size: var(--font-size-md);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  cursor: text;
+}
+.tdx-desc:hover {
+  background: var(--sunken);
+}
+.tdx-desc:focus-visible {
+  outline: none;
+  box-shadow: var(--control-ring);
+}
+.tdx-desc p,
+.tdx-desc ul,
+.tdx-desc ol {
+  margin: 0 0 0.6em;
+}
+.tdx-desc > :last-child {
+  margin-bottom: 0;
+}
+.tdx-desc ul,
+.tdx-desc ol {
+  padding-left: 20px;
+}
+.tdx-desc a {
+  color: var(--info-text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.tdx-empty {
+  color: var(--ink-3);
+}
+.tdx-desc-edit {
+  margin: 0 -8px;
+}
+.tdx-desc-edit textarea {
+  width: 100%;
+  min-height: 120px;
+  max-height: 50vh;
+  padding: 6px 8px;
+  line-height: 1.6;
+  resize: none;
+  field-sizing: content;
+}
+.tdx-desc-actions {
+  display: flex;
+  gap: 6px;
+  margin: 8px 8px 0;
+}
+.tdx-desc-actions button {
+  height: 28px;
+}
+.tdx-desc-actions .primary kbd {
+  margin-left: 6px;
+  border-color: color-mix(in srgb, var(--on-strong) 30%, transparent);
+  background: transparent;
+  color: color-mix(in srgb, var(--on-strong) 75%, transparent);
+}
+
+/* ---- Liên quan: sections stay as they were, only lighter ---- */
+.tdx-related .td-section {
+  border-top: none;
+}
+.tdx-related .td-section > summary {
+  padding-left: 0;
+  padding-right: 0;
+}
+.tdx-related .td-section-body {
+  padding-left: 0;
+  padding-right: 0;
+}
+.tdx-related .td-add-row {
+  margin-left: -8px;
+}
+
+/* ---- Bình luận: one line until it is used ---- */
+.td-box.is-collapsed textarea {
+  min-height: 38px;
+  height: 38px;
+}
+.td-box-actions[hidden] {
+  display: none;
+}
+.td-tabs button:hover:not(:disabled):not(.active) {
+  background: none;
+  border-color: transparent;
+  color: var(--ink);
+}
+.td-box .td-suggest {
+  top: 100%;
+}
+
+/* Dependencies and Jira links: rows of text, no box each; the row shows its tint under the pointer. */
+.tdx-related .pred-list {
+  margin: 2px -8px 4px;
+  gap: 0;
+}
+.tdx-related .pred-list li {
+  padding: 4px 8px;
+  border-color: transparent;
+  background: transparent;
+  border-radius: var(--radius-md);
+}
+.tdx-related .pred-list li:hover,
+.tdx-related .pred-list li:focus-within {
+  background: var(--sunken);
+}
+.tdx-related .td-stack > .td-add-btn {
+  align-self: flex-start;
+  margin-left: -8px;
+}
+.tdx-related .td-stack > .pred-add {
+  margin-left: -2px;
+}
+
+/* ---- Waiting areas that are not the panel ---- */
+.skel-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 12px 20px;
+  animation: skel-in var(--d-2) var(--e-out) 200ms backwards;
+}
+.skel-plan-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: var(--row-h, 32px);
+}
+.picker-skel,
+.menu-skel {
+  padding: 12px 16px;
+}
+
+/* The Bảng tab's first paint: the plan's own work, drawn as columns, until the board answers. */
+.bdp {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(220px, 1fr);
+  gap: 12px;
+  padding: 16px 20px;
+  overflow: hidden;
+  opacity: 0.72;
+  pointer-events: none;
+  animation: skel-in var(--d-2) var(--e-out) 120ms backwards;
+}
+.bdp-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: var(--radius-lg);
+  background: var(--sunken);
+}
+.bdp-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 2px;
+  color: var(--ink-2);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+.bdp-count {
+  color: var(--ink-3);
+  font-weight: 400;
+}
+.bdp-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--raised);
+  font-size: var(--font-size-md);
+}
+.bdp-title {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  color: var(--ink);
+}
+.bdp-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--ink-3);
+  font-size: var(--font-size-sm);
+}
+.bdp-key {
+  font-family: var(--font-mono);
+}
+.bdp-who {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-full);
+  background: var(--line);
+  color: var(--ink-2);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+}
+
+/* ==========================================================================
+   The detail is a layer over the page, in two panes (like Jira's issue view): what the work is on the left,
+   where it stands on the right. Width is spent on the page, not on scrolling: the window is as wide as
+   the screen allows, and each pane scrolls by itself.
+   ========================================================================== */
+.peek-layer {
+  inset: 0;
+  top: 0;
+  width: auto;
+  z-index: 48; /* over the assistant window (46), under menus and pickers (50) */
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: var(--color-overlay);
+  pointer-events: auto;
+  animation: overlay-in var(--d-2) linear;
+}
+.modal.peek-panel {
+  width: min(1320px, 100%);
+  height: min(90vh, 940px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+  animation: modal-in var(--d-3) var(--e-out);
+}
+.peek-panel .td-header {
+  min-height: 52px;
+  padding: 8px 12px 8px 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.td-cols {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(360px, 32%, 440px);
+}
+.td-left,
+.td-right {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+.td-left {
+  padding: 10px 32px 36px 24px;
+}
+.td-right {
+  padding: 14px 20px 32px;
+  border-left: 1px solid var(--line);
+  background: var(--paper);
+}
+.td-left .td-titlebar {
+  padding: 0 0 4px;
+}
+.td-left .td-title {
+  font-size: var(--font-size-page);
+}
+.td-left .tdx-block {
+  padding: 22px 0 0;
+}
+.td-left .tdx-block.tdx-related {
+  padding-top: 14px;
+}
+.td-left .tdx-block.td-card {
+  padding-top: 24px;
+}
+.td-left .tdx-pad {
+  padding: 8px 0 0;
+}
+.td-left .tdx-related .td-add-row,
+.td-left .tdx-related .pred-list {
+  margin-left: -8px;
+}
+
+/* Right pane: the three chips and the dates on the paper, the details in a card of their own. */
+.td-right .tdx-top {
+  padding: 0;
+}
+.td-right .tdx-chips {
+  margin-top: 0;
+}
+button.tdx-chip {
+  background: var(--raised);
+  border-color: var(--line);
+}
+button.tdx-chip:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: var(--raised);
+}
+button.tdx-chip.is-indeterminate {
+  background: var(--info-wash);
+  border-color: var(--info-soft);
+}
+button.tdx-chip.is-done {
+  background: var(--ok-wash);
+  border-color: var(--ok-soft);
+}
+.td-right .tdx-block {
+  margin-top: 16px;
+  padding: 14px 16px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--raised);
+}
+.td-right .tdx-prop {
+  grid-template-columns: 104px minmax(0, 1fr);
+}
+
+/* Narrow windows: one column, the status first, the window as big as the screen. */
+@media (max-width: 900px) {
+  .peek-layer {
+    padding: 0;
+  }
+  .modal.peek-panel {
+    width: 100%;
+    height: 100%;
+    border: none;
+    border-radius: 0;
+  }
+  .td-cols {
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  .td-left,
+  .td-right {
+    overflow: visible;
+  }
+  .td-right {
+    order: -1;
+    border-left: none;
+    border-bottom: 1px solid var(--line);
+  }
+  .td-left {
+    padding: 12px 18px 28px;
+  }
+}
+
+/* Headings of the blocks: small, quiet; the page title is the only large text. */
+.peek-panel .tdx-h {
+  margin: 0 0 8px;
+  color: var(--ink-2);
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  letter-spacing: 0;
+}
+.td-right .tdx-block .tdx-h {
+  margin-bottom: 6px;
+}

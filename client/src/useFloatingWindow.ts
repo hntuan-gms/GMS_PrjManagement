@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { clampRect, defaultRect, maximizedRect, parseRect, resizeRect, stepAsideOfPeek, type Edge, type Rect } from "./windowGeometry";
+import { clampRect, defaultRect, maximizedRect, parseRect, resizeRect, type Edge, type Rect } from "./windowGeometry";
 
 /**
  * A window that can be dragged by its title bar and resized from any edge, like one in an operating
@@ -133,13 +133,5 @@ export function useFloatingWindow(enabled: boolean) {
     commit(defaultRect(vw, vh));
   }, [commit]);
 
-  /** Called after a task is opened beside the window: it moves left of the docked panel if it would sit on it. */
-  const stepAside = useCallback(() => {
-    if (maximized) return;
-    const { vw, vh } = viewport();
-    const next = stepAsideOfPeek(rectRef.current, vw, vh);
-    if (next) commit(next);
-  }, [maximized, commit]);
-
-  return { elRef, rect, maximized, busy, startMove, startResize, toggleMaximized, reset, stepAside };
+  return { elRef, rect, maximized, busy, startMove, startResize, toggleMaximized, reset };
 }

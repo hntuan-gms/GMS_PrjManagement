@@ -48,11 +48,11 @@ await step("khi bản mới về thì nút trở lại bình thường", async (
   await page.waitForFunction(() => document.querySelector(".sync-indicator")?.textContent.includes("Khớp Jira"), null, { timeout: 6000 });
   await setDelay(0);
 });
-await step("chưa có bản lưu và máy chủ chậm: vẫn thấy header, nút đồng bộ xoay, chưa có bảng", async () => {
+await step("chưa có bản lưu và máy chủ chậm: vẫn thấy header, nút đồng bộ xoay, khung xương đúng cỡ hàng thay cho trang trống", async () => {
   await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("gms.tasksCache.")).forEach((k) => localStorage.removeItem(k)));
   await setDelay(2500);
   await page.reload();
-  await page.waitForSelector(".center-message", { timeout: 3000 });
+  await page.waitForSelector(".skel-plan", { timeout: 3000 });
   await page.waitForSelector(".toolbar", { timeout: 1500 });
   assert((await page.locator(".wbs-row").count()) === 0, "chưa có dữ liệu mà đã có hàng");
   assert((await syncButton().textContent()).includes("Đang đọc"), "chỉ báo không báo đang tải");
@@ -66,22 +66,20 @@ await step("danh sách việc không kèm mô tả", async () => {
 });
 
 console.log("\n== Mô tả lấy khi mở việc ==");
-await step("mở việc có mô tả: ô mô tả được điền sau khi tải; sửa chỗ khác rồi lưu thì mô tả vẫn nguyên", async () => {
+await step("mở việc có mô tả: mô tả hiện sau khi tải; sửa chỗ khác thì chỉ gửi chỗ đó, mô tả không bị ghi lại", async () => {
   await fetch(API + "/api/tasks/DEMO-5", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ description: "Mô tả có sẵn" }) });
   await page.reload();
   await page.waitForSelector(".wbs-row");
   await fetch(API + "/api/__reset", { method: "POST" });
   await page.locator(".wbs-row", { hasText: "DEMO-5" }).locator(".wbs-col-name").dblclick();
-  const box = page.locator(".modal .field:has(> span:text-is('Mô tả')) textarea");
-  await page.waitForFunction(() => document.querySelector(".modal .field textarea")?.value === "Mô tả có sẵn");
-  assert.equal(await box.isDisabled(), false);
-  // Nothing changed = nothing to save ("Đã lưu" is disabled); change the title, then save.
-  assert.equal(await page.locator(".modal-footer .primary").isDisabled(), true);
+  await page.waitForFunction(() => document.querySelector(".tdx-desc")?.textContent.includes("Mô tả có sẵn"));
+  assert.equal(await page.locator(".tdx-desc-edit").count(), 0, "mô tả là chữ, chưa phải ô nhập");
   await page.locator(".td-title").fill("Thiết kế cơ sở dữ liệu (sửa)");
-  await page.locator(".modal-footer .primary").click();
+  await page.locator(".td-title").press("Enter");
   await page.waitForFunction(async () => (await (await fetch("/api/__log")).json()).log.some((l) => l.m === "PATCH"));
   const patch = (await log()).find((l) => l.m === "PATCH");
-  assert.equal(patch.b.description, "Mô tả có sẵn");
+  assert.deepEqual(Object.keys(patch.b), ["summary"], "chỉ gửi trường vừa sửa");
+  await page.keyboard.press("Escape");
   await page.waitForSelector(".modal", { state: "detached" });
 });
 

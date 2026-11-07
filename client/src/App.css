@@ -8597,7 +8597,7 @@ button.tf-chip-x:hover:not(:disabled) {
 .td-danger {
   color: var(--color-danger);
 }
-.td-body {
+.td-ctext {
   margin-top: 2px;
   font-size: var(--font-size-md);
   white-space: pre-wrap;

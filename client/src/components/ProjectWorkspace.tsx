@@ -9,6 +9,9 @@ import { makeEntry, pushEntry, undoSteps, type UndoEntry } from "../undo";
 import { addDays, buildResourceLoad, todayIso } from "../resourceAllocation";
 import { loadBigTasksCache, loadTasksCache, saveTasksCache, tasksCacheKey } from "../tasksCache";
 import { dropViewCache, noteViewsStale, readViewCache, viewCacheScope, writeViewCache } from "../viewCache";
+import { setDetailScope } from "../detailCache";
+import { prefetchProjectLists, prefetchTaskDetail } from "../taskDetailReads";
+import { optimisticTask, restoreFields, touchedFields } from "../taskPatch";
 import { warmBoardAndTimesheet, warmProgress } from "../warmViews";
 import { computeSla, slaIds } from "../sla";
 import SavedFilterMenu from "./SavedFilterMenu";
@@ -39,6 +42,7 @@ import KbktImportModal from "./KbktImportModal";
 import ProgressReportView from "./ProgressReportView";
 import ResourceView from "./ResourceView";
 import TaskEditModal from "./TaskEditModal";
+import { PlanSkeleton } from "./Skeleton";
 import ProjectSettings from "./ProjectSettings";
 import type { SettingsSection } from "../settingsSections";
 import { WorkCalendarContext } from "./workCalendarContext";
@@ -148,6 +152,8 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
   // lookup against Jira — the slowest call on the page — and popped in last, shoving "Báo cáo"
   // aside, on every reload.
   const viewScope = viewCacheScope(session.site.cloudId, session.user.accountId, session.project?.key ?? "");
+  // What the task panel read (descriptions, comments, the project's lists) is kept per site + account + project.
+  setDetailScope(viewScope);
   const [cachedPool] = useState(() => readViewCache<ResourcePool>(viewScope, "resourcePool", ""));
   const [pool, setPool] = useState<ResourcePool | null>(cachedPool ?? null);
   const [poolError, setPoolError] = useState<string | null>(null);
@@ -361,6 +367,8 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
   const [closeRequest, setCloseRequest] = useState(0);
   const openTask = useCallback(
     (t: Task) => {
+      prefetchTaskDetail(t.id, t.description === undefined);
+      prefetchProjectLists();
       if (editingTask && editingTask.id !== t.id) {
         setPendingOpen(t);
         setCloseRequest((n) => n + 1);
@@ -368,6 +376,16 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
     },
     [editingTask]
   );
+  // A row selected is usually a row about to be opened: start the panel's reads a beat early, so the
+  // double-click that follows finds them under way (detailCache shares the request with the panel).
+  useEffect(() => {
+    if (!selectedId || loading) return;
+    const h = window.setTimeout(() => {
+      prefetchTaskDetail(selectedId, true);
+      prefetchProjectLists();
+    }, 250);
+    return () => window.clearTimeout(h);
+  }, [selectedId, loading]);
   // Open with an optional parent: "+ Sub-task" in the edit modal pre-fills it.
   const [creating, setCreating] = useState<false | { parentId?: string }>(false);
   // The plan being reviewed, opened from the assistant's table card.
@@ -1147,6 +1165,28 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
     setTasks((prev) => applyTaskUpdate(prev, updated, seq));
   }
 
+  /**
+   * One field edit from the task panel, which saves each field as it is finished: shown at once, sent to
+   * Jira, and put back if Jira refuses. The refusal is thrown so the panel can say why, or ask for the
+   * boxes a status move needs. `extra` is what the patch cannot say alone (the status a transition leads to).
+   */
+  async function savePanelField(id: string, patch: TaskUpdateInput, extra: Partial<Task> = {}) {
+    const seq = nextSeq();
+    const before = tasks.find((t) => t.id === id);
+    const fields = touchedFields(patch, extra);
+    taskVersion.current.set(id, seq);
+    setTasks((prev) => prev.map((t) => (t.id === id ? optimisticTask(t, patch, users, extra) : t)));
+    try {
+      const updated = await api.updateTask(id, patch);
+      setTasks((prev) => applyTaskUpdate(prev, updated, seq));
+    } catch (e) {
+      if (before && (taskVersion.current.get(id) ?? 0) === seq) {
+        setTasks((prev) => prev.map((t) => (t.id === id ? restoreFields(t, before, fields) : t)));
+      }
+      throw e;
+    }
+  }
+
   // The lists quick-add resolves words against; fetched once, the first time the command bar opens.
   useEffect(() => {
     if (!cmdk || meta) return;
@@ -1570,7 +1610,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
     return (
       <div className="app">
         {toolbar}
-        <div className="center-message">Đang tải dữ liệu...</div>
+        <PlanSkeleton />
       </div>
     );
   }
@@ -1881,11 +1921,12 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
 
         {editingTask && (
           <TaskEditModal
-            // Every field in the form starts from this task, so a different task (opened from
-            // an issue key in the chat while this one is up) must be a fresh form, not the
-            // old one with the new task's title in the header.
+            // A different task (opened from an issue key in the chat while this one is up) is a fresh
+            // panel, not the old one with the new title in the header.
             key={editingTask.id}
-            task={editingTask}
+            // The live task: every field saved from the panel is applied to `tasks` at once, so the
+            // panel and the plan behind it show the same thing.
+            task={tasks.find((t) => t.id === editingTask.id) ?? editingTask}
             allTasks={tasks}
             users={users}
             sla={slaView ? { result: slaView.byId.get(editingTask.id) ?? null, settings: slaView.settings, nowMs: slaView.nowMs } : null}
@@ -1894,11 +1935,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
               setPendingOpen(null);
             }}
             closeRequest={closeRequest}
-            onSave={async (patch) => {
-              const seq = nextSeq();
-              const updated = await api.updateTask(editingTask.id, patch);
-              setTasks((prev) => applyTaskUpdate(prev, updated, seq));
-            }}
+            onSave={(patch, extra) => savePanelField(editingTask.id, patch, extra)}
             onDelete={async () => {
               await api.deleteTask(editingTask.id);
               await refreshTasks();
@@ -1909,6 +1946,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
               setEditingTask(null);
               setCreating({ parentId: parent.id });
             }}
+            onOpenTask={openTask}
           />
         )}
 

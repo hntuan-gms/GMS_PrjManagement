@@ -11,7 +11,7 @@ import {
   suggestionsFor,
 } from "../src/chatCompose";
 import { dragKeysFor, readTaskDrag, TASK_MIME } from "../src/taskDrag";
-import { clampRect, defaultRect, launchOrigin, maximizedRect, resizeRect, stepAsideOfPeek, MIN_H, MIN_W, parseRect } from "../src/windowGeometry";
+import { clampRect, defaultRect, launchOrigin, maximizedRect, resizeRect, MIN_H, MIN_W, parseRect } from "../src/windowGeometry";
 import type { JiraUser } from "../src/types";
 import type { Mentions } from "../src/mentions";
 
@@ -117,14 +117,6 @@ describe("chat: drag payload and window geometry", () => {
     const tiny = resizeRect(start, "w", 400, 0, 1600, 900);
     assert.equal(tiny.w, MIN_W);
     assert.equal(tiny.x + tiny.w, 1220);
-  });
-
-  it("steps left of the docked task panel only when it would cover it, and only on a wide window", () => {
-    const over = { x: 900, y: 100, w: 420, h: 600 };
-    const moved = stepAsideOfPeek(over, 1400, 900);
-    assert.ok(moved && moved.x + moved.w <= 1400 - 480);
-    assert.equal(stepAsideOfPeek({ x: 100, y: 100, w: 420, h: 600 }, 1400, 900), null);
-    assert.equal(stepAsideOfPeek(over, 1100, 900), null);
   });
 
   it("maximised fills the area beside the rail, a damaged saved rect is ignored", () => {

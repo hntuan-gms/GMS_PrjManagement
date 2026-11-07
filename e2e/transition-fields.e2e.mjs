@@ -88,66 +88,92 @@ async function openTask(id) {
   await row(id).dblclick();
   await page.waitForSelector(".modal-detail .modal-id");
 }
-const statusSelect = () => page.locator("#td-status");
+const statusChip = () => page.locator("#td-status");
+const chooseStatus = async (label) => {
+  await statusChip().click();
+  await page.locator(".cell-picker-item", { has: page.locator(".cell-picker-label", { hasText: new RegExp("^" + label + "$") }) }).click();
+};
 
-await step("bố cục một cột: chi tiết (.td-side) nằm trên nội dung (.td-main); trạng thái ở đầu khung", async () => {
+await step("hai khung: tên và mô tả bên trái, trạng thái · người · ưu tiên và chi tiết bên phải, trạng thái nằm đầu khung phải", async () => {
   await openTask("DEMO-5");
-  await page.waitForTimeout(500); // the panel slides in
-  const main = await page.locator(".td-main").boundingBox();
-  const side = await page.locator(".td-side").boundingBox();
-  assert.ok(side.y + side.height <= main.y + 2, "bảng chi tiết phải nằm trên nội dung");
-  assert.ok(Math.abs(side.x - main.x) < 2, "hai khối phải cùng một cột");
+  await page.waitForTimeout(500); // the layer fades in
+  const left = await page.locator(".td-left").boundingBox();
+  const right = await page.locator(".td-right").boundingBox();
+  const title = await page.locator(".td-title").boundingBox();
+  const status = await statusChip().boundingBox();
+  const desc = await page.locator(".td-left .tdx-block").first().boundingBox();
+  assert.ok(right.x >= left.x + left.width - 1, "hai khung phải cạnh nhau");
+  assert.ok(title.y + title.height <= desc.y + 2, "mô tả phải nằm dưới tên việc");
+  assert.ok(status.x >= right.x && status.y - right.y < 60, "trạng thái phải ở đầu khung phải");
   assert.equal(await page.locator(".td-group-title").count(), 0, "không còn tiêu đề nhóm");
-  const head = await page.locator(".td-header").boundingBox();
-  const status = await statusSelect().boundingBox();
-  assert.ok(status.y >= head.y && status.y + status.height <= head.y + head.height + 2, "trạng thái phải nằm ở dòng đầu");
+  assert.equal(await page.locator(".modal-footer").count(), 0, "không còn chân khung với nút Lưu");
   assert.equal(await page.locator(".modal-detail").getAttribute("role"), "dialog");
 });
-await step("danh sách trạng thái là danh sách của ứng dụng (select tuỳ biến), không phải của hệ điều hành", async () => {
-  const appearance = await statusSelect().evaluate((el) => getComputedStyle(el).appearance);
-  assert.equal(appearance, "base-select");
+await step("danh sách trạng thái là danh sách của ứng dụng, không phải của hệ điều hành", async () => {
+  await statusChip().click();
+  await page.locator(".cell-picker").waitFor();
+  assert.equal(await page.locator(".modal-detail select#td-status").count(), 0);
+  await page.keyboard.press("Escape");
+  await page.locator(".cell-picker").waitFor({ state: "detached" });
+  assert.equal(await page.locator(".modal-detail").count(), 1, "Esc đã đóng luôn cửa sổ chi tiết");
 });
-await step("chọn Done: hiện ô RootCause; bấm Lưu khi chưa nhập thì không gửi mà báo thiếu gì", async () => {
-  await statusSelect().selectOption({ label: "Done · cần nhập thêm" });
+await step("chọn Done: hiện ô RootCause; bấm Chuyển khi chưa nhập thì không gửi mà báo thiếu gì", async () => {
+  await chooseStatus("Done");
   await page.locator(".td-needs").waitFor();
-  await page.locator(".modal-footer .primary").click();
-  assert.ok((await page.locator(".td-error").textContent()).includes("RootCause"));
+  await page.locator(".td-needs button.primary").click();
+  assert.ok((await page.locator(".td-needs .td-error").textContent()).includes("RootCause"));
   assert.equal((await patches()).length, 0);
 });
-await step("nhập RootCause → lưu gửi kèm transitionFields", async () => {
+await step("nhập RootCause → chuyển gửi kèm transitionFields, khung vẫn mở và đã sang Done", async () => {
   await page.locator(".td-needs .field", { hasText: "RootCause" }).locator("input").fill("Thiếu index");
-  await page.locator(".modal-footer .primary").click();
-  await page.waitForSelector(".modal", { state: "detached" });
+  await page.locator(".td-needs button.primary").click();
+  await page.locator(".td-needs").waitFor({ state: "detached" });
   const p = (await patches()).at(-1).b;
   assert.equal(p.statusTransition, "31");
   assert.equal(p.transitionFields.customfield_9, "Thiếu index");
+  assert.ok((await statusChip().textContent()).includes("Done"));
+  assert.equal(await page.locator(".modal-detail").count(), 1, "khung phải còn mở");
 });
-await step("Rejected (validator): lần lưu đầu bị từ chối → ô xuất hiện ngay tại chỗ với câu của Jira → lưu lại thành công", async () => {
+await step("Rejected (validator): bị từ chối → ô xuất hiện ngay tại chỗ với câu của Jira, trạng thái trả về cũ → chuyển lại thành công", async () => {
   await openTask("DEMO-5");
-  await statusSelect().selectOption({ label: "Rejected (Reject)" });
-  await page.locator(".modal-footer .primary").click();
+  const was = (await statusChip().textContent()).trim();
+  await chooseStatus("Rejected");
   const needs = page.locator(".td-needs");
   await needs.waitFor();
   assert.ok((await needs.textContent()).includes("Vui lòng nhập Lý do từ chối"));
-  assert.equal(await page.locator(".modal").count(), 1, "cửa sổ không được đóng");
+  assert.equal(await page.locator(".modal-detail").count(), 1, "cửa sổ không được đóng");
+  assert.equal((await statusChip().textContent()).trim(), was, "bị từ chối thì trạng thái phải trả về cũ");
   await needs.locator("input").fill("Không làm nữa");
-  await page.locator(".modal-footer .primary").click();
-  await page.waitForSelector(".modal", { state: "detached" });
+  await needs.locator("button.primary").click();
+  await needs.waitFor({ state: "detached" });
   assert.equal((await patches()).at(-1).b.transitionFields.customfield_8, "Không làm nữa");
+  assert.ok((await statusChip().textContent()).includes("Rejected"));
 });
 
-console.log("\n== Thay đổi chưa lưu & hộp thoại ==");
-await step("sửa tiêu đề rồi Esc → khung tự lưu rồi đóng, không hỏi 'Bỏ thay đổi?'", async () => {
+console.log("\n== Lưu từng trường & hộp thoại ==");
+await step("sửa tiêu đề rồi Enter → lưu ngay một yêu cầu riêng, báo 'Đã lưu', không có nút Lưu", async () => {
   await openTask("DEMO-5");
-  await page.locator(".td-title").fill("Tiêu đề mới");
-  assert.ok(await page.locator(".td-dirty").isVisible(), "phải báo có thay đổi chưa lưu");
-  await page.keyboard.press("Escape");
-  await page.waitForSelector(".modal", { state: "detached" });
-  assert.equal(await page.locator(".dlg").count(), 0, "không được hỏi");
+  const t = page.locator(".td-title");
+  await t.fill("Tiêu đề mới");
+  await t.press("Enter");
+  await page.waitForFunction(async () => (await (await fetch("/api/__log")).json()).log.some((l) => l.m === "PATCH" && l.b.summary === "Tiêu đề mới"));
   const last = (await patches()).at(-1);
-  assert.equal(last?.b.summary, "Tiêu đề mới", "đóng khung phải lưu tiêu đề đã gõ");
+  assert.deepEqual(Object.keys(last.b), ["summary"], "chỉ gửi trường vừa sửa");
+  await page.locator(".tdx-save.is-saved").waitFor();
+  assert.equal(await page.locator(".modal-detail").count(), 1);
+  assert.equal(await page.locator(".dlg").count(), 0, "không được hỏi gì");
 });
-await step("không sửa gì thì đóng ngay, không hỏi", async () => {
+await step("Esc khi đang sửa tiêu đề → trả tiêu đề cũ, khung còn nguyên, không gửi gì", async () => {
+  await openTask("DEMO-5");
+  const before = await page.locator(".td-title").inputValue();
+  await page.locator(".td-title").fill("Gõ dở");
+  await page.keyboard.press("Escape");
+  assert.equal(await page.locator(".td-title").inputValue(), before);
+  assert.equal(await page.locator(".modal-detail").count(), 1, "Esc đã đóng khung khi đang sửa");
+  await page.waitForTimeout(300);
+  assert.equal((await patches()).length, 0);
+});
+await step("không sửa gì thì Esc đóng ngay, không hỏi", async () => {
   await openTask("DEMO-5");
   await page.keyboard.press("Escape");
   await page.waitForSelector(".modal", { state: "detached" });

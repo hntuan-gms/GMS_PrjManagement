@@ -1,6 +1,7 @@
-// The task detail panel: a title that wraps, counts instead of empty boxes (an empty section is one "+"
-// button), attachments you can open / download / delete, a link form that stays folded, quick time-logging
-// behind a button, and the facts one per line in a single column. Client against the stand-in API.
+// The task detail: a layer over the page in two panes (what the work is on the left, where it stands on the
+// right), values that are text until pressed, a title that wraps, counts instead of empty boxes (an empty
+// section is one "+" button), attachments you can open / download / delete, quick time-logging behind a button.
+// Client against the stand-in API.
 import assert from "node:assert/strict";
 import { chromium } from "playwright-core";
 
@@ -41,10 +42,9 @@ await step("tiêu đề dài xuống dòng, không bị cắt, và Enter không 
   const many = (await title.boundingBox()).height;
   assert.ok(many > one * 1.8, `chiều cao ${one} → ${many}`);
   assert.equal(await title.evaluate((el) => el.scrollHeight <= el.clientHeight + 1), true, "vẫn bị cuộn/cắt");
-  await title.press("Enter");
-  assert.equal(await title.inputValue(), long, "Enter đã chèn dòng mới");
   await title.fill("Dòng một\ndòng hai");
   assert.equal(await title.inputValue(), "Dòng một dòng hai", "xuống dòng dán vào phải thành khoảng trắng");
+  await title.press("Escape");
 });
 
 console.log("\n== Các thẻ bên trái ==");
@@ -56,7 +56,7 @@ await step("số đếm nằm ở tiêu đề thẻ; thẻ trống không có m�
   // A section with nothing in it is not drawn: one "+" button stands for it.
   assert.equal(await section("Phụ thuộc lịch").count(), 0);
   assert.equal(await page.locator(".td-add-row button", { hasText: "Phụ thuộc" }).count(), 1);
-  const text = await page.locator(".td-main").innerText();
+  const text = await page.locator(".td-left").innerText();
   for (const gone of ["Phụ thuộc (predecessors)", "Liên kết Jira (issue links)", "Không có"]) assert.ok(!text.includes(gone), `còn "${gone}"`);
 });
 await step("form liên kết gập sẵn; bấm '+ Thêm liên kết' mới mở, Esc chỉ đóng form chứ không đóng cửa sổ", async () => {
@@ -130,22 +130,26 @@ await step("xoá một tệp: hỏi trước, huỷ thì giữ, đồng ý thì 
 
 console.log("\n== Bình luận ==");
 await openTask();
-await step("thẻ bình luận không còn tiêu đề gập lặp lại; nút gửi dịu hơn nút Lưu; câu 'chưa có' nằm trên ô nhập", async () => {
+await step("thẻ bình luận không còn tiêu đề gập lặp lại; ô viết gọn một dòng cho tới khi dùng; câu 'chưa có' nằm trên ô nhập", async () => {
   assert.equal(await page.locator(".td-section-title", { hasText: "Bình luận" }).count(), 0, "còn tiêu đề gập 'Bình luận & lịch sử'");
   assert.equal(await page.getByRole("tab", { name: /Bình luận/ }).count(), 1);
-  const send = await page.locator(".td-box-actions .primary").evaluate((el) => getComputedStyle(el).backgroundColor);
-  const save = await page.locator(".modal-footer .primary").evaluate((el) => getComputedStyle(el).backgroundColor);
-  assert.notEqual(send, save, "nút gửi bình luận cùng màu đặc với nút Lưu");
+  assert.equal(await page.locator(".modal-footer").count(), 0, "không còn chân khung với nút Lưu");
+  const slim = (await page.locator(".td-box").boundingBox()).height;
+  assert.ok(slim < 60, `ô bình luận chưa dùng cao ${slim}px`);
+  assert.equal(await page.locator(".td-box-actions").isVisible(), false, "nút Gửi hiện khi chưa dùng ô");
+  await page.locator(".td-box textarea").click();
+  await page.locator(".td-box-actions .primary").waitFor();
+  assert.ok((await page.locator(".td-box").boundingBox()).height > slim + 30, "ô không mở rộng khi dùng");
   const empty = await page.locator(".td-muted", { hasText: "Chưa có bình luận nào." }).boundingBox();
   const box = await page.locator(".td-box").boundingBox();
   assert.ok(empty.y < box.y, "câu 'chưa có bình luận' nằm dưới ô nhập");
 });
 await step("Liên kết Jira không kèm đoạn hướng dẫn: tên thẻ đã phân biệt nó với Phụ thuộc lịch", async () => {
-  const text = await page.locator(".td-main").innerText();
+  const text = await page.locator(".td-left").innerText();
   assert.ok(!text.includes("Chỉ để tham khảo"), text.slice(0, 80));
 });
 
-console.log("\n== Thanh bên ==");
+console.log("\n== Khung bên phải ==");
 await openTask();
 await step("ghi giờ: form gập sẵn, mở bằng '+ Ghi giờ' ngay cạnh 'Đã ghi'", async () => {
   assert.equal(await page.locator("#td-logform").count(), 0);
@@ -155,77 +159,114 @@ await step("ghi giờ: form gập sẵn, mở bằng '+ Ghi giờ' ngay cạnh '
   await page.locator(".td-logtoggle").click();
   await page.locator("#td-logform .log-hours").waitFor();
 });
-await step("Kết thúc sửa được: đổi thì thời lượng đổi theo; ước lượng một dòng, đã ghi + Ghi giờ dòng dưới", async () => {
-  assert.equal(await page.locator(".td-calc").count(), 0, "Kết thúc không còn là giá trị chỉ đọc");
-  const start = page.locator(".field:has(> span:text-is('Lịch')) input[aria-label='Ngày bắt đầu']");
-  const end = page.locator(".field:has(> span:text-is('Lịch')) input[aria-label='Ngày kết thúc']");
-  const dur = page.locator(".field:has(> span:text-is('Lịch')) input[aria-label='Thời lượng (ngày)']");
-  const [d, m, y] = (await start.inputValue()).split("/").map(Number);
+await step("Lịch là chữ tại chỗ: bấm Kết thúc để sửa, đổi thì thời lượng đổi theo; đổi thời lượng thì Kết thúc đổi theo", async () => {
+  const sched = page.locator(".tdx-sched");
+  const startText = (await sched.locator(".tdx-val").first().innerText()).trim();
+  const [d, m, y] = startText.split("/").map(Number);
   const plus = (n) => {
     const t = new Date(Date.UTC(y, m - 1, d + n));
     return `${String(t.getUTCDate()).padStart(2, "0")}/${String(t.getUTCMonth() + 1).padStart(2, "0")}/${t.getUTCFullYear()}`;
   };
+  assert.equal(await sched.locator("input").count(), 0, "lịch đang vẽ ô nhập khi chưa bấm");
+  await sched.locator(".tdx-val[aria-label='Ngày kết thúc']").click();
+  const end = sched.locator("input[aria-label='Ngày kết thúc']");
   await end.fill(plus(6));
   await end.press("Tab");
-  assert.equal(await dur.inputValue(), "7", "đổi Kết thúc phải đổi thời lượng");
+  await sched.locator(".tdx-val[aria-label='Thời lượng (ngày)']", { hasText: "7 ngày" }).waitFor();
+  await sched.locator(".tdx-val[aria-label='Thời lượng (ngày)']").click();
+  const dur = sched.locator("input[aria-label='Thời lượng (ngày)']");
   await dur.fill("3");
-  await dur.press("Tab");
-  assert.equal(await end.inputValue(), plus(2), "đổi thời lượng phải đổi Kết thúc");
-  const est = await page.locator(".td-effort .td-est").boundingBox();
+  await dur.press("Enter");
+  await sched.locator(".tdx-val[aria-label='Ngày kết thúc']", { hasText: plus(2) }).waitFor();
+});
+await step("ước lượng và 'Đã ghi' cùng một dòng", async () => {
+  const est = await page.locator("[data-prop=estimate] .tdx-val").boundingBox();
   const spent = await page.locator(".td-effort .td-spent-row").boundingBox();
-  assert.ok(spent.y > est.y + est.height - 2, JSON.stringify([est, spent]));
+  assert.ok(Math.abs(spent.y - est.y) < 24, JSON.stringify([est, spent]));
 });
-await step("facts: tên và giá trị cùng một dòng", async () => {
-  for (const label of ["Ưu tiên", "Nhãn", "Loại", "Sprint"]) {
-    const row = page.locator(".td-row", { has: page.locator(":scope > span", { hasText: new RegExp("^" + label + "$") }) });
-    const name = await row.locator(":scope > span").first().boundingBox();
-    const value = await row.locator(":scope > :not(span:first-child)").first().boundingBox();
-    assert.ok(value.x > name.x + 30 && Math.abs(value.y + value.height / 2 - (name.y + name.height / 2)) < 20, `${label}: ${JSON.stringify([name, value])}`);
+await step("facts: tên và giá trị cùng một dòng, nhãn thẳng cột", async () => {
+  const xs = new Set();
+  for (const name of ["progress", "estimate", "type", "parent", "labels", "sprint"]) {
+    const row = page.locator(`[data-prop=${name}]`);
+    const label = await row.locator(".tdx-label").boundingBox();
+    const value = await row.locator(".tdx-value").boundingBox();
+    assert.ok(value.x > label.x + 60 && value.y < label.y + label.height + 12 && label.y < value.y + 40, `${name}: ${JSON.stringify([label, value])}`);
+    xs.add(Math.round(value.x));
   }
+  assert.equal(xs.size, 1, "giá trị không thẳng cột: " + [...xs]);
 });
-await step("một ô cuộn: .td-body cuộn (thanh mảnh), .td-main và .td-side không có thanh riêng", async () => {
-  assert.equal(await page.locator(".td-body").evaluate((el) => getComputedStyle(el).scrollbarWidth), "thin");
-  for (const sel of [".td-main", ".td-side"]) assert.equal(await page.locator(sel).evaluate((el) => getComputedStyle(el).overflowY), "visible", sel);
+await step("hai khung cuộn riêng: trái và phải cuộn bằng thanh mảnh, khung ngoài không cuộn", async () => {
+  for (const sel of [".td-left", ".td-right"]) {
+    const c = await page.locator(sel).evaluate((el) => ({ w: getComputedStyle(el).scrollbarWidth, o: getComputedStyle(el).overflowY }));
+    assert.equal(c.w, "thin", sel);
+    assert.equal(c.o, "auto", sel);
+  }
+  assert.equal(await page.locator(".peek-panel").evaluate((el) => getComputedStyle(el).overflow), "hidden");
 });
-await step("ở 440px nhãn vẫn đứng cùng dòng với giá trị và không tràn ngang", async () => {
+await step("ở 440px: một cột, trạng thái lên trước, không tràn ngang, nhãn vẫn cùng dòng với giá trị", async () => {
   await page.setViewportSize({ width: 440, height: 900 });
   await page.waitForTimeout(200);
   const over = await page.locator(".peek-panel").evaluate((el) => el.scrollWidth - el.clientWidth);
-  assert.ok(over <= 1, `panel tràn ngang ${over}px`);
-  for (const label of ["Người", "Hoàn thành", "Nhãn"]) {
-    const row = page.locator(".td-row", { has: page.locator(":scope > span", { hasText: new RegExp("^" + label + "$") }) });
-    const name = await row.locator(":scope > span").first().boundingBox();
-    const value = await row.locator(":scope > :not(span:first-child)").first().boundingBox();
-    assert.ok(value.x > name.x + 30 && Math.abs(value.y + value.height / 2 - (name.y + name.height / 2)) < 24, `${label}: ${JSON.stringify([name, value])}`);
+  assert.ok(over <= 1, `khung tràn ngang ${over}px`);
+  const right = await page.locator(".td-right").boundingBox();
+  const left = await page.locator(".td-left").boundingBox();
+  assert.ok(right.y < left.y, "trạng thái phải nằm trên khi hẹp");
+  for (const name of ["progress", "labels"]) {
+    const row = page.locator(`[data-prop=${name}]`);
+    const label = await row.locator(".tdx-label").boundingBox();
+    const value = await row.locator(".tdx-value").boundingBox();
+    assert.ok(value.x > label.x + 40 && Math.abs(value.y - label.y) < 24, `${name}: ${JSON.stringify([label, value])}`);
   }
   await page.setViewportSize({ width: 1400, height: 900 });
 });
 
-console.log("\n== Ô nhập ==");
-await step("ô mô tả và ô bình luận cùng kiểu ô nhập của ứng dụng: tự giãn theo chữ, không có nút kéo, không gạch đỏ chính tả", async () => {
-  // An empty description is one dim line until it is clicked.
-  await page.locator(".td-ghost", { hasText: "Thêm mô tả" }).click();
-  await page.locator(".td-main .field textarea").first().waitFor();
-  for (const sel of [".td-main .field textarea", ".td-box textarea"]) {
-    const t = page.locator(sel).first();
-    const c = await t.evaluate((el) => ({ resize: getComputedStyle(el).resize, spell: el.spellcheck }));
-    assert.equal(c.resize, "none", sel);
-    assert.equal(c.spell, false, sel);
-  }
-  // The comment box and its button share one border and one focus ring.
+console.log("\n== Ô nhập: chữ cho tới khi bấm ==");
+await openTask("DEMO-1");
+await step("mô tả không vẽ ô nhập khi chưa bấm; bấm mới thành ô, tự giãn, không nút kéo, không gạch đỏ chính tả", async () => {
+  const read = page.locator(".tdx-desc");
+  const rest = await read.evaluate((el) => ({ border: getComputedStyle(el).borderTopWidth, bg: getComputedStyle(el).backgroundColor }));
+  assert.equal(rest.border, "0px", "mô tả có viền khi chưa bấm");
+  assert.equal(await page.locator(".tdx-desc-edit textarea").count(), 0);
+  await read.click();
+  const area = page.locator(".tdx-desc-edit textarea");
+  await area.waitFor();
+  const c = await area.evaluate((el) => ({ resize: getComputedStyle(el).resize, spell: el.spellcheck }));
+  assert.equal(c.resize, "none");
+  assert.equal(c.spell, false);
+  await area.fill("Nháp không lưu");
+  await area.press("Escape");
+  await page.locator(".tdx-desc-edit").waitFor({ state: "detached" });
+  assert.equal(await page.locator(".modal-detail").count(), 1, "Esc khi đang sửa mô tả đã đóng cả khung");
+  assert.ok(!(await read.innerText()).includes("Nháp không lưu"), "bản nháp bị Esc phải bị bỏ");
+});
+await step("ô bình luận: cùng một viền và một vòng focus cho cả ô và nút", async () => {
   await page.locator(".td-box textarea").focus();
   const ring = await page.locator(".td-box").evaluate((el) => getComputedStyle(el).boxShadow);
   assert.notEqual(ring, "none");
 });
 
-console.log("\n== Cột Tên việc khi khung chi tiết mở ==");
-await step("mở khung chi tiết ở 1440: cột Tên việc còn ít nhất 200px, cột phụ nhường chỗ", async () => {
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await openTask("DEMO-5");
+console.log("\n== Lớp phủ ==");
+await step("chi tiết là một lớp giữa màn hình: rộng, hai khung cạnh nhau, bảng phía sau không bị dồn", async () => {
+  await page.keyboard.press("Escape");
+  await page.waitForSelector(".modal-detail", { state: "detached" });
+  const before = await page.locator(".wbs-row", { hasText: "DEMO-6" }).first().locator(".wbs-col-name").evaluate((el) => el.getBoundingClientRect().width);
+  await page.locator(".wbs-row", { hasText: "DEMO-5" }).dblclick();
+  await page.waitForSelector(".modal-detail");
   await page.waitForTimeout(300);
-  const w = await page.locator(".wbs-row", { hasText: "DEMO-6" }).first().locator(".wbs-col-name").evaluate((el) => el.getBoundingClientRect().width);
-  assert.ok(w >= 200, `cột tên chỉ rộng ${Math.round(w)}px`);
-  await page.setViewportSize({ width: 1400, height: 900 });
+  const after = await page.locator(".wbs-row", { hasText: "DEMO-6" }).first().locator(".wbs-col-name").evaluate((el) => el.getBoundingClientRect().width);
+  assert.ok(Math.abs(after - before) < 1, `bảng bị dồn: ${before} → ${after}`);
+  const panel = await page.locator(".modal-detail").boundingBox();
+  assert.ok(panel.width >= 1100, `khung chỉ rộng ${panel.width}px`);
+  assert.ok(Math.abs(panel.x + panel.width / 2 - 700) < 80, "khung không nằm giữa màn hình");
+  const l = await page.locator(".td-left").boundingBox();
+  const r = await page.locator(".td-right").boundingBox();
+  assert.ok(l.x + l.width <= r.x + 1 && Math.abs(l.y - r.y) < 2 && Math.abs(l.height - r.height) < 2, JSON.stringify([l, r]));
+  assert.ok(l.width > r.width * 1.6, "khung trái phải rộng hơn hẳn khung phải");
+  assert.equal(await page.locator(".modal-detail").getAttribute("aria-modal"), "true");
+});
+await step("bấm vào nền mờ quanh khung thì đóng", async () => {
+  await page.mouse.click(8, 450);
+  await page.waitForSelector(".modal-detail", { state: "detached" });
 });
 
 assert.equal(problems.length, 0, "lỗi trong trình duyệt: " + problems.join("; "));

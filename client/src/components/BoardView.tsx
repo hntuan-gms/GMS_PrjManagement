@@ -1,3 +1,4 @@
+import BoardPreview from "./BoardPreview";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ApiError, api } from "../api";
 import { matchesFilter, nextSprintName, rankTarget, reorder, tzOffsetMinutes, unitLabel, type BoardFilter, type Swimlane } from "../boardModel";
@@ -719,9 +720,7 @@ export default function BoardView({
   if (!snapshot) {
     return (
       <div className="bd-view">
-        <div className="pr-loading">
-          <span className="chat-spinner" /> Đang tải board từ Jira...
-        </div>
+        <BoardPreview tasks={tasks} />
       </div>
     );
   }
