@@ -735,7 +735,18 @@ export default function GanttView({
   // Per browser, not per project: which columns someone reads is a habit, not a property of the plan.
   const [columnIds, setColumnIds] = useState<ColumnId[]>(loadColumns);
   // Kept in COLUMNS order whatever order they were ticked in, so the table never reshuffles.
-  const columns = useMemo(() => COLUMNS.filter((c) => columnIds.includes(c.id)), [columnIds]);
+  // The type column is as wide as the project's longest type name ("Sub Testcase", a renamed type…):
+  // a name cut to "Sub Tes…" does not say which type a row is. Proportional face, ≈7px a character
+  // at 13px, plus the cell's 16px padding.
+  const typeColWidth = useMemo(() => {
+    let longest = 0;
+    for (const t of tasks) longest = Math.max(longest, t.issueType.length);
+    return Math.max(70, Math.ceil(longest * 7) + 20);
+  }, [tasks]);
+  const columns = useMemo(
+    () => COLUMNS.filter((c) => columnIds.includes(c.id)).map((c) => (c.id === "type" ? { ...c, width: typeColWidth } : c)),
+    [columnIds, typeColWidth]
+  );
   const columnsWidth = columns.reduce((s, c) => s + c.width, 0);
 
   function toggleColumn(id: ColumnId) {

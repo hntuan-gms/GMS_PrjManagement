@@ -1,4 +1,4 @@
-import { isDroppedStatus } from "../droppedStatus";
+import { statusKind, STATUS_KIND_LABEL, type StatusKind } from "../statusKind";
 import type { Task } from "../types";
 
 const LABEL: Record<Task["statusCategory"], string> = {
@@ -8,11 +8,60 @@ const LABEL: Record<Task["statusCategory"], string> = {
 };
 
 /**
- * Status as a shape, not a filled pill (plan §4.5): ○ not started, a pie that fills with % while
- * in progress, ● with a tick when done. Readable without colour; the colour only confirms it.
- * The workflow's own status name ("In-Progress", "Pending"…) is shown beside it by the caller —
- * names differ per site and cannot be translated safely (BUG-05), the category can.
+ * Status as a shape, not a filled pill (plan §4.5), readable without colour; the colour only confirms it.
+ * Each state a workflow can be in has its own shape (`statusKind`): ○ to do, ◌ backlog, ▷ ready,
+ * a pie that fills with % while in progress, ◉ in review/testing, ⏸ on hold, ⊖ blocked, ↺ reopened,
+ * ✓ done, ⊘ cancelled. The workflow's own status name ("In-Progress", "Pending"…) is shown beside it
+ * by the caller — names differ per site and cannot be translated safely (BUG-05), the kind is a best
+ * reading of the name and falls back to the category.
  */
+
+const R = 5.25;
+const C = 7;
+
+function inner(kind: StatusKind, percent: number) {
+  switch (kind) {
+    case "doing": {
+      // At least a quarter so "started" is visible at 0%, at most three quarters so it never reads as done.
+      const p = Math.min(0.75, Math.max(0.25, percent / 100));
+      const a = p * 2 * Math.PI - Math.PI / 2;
+      const x = C + 3.2 * Math.cos(a);
+      const y = C + 3.2 * Math.sin(a);
+      return <path d={`M${C} ${C} L${C} ${C - 3.2} A3.2 3.2 0 ${p > 0.5 ? 1 : 0} 1 ${x} ${y} Z`} className="sg-fill" />;
+    }
+    case "done":
+      return (
+        <>
+          <circle cx={C} cy={C} r={R} className="sg-solid" />
+          <path d="M4.6 7.2l1.6 1.6 3.2-3.3" className="sg-mark" />
+        </>
+      );
+    case "blocked":
+      return (
+        <>
+          <circle cx={C} cy={C} r={R} className="sg-solid" />
+          <path d="M4.5 7h5" className="sg-mark" />
+        </>
+      );
+    case "dropped":
+      return <path d="M3.4 10.6l7.2-7.2" className="sg-slash" />;
+    case "review":
+      return <circle cx={C} cy={C} r={2.1} className="sg-fill" />;
+    case "ready":
+      return <path d="M5.9 4.7L9.5 7 5.9 9.3z" className="sg-fill" />;
+    case "hold":
+      return <path d="M5.5 4.9v4.2M8.5 4.9v4.2" className="sg-bars" />;
+    case "reopened":
+      return (
+        <>
+          <path d="M8.98 5.02A2.8 2.8 0 1 0 7 9.8" className="sg-arc" />
+          <path d="M9.76 5.8L9.41 3.89 7.85 5.45z" className="sg-fill" />
+        </>
+      );
+    default:
+      return null;
+  }
+}
 
 export default function StatusGlyph({
   category,
@@ -25,41 +74,16 @@ export default function StatusGlyph({
   percent?: number;
   size?: number;
   title?: string;
-  /** The workflow status name, so a cancelled item is not drawn as finished. */
+  /** The workflow status name: lets a blocked, in-review or cancelled item look like what it is. */
   name?: string;
 }) {
-  if (category === "done" && isDroppedStatus(name)) {
-    return (
-      <svg className="status-glyph sg-dropped" width={size} height={size} viewBox="0 0 14 14" role="img" aria-label={title ?? name}>
-        <title>{title ?? name}</title>
-        <circle cx={7} cy={7} r={5.25} className="sg-ring" />
-        <path d="M3.4 10.6l7.2-7.2" className="sg-slash" />
-      </svg>
-    );
-  }
-  const r = 5.25;
-  const c = 7;
-  let inner = null;
-  if (category === "indeterminate") {
-    // At least a quarter so "started" is visible at 0%, at most three quarters so it never reads as done.
-    const p = Math.min(0.75, Math.max(0.25, percent / 100));
-    const a = p * 2 * Math.PI - Math.PI / 2;
-    const x = c + 3.2 * Math.cos(a);
-    const y = c + 3.2 * Math.sin(a);
-    inner = <path d={`M${c} ${c} L${c} ${c - 3.2} A3.2 3.2 0 ${p > 0.5 ? 1 : 0} 1 ${x} ${y} Z`} className="sg-fill" />;
-  } else if (category === "done") {
-    inner = (
-      <>
-        <circle cx={c} cy={c} r={r} className="sg-solid" />
-        <path d="M4.6 7.2l1.6 1.6 3.2-3.3" className="sg-tick" />
-      </>
-    );
-  }
+  const kind = statusKind(category, name);
+  const label = title ?? name ?? (kind === "doing" || kind === "todo" || kind === "done" ? LABEL[category] : STATUS_KIND_LABEL[kind]);
   return (
-    <svg className={`status-glyph sg-${category}`} width={size} height={size} viewBox="0 0 14 14" role="img" aria-label={title ?? LABEL[category]}>
-      <title>{title ?? LABEL[category]}</title>
-      <circle cx={c} cy={c} r={r} className="sg-ring" />
-      {inner}
+    <svg className={`status-glyph sg-${kind}`} width={size} height={size} viewBox="0 0 14 14" role="img" aria-label={label}>
+      <title>{label}</title>
+      <circle cx={C} cy={C} r={R} className="sg-ring" />
+      {inner(kind, percent)}
     </svg>
   );
 }
