@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import Skeleton from "./Skeleton";
+import Spinner from "./Spinner";
 import { ApiError, api } from "../api";
 import { fromSavedSpec, matchesSaved, toSavedSpec } from "../savedFilters";
 import { facetCount, type TaskFilter } from "../taskFilter";
@@ -141,7 +141,7 @@ export default function SavedFilterMenu({ filter, onApply, myAccountId }: Props)
       {open && (
         <div className="col-chooser-menu tf-menu sf-menu" role="menu">
           {error && <div className="sf-error">{error}</div>}
-          {filters === null && !error && <Skeleton lines={2} className="menu-skel" />}
+          {filters === null && !error && <Spinner block className="spinner-menu" />}
 
           <div className="col-chooser-title">Của tôi</div>
           {filters !== null && mine.length === 0 && <div className="tf-empty">Chưa lưu bộ lọc nào.</div>}

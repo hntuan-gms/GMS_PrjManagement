@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { describeBlocks, linkPieces } from "../../descriptionView";
-import Skeleton from "../Skeleton";
+import Spinner from "../Spinner";
 
 /**
  * The task panel's way of editing: a value is text first. It looks like the rest of the page, shows a
@@ -168,7 +168,7 @@ export function InlineDescription({
         </button>
       </p>
     ) : (
-      <Skeleton lines={3} />
+      <Spinner block className="spinner-inline" />
     );
   }
 

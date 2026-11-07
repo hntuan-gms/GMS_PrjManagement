@@ -146,14 +146,16 @@ Mỗi họ tín hiệu có 5 bậc: `-wash` (nền) · `-soft` · `-line` (viề
 - `transition: all`; hiệu ứng trên thao tác bàn phím lặp lại; hover làm lệch bố cục.
 - Cỡ chữ ngoài thang `--font-size-*` (không 12.5px, 10.5px…).
 
-### Chờ dữ liệu: không bao giờ một vùng trống với một dòng "Đang tải…"
+### Chờ dữ liệu: một vòng xoay, đủ rồi mới hiện, hiện một lần
 
-Cái đã biết thì hiện ngay; cái chưa biết giữ chỗ đúng cỡ của nó.
+Một màn hình không được điền dần từng mảnh (một ô, rồi một danh sách, rồi một con số): đó là cái giật. Chưa đủ thì **chỉ có `Spinner`**, đủ rồi mới hiện **cả vùng một lần**.
 
-- **Đáp án đã có thì hiện trước, đọc lại phía sau** (`detailCache.ts`, `useDetail`): mô tả, bình luận, đính kèm, liên kết, trạng thái có thể chuyển, người theo dõi giữ trong bộ nhớ theo site + tài khoản + dự án; năm danh sách của dự án (ưu tiên, nhãn, thành phần, phiên bản, loại việc) đọc một lần mỗi 10 phút. Chọn một dòng (250ms) thì tải sẵn, nên cú nhấp đúp sau đó gặp dữ liệu đang về.
-- **Trạng thái, người, ngày, số liệu đã nằm trong danh sách việc thì không được chờ ai**: hiện từ danh sách, không từ lần đọc riêng.
-- **Chỗ chưa có gì để vẽ** là `Skeleton` đúng kích thước (chỉ hiện nếu chờ quá 200ms; trả lời nhanh thì không nháy), hoặc vẽ từ dữ liệu đang có (`BoardPreview`: tab Bảng dựng cột từ trạng thái của các việc trong kế hoạch cho tới khi board của Jira trả lời).
-- Khi dữ liệu về, **không được làm xô lệch** những gì bên dưới.
+- **Cái đã có thì hiện ngay, không vòng xoay.** Đáp án đã giữ (`detailCache.ts`, `useDetail`) có ở khung hình đầu tiên và được đọc lại phía sau mà không đổi gì trên màn hình; vòng xoay chỉ có khi còn thiếu thứ gì để vẽ.
+- **Vòng xoay** (`components/Spinner.tsx`): một vòng, không chữ (chỉ `aria-label`), chỉ hiện nếu chờ quá 120ms để đáp án nhanh không loé. `block` đặt nó giữa vùng đang chờ. Không "Đang tải…", không khung xương, không bản xem trước từng phần.
+- **Chi tiết việc chờ đủ mười một thứ** (mô tả, bình luận, đính kèm, liên kết, bước chuyển trạng thái, người theo dõi, sáu danh sách của dự án) rồi mới hiện; trong lúc chờ chỉ có khung đúng cỡ cuối cùng, nút × và vòng xoay, nên lúc nội dung hiện ra khung không đổi kích thước. Một lần đọc lỗi cũng tính là xong (không chờ mãi). Đã hiện thì không quay lại chờ.
+- **Tab Bảng, lần mở đầu của kế hoạch, Hôm nay, Cài đặt, danh sách dự án, danh sách thành viên** đều là một vòng xoay cho tới khi đủ.
+- **Phần mới mở bằng nút "+"** (Phụ thuộc, Liên kết, Đính kèm) hiện đúng chỗ nút vừa bấm, mờ vào, không đẩy phần đã có: thứ tự các phần cố định lúc khung hiện ra rồi chỉ nối thêm, ô đầu tiên của phần mới được trỏ tới và phần đó được cuộn vào tầm nhìn.
+- Khi dữ liệu về, **không được làm xô lệch** những gì đã nằm trên màn hình.
 
 ### Chữ trên màn hình: ít, ngắn, không giải thích
 

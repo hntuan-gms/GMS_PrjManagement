@@ -1,5 +1,5 @@
 import { startTaskDrag } from "../taskDrag";
-import Skeleton from "./Skeleton";
+import Spinner from "./Spinner";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLayer } from "../useLayer";
 import DateField from "./DateField";
@@ -476,7 +476,7 @@ function LogSheet({
       </header>
       <div className="side-sheet-body">
         {logged === null ? (
-          <Skeleton lines={3} />
+          <Spinner block />
         ) : (
           <>
             {rows.length > 0 && (

@@ -48,11 +48,11 @@ await step("khi bản mới về thì nút trở lại bình thường", async (
   await page.waitForFunction(() => document.querySelector(".sync-indicator")?.textContent.includes("Khớp Jira"), null, { timeout: 6000 });
   await setDelay(0);
 });
-await step("chưa có bản lưu và máy chủ chậm: vẫn thấy header, nút đồng bộ xoay, khung xương đúng cỡ hàng thay cho trang trống", async () => {
+await step("chưa có bản lưu và máy chủ chậm: vẫn thấy header, nút đồng bộ xoay, một vòng xoay thay cho trang trống", async () => {
   await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("gms.tasksCache.")).forEach((k) => localStorage.removeItem(k)));
   await setDelay(2500);
   await page.reload();
-  await page.waitForSelector(".skel-plan", { timeout: 3000 });
+  await page.waitForSelector(".spinner", { timeout: 3000 });
   await page.waitForSelector(".toolbar", { timeout: 1500 });
   assert((await page.locator(".wbs-row").count()) === 0, "chưa có dữ liệu mà đã có hàng");
   assert((await syncButton().textContent()).includes("Đang đọc"), "chỉ báo không báo đang tải");

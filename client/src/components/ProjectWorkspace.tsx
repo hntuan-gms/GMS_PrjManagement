@@ -42,7 +42,7 @@ import KbktImportModal from "./KbktImportModal";
 import ProgressReportView from "./ProgressReportView";
 import ResourceView from "./ResourceView";
 import TaskEditModal from "./TaskEditModal";
-import { PlanSkeleton } from "./Skeleton";
+import Spinner from "./Spinner";
 import ProjectSettings from "./ProjectSettings";
 import type { SettingsSection } from "../settingsSections";
 import { WorkCalendarContext } from "./workCalendarContext";
@@ -1610,7 +1610,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
     return (
       <div className="app">
         {toolbar}
-        <PlanSkeleton />
+        <Spinner block className="spinner-page" />
       </div>
     );
   }

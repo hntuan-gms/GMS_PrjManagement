@@ -8,34 +8,72 @@
    (leave it, or Enter); Esc puts the old value back.
    ========================================================================== */
 
-/* ---- Waiting: drawn at the size of what is coming, and only if the wait outlasts 200ms ---- */
-.skel {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 6px 0;
-  animation: skel-in var(--d-2) var(--e-out) 200ms backwards;
+/* ---- Waiting: one ring, everything appears together once it has all arrived ---- */
+.spinner {
+  display: inline-block;
+  width: 26px;
+  height: 26px;
+  border: 2px solid var(--line-strong);
+  border-top-color: var(--ink-2);
+  border-radius: var(--radius-full);
+  /* Shown only if the wait outlasts 120ms: a held or quick answer never flashes it. */
+  animation: spinner-turn 0.8s linear infinite, spinner-in var(--d-2) linear 120ms backwards;
 }
-.skel-line {
-  display: block;
-  height: 12px;
-  border-radius: var(--radius-sm);
-  background: var(--sunken);
-  animation: skel-pulse 1.1s ease-in-out infinite alternate;
+@keyframes spinner-turn {
+  to {
+    transform: rotate(360deg);
+  }
 }
-@keyframes skel-in {
+@keyframes spinner-in {
   from {
     opacity: 0;
   }
 }
-@keyframes skel-pulse {
-  from {
-    opacity: 0.55;
+@media (prefers-reduced-motion: reduce) {
+  /* Slower, not still: a ring that does not move reads as frozen. */
+  .spinner {
+    animation-duration: 2.4s, var(--d-2);
   }
 }
-@media (prefers-reduced-motion: reduce) {
-  .skel-line {
-    animation: none;
+.spinner-block {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 160px;
+  padding: 32px;
+}
+.spinner-block.spinner-page {
+  min-height: 60vh;
+}
+.spinner-block.spinner-inline {
+  min-height: 72px;
+  padding: 16px;
+}
+.spinner-block.spinner-menu {
+  min-height: 56px;
+  padding: 12px;
+}
+.spinner-block .spinner {
+  width: 22px;
+  height: 22px;
+}
+.spinner-block.spinner-page .spinner {
+  width: 30px;
+  height: 30px;
+}
+
+/* The detail while it is still arriving: the window is already its full size, so nothing moves when it fills. */
+.td-loading {
+  flex: 1;
+  min-height: 0;
+}
+.td-cols {
+  animation: td-reveal var(--d-2) var(--e-out);
+}
+@keyframes td-reveal {
+  from {
+    opacity: 0;
   }
 }
 
@@ -454,98 +492,6 @@ button.tdx-more {
   margin-left: -2px;
 }
 
-/* ---- Waiting areas that are not the panel ---- */
-.skel-plan {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  padding: 12px 20px;
-  animation: skel-in var(--d-2) var(--e-out) 200ms backwards;
-}
-.skel-plan-row {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  height: var(--row-h, 32px);
-}
-.picker-skel,
-.menu-skel {
-  padding: 12px 16px;
-}
-
-/* The Bảng tab's first paint: the plan's own work, drawn as columns, until the board answers. */
-.bdp {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(220px, 1fr);
-  gap: 12px;
-  padding: 16px 20px;
-  overflow: hidden;
-  opacity: 0.72;
-  pointer-events: none;
-  animation: skel-in var(--d-2) var(--e-out) 120ms backwards;
-}
-.bdp-col {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px;
-  border-radius: var(--radius-lg);
-  background: var(--sunken);
-}
-.bdp-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0 0 2px;
-  color: var(--ink-2);
-  font-size: var(--font-size-sm);
-  font-weight: 600;
-}
-.bdp-count {
-  color: var(--ink-3);
-  font-weight: 400;
-}
-.bdp-card {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: var(--raised);
-  font-size: var(--font-size-md);
-}
-.bdp-title {
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  color: var(--ink);
-}
-.bdp-meta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  color: var(--ink-3);
-  font-size: var(--font-size-sm);
-}
-.bdp-key {
-  font-family: var(--font-mono);
-}
-.bdp-who {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  border-radius: var(--radius-full);
-  background: var(--line);
-  color: var(--ink-2);
-  font-size: var(--font-size-xs);
-  font-weight: 600;
-}
-
 /* ==========================================================================
    The detail is a layer over the page, in two panes (like Jira's issue view): what the work is on the left,
    where it stands on the right. Width is spent on the page, not on scrolling: the window is as wide as
@@ -696,4 +642,16 @@ button.tdx-chip.is-done {
 }
 .td-right .tdx-block .tdx-h {
   margin-bottom: 6px;
+}
+
+/* A section opened by its "+" arrives where the button was, fading in; it is brought into view, not jumped to. */
+.tdx-related .td-section {
+  scroll-margin-bottom: 24px;
+  animation: td-section-in var(--d-2) var(--e-out);
+}
+@keyframes td-section-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
 }

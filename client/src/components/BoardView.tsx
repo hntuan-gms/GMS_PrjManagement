@@ -1,4 +1,4 @@
-import BoardPreview from "./BoardPreview";
+import Spinner from "./Spinner";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ApiError, api } from "../api";
 import { matchesFilter, nextSprintName, rankTarget, reorder, tzOffsetMinutes, unitLabel, type BoardFilter, type Swimlane } from "../boardModel";
@@ -720,7 +720,7 @@ export default function BoardView({
   if (!snapshot) {
     return (
       <div className="bd-view">
-        <BoardPreview tasks={tasks} />
+        <Spinner block className="spinner-page" />
       </div>
     );
   }

@@ -3,7 +3,7 @@ import { api } from "../api";
 import { TASK_MAX_AGE_MS } from "../detailCache";
 import { readers } from "../taskDetailReads";
 import { useDetail } from "../useDetail";
-import Skeleton from "./Skeleton";
+import Spinner from "./Spinner";
 import { fromTokens, labelFor, toTokens, type Mentions } from "../mentions";
 import type { JiraUser } from "../types";
 
@@ -306,7 +306,7 @@ export default function TaskDiscussion({ taskId, members, myAccountId }: Props) 
         <>
           {commentsError && <div className="td-error">{commentsError}</div>}
           {actionError && <div className="td-error">{actionError}</div>}
-          {!comments && !commentsError && <Skeleton lines={2} />}
+          {!comments && !commentsError && <Spinner block className="spinner-inline" />}
           {comments && comments.length === 0 && <div className="td-muted">Chưa có bình luận nào.</div>}
           <CommentBox members={members} submitLabel="Gửi bình luận" onSubmit={add} />
           <ul className="td-list">
@@ -358,7 +358,7 @@ export default function TaskDiscussion({ taskId, members, myAccountId }: Props) 
       ) : (
         <>
           {activityError && <div className="td-error">{activityError}</div>}
-          {!activity && !activityError && <Skeleton lines={3} />}
+          {!activity && !activityError && <Spinner block className="spinner-inline" />}
           {activity && activity.length === 0 && <div className="td-muted">Chưa có thay đổi nào được ghi lại.</div>}
           <ul className="td-list">
             {(activity ?? []).map((a) => (

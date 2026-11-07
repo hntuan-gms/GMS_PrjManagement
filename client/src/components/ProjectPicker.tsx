@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
-import Skeleton from "./Skeleton";
+import Spinner from "./Spinner";
 import { fold } from "../csvImport";
 import { api } from "../api";
 import type { ProjectSummary, Session } from "../types";
@@ -126,7 +126,7 @@ export default function ProjectPicker({ session, variant, onSelect, onCancel, on
 
       {error && <div className="modal-error">{error}</div>}
 
-      {projects === null && !error && <Skeleton lines={5} className="picker-skel" />}
+      {projects === null && !error && <Spinner block />}
 
       {projects !== null && projects.length === 0 && (
         <div className="picker-empty">

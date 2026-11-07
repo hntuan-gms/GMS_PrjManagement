@@ -245,6 +245,58 @@ await step("ô bình luận: cùng một viền và một vòng focus cho cả �
   assert.notEqual(ring, "none");
 });
 
+console.log("\n== Chờ đủ rồi mới hiện ==");
+await step("chi tiết chưa tải đủ: chỉ có vòng xoay (khung đã đủ cỡ), đủ rồi mới hiện cả khung một lần", async () => {
+  await fetch(API + "/api/__restore", { method: "POST" });
+  await page.route("**/api/tasks/*/comments", async (route) => {
+    await new Promise((r) => setTimeout(r, 1200));
+    await route.continue();
+  });
+  await page.goto(process.env.E2E_APP ?? "http://localhost:5173/");
+  await page.waitForSelector(".wbs-row");
+  await page.locator(".wbs-row", { hasText: "DEMO-5" }).dblclick();
+  await page.locator(".td-loading .spinner").waitFor();
+  await page.waitForTimeout(400); // the layer's own fade-in
+  const loadingBox = await page.locator(".modal-detail").boundingBox();
+  assert.equal(await page.locator(".td-cols").count(), 0, "đã hiện nội dung khi chưa tải đủ");
+  assert.equal(await page.locator(".modal-detail .modal-id").count(), 0, "đã hiện mã việc khi chưa tải đủ");
+  assert.equal(await page.locator(".td-title").count(), 0, "đã hiện tên khi chưa tải đủ");
+  await page.locator(".td-cols").waitFor();
+  assert.equal(await page.locator(".td-loading").count(), 0, "vòng xoay còn sau khi đã đủ");
+  // Everything is there on the first frame it appears, not filled in later.
+  for (const sel of [".td-title", ".td-tabs", ".td-box", "[data-prop=labels]", ".td-right .tdx-chips"]) assert.equal(await page.locator(sel).count() > 0, true, sel);
+  const doneBox = await page.locator(".modal-detail").boundingBox();
+  assert.deepEqual(doneBox, loadingBox, "khung đổi kích thước khi nội dung hiện ra");
+  await page.unroute("**/api/tasks/*/comments");
+});
+
+console.log("\n== Mở một phần mới ==");
+await openTask("DEMO-3");
+await step("bấm '+ Phụ thuộc': phần mới hiện đúng chỗ nút vừa bấm, phần trên không xê dịch, ô đầu được trỏ tới", async () => {
+  const top = (sel) => page.locator(sel).evaluate((el) => Math.round(el.getBoundingClientRect().top));
+  await page.waitForTimeout(400); // the sections' own fade-in
+  const linkBefore = await top("[data-section=link]");
+  const addBefore = await top(".td-add-row");
+  await page.locator(".td-add-row button", { hasText: "Phụ thuộc" }).click();
+  await page.locator("[data-section=pred]").waitFor();
+  await page.waitForTimeout(400);
+  const linkAfter = await top("[data-section=link]");
+  const predTop = await top("[data-section=pred]");
+  assert.ok(Math.abs(linkAfter - linkBefore) <= 1, `phần phía trên bị đẩy: ${linkBefore} → ${linkAfter}`);
+  assert.ok(Math.abs(predTop - addBefore) <= 6, `phần mới không nằm ở chỗ nút: nút ${addBefore}, phần ${predTop}`);
+  assert.equal(await page.evaluate(() => !!document.activeElement?.closest("[data-section=pred]")), true, "ô đầu của phần mới không được trỏ tới");
+});
+await step("phần có dữ liệu đầu tiên không nhảy lên trên các phần khác", async () => {
+  const order = () => page.$$eval(".tdx-related .td-section", (s) => s.map((x) => x.getAttribute("data-section")));
+  const before = await order();
+  assert.deepEqual(before, ["link", "pred"]);
+  await page.locator("[data-section=pred] .td-add-btn").click();
+  await page.locator(".cell-picker input").fill("DEMO-5");
+  await page.locator(".cell-picker-item", { hasText: "DEMO-5" }).first().click();
+  await page.locator("[data-section=pred] .pred-list li").waitFor();
+  assert.deepEqual(await order(), ["link", "pred"], "phần Phụ thuộc đổi chỗ khi có mục đầu tiên");
+});
+
 console.log("\n== Lớp phủ ==");
 await step("chi tiết là một lớp giữa màn hình: rộng, hai khung cạnh nhau, bảng phía sau không bị dồn", async () => {
   await page.keyboard.press("Escape");

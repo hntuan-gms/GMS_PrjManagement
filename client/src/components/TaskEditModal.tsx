@@ -22,7 +22,7 @@ import PersonPicker from "./PersonPicker";
 import TaskPicker from "./TaskPicker";
 import CellPicker, { type PickItem } from "./CellPicker";
 import PriorityMark from "./PriorityMark";
-import Skeleton from "./Skeleton";
+import Spinner from "./Spinner";
 import TaskDiscussion from "./TaskDiscussion";
 import TaskLinks from "./TaskLinks";
 import { useTaskWatchers, WatcherCount } from "./TaskWatchers";
@@ -85,9 +85,9 @@ interface PendingMove {
 }
 
 /** A block of the panel that can be folded away. */
-function Section({ title, hint, hidden, children }: { title: string; hint?: ReactNode; hidden?: boolean; children: ReactNode }) {
+function Section({ id, title, hint, hidden, children }: { id?: SectionKey; title: string; hint?: ReactNode; hidden?: boolean; children: ReactNode }) {
   return (
-    <details className="td-section" open hidden={hidden}>
+    <details className="td-section" open hidden={hidden} data-section={id}>
       <summary>
         <Icon name="chevronRight" size={14} className="td-section-caret" />
         <span className="td-section-title">{title}</span>
@@ -121,6 +121,11 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
   const componentsRead = useDetail("list:components", "", () => projectLists.components(), LIST_MAX_AGE_MS);
   const versionsRead = useDetail("list:versions", "", () => projectLists.versions(), LIST_MAX_AGE_MS);
   const typesRead = useDetail("list:issueTypes", "", () => projectLists.issueTypes(), LIST_MAX_AGE_MS);
+  // The conversation, the Jira links and the link kinds are drawn by TaskDiscussion and TaskLinks; asked for here
+  // too (same key, so one request) so the panel can wait for them: it appears once, with everything in it.
+  const commentsRead = useDetail("comments", task.id, () => readers.comments(task.id), TASK_MAX_AGE_MS);
+  const linksRead = useDetail("links", task.id, () => readers.links(task.id), TASK_MAX_AGE_MS);
+  const linkTypesRead = useDetail("list:linkTypes", "", () => projectLists.linkTypes(), LIST_MAX_AGE_MS);
 
   const description: string | null | undefined = descRead.value !== undefined ? descRead.value : task.description;
   const transitions = transitionsRead.value ?? null;
@@ -130,6 +135,39 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
   const componentOptions = useMemo(() => (componentsRead.value ?? []).map((c) => c.name), [componentsRead.value]);
   const versionOptions = useMemo(() => (versionsRead.value ?? []).filter((v) => !v.archived).map((v) => v.name), [versionsRead.value]);
   const typeOptions = useMemo(() => typesRead.value ?? [], [typesRead.value]);
+
+  // Nothing is drawn piece by piece: until every first-screen read has an answer (held, fresh, or a refusal), the
+  // panel is one spinner, and then it appears whole. Held answers make this instant; it never goes back to
+  // waiting once shown (a later read keeps what is on screen).
+  const arriving =
+    descRead.loading ||
+    transitionsRead.loading ||
+    attachmentsRead.loading ||
+    commentsRead.loading ||
+    linksRead.loading ||
+    linkTypesRead.loading ||
+    prioritiesRead.loading ||
+    labelsRead.loading ||
+    componentsRead.loading ||
+    versionsRead.loading ||
+    typesRead.loading ||
+    (watchers === null && !watchError);
+  // The order the sections stand in, fixed when the panel first appears and then only added to: what is opened
+  // takes its place after the others, where the "+" that opened it was. Re-sorting by "has data" would hop a
+  // section above its neighbours the moment it gets its first item.
+  const [order, setOrder] = useState<SectionKey[]>([]);
+  // The section just opened: scrolled into view and its first control focused once it is on screen.
+  const justOpened = useRef<SectionKey | null>(null);
+  const [shown, setShown] = useState(false);
+  if (!arriving && !shown) {
+    setShown(true);
+    const files = attachmentsRead.value;
+    setOrder(
+      (["att", "pred", "link"] as SectionKey[]).filter((k) =>
+        k === "att" ? !!files && files.files.length + files.links.length > 0 : k === "pred" ? task.predecessors.length > 0 : (linksRead.value?.length ?? 0) > 0
+      )
+    );
+  }
 
   const [saving, setSaving] = useState(0);
   const [savedAt, setSavedAt] = useState(0);
@@ -152,7 +190,6 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
   const [logNote, setLogNote] = useState<{ ok: boolean; text: string } | null>(null);
   // The quick-log form is folded away until "Ghi giờ" is pressed.
   const [logOpen, setLogOpen] = useState(false);
-  const [linkCount, setLinkCount] = useState<number | null>(null);
   // An empty section is one "+" button; pressing it opens the section for its form.
   const [opened, setOpened] = useState<ReadonlySet<SectionKey>>(new Set());
   // Sprint · Thành phần · Phiên bản: only said when there is something to say, one press shows the rest.
@@ -163,6 +200,18 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
   const [picker, setPicker] = useState<{ kind: PickerKind; rect: DOMRect } | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const typeRef = useRef<HTMLButtonElement>(null);
+
+  // A section just opened by its "+" button: kept in view and given focus, so the eye follows what the press made.
+  useEffect(() => {
+    const k = justOpened.current;
+    if (!k) return;
+    const el = dialogRef.current?.querySelector<HTMLElement>(`[data-section="${k}"]`);
+    if (!el) return;
+    justOpened.current = null;
+    const calm = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    el.scrollIntoView({ block: "nearest", behavior: calm ? "auto" : "smooth" });
+    el.querySelector<HTMLElement>(".td-section-body button, .td-section-body select, .td-section-body input")?.focus({ preventScroll: true });
+  });
 
   // Focus moves into the window when it opens and back to where it was when it closes.
   useEffect(() => {
@@ -186,10 +235,18 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
 
   // Sections with something in them are open; an empty one is a "+" button until it is pressed.
   const attCount = existing ? existing.files.length + existing.links.length : 0;
-  const showAtt = attCount > 0 || opened.has("att");
-  const showPred = task.predecessors.length > 0 || opened.has("pred");
-  const showLink = (linkCount ?? 0) > 0 || opened.has("link");
-  const open = (k: SectionKey) => setOpened((s) => new Set(s).add(k));
+  const linkCount = linksRead.value ? linksRead.value.length : null;
+  const hasData: Record<SectionKey, boolean> = { att: attCount > 0, pred: task.predecessors.length > 0, link: (linkCount ?? 0) > 0 };
+  const visible = (k: SectionKey) => hasData[k] || opened.has(k);
+  const open = (k: SectionKey) => {
+    justOpened.current = k;
+    setOpened((prev) => new Set(prev).add(k));
+    setOrder((prev) => (prev.includes(k) ? prev : [...prev, k]));
+  };
+  // Shown in the order they were first shown; one that got its data some other way (a dependency added from the
+  // plan while this is open) stands after them.
+  const sections = [...order.filter(visible), ...(["att", "pred", "link"] as SectionKey[]).filter((k) => visible(k) && !order.includes(k))];
+  const absent = (["pred", "link", "att"] as SectionKey[]).filter((k) => !visible(k));
   const extraSet = !!task.sprint || task.components.length > 0 || task.fixVersions.length > 0;
 
   /**
@@ -424,6 +481,38 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
       }))
     : null;
 
+  if (!shown) {
+    return (
+      <div
+        className="peek-layer"
+        onMouseDown={(e) => {
+          if (e.target === e.currentTarget) requestClose();
+        }}
+      >
+        <div
+          ref={dialogRef}
+          className="modal modal-detail peek-panel"
+          role="dialog"
+          aria-modal="true"
+          aria-busy="true"
+          aria-label={`Đang tải ${task.id}`}
+          tabIndex={-1}
+          onKeyDown={onKeyDown}
+        >
+          <header className="td-header">
+            <span className="td-header-spacer" />
+            <button className="modal-close" onClick={requestClose} aria-label="Đóng" title="Đóng (Esc)">
+              <Icon name="x" size={16} />
+            </button>
+          </header>
+          <div className="td-loading">
+            <Spinner block />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className="peek-layer"
@@ -606,91 +695,79 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
           </section>
 
           <section className="tdx-block tdx-related" aria-label="Liên quan">
-            {showAtt && (
-              <Section title="Đính kèm" hint={existing ? attCount : undefined}>
-                <div className="td-stack">
-                  {existing ? (
-                    <TaskAttachmentList
-                      taskId={task.id}
-                      files={existing.files}
-                      links={existing.links}
-                      onRemoved={(fileId) => attachmentsRead.set({ ...existing, files: existing.files.filter((f) => f.id !== fileId) })}
-                    />
-                  ) : (
-                    <Skeleton lines={1} />
-                  )}
-                  {/* Nothing is held back for a Save: what is chosen goes up at once, so the picker always starts empty. */}
-                  <AttachmentPicker value={NO_ATTACHMENTS} onChange={(next) => void uploadNow(next)} hint={uploading ? "Đang tải lên Jira…" : undefined} />
-                </div>
-              </Section>
-            )}
-
-            {showPred && (
-              <Section title="Phụ thuộc lịch" hint={task.predecessors.length}>
-                <div className="td-stack">
-                  {task.predecessors.length > 0 && (
-                    <ul className="pred-list">
-                      {task.predecessors.map((p) => (
-                        <li key={p.taskId}>
-                          <span className="pred-text">
-                            <b>{p.taskId}</b> · {p.type} · lag {p.lagDays}d
-                          </span>
-                          <button
-                            className="link-btn"
-                            aria-label={`Gỡ phụ thuộc ${p.taskId}`}
-                            onClick={() => void commit({ predecessors: task.predecessors.filter((x) => x.taskId !== p.taskId) })}
-                          >
-                            gỡ
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  {/* Kind and lag first, then the task: picking it adds the dependency. "5fs+2" typed in the
-                      picker says all three at once. */}
-                  <div className="pred-add">
-                    <select value={newPredType} onChange={(e) => setNewPredType(e.target.value as DependencyType)} aria-label="Kiểu phụ thuộc">
-                      {DEP_TYPES.map((t) => (
-                        <option key={t} value={t}>
-                          {t}
-                        </option>
-                      ))}
-                    </select>
-                    <NumberInput integer title="Lag (ngày)" aria-label="Lag (ngày)" value={newPredLag} onChange={(n) => setNewPredLag(n ?? 0)} />
-                    <button type="button" className="td-add-btn" onClick={(e) => openPicker("dep", e)} aria-haspopup="dialog">
-                      <Icon name="plus" size={13} />
-                      Việc phải xong trước
-                    </button>
+            {sections.map((k) =>
+              k === "att" ? (
+                <Section key="att" id="att" title="Đính kèm" hint={existing ? attCount : undefined}>
+                  <div className="td-stack">
+                    {existing ? (
+                      <TaskAttachmentList
+                        taskId={task.id}
+                        files={existing.files}
+                        links={existing.links}
+                        onRemoved={(fileId) => attachmentsRead.set({ ...existing, files: existing.files.filter((f) => f.id !== fileId) })}
+                      />
+                    ) : (
+                      <Spinner block className="spinner-inline" />
+                    )}
+                    {/* Nothing is held back for a Save: what is chosen goes up at once, so the picker always starts empty. */}
+                    <AttachmentPicker value={NO_ATTACHMENTS} onChange={(next) => void uploadNow(next)} hint={uploading ? "Đang tải lên Jira…" : undefined} />
                   </div>
-                  {predNote && <small className="field-note is-error">{predNote}</small>}
-                </div>
-              </Section>
+                </Section>
+              ) : k === "pred" ? (
+                <Section key="pred" id="pred" title="Phụ thuộc lịch" hint={task.predecessors.length}>
+                  <div className="td-stack">
+                    {task.predecessors.length > 0 && (
+                      <ul className="pred-list">
+                        {task.predecessors.map((p) => (
+                          <li key={p.taskId}>
+                            <span className="pred-text">
+                              <b>{p.taskId}</b> · {p.type} · lag {p.lagDays}d
+                            </span>
+                            <button
+                              className="link-btn"
+                              aria-label={`Gỡ phụ thuộc ${p.taskId}`}
+                              onClick={() => void commit({ predecessors: task.predecessors.filter((x) => x.taskId !== p.taskId) })}
+                            >
+                              gỡ
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {/* Kind and lag first, then the task: picking it adds the dependency. "5fs+2" typed in the
+                        picker says all three at once. */}
+                    <div className="pred-add">
+                      <select value={newPredType} onChange={(e) => setNewPredType(e.target.value as DependencyType)} aria-label="Kiểu phụ thuộc">
+                        {DEP_TYPES.map((t) => (
+                          <option key={t} value={t}>
+                            {t}
+                          </option>
+                        ))}
+                      </select>
+                      <NumberInput integer title="Lag (ngày)" aria-label="Lag (ngày)" value={newPredLag} onChange={(n) => setNewPredLag(n ?? 0)} />
+                      <button type="button" className="td-add-btn" onClick={(e) => openPicker("dep", e)} aria-haspopup="dialog">
+                        <Icon name="plus" size={13} />
+                        Việc phải xong trước
+                      </button>
+                    </div>
+                    {predNote && <small className="field-note is-error">{predNote}</small>}
+                  </div>
+                </Section>
+              ) : (
+                <Section key="link" id="link" title="Liên kết Jira" hint={linkCount ?? undefined}>
+                  <TaskLinks task={task} allTasks={allTasks} />
+                </Section>
+              )
             )}
 
-            <Section title="Liên kết Jira" hint={linkCount ?? undefined} hidden={!showLink}>
-              <TaskLinks task={task} allTasks={allTasks} onCount={setLinkCount} hidden={!showLink} />
-            </Section>
-
-            {(!showAtt || !showPred || !showLink) && (
+            {absent.length > 0 && (
               <div className="td-add-row">
-                {!showPred && (
-                  <button type="button" className="td-add-btn" onClick={() => open("pred")}>
+                {absent.map((k) => (
+                  <button key={k} type="button" className="td-add-btn" onClick={() => open(k)}>
                     <Icon name="plus" size={13} />
-                    Phụ thuộc
+                    {k === "pred" ? "Phụ thuộc" : k === "link" ? "Liên kết" : "Đính kèm"}
                   </button>
-                )}
-                {!showLink && (
-                  <button type="button" className="td-add-btn" onClick={() => open("link")}>
-                    <Icon name="plus" size={13} />
-                    Liên kết
-                  </button>
-                )}
-                {!showAtt && (
-                  <button type="button" className="td-add-btn" onClick={() => open("att")}>
-                    <Icon name="plus" size={13} />
-                    Đính kèm
-                  </button>
-                )}
+                ))}
               </div>
             )}
           </section>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import Skeleton from "./Skeleton";
+import Spinner from "./Spinner";
 import { assignHints } from "../assignHints";
 import { monthLabels, shortRange, weekColumnLabel } from "../dateLabels";
 import { buildResourceLoad, firstOverloadedDate, todayIso, type Granularity } from "../resourceAllocation";
@@ -618,7 +618,7 @@ export default function ResourceView({
                   ? "Không có thành viên nào khớp."
                   : "Không có thành viên nào khớp. Chọn “Tất cả” để xem toàn bộ thành viên dự án."
                 : pool === null
-                  ? <Skeleton lines={4} />
+                  ? <Spinner block />
                   : "Dự án này chưa có thành viên nào trên Jira, hoặc tài khoản của bạn không đọc được danh sách."}
             </div>
           ) : (

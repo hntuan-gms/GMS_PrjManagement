@@ -3,7 +3,7 @@ import { api } from "../api";
 import { LIST_MAX_AGE_MS, TASK_MAX_AGE_MS } from "../detailCache";
 import { projectLists, readers } from "../taskDetailReads";
 import { useDetail } from "../useDetail";
-import Skeleton from "./Skeleton";
+import Spinner from "./Spinner";
 import type { IssueLink, LinkType, Task } from "../types";
 import TaskPicker from "./TaskPicker";
 import { Icon } from "./Icons";
@@ -103,7 +103,7 @@ export default function TaskLinks({ task, allTasks, onCount, hidden }: Props) {
   if (hidden) return null;
   return (
     <div className="td-stack">
-      {links === null && <Skeleton lines={1} />}
+      {links === null && <Spinner block className="spinner-inline" />}
       {links && links.length > 0 && (
       <ul className="pred-list">
         {links.map((l) => (

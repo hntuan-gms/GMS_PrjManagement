@@ -1,5 +1,5 @@
 import { useCallback, useRef } from "react";
-import Skeleton from "./Skeleton";
+import Spinner from "./Spinner";
 import { SETTINGS_SECTIONS, type SettingsSection } from "../settingsSections";
 import type { SlaSettingsResponse, WorkCalendarSettings } from "../types";
 import { useDialogs } from "./dialogContext";
@@ -85,7 +85,7 @@ export default function ProjectSettings({ projectKey, section, onSectionChange, 
               onOpenCalendar={() => void leave(() => onSectionChange("calendar"))}
             />
           ) : (
-            <Skeleton lines={4} />
+            <Spinner block />
           ))}
         {section === "kbkt" && <KbktSettingsSection onDirtyChange={onDirtyChange} />}
         {section === "board" && <BoardCardSettings projectKey={projectKey} />}
