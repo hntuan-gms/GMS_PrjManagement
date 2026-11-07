@@ -417,7 +417,24 @@ export interface ChatMessage {
   filterNote?: string | null;
   /** Files attached to a user message — name, type, size; the server never stored the content. */
   attachments?: Array<{ name: string; mimeType: string; size: number }>;
+  /** Client-side only: buttons the assistant offered instead of a question to type an answer to. */
+  choices?: ChatChoices | null;
+  /** Client-side only: what the assistant wrote to Jira this turn, one line each, with an undo where one exists. */
+  receipts?: ChatReceiptItem[];
   createdAt: string;
+}
+
+export interface ChatChoices {
+  prompt: string;
+  options: Array<{ label: string; message: string; tone?: "danger" | "default" }>;
+}
+
+export interface ChatReceiptItem {
+  key: string;
+  text: string;
+  /** The PATCH body that puts the issue back as it was; absent when the change cannot be undone. */
+  undo?: { patch: Record<string, unknown> };
+  undone?: boolean;
 }
 
 export interface AuthUser {

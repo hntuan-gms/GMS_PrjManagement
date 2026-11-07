@@ -1,3 +1,4 @@
+import { startTaskDrag } from "../taskDrag";
 import StatusGlyph from "./StatusGlyph";
 import { useRef, useState, type DragEvent } from "react";
 import { api } from "../api";
@@ -114,8 +115,7 @@ export default function KanbanBoard({ snapshot, issues, swimlane, today, onMove,
   }
 
   function startDrag(e: DragEvent, issue: BoardIssue) {
-    e.dataTransfer.effectAllowed = "move";
-    e.dataTransfer.setData("text/plain", issue.key);
+    startTaskDrag(e, [issue.key], issue.summary);
     const cacheKey = `${issue.key}:${issue.statusId}`;
     const cached = transitionCache.current.get(cacheKey) ?? null;
     setDrag({ key: issue.key, fromStatusId: issue.statusId, allowed: cached });

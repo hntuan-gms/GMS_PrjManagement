@@ -52,7 +52,7 @@ export function fold(name: string): string {
 export function resolvePerson(
   team: JiraUser[],
   raw: string
-): { person: JiraUser } | { error: string; candidates?: string[] } {
+): { person: JiraUser } | { error: string; candidates?: string[]; ambiguous?: Array<{ accountId: string; name: string }> } {
   const q = fold(raw);
   if (!q) return { error: "Chưa có tên người phụ trách." };
   const exact = team.filter((u) => fold(u.displayName) === q);
@@ -68,6 +68,9 @@ export function resolvePerson(
     return {
       error: `Có ${hits.length} người khớp với "${raw}". Hỏi lại người dùng muốn chọn ai.`,
       candidates: hits.map((u) => `${u.displayName} (${u.accountId})`),
+      // Structured twin of `candidates`, so the browser can draw one button per person.
+      // Only here: "không có ai tên …" is not a choice between people.
+      ambiguous: hits.map((u) => ({ accountId: u.accountId, name: u.displayName })),
     };
   }
   return {

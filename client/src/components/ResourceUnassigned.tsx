@@ -1,3 +1,4 @@
+import { startTaskDrag } from "../taskDrag";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type RefObject } from "react";
 import { shortRange } from "../dateLabels";
 import { diffDays, type ResourceLoad } from "../resourceAllocation";
@@ -223,8 +224,7 @@ export default function ResourceUnassigned({
                       className="rv-un-main"
                       draggable
                       onDragStart={(e) => {
-                        e.dataTransfer.effectAllowed = "move";
-                        e.dataTransfer.setData("text/plain", t.id);
+                        startTaskDrag(e, [t.id], t.summary);
                         onDragStartTask(t);
                       }}
                       onClick={() => onOpenEdit(t)}

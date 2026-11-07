@@ -25,6 +25,9 @@ interface Props {
   onOpenCommand: () => void;
   onOpenShortcuts: () => void;
   onOpenAssistant?: () => void;
+  /** The assistant window is open / has an answer the person has not seen. */
+  assistantOpen?: boolean;
+  assistantUnread?: boolean;
   onLogout: () => void;
 }
 
@@ -116,6 +119,8 @@ export default function Toolbar({
   onOpenCommand,
   onOpenShortcuts,
   onOpenAssistant,
+  assistantOpen,
+  assistantUnread,
   onLogout,
 }: Props) {
   // Jira avatar URLs behind the OAuth gateway need a bearer token and 403 as a
@@ -156,7 +161,17 @@ export default function Toolbar({
           onClick={() => onViewChange(lensView ?? (phone ? "board" : "gantt"))}
         />
         <span className="rail-fill" />
-        {onOpenAssistant && <RailButton icon="chat" label="Trợ lý" onClick={onOpenAssistant} />}
+        {onOpenAssistant && (
+          <RailButton
+            icon="chat"
+            label="Trợ lý"
+            keys="Ctrl J"
+            view="assistant"
+            active={assistantOpen}
+            onClick={onOpenAssistant}
+            badge={assistantUnread && !assistantOpen ? <span className="rail-dot" title="Có câu trả lời mới" /> : undefined}
+          />
+        )}
         <Popover
           className="rail-btn rail-avatar"
           role="menu"

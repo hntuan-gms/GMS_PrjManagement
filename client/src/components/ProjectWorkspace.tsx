@@ -257,7 +257,10 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
   // The layers this shell adds on top of the views: Ctrl K, "?", and a request to open the assistant.
   const [cmdk, setCmdk] = useState<null | "command" | "create">(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  const [chatRequest, setChatRequest] = useState<{ nonce: number; text?: string } | null>(null);
+  const [chatRequest, setChatRequest] = useState<{ nonce: number; text?: string; toggle?: boolean } | null>(null);
+  // The assistant window, as the rail shows it: open, and an answer waiting in it.
+  const [assistantOpen, setAssistantOpen] = useState(false);
+  const [assistantUnread, setAssistantUnread] = useState(false);
   const [draft, setDraft] = useState<PlanDraft | null>(null);
   const draftRef = useRef<PlanDraft | null>(null);
   draftRef.current = draft;
@@ -537,7 +540,8 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
     [sla, slaById, nowMs]
   );
 
-  const taskKeys = useMemo(() => new Set(tasks.map((t) => t.id)), [tasks]);
+  // What the assistant is told is selected: the plan's selection, and only while the plan is on screen.
+  const chatSelectedKeys = useMemo(() => (view === "gantt" ? [...new Set([...selectedIds, ...(selectedId ? [selectedId] : [])])] : []), [view, selectedIds, selectedId]);
 
   // The toolbar's overload count: who is over capacity in the next two weeks. Counting the whole project
   // made the badge red on any large one, which says nothing; this is what can still be acted on.
@@ -1490,6 +1494,13 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
         setCmdk((c) => (c ? null : "command"));
         return;
       }
+      if (id === "assistant") {
+        // Works while typing, like Ctrl K: the window is meant to stay open beside whatever is being edited.
+        e.preventDefault();
+        if (!session.staff || layersOpen("cmdk", "task-detail")) return;
+        setChatRequest({ nonce: Date.now(), toggle: true });
+        return;
+      }
       if (id === "projects") {
         e.preventDefault();
         if (layersOpen("task-detail")) return;
@@ -1544,7 +1555,9 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
         sync={syncState}
         onOpenCommand={() => setCmdk("command")}
         onOpenShortcuts={() => setShortcutsOpen(true)}
-        onOpenAssistant={session.staff ? () => setChatRequest({ nonce: Date.now() }) : undefined}
+        onOpenAssistant={session.staff ? () => setChatRequest({ nonce: Date.now(), toggle: true }) : undefined}
+        assistantOpen={assistantOpen}
+        assistantUnread={assistantUnread}
         onSwitchProject={onSwitchProject}
         onOpenSettings={() => openSettings()}
         onLogout={onLogout}
@@ -1914,7 +1927,13 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
             }}
             onProjectChanged={refreshTasks}
             onApplyFilter={applyChatFilter}
-            knownKeys={taskKeys}
+            users={users}
+            meId={session.user.accountId}
+            tasks={tasks}
+            view={view === "gantt" || view === "board" || view === "resource" || view === "report" || view === "settings" || view === "today" ? view : "gantt"}
+            selectedKeys={chatSelectedKeys}
+            onOpenChange={setAssistantOpen}
+            onUnreadChange={setAssistantUnread}
             onOpenIssue={(key) => {
               const task = tasks.find((t) => t.id === key);
               if (task) openTask(task);

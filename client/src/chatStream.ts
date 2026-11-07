@@ -21,6 +21,10 @@ export type ChatStreamEvent =
   | { type: "report"; reportId: string; headline: string; health: string }
   /** The assistant filtered what the user sees (set_view_filter); spec null = clear the filters. */
   | { type: "filter"; spec: ViewFilterSpec | null; view: "gantt" | "board" | null; summary: string }
+  /** The assistant needs a decision: buttons whose `message` is sent as the next question. */
+  | { type: "choices"; prompt: string; options: Array<{ label: string; message: string; tone?: "danger" | "default" }> }
+  /** What a write tool changed in Jira, with the patch that undoes it where one exists. */
+  | { type: "receipt"; items: Array<{ key: string; text: string; undo?: { patch: Record<string, unknown> } }> }
   | { type: "usage"; usage: UsageStats & { model: string } }
   | { type: "done"; messageId: string; usage: UsageStats }
   | { type: "error"; message: string };
@@ -39,7 +43,8 @@ export async function* streamChat(
   sessionId: string | null,
   signal: AbortSignal,
   retry?: RetryMode,
-  attachments?: EncodedAttachment[]
+  attachments?: EncodedAttachment[],
+  context?: { view?: string; selected?: string[] }
 ): AsyncGenerator<ChatStreamEvent> {
   const res = await fetch(`${API_BASE}/ai/chat`, {
     method: "POST",
@@ -54,6 +59,7 @@ export async function* streamChat(
       sessionId,
       today: todayIso(),
       tzOffsetMinutes: -new Date().getTimezoneOffset(),
+      ...(context ? { context } : {}),
       ...(retry === "regenerate" ? { regenerate: true } : {}),
       ...(retry === "replace" ? { replaceLast: true } : {}),
       ...(attachments && attachments.length > 0 ? { attachments: attachments.map(({ name, mimeType, data }) => ({ name, mimeType, data })) } : {}),

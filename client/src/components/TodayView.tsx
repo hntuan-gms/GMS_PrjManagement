@@ -1,3 +1,4 @@
+import { startTaskDrag } from "../taskDrag";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLayer } from "../useLayer";
 import DateField from "./DateField";
@@ -191,6 +192,8 @@ export default function TodayView({ session, tasks, today, capacityHours, onOpen
         key={t.id}
         className={`today-row${cursorShown && i === cursor ? " is-cursor" : ""}${done ? " is-done" : ""}${extra ? ` ${extra}` : ""}`}
         data-today-row={i}
+        draggable
+        onDragStart={(e) => startTaskDrag(e, [t.id], t.summary)}
         onClick={() => {
           setCursor(i);
           setCursorShown(true);

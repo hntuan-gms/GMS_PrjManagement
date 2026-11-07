@@ -152,6 +152,7 @@
      the page; a popover above that, a modal above a popover, a confirmation above a modal, toasts on top. */
   --z-float: 40;
   --z-peek: 45;
+  --z-chat: 46;
   --z-popover: 50;
   --z-modal: 50;
   --z-command: 70;

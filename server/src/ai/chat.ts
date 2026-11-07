@@ -4,6 +4,9 @@ import type { JiraUser, Task } from "../types.js";
 import { activeModel } from "./planner.js";
 import { toolFailureMessage } from "./toolError.js";
 import { TOOLS, labelFor, runTool, type ToolContext } from "./tools.js";
+import { choicesFor, type ChoicesEvent } from "./choices.js";
+import { buildReceipt, isReceiptTool, type ReceiptItem } from "./receipts.js";
+import { contextLine, type ChatContext } from "./chatContext.js";
 import type { ViewFilterSpec } from "./viewFilter.js";
 
 /**
@@ -46,6 +49,10 @@ export type ChatEvent =
   | { type: "report"; reportId: string; headline: string; health: string }
   /** set_view_filter: the browser applies this to the Gantt / heatmap / board. spec null = clear. */
   | { type: "filter"; spec: ViewFilterSpec | null; view: "gantt" | "board" | null; summary: string }
+  /** A tool asked a question (delete? which Quang?): the browser draws the answers as buttons. */
+  | ({ type: "choices" } & ChoicesEvent)
+  /** What a write tool did, one line per issue; `undo.patch` goes to PATCH /api/tasks/:id. Live only, not stored. */
+  | { type: "receipt"; items: ReceiptItem[] }
   | { type: "usage"; usage: ChatUsage }
   | { type: "error"; message: string };
 
@@ -116,7 +123,8 @@ function teamRoster(team: JiraUser[], limit = 60): string {
   return [...lines, team.length > limit ? `(và ${team.length - limit} người nữa)` : ""].filter(Boolean).join("\n");
 }
 
-function systemPrompt(projectKey: string, tasks: Task[], today: string, team: JiraUser[]): string {
+function systemPrompt(projectKey: string, tasks: Task[], today: string, team: JiraUser[], context?: ChatContext): string {
+  const where = contextLine(context);
   return [
     `Bạn là trợ lý quản lý dự án cho project Jira "${projectKey}". Trả lời bằng tiếng Việt, ngắn gọn, đi thẳng vào việc.`,
     "Suy nghĩ (phần reasoning) cũng bằng tiếng Việt.",
@@ -181,6 +189,7 @@ function systemPrompt(projectKey: string, tasks: Task[], today: string, team: Ji
     "- Nói rõ vì sao chọn người đó (số ngày trùng, giờ còn trống) để người dùng phản biện được.",
     "- Sau khi tạo hoặc gán xong, nhắc lại mã issue vừa tác động.",
     "",
+    ...(where ? ["Ngữ cảnh màn hình hiện tại:", where, ""] : []),
     "Thành viên dự án (tên — accountId):",
     teamRoster(team),
     "",
@@ -224,6 +233,8 @@ export async function* streamChat(
     signal?: AbortSignal;
     /** Files attached to THIS message (ai/attachments.ts) — sent with it and not kept. */
     files?: Part[];
+    /** The screen the question was asked on (chatContext.ts). A prompt line only, never stored. */
+    context?: ChatContext;
   } = {}
 ): AsyncGenerator<ChatEvent> {
   const { signal } = options;
@@ -244,7 +255,7 @@ export async function* streamChat(
   ];
 
   const config = {
-    systemInstruction: systemPrompt(projectKey, tasks, today, team),
+    systemInstruction: systemPrompt(projectKey, tasks, today, team, options.context),
     tools: [{ functionDeclarations: TOOLS }],
     thinkingConfig: { includeThoughts: true },
     temperature: 0.3,
@@ -340,6 +351,9 @@ export async function* streamChat(
         if (signal?.aborted) break;
         yield { type: "tool", name: call.name, label: labelFor(call.name) };
         try {
+          // Tasks as they were: a receipt compares them with the tasks afterwards, and a tool
+          // replaces entries of toolCtx.tasks, so the copy must be taken before it runs.
+          const before = isReceiptTool(call.name) ? [...toolCtx.tasks] : [];
           const outcome = await runTool(call.name, call.args, toolCtx);
           if (outcome.plan) {
             yield {
@@ -357,6 +371,15 @@ export async function* streamChat(
               headline: outcome.report.headline,
               health: outcome.report.health,
             };
+          }
+          // Neither may fail the turn: they only decorate what the tool already did.
+          try {
+            const items = isReceiptTool(call.name) ? buildReceipt(call.name, call.args, outcome.response, before, toolCtx.tasks) : [];
+            if (items.length > 0) yield { type: "receipt", items };
+            const choices = choicesFor(outcome.response);
+            if (choices) yield { type: "choices", ...choices };
+          } catch (e) {
+            console.warn(`[ai] receipt/choices for ${call.name} failed: ${(e as Error).message}`);
           }
           responseParts.push({
             functionResponse: { name: call.name, response: outcome.response },

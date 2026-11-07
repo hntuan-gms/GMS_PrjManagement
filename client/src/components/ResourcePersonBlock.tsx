@@ -1,3 +1,4 @@
+import { startTaskDrag } from "../taskDrag";
 import { useMemo, useState } from "react";
 import {
   aggregateMonths,
@@ -312,8 +313,7 @@ function PersonTasks({
               className={`rv-row rv-task-row${conflict ? " is-conflict" : ""}`}
               draggable
               onDragStart={(e) => {
-                e.dataTransfer.effectAllowed = "move";
-                e.dataTransfer.setData("text/plain", task.id);
+                startTaskDrag(e, [task.id], task.summary);
                 onDragTask(task);
               }}
               onClick={() => onOpenEdit(task)}

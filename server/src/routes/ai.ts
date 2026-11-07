@@ -17,6 +17,7 @@ import type { WorkCalendar } from "../workCalendar.js";
 import type { Predecessor } from "../types.js";
 import { boardAiRouter } from "./boardAi.js";
 import { boardServiceFor } from "./board.js";
+import { sanitizeContext } from "../ai/chatContext.js";
 
 export const aiRouter = Router();
 
@@ -159,6 +160,7 @@ aiRouter.post("/chat", requireProject, express.json({ limit: CHAT_BODY_LIMIT }),
     regenerate?: unknown;
     replaceLast?: unknown;
     attachments?: unknown;
+    context?: unknown;
   };
   let message = String(body?.message ?? "").trim();
   // "Tạo lại" answers the last question again; "sửa" replaces the last question and
@@ -303,7 +305,7 @@ aiRouter.post("/chat", requireProject, express.json({ limit: CHAT_BODY_LIMIT }),
           throw err;
         }
       },
-    }, { signal: abort.signal, files: files.parts });
+    }, { signal: abort.signal, files: files.parts, context: sanitizeContext(body?.context, session.projectKey!) });
 
     try {
       for await (const event of stream) {

@@ -25,7 +25,7 @@ const chatPosts = async () => (await (await fetch(API + "/api/__log")).json()).l
 const users = () => page.$$eval(".chat-msg-user .chat-bubble", (b) => b.map((x) => x.textContent.trim()));
 const models = () => page.$$eval(".chat-msg-model .chat-bubble", (b) => b.map((x) => x.textContent.trim()));
 const ask = async (text) => {
-  await page.fill(".chat-input-row textarea", text);
+  await page.fill(".chat-composer textarea", text);
   await page.keyboard.press("Enter");
 };
 const waitModel = (text) => page.waitForFunction((t) => [...document.querySelectorAll(".chat-msg-model .chat-bubble")].some((b) => b.textContent.includes(t)), text);
@@ -35,7 +35,7 @@ await page.goto(process.env.E2E_APP ?? "http://localhost:5173/");
 await page.waitForSelector(".wbs-row");
 // No floating pill any more: the rail's "Trợ lý" (or Ctrl K → Tab) opens the assistant.
 await page.locator(".app-rail button[aria-label='Trợ lý']").click();
-await page.waitForSelector(".chat-input-row textarea");
+await page.waitForSelector(".chat-composer textarea");
 
 console.log("\n== Trợ lý: tạo lại, sửa câu hỏi ==");
 await step("hỏi một câu → một câu trả lời", async () => {
@@ -45,12 +45,14 @@ await step("hỏi một câu → một câu trả lời", async () => {
 });
 await step("chi phí quy ra tiền hiện trong bảng thống kê (không còn dải token ở chân khung)", async () => {
   assert.equal(await page.locator(".chat-token-strip").count(), 0, "dải token không còn hiện với mọi người");
-  await page.locator("button[title='Thống kê token']").click();
+  await page.locator(".chat-dock button[aria-label='Tuỳ chọn trợ lý']").click();
+  await page.locator("[role=menuitem]", { hasText: "Thống kê token" }).click();
   await page.waitForFunction(() => /≈/.test(document.querySelector(".chat-usage-panel")?.textContent ?? ""));
-  await page.locator("button[title='Thống kê token']").click();
+  await page.locator(".chat-dock button[aria-label='Tuỳ chọn trợ lý']").click();
+  await page.locator("[role=menuitem]", { hasText: "Ẩn thống kê token" }).click();
 });
 await step("'Tạo lại' → gọi máy chủ với regenerate, câu trả lời cũ được thay (không dồn thêm)", async () => {
-  await page.locator(".chat-copy", { hasText: "Tạo lại" }).click();
+  await page.locator(".chat-act[aria-label='Tạo lại']").click();
   await waitModel("Trả lời số 2");
   assert.deepEqual(await models(), ["Trả lời số 2."]);
   assert.deepEqual(await users(), ["cho tôi biết nhanh tiến độ"]);
@@ -58,7 +60,7 @@ await step("'Tạo lại' → gọi máy chủ với regenerate, câu trả lờ
   assert(last.b.regenerate === true && last.b.sessionId === "s1", JSON.stringify(last.b));
 });
 await step("'Sửa' câu hỏi → ô soạn thảo, Esc huỷ mà không mất câu cũ", async () => {
-  await page.locator(".chat-msg-user .chat-copy", { hasText: "Sửa" }).click();
+  await page.locator(".chat-msg-user .chat-act[aria-label='Sửa']").click();
   await page.waitForSelector(".chat-edit textarea");
   assert((await page.inputValue(".chat-edit textarea")) === "cho tôi biết nhanh tiến độ");
   await page.locator(".chat-edit textarea").press("Escape");
@@ -66,7 +68,7 @@ await step("'Sửa' câu hỏi → ô soạn thảo, Esc huỷ mà không mất 
   assert.deepEqual(await users(), ["cho tôi biết nhanh tiến độ"]);
 });
 await step("sửa rồi 'Gửi lại' → câu hỏi và câu trả lời cũ đều được thay", async () => {
-  await page.locator(".chat-msg-user .chat-copy", { hasText: "Sửa" }).click();
+  await page.locator(".chat-msg-user .chat-act[aria-label='Sửa']").click();
   await page.fill(".chat-edit textarea", "tình hình nhanh của Epic 2");
   await page.locator(".chat-edit-actions .primary").click();
   await waitModel("Trả lời số 3");
@@ -77,19 +79,16 @@ await step("sửa rồi 'Gửi lại' → câu hỏi và câu trả lời cũ đ
 });
 
 console.log("\n== Trợ lý: lượt đã ghi lên Jira không làm lại được ==");
-await step("sau một lượt có ghi: ẩn 'Tạo lại' và 'Sửa', nói rõ vì sao", async () => {
+await step("sau một lượt có ghi: ẩn 'Tạo lại' và 'Sửa' (làm lại sẽ ghi lần nữa)", async () => {
   await ask("tạo giúp tôi một việc nhanh");
   await waitModel("Trả lời số 4");
-  await page.waitForSelector(".chat-copy-off");
-  assert((await page.locator(".chat-copy", { hasText: "Tạo lại" }).count()) === 0, "Tạo lại vẫn hiện");
-  assert((await page.locator(".chat-msg-user .chat-copy", { hasText: /^Sửa$/ }).count()) === 0, "Sửa vẫn hiện");
-  const why = await page.locator(".chat-copy-off").first().getAttribute("title");
-  assert(why.includes("ghi lần nữa"), why);
+  assert((await page.locator(".chat-act[aria-label='Tạo lại']").count()) === 0, "Tạo lại vẫn hiện");
+  assert((await page.locator(".chat-msg-user .chat-act[aria-label='Sửa']").count()) === 0, "Sửa vẫn hiện");
 });
 await step("một câu hỏi mới vẫn được (làm lại được lượt sau)", async () => {
   await ask("hỏi nhanh lại");
   await waitModel("Trả lời số 5");
-  assert((await page.locator(".chat-copy", { hasText: "Tạo lại" }).count()) === 1);
+  assert((await page.locator(".chat-act[aria-label='Tạo lại']").count()) === 1);
 });
 
 console.log("\n== Trợ lý: lọc màn hình bằng lời ==");
@@ -122,49 +121,48 @@ const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
 const fileInput = page.locator(".chat-dock input[type=file]");
 await step("đính kèm một ảnh → hiện chip, gửi kèm dữ liệu, bong bóng hiện tên tệp", async () => {
   await fileInput.setInputFiles({ name: "loi.png", mimeType: "image/png", buffer: PNG });
-  await page.waitForSelector(".chat-pending .chat-files li");
-  assert((await page.textContent(".chat-pending")).includes("loi.png"));
+  await page.waitForSelector(".chat-tray .chat-chip");
+  assert((await page.textContent(".chat-tray")).includes("loi.png"));
   await ask("xem ảnh nhanh");
   await waitModel("Đã đọc 1 tệp: loi.png");
   const last = (await chatPosts()).at(-1);
   assert(last.b.attachments?.length === 1 && last.b.attachments[0].name === "loi.png" && last.b.attachments[0].mimeType === "image/png", JSON.stringify(last.b).slice(0, 200));
   assert(last.b.attachments[0].data === PNG.toString("base64"), "dữ liệu base64 không khớp");
   assert((await page.locator(".chat-msg-user .chat-files").last().textContent()).includes("loi.png"));
-  assert((await page.locator(".chat-pending").count()) === 0, "chip phải mất sau khi gửi");
+  assert((await page.locator(".chat-tray").count()) === 0, "chip phải mất sau khi gửi");
 });
-await step("lượt có tệp không tạo lại / sửa được, và nói rõ vì sao", async () => {
-  assert((await page.locator(".chat-copy", { hasText: "Tạo lại" }).count()) === 0);
-  const why = await page.locator(".chat-msg-user .chat-copy-off").last().getAttribute("title");
-  assert(why.includes("tệp"), why);
+await step("lượt có tệp không tạo lại / sửa được", async () => {
+  assert((await page.locator(".chat-act[aria-label='Tạo lại']").count()) === 0);
+  assert((await page.locator(".chat-msg-user .chat-act[aria-label='Sửa']").count()) === 0);
 });
 await step("dán ảnh chụp màn hình vào ô soạn thảo → thành tệp đính kèm", async () => {
   await page.evaluate(() => {
     const dt = new DataTransfer();
     dt.items.add(new File([new Uint8Array([137, 80, 78, 71])], "man-hinh.png", { type: "image/png" }));
-    const area = document.querySelector(".chat-input-row textarea");
+    const area = document.querySelector(".chat-composer textarea");
     area.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
   });
-  await page.waitForSelector(".chat-pending .chat-files li");
-  assert((await page.textContent(".chat-pending")).includes("man-hinh.png"));
+  await page.waitForSelector(".chat-tray .chat-chip");
+  assert((await page.textContent(".chat-tray")).includes("man-hinh.png"));
 });
 await step("bỏ tệp bằng nút ✕", async () => {
-  await page.locator(".chat-file-remove").click();
-  await page.waitForSelector(".chat-pending", { state: "detached" });
+  await page.locator(".chat-chip-x").click();
+  await page.waitForSelector(".chat-tray", { state: "detached" });
 });
 await step("loại tệp không hỗ trợ bị từ chối ngay, không thành chip", async () => {
   await fileInput.setInputFiles({ name: "chay.exe", mimeType: "application/x-msdownload", buffer: Buffer.from("MZ") });
-  await page.waitForSelector(".chat-pending .chat-error");
-  assert((await page.textContent(".chat-pending")).includes("chưa hỗ trợ"));
-  assert((await page.locator(".chat-pending .chat-files li").count()) === 0);
+  await page.waitForSelector(".chat-composer .chat-error");
+  assert((await page.textContent(".chat-composer .chat-error")).includes("chưa hỗ trợ"));
+  assert((await page.locator(".chat-tray .chat-chip").count()) === 0);
 });
 await step("tệp quá lớn bị từ chối", async () => {
   await fileInput.setInputFiles({ name: "to.png", mimeType: "image/png", buffer: Buffer.alloc(5 * 1024 * 1024 + 1) });
-  await page.waitForFunction(() => (document.querySelector(".chat-pending")?.textContent ?? "").includes("lớn hơn 5 MB"));
+  await page.waitForFunction(() => (document.querySelector(".chat-composer .chat-error")?.textContent ?? "").includes("lớn hơn 5 MB"));
 });
 await step("chỉ có tệp, không có chữ: vẫn gửi được", async () => {
   await fileInput.setInputFiles({ name: "ghi-chu.md", mimeType: "", buffer: Buffer.from("# Yêu cầu") });
-  await page.waitForSelector(".chat-pending .chat-files li");
-  await page.locator(".chat-send.primary").click();
+  await page.waitForSelector(".chat-tray .chat-chip");
+  await page.locator(".chat-send").click();
   await page.waitForFunction(() => document.querySelectorAll(".chat-msg-model .chat-bubble").length >= 1);
   const last = (await chatPosts()).at(-1);
   assert(last.b.attachments?.[0].name === "ghi-chu.md" && last.b.attachments[0].mimeType === "text/markdown", JSON.stringify(last.b).slice(0, 200));

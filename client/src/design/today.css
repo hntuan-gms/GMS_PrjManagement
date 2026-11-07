@@ -431,38 +431,7 @@ button.today-check.is-on:disabled {
   background: var(--sunken);
 }
 
-/* ---- Trợ lý là tờ bên phải, đẩy chứ không che (H13) ----
-   Cùng vị trí với khung chi tiết việc: mọi thứ bên phải dùng một chỗ. Nội dung của app nhường chỗ bằng
-   padding-right trên .app, nên dải "Ghi giờ" ở Hôm nay không còn nằm dưới khung. Dưới 900px không đủ
-   chỗ để đẩy, khung phủ lên như trước. */
-:root {
-  --chat-w: 400px;
-}
-.chat-dock {
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: min(var(--chat-w), 100vw);
-  max-width: none;
-  height: auto;
-  max-height: none;
-  border-width: 0 0 0 1px;
-  border-radius: 0;
-  z-index: var(--z-float);
-}
-.app:has(.chat-dock) {
-  padding-right: var(--chat-w);
-}
-@media (max-width: 900px) {
-  .app:has(.chat-dock) {
-    padding-right: 0;
-  }
-}
-@media print {
-  .app:has(.chat-dock) {
-    padding-right: 0;
-  }
-}
+/* Trợ lý là cửa sổ nổi (design/chatwin.css), không còn đẩy trang. */
 
 /* Trợ lý: icon thay cho ký tự (H12). */
 .chat-thinking-toggle {

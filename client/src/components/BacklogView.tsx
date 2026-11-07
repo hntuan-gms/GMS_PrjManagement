@@ -1,3 +1,4 @@
+import { startTaskDrag } from "../taskDrag";
 import StatusGlyph from "./StatusGlyph";
 import { useMemo, useState, type DragEvent, type MouseEvent } from "react";
 import { canonicalIssueType, capacityRows, localDate, shortDate, totalWeight, velocityAverage, weightOf } from "../boardModel";
@@ -137,8 +138,7 @@ export default function BacklogView(props: Props) {
     // Dragging an unselected row drags just that row, as in a file manager.
     const keys = selected.has(key) ? visibleOrder.filter((k) => selected.has(k)) : [key];
     if (!selected.has(key)) setSelected(new Set([key]));
-    e.dataTransfer.effectAllowed = "move";
-    e.dataTransfer.setData("text/plain", keys.join(","));
+    startTaskDrag(e, keys);
     setDragKeys(keys);
   }
 

@@ -364,11 +364,11 @@ await step("Dừng: giữ phần trả lời dở và báo cho máy chủ ngắt
   await tab("Kế hoạch");
   await reset();
   await page.locator(".app-rail button[aria-label='Trợ lý']").click();
-  await page.fill(".chat-input-row textarea", "cho tôi một câu trả lời dài");
+  await page.fill(".chat-composer textarea", "cho tôi một câu trả lời dài");
   await page.keyboard.press("Enter");
   await page.waitForFunction(() => document.querySelector(".chat-msg-model .chat-bubble")?.textContent.includes("Đây"), null, { timeout: 8000 });
   await page.waitForTimeout(500);
-  await page.locator(".chat-send", { hasText: "■" }).click();
+  await page.locator(".chat-send.is-stop").click();
   await page.waitForTimeout(800);
   const kept = await page.$$eval(".chat-msg-model .chat-bubble", (b) => b.map((x) => x.textContent).join("|"));
   assert.ok(kept.includes("Đây"), "mất phần trả lời đã stream: " + kept);
@@ -377,7 +377,7 @@ await step("Dừng: giữ phần trả lời dở và báo cho máy chủ ngắt
   assert.equal(state.chatAborts, 1, "máy chủ không nhận được tín hiệu ngắt");
 });
 await step("có nút Sao chép trên câu trả lời", async () => {
-  assert.ok(await page.locator(".chat-copy", { hasText: "Sao chép" }).count() >= 1);
+  assert.ok(await page.locator(".chat-act[aria-label='Sao chép']").count() >= 1);
 });
 
 console.log("\n== Tạo việc ==");

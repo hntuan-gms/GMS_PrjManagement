@@ -525,9 +525,31 @@ app.post("/api/ai/chat", (req, res) => {
   };
 
   // Fast, scripted turns for the tests that are not about streaming.
-  if (message.includes("nhanh") || body.regenerate === true) {
+  const scripted = ["xoá", "gán", "ngữ cảnh"].some((w) => message.includes(w));
+  if (message.includes("nhanh") || body.regenerate === true || scripted) {
     answerCount++;
     lastAnswerMutated = false;
+    // Stand-ins for the server's structured events (ai/choices.ts, ai/receipts.ts).
+    if (message.includes("xoá")) {
+      send("tool", { name: "delete_task", label: "Đang xử lý..." });
+      send("choices", {
+        prompt: "Xoá GPM-1 · Việc mẫu? Không hoàn tác được.",
+        options: [
+          { label: "Xoá GPM-1", message: "Xác nhận xoá GPM-1", tone: "danger" },
+          { label: "Huỷ", message: "Thôi, không làm nữa", tone: "default" },
+        ],
+      });
+    }
+    if (message.includes("gán")) {
+      lastAnswerMutated = true;
+      send("tool", { name: "assign_task", label: "Đang gán người phụ trách..." });
+      send("mutated", {});
+      send("receipt", { items: [{ key: "DEMO-1", text: "DEMO-1 → Bình", undo: { patch: { assigneeAccountId: null } } }] });
+    }
+    // The screen context the browser sent, echoed so a test can see it arrived.
+    const ctxText = message.includes("ngữ cảnh")
+      ? ` Ngữ cảnh: tab ${body.context?.view ?? "-"}; chọn ${Array.isArray(body.context?.selected) ? body.context.selected.join(", ") : "-"}.`
+      : "";
     if (message.includes("tạo")) {
       lastAnswerMutated = true;
       send("tool", { name: "create_task", label: "Đang tạo việc trên Jira..." });
@@ -538,7 +560,7 @@ app.post("/api/ai/chat", (req, res) => {
       send("filter", { spec: { text: "", people: ["anh"], statuses: [], types: [], epics: [], labels: [], priorities: [], onlyOverdue: false, onlyBlocked: false }, view: null, summary: "người: Nguyễn Anh" });
     }
     const files: Array<{ name: string }> = Array.isArray(body.attachments) ? body.attachments : [];
-    send("text", { text: `Trả lời số ${answerCount}.${files.length ? ` Đã đọc ${files.length} tệp: ${files.map((f) => f.name).join(", ")}.` : ""}` });
+    send("text", { text: `Trả lời số ${answerCount}.${ctxText}${files.length ? ` Đã đọc ${files.length} tệp: ${files.map((f) => f.name).join(", ")}.` : ""}` });
     return done();
   }
 

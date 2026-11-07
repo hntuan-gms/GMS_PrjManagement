@@ -1,6 +1,11 @@
 import type { ReactNode } from "react";
 
 export type IconName =
+  | "copy"
+  | "stop"
+  | "maximize"
+  | "restore"
+  | "refresh"
   | "logo"
   | "chevronDown"
   | "chevronLeft"
@@ -339,6 +344,16 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M7 14h10v6.5H7z" />
     </>
   ),
+  copy: (
+    <>
+      <rect x="9" y="9" width="11" height="11" rx="2" />
+      <path d="M5 15V6a2 2 0 0 1 2-2h8" />
+    </>
+  ),
+  stop: <rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none" />,
+  maximize: <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />,
+  restore: <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />,
+  refresh: <path d="M20 11a8 8 0 0 0-14-4L4 9M4 4v5h5M4 13a8 8 0 0 0 14 4l2-2M20 20v-5h-5" />,
   more: (
     <>
       <path d="M6 12h.01" />

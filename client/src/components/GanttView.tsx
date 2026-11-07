@@ -1,6 +1,7 @@
 import { buildEpicIndex, filterTaskIds, isOverdueTask, type TaskFilter } from "../taskFilter";
 import FilterBar, { type JqlControl } from "./FilterBar";
 import TimelineMarkers from "./TimelineMarkers";
+import { dragKeysFor, startTaskDrag } from "../taskDrag";
 import { Gantt, ViewMode, type Task as GanttTaskT } from "gantt-task-react";
 import "gantt-task-react/dist/index.css";
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
@@ -1743,6 +1744,19 @@ export default function GanttView({
             showCriticalPath && criticalIds.has(task.id) ? "wbs-row-critical" : ""
           }${unscheduledIds.has(task.id) ? " is-unscheduled" : ""}`}
           style={{ height: ROW_HEIGHT }}
+          draggable
+          onDragStart={(e) => {
+            // Work leaves the plan by hand: this row, or the whole selection when the row is part of it, as in a
+            // file manager. Fields inside the row keep their own text selection.
+            if ((e.target as HTMLElement).closest("input, select, textarea")) {
+              e.preventDefault();
+              return;
+            }
+            const order = rows.map((r) => r.task.id);
+            startTaskDrag(e, dragKeysFor(task.id, selectedIds, order), task.summary);
+            // Selecting on grab is deferred: re-rendering the row inside dragstart can cancel the drag.
+            if (!selectedIds.has(task.id)) window.setTimeout(() => onSelect(task.id, { toggle: false, range: false }, order), 0);
+          }}
           onClick={(e) =>
             onSelect(
               task.id,
@@ -1757,7 +1771,7 @@ export default function GanttView({
           }}
         >
           <div className="wbs-col wbs-col-key">
-            <a href={task.jiraUrl} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
+            <a href={task.jiraUrl} target="_blank" rel="noreferrer" draggable={false} onClick={(e) => e.stopPropagation()}>
               {task.id}
             </a>
           </div>

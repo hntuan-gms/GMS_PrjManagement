@@ -17,6 +17,7 @@ export interface Shortcut {
 export const SHORTCUTS: Shortcut[] = [
   { id: "command", keys: "Ctrl K", label: "Ô lệnh: tìm, tạo, hỏi trợ lý", group: "Chung" },
   { id: "projects", keys: "Ctrl P", label: "Chuyển dự án", group: "Chung" },
+  { id: "assistant", keys: "Ctrl J", label: "Mở / đóng trợ lý", group: "Chung" },
   { id: "help", keys: "?", label: "Bảng phím tắt", group: "Chung" },
   { id: "create", keys: "C", label: "Tạo việc nhanh", group: "Chung" },
   { id: "search", keys: "/", label: "Tìm / lọc trong màn hiện tại", group: "Chung" },
@@ -79,6 +80,7 @@ export function shortcutIdFor(e: KeyLike): string | null {
     const l = k.toLowerCase();
     if (l === "k") return "command";
     if (l === "p") return "projects";
+    if (l === "j") return "assistant";
     if (l === "a") return "select-all";
     if (k === ".") return "copy-key";
     return null;

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { startTaskDrag } from "../taskDrag";
 
 /**
  * The assistant's replies, rendered instead of shown raw.
@@ -48,7 +49,7 @@ function inline(text: string, props: Props, keyBase: string): ReactNode[] {
       out.push(<em key={k}>{tok.slice(1, -1)}</em>);
     } else if (props.knownKeys?.has(tok) && props.onOpenIssue) {
       out.push(
-        <button key={k} className="chat-issue" onClick={() => props.onOpenIssue!(tok)} title="Mở việc">
+        <button key={k} className="chat-issue" draggable onDragStart={(e) => startTaskDrag(e, [tok])} onClick={() => props.onOpenIssue!(tok)} title="Mở việc (kéo được)">
           {tok}
         </button>
       );

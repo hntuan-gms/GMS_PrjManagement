@@ -8,6 +8,7 @@ const key = (k: string, m: Partial<KeyLike> = {}): KeyLike => ({ key: k, ctrlKey
 const PRESS: Record<string, KeyLike> = {
   command: key("k", { ctrlKey: true }),
   projects: key("p", { ctrlKey: true }),
+  assistant: key("j", { ctrlKey: true }),
   help: key("?", { shiftKey: true }),
   create: key("c"),
   search: key("/"),
