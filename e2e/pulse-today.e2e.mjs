@@ -80,12 +80,13 @@ await step("'Ghi giờ' mở tờ bên; Esc đóng tờ, không đóng trang", a
   assert.ok(await page.locator(".today-view").isVisible());
 });
 
-await step("bấm một lăng kính khi tờ Ghi giờ đang mở: tờ đóng, lăng kính mở", async () => {
+await step("Hôm nay không có lăng kính; bấm Dự án khi tờ Ghi giờ đang mở: tờ đóng, dự án mở", async () => {
+  assert.equal(await page.locator(".lens-tabs").count(), 0);
   await page.locator(".today-log-btn").click();
   await page.locator(".side-sheet").waitFor();
-  await page.locator(".toolbar-tabs button", { hasText: "Bảng" }).click();
+  await page.locator(".rail-btn[data-view=plan]").click();
   await page.locator(".side-sheet").waitFor({ state: "detached" });
-  await page.waitForSelector(".bd-card, .bd-board, .board-view", { timeout: 8000 }).catch(() => {});
+  await page.waitForSelector(".lens-tabs");
   assert.equal(await page.locator(".today-view").count(), 0);
 });
 

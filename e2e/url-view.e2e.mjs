@@ -41,7 +41,7 @@ await step("F5 giữ nguyên Bảng", async () => {
 });
 await step("1 rồi 2 rồi Back về Kế hoạch (không thoát khỏi app)", async () => {
   await page.goto(APP + "?view=today");
-  await page.waitForSelector(".lens-tabs");
+  await page.waitForSelector(".today-view");
   await page.keyboard.press("1");
   await page.waitForSelector(".wbs-row");
   await page.keyboard.press("2");
@@ -75,6 +75,9 @@ await step("Cài đặt: '← Về …' quay lại bằng Back, không thêm m�
   await page.keyboard.press("s");
   await page.waitForSelector(".settings-page");
   assert.equal(view(), "settings");
+  // Settings belong to the project: Dự án stays lit on the rail, and no lens pretends to be open.
+  assert.equal(await page.locator(".rail-btn[data-view=plan][aria-current=page]").count(), 1);
+  assert.equal(await page.locator(".lens-tabs").count(), 0);
   await page.locator(".settings-back").click();
   await page.waitForSelector(".bd-switcher");
   assert.equal(view(), "board");

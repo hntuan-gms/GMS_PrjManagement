@@ -5,7 +5,7 @@
 // a project admin may save it. The stand-in API runs the server's own validator (validateCalendar).
 import assert from "node:assert/strict";
 import { chromium } from "playwright-core";
-import { fillDate, openSettings, openTimesheet, setGranularity } from "./toolbar.mjs";
+import { fillDate, openLens, openSettings, openTimesheet, setGranularity } from "./toolbar.mjs";
 
 const APP = process.env.E2E_APP ?? "http://localhost:5173/";
 const API = process.env.E2E_API ?? "http://localhost:4000";
@@ -95,7 +95,7 @@ await step("lưu: nút Lưu tắt lại, máy chủ giữ 13 ngày lễ và 1 ng
 
 console.log("\n== Các màn hình đọc lịch ==");
 await step("Nguồn lực: ngày lễ ghi 'Ngày lễ: …', Thứ 7 làm bù có công suất 8h", async () => {
-  await page.locator(".toolbar-tabs button", { hasText: "Nhân lực" }).click();
+  await openLens(page, "Nhân lực");
   await page.waitForSelector(".resource-view .rv-row-person");
   await setGranularity(page, "day");
   const titles = await page.locator(".rv-row-person").first().locator(".rv-cell").evaluateAll((els) => els.map((e) => e.title));
@@ -143,7 +143,7 @@ await step("lưu SLA không xoá ngày lễ đã lưu", async () => {
 await step("người không phải quản trị dự án: chỉ xem, không có nút lưu", async () => {
   await api("POST", "/api/__sla-canedit", { canEdit: false });
   await page.reload();
-  await page.waitForSelector(".toolbar-tabs");
+  await page.waitForSelector(".toolbar");
   await openSettings(page, "Lịch làm việc");
   await cal().waitFor();
   await cal().locator(".sla-note", { hasText: "Chỉ quản trị dự án được sửa" }).waitFor();

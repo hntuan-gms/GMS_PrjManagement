@@ -131,6 +131,11 @@ export default function Toolbar({
   const dialogs = useDialogs();
   const appearance = useAppearance();
   const lensView = LENSES.some((l) => l.id === view) ? view : null;
+  // The rail picks a place, the header's lenses are the views inside Dự án. The settings page belongs to the
+  // project too, so Dự án stays lit there; Hôm nay is a place of its own and shows no lenses.
+  const inProject = lensView !== null || view === "settings";
+  const [lastLens, setLastLens] = useState<WorkspaceView | null>(lensView);
+  if (lensView && lensView !== lastLens) setLastLens(lensView);
 
   const avatar =
     user.avatarUrl && !avatarFailed ? (
@@ -166,10 +171,12 @@ export default function Toolbar({
         <RailButton
           icon="plan"
           label="Dự án"
+          keys="1–4"
           view="plan"
-          active={lensView !== null}
-          onClick={() => onViewChange(lensView ?? (phone ? "board" : "gantt"))}
+          active={inProject}
+          onClick={() => onViewChange(lensView ?? lastLens ?? (phone ? "board" : "gantt"))}
         />
+        {/* Further places (integrations) go here, one button each; the header's lenses belong to Dự án only. */}
         <span className="rail-fill" />
         {onOpenAssistant && (
           <RailButton
@@ -316,6 +323,7 @@ export default function Toolbar({
           )}
         </div>
 
+        {lensView && (
         <nav className="toolbar-tabs lens-tabs" aria-label="Lăng kính">
           {lenses.map((l) => (
             <button
@@ -337,6 +345,7 @@ export default function Toolbar({
             </button>
           ))}
         </nav>
+        )}
 
         <div className="toolbar-right">
           <SyncIndicator sync={sync} onSync={onSync} />

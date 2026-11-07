@@ -27,9 +27,9 @@ await page.goto(APP + "?view=gantt");
 await page.waitForSelector(".app-rail");
 
 console.log("\n== Điện thoại ==");
-await step("liên kết tới Kế hoạch mở Hôm nay; chỉ còn lăng kính Bảng", async () => {
+await step("liên kết tới Kế hoạch mở Hôm nay; Hôm nay không có lăng kính", async () => {
   await page.waitForSelector(".today-view");
-  assert.deepEqual(await page.locator(".lens-tabs button").allTextContents().then((t) => t.map((x) => x.trim())), ["Bảng"]);
+  assert.equal(await page.locator(".lens-tabs").count(), 0);
 });
 await step("thanh bên thành thanh dưới cùng, không che nội dung", async () => {
   const r = await page.locator(".app-rail").boundingBox();
@@ -38,8 +38,10 @@ await step("thanh bên thành thanh dưới cùng, không che nội dung", async
 });
 await step("trang không cuộn ngang ở Hôm nay và ở Bảng", async () => {
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth), 0);
-  await page.locator("[data-lens=board]").click();
+  // On a phone "Dự án" on the bottom bar opens the board, the one lens there is room for.
+  await page.locator(".rail-btn[data-view=plan]").click();
   await page.waitForSelector(".bd-card");
+  assert.deepEqual(await page.locator(".lens-tabs button").allTextContents().then((t) => t.map((x) => x.trim())), ["Bảng"]);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth), 0);
 });
 await step("cột của Bảng xếp dọc, mỗi cột có tên phía trên thẻ", async () => {

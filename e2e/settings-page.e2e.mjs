@@ -4,7 +4,7 @@
 // is not a project admin. The sections are the bodies of the old dialogs (classes .cal-modal, .sla-modal, .kb-settings).
 import assert from "node:assert/strict";
 import { chromium } from "playwright-core";
-import { openSettings } from "./toolbar.mjs";
+import { openLens, openSettings } from "./toolbar.mjs";
 
 const APP = process.env.E2E_APP ?? "http://localhost:5173/";
 const API = process.env.E2E_API ?? "http://localhost:4000";
@@ -140,7 +140,7 @@ await step("Thẻ trên board: đổi ở đây thì nút Thẻ của Bảng th�
   await page.locator(".settings-nav-item", { hasText: "Thẻ trên board" }).click();
   // Before the Bảng tab has been drawn there is no board to edit.
   await page.locator(".settings-body .sla-muted", { hasText: "Chưa mở tab Bảng" }).waitFor();
-  await page.locator(".toolbar-tabs button", { hasText: "Bảng" }).click();
+  await openLens(page, "Bảng");
   await page.waitForSelector(".bd-card");
   await openSettings(page, "Thẻ trên board");
   const box = page.locator(".board-card-settings");
@@ -148,7 +148,7 @@ await step("Thẻ trên board: đổi ở đây thì nút Thẻ của Bảng th�
   const key = box.locator("label.bd-card-opt", { hasText: /^Mã$/ }).locator("input");
   assert.equal(await key.isChecked(), true);
   await key.uncheck();
-  await page.locator(".toolbar-tabs button", { hasText: "Bảng" }).click();
+  await openLens(page, "Bảng");
   await page.waitForSelector(".bd-card");
   await page.locator(".bd-cardbtn").click();
   const same = page.locator(".bd-card-menu label.bd-card-opt", { hasText: /^Mã$/ }).locator("input");
@@ -161,7 +161,7 @@ console.log("\n== Quyền ==");
 await step("không phải quản trị dự án: cả hai mục chỉ đọc, một dòng giải thích, không có nút lưu", async () => {
   await api("POST", "/api/__sla-canedit", { canEdit: false });
   await page.reload();
-  await page.waitForSelector(".toolbar-tabs");
+  await page.waitForSelector(".toolbar");
   for (const [section, root] of [
     ["Lịch làm việc", ".cal-modal"],
     ["SLA", ".sla-modal:not(.cal-modal)"],

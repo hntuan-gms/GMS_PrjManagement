@@ -58,9 +58,22 @@ export async function ioAction(page, label) {
   await page.locator(".io-menu button", { hasText: label }).click();
 }
 
+/**
+ * Opens a lens by its label. The lenses are the views inside Dự án, so on Hôm nay or the settings page
+ * (where they are not drawn) the rail's Dự án comes first.
+ */
+export async function openLens(page, label) {
+  const lens = page.locator(".lens-tabs button", { hasText: label });
+  if (!(await lens.count())) {
+    await page.locator(".rail-btn[data-view=plan]").click();
+    await page.waitForSelector(".lens-tabs");
+  }
+  await lens.click();
+}
+
 /** Nhân lực in its "Giờ đã ghi" mode (what the rail's "Giờ làm" used to open): lens, then the mode switch. */
 export async function openTimesheet(page, { wait = true } = {}) {
-  if (!(await page.locator("[data-lens=resource][aria-current=page]").count())) await page.locator("[data-lens=resource]").click();
+  if (!(await page.locator("[data-lens=resource][aria-current=page]").count())) await openLens(page, "Nhân lực");
   await page.locator("[data-mode=ts]").click();
   if (wait) await page.waitForSelector(".ts-grid");
 }
