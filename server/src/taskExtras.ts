@@ -96,7 +96,7 @@ export class TaskExtras {
   }
 
   private own(key: string): string {
-    if (!this.ownKey.test(key)) throw badRequest(`Chỉ thao tác được với công việc của dự án ${this.who.projectKey}.`);
+    if (!this.ownKey.test(key)) throw badRequest(`Chỉ thao tác được với việc của dự án ${this.who.projectKey}.`);
     return key;
   }
 
@@ -135,8 +135,8 @@ export class TaskExtras {
   async addLink(key: string, input: { typeName: string; otherKey: string; direction: "outward" | "inward" }): Promise<IssueLinkView[]> {
     this.own(key);
     const other = String(input.otherKey ?? "").trim().toUpperCase();
-    if (!KEY.test(other)) throw badRequest("Mã công việc cần liên kết không hợp lệ (ví dụ ABC-12).");
-    if (other === key) throw badRequest("Không liên kết một công việc với chính nó.");
+    if (!KEY.test(other)) throw badRequest("Mã việc cần liên kết không hợp lệ (ví dụ ABC-12).");
+    if (other === key) throw badRequest("Không liên kết một việc với chính nó.");
     if (input.direction !== "outward" && input.direction !== "inward") throw badRequest("Chiều liên kết không hợp lệ.");
     const types = await this.jira.getIssueLinkTypes();
     const type = types.find((t) => t.name === input.typeName);
@@ -147,7 +147,7 @@ export class TaskExtras {
       await this.jira.createIssueLink(type.name, inwardKey, outwardKey);
     } catch (err) {
       if (err instanceof JiraApiError && (err.status === 400 || err.status === 404)) {
-        throw badRequest(`Jira không tạo được liên kết: ${err.summary || "không tìm thấy công việc kia, hoặc bạn không có quyền liên kết."}`);
+        throw badRequest(`Jira không tạo được liên kết: ${err.summary || "không tìm thấy việc kia, hoặc bạn không có quyền liên kết."}`);
       }
       throw err;
     }
@@ -157,7 +157,7 @@ export class TaskExtras {
   /** Only a link that really belongs to this issue: the id alone is not enough to delete by. */
   async removeLink(key: string, linkId: string): Promise<IssueLinkView[]> {
     const current = await this.links(key);
-    if (!current.some((l) => l.id === linkId)) throw badRequest("Liên kết này không thuộc công việc đang mở.");
+    if (!current.some((l) => l.id === linkId)) throw badRequest("Liên kết này không thuộc việc đang mở.");
     await this.jira.deleteIssueLink(linkId);
     return current.filter((l) => l.id !== linkId);
   }

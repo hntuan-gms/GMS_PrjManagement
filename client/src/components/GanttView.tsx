@@ -1010,7 +1010,7 @@ export default function GanttView({
     // The overlay block (dependencies, baseline, and % unless it is already a
     // visible column) always follows: it is the data Jira's own export lacks.
     const includePct = !columnIds.includes("pct");
-    const header = ["Mã", "Tên công việc", ...columns.map((c) => c.long), ...overlayCsvHeader(includePct)];
+    const header = ["Mã", "Tên việc", ...columns.map((c) => c.long), ...overlayCsvHeader(includePct)];
     const body = list.map((o) => [
       o.task.id,
       o.task.summary,
@@ -1587,7 +1587,7 @@ export default function GanttView({
     () => (
     <div className="wbs-header" style={{ height: HEADER_HEIGHT, width: listWidth }}>
       <div className="wbs-col wbs-col-key">Mã</div>
-      <div className="wbs-col wbs-col-name">Tên công việc</div>
+      <div className="wbs-col wbs-col-name">Tên việc</div>
       {columns.map((c) => (
         <div
           key={c.id}
@@ -1941,7 +1941,7 @@ export default function GanttView({
                   >
                     <Icon name="upload" />
                     <span className="menu-item-text">
-                      Nhập công việc…
+                      Nhập việc…
                       <small>Từ file CSV hoặc dán từ Excel</small>
                     </span>
                   </button>
@@ -1989,10 +1989,10 @@ export default function GanttView({
               title="Thao tác và phím tắt"
               label={<Icon name="help" />}
             >
-              <div className="menu-heading">Chọn công việc</div>
+              <div className="menu-heading">Chọn việc</div>
               <dl className="help-list">
                 <dt>Nhấp</dt>
-                <dd>chọn một công việc</dd>
+                <dd>chọn một việc</dd>
                 <dt>
                   <kbd>Ctrl</kbd>/<kbd>Cmd</kbd> + nhấp
                 </dt>
@@ -2031,7 +2031,7 @@ export default function GanttView({
       <div className="gantt-body" ref={bodyRef} style={{ "--wbs-key-w": `${keyColWidth}px` } as React.CSSProperties}>
         {rows.length === 0 ? (
           <div className="empty-state">
-            {matchIds?.size === 0 ? "Không có công việc nào khớp bộ lọc." : "Chưa có việc nào trong dự án."}
+            {matchIds?.size === 0 ? "Không có việc nào khớp bộ lọc." : "Chưa có việc nào trong dự án."}
           </div>
         ) : (
           bodySize.width > 0 && (

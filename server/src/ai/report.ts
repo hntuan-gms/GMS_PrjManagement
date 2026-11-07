@@ -96,7 +96,7 @@ const REPORT_SCHEMA = {
     },
     outlook: {
       type: Type.OBJECT,
-      description: "Dự báo của bạn: dự án có kịp ngày kết thúc dự kiến không, suy ra từ đồ thị công việc.",
+      description: "Dự báo của bạn: dự án có kịp ngày kết thúc dự kiến không, suy ra từ đồ thị việc.",
       properties: {
         verdict: { type: Type.STRING, enum: ["on_time", "at_risk", "late"], format: "enum" },
         confidence: { type: Type.STRING, enum: ["high", "medium", "low"], format: "enum" },
@@ -188,7 +188,7 @@ function prompt(
     "",
     "VAI TRÒ CỦA BẠN:",
     "Trang báo cáo ĐÃ vẽ mọi con số thành biểu đồ (% hoàn thành, kế hoạch, SPI, quá hạn, theo giai đoạn, theo người).",
-    "Đừng kể lại các con số đó. Việc của bạn là SUY LUẬN từ đồ thị công việc bên dưới — điều mà biểu đồ không nói được:",
+    "Đừng kể lại các con số đó. Việc của bạn là SUY LUẬN từ đồ thị việc bên dưới — điều mà biểu đồ không nói được:",
     "- Nguyên nhân gốc: vì sao chậm (một việc tắc kéo theo chuỗi? một người ôm quá nhiều việc cùng lúc? việc bắt đầu muộn? phạm vi phình?).",
     "- Nút thắt: việc nào (openDependants cao, trên đường găng, đang trễ) đang giữ chân nhiều việc khác.",
     "- Nhân sự: ai quá tải (peakConcurrent14d cao, nhiều việc quá hạn), ai còn trống trong TEAM có thể đỡ.",
@@ -196,7 +196,7 @@ function prompt(
     "- Giải pháp cụ thể: ai làm gì, với việc nào, ưu tiên ra sao — không phải lời khuyên chung chung.",
     "",
     "QUY TẮC:",
-    `1. Tình trạng ĐO ĐƯỢC là "${HEALTH_LABEL[m.health]}" (lý do bên dưới) — đây là sự thật, đừng phủ nhận. Nhưng outlook là DỰ BÁO của riêng bạn và ĐƯỢC PHÉP khác nếu đồ thị công việc cho thấy điều số liệu chưa phản ánh (ví dụ: số liệu đúng tiến độ nhưng việc găng sắp tới chưa có người). Khi khác, reasoning phải nói rõ vì sao.`,
+    `1. Tình trạng ĐO ĐƯỢC là "${HEALTH_LABEL[m.health]}" (lý do bên dưới) — đây là sự thật, đừng phủ nhận. Nhưng outlook là DỰ BÁO của riêng bạn và ĐƯỢC PHÉP khác nếu đồ thị việc cho thấy điều số liệu chưa phản ánh (ví dụ: số liệu đúng tiến độ nhưng việc găng sắp tới chưa có người). Khi khác, reasoning phải nói rõ vì sao.`,
     "2. Không tạo con số mới (phần trăm, ngày, số ngày). Chỉ được trích số có sẵn trong dữ liệu, và chỉ khi thật cần.",
     "3. Nhắc tới việc cụ thể thì ghi mã issue (ví dụ GPM-12) và đưa mã đó vào issueKeys. Chỉ dùng mã có trong dữ liệu.",
     "4. owner phải là một tên CHÍNH XÁC trong danh sách TEAM, hoặc chuỗi rỗng.",

@@ -305,7 +305,7 @@ export function labelFor(name: string): string {
     case CREATE_PLAN.name:
       return "Đang lập kế hoạch...";
     case CREATE_TASK.name:
-      return "Đang tạo công việc trên Jira...";
+      return "Đang tạo việc trên Jira...";
     case ASSIGN_TASK.name:
       return "Đang gán người phụ trách...";
     case UNASSIGN_TASK.name:
@@ -405,7 +405,7 @@ async function runCreateTask(args: Record<string, unknown>, ctx: ToolContext): P
   const summary = str(args, "summary");
   const issueType = str(args, "issueType");
   if (!summary || !issueType) {
-    return { response: { error: "Thiếu tên công việc hoặc loại issue." } };
+    return { response: { error: "Thiếu tên việc hoặc loại issue." } };
   }
 
   // Looks for the same work already in the project before adding it again. Enforced
@@ -497,11 +497,11 @@ async function runCreateTask(args: Record<string, unknown>, ctx: ToolContext): P
 async function runAssignTask(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolOutcome> {
   const taskId = str(args, "taskId");
   const task = findTask(ctx, taskId);
-  if (!task) return { response: { error: `Không tìm thấy công việc ${taskId} trong dự án này.` } };
+  if (!task) return { response: { error: `Không tìm thấy việc ${taskId} trong dự án này.` } };
   if (!isAssignableType(task.issueType)) {
     return {
       response: {
-        error: `${task.id} là Epic nên không gán người được. Hãy gán cho các công việc con của nó.`,
+        error: `${task.id} là Epic nên không gán người được. Hãy gán cho các việc con của nó.`,
       },
     };
   }
@@ -553,7 +553,7 @@ async function runAssignTask(args: Record<string, unknown>, ctx: ToolContext): P
 async function runUnassignTask(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolOutcome> {
   const taskId = str(args, "taskId");
   const task = findTask(ctx, taskId);
-  if (!task) return { response: { error: `Không tìm thấy công việc ${taskId}.` } };
+  if (!task) return { response: { error: `Không tìm thấy việc ${taskId}.` } };
 
   const result = await ctx.taskService.updateTask(task.id, { assigneeAccountId: null });
   ctx.mutated = true;
@@ -575,9 +575,9 @@ async function runSuggestAssignees(
 
   if (taskId) {
     const task = findTask(ctx, taskId);
-    if (!task) return { response: { error: `Không tìm thấy công việc ${taskId}.` } };
+    if (!task) return { response: { error: `Không tìm thấy việc ${taskId}.` } };
     if (!isAssignableType(task.issueType)) {
-      return { response: { error: `${task.id} là Epic — hãy hỏi cho các công việc con.` } };
+      return { response: { error: `${task.id} là Epic — hãy hỏi cho các việc con.` } };
     }
     from = task.startDate ?? ctx.today;
     to = task.dueDate ?? addDays(from, Math.max(0, task.durationDays - 1));

@@ -193,7 +193,7 @@ export default function PlanReviewModal({ runId, users, onClose, onApplied }: Pr
               <table className="ai-table">
                 <thead>
                   <tr>
-                    <th>Công việc</th>
+                    <th>Việc</th>
                     <th>Loại</th>
                     <th>Số ngày</th>
                     <th>Phụ trách</th>
@@ -219,7 +219,7 @@ export default function PlanReviewModal({ runId, users, onClose, onApplied }: Pr
                           <input
                             className="ai-summary-input"
                             value={item.summary}
-                            aria-label="Tên công việc"
+                            aria-label="Tên việc"
                             onChange={(e) =>
                               setPlan({
                                 ...plan,
@@ -310,7 +310,7 @@ export default function PlanReviewModal({ runId, users, onClose, onApplied }: Pr
             </div>
 
             <p className="ai-hint">
-              {plan.items.length} công việc · ngày do hệ thống tính từ số ngày và quan hệ phụ thuộc (AI không
+              {plan.items.length} việc · ngày do hệ thống tính từ số ngày và quan hệ phụ thuộc (AI không
               tự đặt ngày), tính lại mỗi khi bạn sửa số ngày.
               {plan.run.model && <> · mô hình: {plan.run.model}</>}
             </p>

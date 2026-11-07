@@ -113,7 +113,7 @@ await step("pill KPI: Tất cả / Có việc / Đang quá tải kèm số, Mứ
   // A zero count is hidden (MASTER), the pill stays.
   assert.match(pills[2], /^Đang quá tải( \(\d+\))?$/);
   assert.match(await page.locator(".rv-kpi-stat").innerText(), /Mức sử dụng: \d+%/);
-  assert.match(await page.locator(".rv-pill-warn").innerText(), /^\s*\d+ công việc chưa gán\s*$/);
+  assert.match(await page.locator(".rv-pill-warn").innerText(), /^\s*\d+ việc chưa gán\s*$/);
 });
 await step("chú giải rút gọn: 4 mục, không có 'Trống', mô tả đầy đủ nằm trong tooltip", async () => {
   const items = await page.locator(".rv-legend-item").allTextContents();
@@ -516,7 +516,7 @@ await step("thanh việc thẳng hàng với cột ngày bên trên (mép trái 
 await step("banner chồng lịch nằm ngay trên các hàng việc; hai việc trùng được tô nổi", async () => {
   const banner = page.locator(".rv-expand .rv-banner");
   const text = await banner.innerText();
-  assert.match(text, /1 cặp công việc chồng lịch/);
+  assert.match(text, /1 cặp việc chồng lịch/);
   assert.ok(text.includes("DEMO-5") && text.includes("DEMO-7"), text);
   const b = await banner.boundingBox();
   const firstRow = await page.locator(".rv-expand .rv-task-row").first().boundingBox();

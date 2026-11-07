@@ -715,7 +715,7 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
                   <Icon name="plan" size={16} />
                 </span>
                 <span>
-                  <strong>{live.planItemCount} công việc đã dựng</strong>
+                  <strong>{live.planItemCount} việc đã dựng</strong>
                   <br />
                   Bấm để kiểm tra trước khi tạo trên Jira
                 </span>

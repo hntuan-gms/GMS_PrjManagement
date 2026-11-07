@@ -195,14 +195,14 @@ let attachmentsOf5 = seedFiles();
 app.get("/api/tasks/:id/attachments", (req, r) => r.json({ files: req.params.id === "DEMO-5" ? attachmentsOf5 : [], links: [] }));
 app.get("/api/tasks/:id/attachments/:attId/content", (req, r) => {
   const f = req.params.id === "DEMO-5" ? attachmentsOf5.find((x) => x.id === req.params.attId) : undefined;
-  if (!f) return r.status(404).json({ error: "Không tìm thấy tệp đính kèm trên công việc này." });
+  if (!f) return r.status(404).json({ error: "Không tìm thấy tệp đính kèm trên việc này." });
   r.setHeader("Content-Type", req.query.inline === "1" && f.mimeType === "image/png" ? "image/png" : "application/octet-stream");
   r.send(f.mimeType === "image/png" ? PNG : Buffer.from("%PDF-1.4 stand-in"));
 });
 app.delete("/api/tasks/:id/attachments/:attId", (req, r) => {
   const before = attachmentsOf5.length;
   attachmentsOf5 = attachmentsOf5.filter((x) => x.id !== req.params.attId);
-  if (attachmentsOf5.length === before) return r.status(404).json({ error: "Không tìm thấy tệp đính kèm trên công việc này." });
+  if (attachmentsOf5.length === before) return r.status(404).json({ error: "Không tìm thấy tệp đính kèm trên việc này." });
   r.status(204).end();
 });
 
@@ -240,7 +240,7 @@ app.patch("/api/tasks/:id", (req, res) => {
     t.issueType = b.issueType;
   }
   if (b.parentKey !== undefined) {
-    if (b.parentKey === t.id) return res.status(400).json({ error: "Một công việc không thể làm cha của chính nó." });
+    if (b.parentKey === t.id) return res.status(400).json({ error: "Một việc không thể làm cha của chính nó." });
     t.wbsParentId = b.parentKey;
   }
   for (const k of ["summary", "description", "startDate", "priority", "labels", "components", "fixVersions", "percentComplete", "estimateHours", "durationDays", "baselineStart", "baselineDue", "predecessors"]) if (b[k] !== undefined) t[k] = b[k];
@@ -375,7 +375,7 @@ const linkViews = (key: string) => issueLinks.filter((l) => l.a === key || l.b =
 app.get("/api/tasks/:id/issue-links", (req, r) => r.json(linkViews(req.params.id)));
 app.post("/api/tasks/:id/issue-links", (req, res) => {
   const { typeName, otherKey, direction } = req.body;
-  if (!tasks.some((t) => t.id === otherKey)) return res.status(400).json({ error: "Jira không tạo được liên kết: không tìm thấy công việc kia." });
+  if (!tasks.some((t) => t.id === otherKey)) return res.status(400).json({ error: "Jira không tạo được liên kết: không tìm thấy việc kia." });
   issueLinks.push({ id: `L${++linkSeq}`, a: direction === "outward" ? req.params.id : otherKey, b: direction === "outward" ? otherKey : req.params.id, type: typeName });
   res.status(201).json(linkViews(req.params.id));
 });
@@ -518,7 +518,7 @@ app.post("/api/ai/chat", (req, res) => {
     lastAnswerMutated = false;
     if (message.includes("tạo")) {
       lastAnswerMutated = true;
-      send("tool", { name: "create_task", label: "Đang tạo công việc trên Jira..." });
+      send("tool", { name: "create_task", label: "Đang tạo việc trên Jira..." });
       send("mutated", {});
     }
     if (message.includes("lọc")) {

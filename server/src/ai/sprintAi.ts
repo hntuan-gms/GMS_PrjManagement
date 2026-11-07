@@ -303,7 +303,7 @@ export async function estimateIssues(input: {
   const points = input.unit === "points";
 
   const prompt = [
-    "Bạn là thành viên kỳ cựu của nhóm, ước lượng công việc bằng so sánh tương đối với việc nhóm ĐÃ LÀM (reference-class estimation). Viết tiếng Việt.",
+    "Bạn là thành viên kỳ cựu của nhóm, ước lượng việc bằng so sánh tương đối với việc nhóm ĐÃ LÀM (reference-class estimation). Viết tiếng Việt.",
     "",
     points
       ? `Thang điểm: ${FIBONACCI.join(", ")} story point. Điểm đo độ lớn tương đối (công sức + độ phức tạp + rủi ro), không phải giờ.`

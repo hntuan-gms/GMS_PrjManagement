@@ -268,7 +268,7 @@ export async function generatePlan(input: PlannerInput): Promise<PlannerResult> 
 
   const warnings: string[] = [];
   const items = normalize(Array.isArray(parsed.items) ? parsed.items : [], input, warnings);
-  if (items.length === 0) throw new Error("Trợ lý không dựng được công việc nào. Hãy mô tả dự án chi tiết hơn.");
+  if (items.length === 0) throw new Error("Trợ lý không dựng được việc nào. Hãy mô tả dự án chi tiết hơn.");
 
   return {
     items: layoutSchedule(items, input.startDate),
@@ -318,7 +318,7 @@ function normalize(raw: unknown[], input: PlannerInput, warnings: string[]): Dra
     // A phase-level container never carries a person; the model is told so in
     // the prompt, but constrained decoding guarantees shape, not obedience.
     if (assignee && !isAssignableType(resolvedType)) {
-      warnings.push(`"${summary}": là ${resolvedType} nên đã bỏ người phụ trách — hãy gán cho công việc con.`);
+      warnings.push(`"${summary}": là ${resolvedType} nên đã bỏ người phụ trách — hãy gán cho việc con.`);
       assignee = "";
     }
 
@@ -339,7 +339,7 @@ function normalize(raw: unknown[], input: PlannerInput, warnings: string[]): Dra
   const byId = new Map(items.map((i) => [i.tempId, i]));
   for (const item of items) {
     if (item.parentTempId && !byId.has(item.parentTempId)) {
-      warnings.push(`"${item.summary}": công việc cha không tồn tại nên đã đưa lên cấp cao nhất.`);
+      warnings.push(`"${item.summary}": việc cha không tồn tại nên đã đưa lên cấp cao nhất.`);
       item.parentTempId = null;
     }
   }
@@ -356,7 +356,7 @@ function normalize(raw: unknown[], input: PlannerInput, warnings: string[]): Dra
       const predId = String(d.tempId ?? "").trim();
       const type = String(d.type ?? "FS").toUpperCase() as Predecessor["type"];
       if (!byId.has(predId) || predId === item.tempId) {
-        warnings.push(`"${item.summary}": đã bỏ một phụ thuộc trỏ tới công việc không tồn tại.`);
+        warnings.push(`"${item.summary}": đã bỏ một phụ thuộc trỏ tới việc không tồn tại.`);
         continue;
       }
       if (!DEPENDENCY_TYPES.includes(type)) continue;

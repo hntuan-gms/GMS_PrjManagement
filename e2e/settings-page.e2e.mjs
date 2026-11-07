@@ -1,5 +1,5 @@
 // Cài đặt dự án is a page (plan B4): `G S` and the project menu open it, `?view=settings` too, a menu on the
-// left with three sections (Lịch làm việc, SLA, Nhập KBKT), "← Về <nơi trước>" at the top, no lens underlined,
+// left with four sections (Lịch làm việc, SLA, Nhập KBKT, Thẻ trên board), "← Về <nơi trước>" at the top, no lens underlined,
 // Save at the foot of each section and on only when something changed, and a read-only form for someone who
 // is not a project admin. The sections are the bodies of the old dialogs (classes .cal-modal, .sla-modal, .kb-settings).
 import assert from "node:assert/strict";
@@ -51,9 +51,9 @@ await step("G rồi S mở trang; không lăng kính nào được gạch chân"
   assert.equal(await page.locator(".toolbar-tabs button.active").count(), 0);
 });
 
-await step("menu trái có đúng ba mục", async () => {
+await step("menu trái có đúng bốn mục", async () => {
   const labels = (await page.locator(".settings-nav-item").allTextContents()).map((t) => t.trim());
-  assert.deepEqual(labels, ["Lịch làm việc", "SLA", "Nhập KBKT"]);
+  assert.deepEqual(labels, ["Lịch làm việc", "SLA", "Nhập KBKT", "Thẻ trên board"]);
   assert.equal(await activeSection(), "Lịch làm việc");
   await page.locator(".cal-modal").waitFor();
 });
@@ -134,6 +134,27 @@ await step("Nhập KBKT: cấu hình dùng chung, Lưu chỉ bật khi đổi", 
   await page.locator(".kb-settings .settings-foot button", { hasText: "Huỷ" }).click();
   assert.equal(await select.inputValue(), before);
   assert.equal(await save.isDisabled(), true);
+});
+
+await step("Thẻ trên board: đổi ở đây thì nút Thẻ của Bảng thấy ngay", async () => {
+  await page.locator(".settings-nav-item", { hasText: "Thẻ trên board" }).click();
+  // Before the Bảng tab has been drawn there is no board to edit.
+  await page.locator(".settings-body .sla-muted", { hasText: "Chưa mở tab Bảng" }).waitFor();
+  await page.locator(".toolbar-tabs button", { hasText: "Bảng" }).click();
+  await page.waitForSelector(".bd-card");
+  await openSettings(page, "Thẻ trên board");
+  const box = page.locator(".board-card-settings");
+  await box.waitFor();
+  const key = box.locator("label.bd-card-opt", { hasText: /^Mã$/ }).locator("input");
+  assert.equal(await key.isChecked(), true);
+  await key.uncheck();
+  await page.locator(".toolbar-tabs button", { hasText: "Bảng" }).click();
+  await page.waitForSelector(".bd-card");
+  await page.locator(".bd-cardbtn").click();
+  const same = page.locator(".bd-card-menu label.bd-card-opt", { hasText: /^Mã$/ }).locator("input");
+  assert.equal(await same.isChecked(), false);
+  await same.check();
+  await page.keyboard.press("Escape");
 });
 
 console.log("\n== Quyền ==");

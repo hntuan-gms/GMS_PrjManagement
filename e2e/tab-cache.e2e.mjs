@@ -87,7 +87,7 @@ await step("Báo cáo: hiện số liệu cũ ngay, không có màn 'đang tải
   await tab("Nhịp dự án");
   await page.waitForTimeout(300);
   assert.equal(await page.locator(".pr-loading").count(), 0, "đang hiện màn tải thay vì số liệu cũ");
-  assert.ok((await page.textContent(".app-body")).includes("công việc"));
+  assert.ok((await page.textContent(".app-body")).includes("Trạng thái việc"));
   assert.ok(held.requests.length >= 1);
   held.release();
   await held.stop();

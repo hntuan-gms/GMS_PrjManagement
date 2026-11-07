@@ -4,7 +4,10 @@ import { push, type LayerOptions } from "./layers";
 /** Registers a layer in `layers.ts` while `open` is true. `onEscape` may change every render. */
 export function useLayer(id: string, open: boolean, options: LayerOptions = {}): void {
   const latest = useRef(options);
-  latest.current = options;
+  // After the render, not during it: a layer's handler is read only when Escape is pressed.
+  useEffect(() => {
+    latest.current = options;
+  });
   const hasEscape = !!options.onEscape;
   const dismissOnNav = !!options.dismissOnNav;
   useEffect(() => {

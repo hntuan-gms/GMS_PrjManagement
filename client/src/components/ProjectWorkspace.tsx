@@ -648,7 +648,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
     if (ids.length === 0) return;
     const ok = await dialogs.confirm({
       title: "Xoá khỏi Jira",
-      message: ids.length === 1 ? `Xoá ${ids[0]} khỏi Jira? Không hoàn tác được.` : `Xoá ${ids.length} công việc khỏi Jira? Không hoàn tác được.`,
+      message: ids.length === 1 ? `Xoá ${ids[0]} khỏi Jira? Không hoàn tác được.` : `Xoá ${ids.length} việc khỏi Jira? Không hoàn tác được.`,
       tone: "danger",
     });
     if (!ok) return;
@@ -666,7 +666,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
     setSelectedId(null);
     setDeleting(false);
     if (failed.length > 0) {
-      setSyncError(`Không xoá được ${failed.length} công việc: ${failed.join(", ")}`);
+      setSyncError(`Không xoá được ${failed.length} việc: ${failed.join(", ")}`);
     }
     await refreshTasks();
   }
@@ -702,7 +702,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
     takeover?: (id: string, err: unknown) => boolean
   ) {
     if (ids.length === 0) {
-      setSyncError(`Không có công việc nào phù hợp để ${verb}.`);
+      setSyncError(`Không có việc nào phù hợp để ${verb}.`);
       return;
     }
     const failed: string[] = [];
@@ -718,7 +718,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
     }
     setBulkBusy(null);
     const notes: string[] = [];
-    if (failed.length > 0) notes.push(`Không ${verb} được ${failed.length} công việc: ${failed.join("; ")}.`);
+    if (failed.length > 0) notes.push(`Không ${verb} được ${failed.length} việc: ${failed.join("; ")}.`);
     if (skipped.length > 0) notes.push(`Bỏ qua ${skipped.join(", ")} vì không áp dụng được.`);
     setSyncError(notes.length > 0 ? notes.join(" ") : null);
     await refreshTasks();
@@ -789,10 +789,10 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
     if (mode === "clear") {
       const target = picked.filter((t) => !rollup(t) && (t.baselineStart || t.baselineDue));
       if (target.length === 0) {
-        setSyncError("Các công việc đã chọn chưa có baseline nào để xoá.");
+        setSyncError("Các việc đã chọn chưa có baseline nào để xoá.");
         return;
       }
-      if (!(await dialogs.confirm({ message: `Xoá baseline của ${target.length} công việc? Không hoàn tác được.`, tone: "danger" }))) return;
+      if (!(await dialogs.confirm({ message: `Xoá baseline của ${target.length} việc? Không hoàn tác được.`, tone: "danger" }))) return;
       return runBulk("xoá baseline", target.map((t) => t.id), () => ({ baselineStart: null, baselineDue: null }));
     }
     const target = picked.filter((t) => t.startDate && !rollup(t));
@@ -800,7 +800,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
     const overwrite = target.filter((t) => t.baselineStart || t.baselineDue).length;
     if (
       overwrite > 0 &&
-      !(await dialogs.confirm({ message: `${overwrite} công việc đã có baseline sẽ bị ghi đè bằng lịch hiện tại. Tiếp tục?`, confirmLabel: "Ghi đè" }))
+      !(await dialogs.confirm({ message: `${overwrite} việc đã có baseline sẽ bị ghi đè bằng lịch hiện tại. Tiếp tục?`, confirmLabel: "Ghi đè" }))
     ) {
       return;
     }
@@ -1259,7 +1259,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
     { id: "clear", label: "Xoá mọi lọc", group: "Lọc", icon: "x", keys: "Shift F", run: () => setTaskFilter(EMPTY_TASK_FILTER) },
     { id: "sync", label: "Đọc lại từ Jira", group: "Dự án", icon: "sync", keys: "Shift R", aliases: "dong bo refresh", run: () => void handleSync() },
     { id: "projects", label: "Chuyển dự án…", group: "Dự án", icon: "switch", keys: "Ctrl P", run: onSwitchProject },
-    { id: "import", label: "Nhập công việc từ CSV / Excel…", group: "Dự án", icon: "upload", run: () => setImporting(true) },
+    { id: "import", label: "Nhập việc từ CSV / Excel…", group: "Dự án", icon: "upload", run: () => setImporting(true) },
     { id: "kbkt", label: "Nhập KBKT (test case)…", group: "Dự án", icon: "upload", run: () => setImportingKbkt(true) },
     { id: "sla", label: "Cài đặt SLA…", group: "Dự án", icon: "clock", run: () => openSettings("sla") },
     { id: "calendar", label: "Lịch làm việc & ngày lễ…", group: "Dự án", icon: "calendar", run: () => openSettings("calendar") },
@@ -1430,7 +1430,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
         {selectedIds.size > 0 && view === "gantt" && !editingTask && (
           <div className="selection-bar" role="region" aria-label="Thao tác hàng loạt">
             <span className="selection-count">
-              Đã chọn <strong>{selectedIds.size}</strong> công việc
+              Đã chọn <strong>{selectedIds.size}</strong> việc
             </span>
             <button onClick={() => setSelectedIds(new Set())}>Bỏ chọn</button>
             <select
@@ -1441,7 +1441,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
                 const v = e.target.value;
                 if (v) handleBulkAssign(v === "__none__" ? null : v);
               }}
-              aria-label="Gán người phụ trách cho các công việc đã chọn"
+              aria-label="Gán người phụ trách cho các việc đã chọn"
             >
               <option value="">Gán cho…</option>
               <option value="__none__">Bỏ gán</option>
@@ -1464,7 +1464,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
                 const v = e.target.value;
                 if (v === "save" || v === "clear") handleBulkBaseline(v);
               }}
-              aria-label="Lưu hoặc xoá baseline của các công việc đã chọn"
+              aria-label="Lưu hoặc xoá baseline của các việc đã chọn"
               title="Baseline là lịch đã chốt để so với lịch hiện tại trên Gantt"
             >
               <option value="">Baseline…</option>
@@ -1499,7 +1499,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
               </button>
             </span>
             <button className="danger" onClick={handleDeleteSelected} disabled={deleting || bulkBusy !== null}>
-              {deleting ? "Đang xoá..." : `Xoá ${selectedIds.size} công việc`}
+              {deleting ? "Đang xoá..." : `Xoá ${selectedIds.size} việc`}
             </button>
             {bulkBusy && <span className="selection-hint">{bulkBusy}</span>}
           </div>
@@ -1631,6 +1631,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
             />
           ) : view === "settings" ? (
             <ProjectSettings
+              projectKey={session.project?.key ?? ""}
               section={settingsSection}
               onSectionChange={setSettingsSection}
               sla={sla}

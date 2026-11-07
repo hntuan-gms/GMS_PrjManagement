@@ -288,7 +288,7 @@ function PersonTasks({
         {person.overlaps.length > 0 && (
           <div className="rv-banner" role="status">
             <Icon name="alert" size={14} className="rv-banner-icon" />
-            <strong>{person.overlaps.length} cặp công việc chồng lịch:</strong>
+            <strong>{person.overlaps.length} cặp việc chồng lịch:</strong>
             {person.overlaps.slice(0, 6).map((o, i) => (
               <span key={i} className="rv-conflict-pair" title={`Trùng ${o.from} → ${o.to}`}>
                 {o.aId} ↔ {o.bId} ({shortDate(o.from)}–{shortDate(o.to)})
@@ -300,7 +300,7 @@ function PersonTasks({
       </div>
 
       {bars.length === 0 ? (
-        <div className="rv-tl-empty">Chưa có công việc nào được giao.</div>
+        <div className="rv-tl-empty">Chưa có việc nào được giao.</div>
       ) : (
         bars.map(({ task, dates, place, beyond }) => {
           const conflict = conflictIds.has(task.id);

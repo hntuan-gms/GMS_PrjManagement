@@ -18,7 +18,7 @@ export default function QuickCreateOptions({ types, members, value, onChange }: 
   const type = types.includes(value.issueType) ? value.issueType : types[0];
   return (
     <div className="bd-quick-opts">
-      <select value={type} onChange={(e) => onChange({ ...value, issueType: e.target.value })} aria-label="Loại công việc">
+      <select value={type} onChange={(e) => onChange({ ...value, issueType: e.target.value })} aria-label="Loại việc">
         {types.map((t) => (
           <option key={t} value={t}>
             {t}

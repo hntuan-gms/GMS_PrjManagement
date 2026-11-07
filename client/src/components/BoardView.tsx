@@ -13,10 +13,9 @@ import {
 import { EMPTY_TASK_FILTER, type TaskFilter } from "../taskFilter";
 import { buildResourceLoad, todayIso } from "../resourceAllocation";
 import {
-  CARD_FIELDS,
-  COLOR_SCHEMES,
   isCustomized,
   readCardOptions,
+  rememberCardScope,
   subtasksByParent,
   withoutMergedSubtasks,
   writeCardOptions,
@@ -44,6 +43,7 @@ import FilterBar, { type FilterFacet } from "./FilterBar";
 import { Icon } from "./Icons";
 import { AssignContext, type AssignContextValue } from "./assignContext";
 import { useWorkCalendar } from "./workCalendarContext";
+import CardOptionsForm from "./CardOptionsForm";
 import Popover from "./Popover";
 import type { QuickOptions } from "./QuickCreateOptions";
 import KanbanBoard from "./KanbanBoard";
@@ -177,6 +177,11 @@ export default function BoardView({
   useEffect(() => {
     setCardOptionsState(readCardOptions(cardScope));
   }, [cardScope]);
+  // The project settings page edits the card options of the board last drawn here.
+  const hasSnapshot = snapshot !== null;
+  useEffect(() => {
+    if (hasSnapshot) rememberCardScope(projectKey, cardScope);
+  }, [hasSnapshot, projectKey, cardScope]);
   function setCardOptions(next: CardOptions) {
     setCardOptionsState(next);
     writeCardOptions(cardScope, next);
@@ -473,7 +478,7 @@ export default function BoardView({
           }
         }
       },
-      { failure: "Không tạo được công việc", touchesTasks: true }
+      { failure: "Không tạo được việc", touchesTasks: true }
     );
   }
 
@@ -876,40 +881,7 @@ export default function BoardView({
                 </>
               }
             >
-              <div className="bd-card-opts">
-                <div className="menu-heading">Hiện trên thẻ</div>
-                {CARD_FIELDS.map((f) => (
-                  <label key={f.id} className="bd-card-opt">
-                    <input
-                      type="checkbox"
-                      checked={cardOptions.fields[f.id]}
-                      onChange={(e) => setCardOptions({ ...cardOptions, fields: { ...cardOptions.fields, [f.id]: e.target.checked } })}
-                    />
-                    {f.label}
-                  </label>
-                ))}
-                <label className="bd-card-opt">
-                  <input
-                    type="checkbox"
-                    checked={cardOptions.mergeSubtasks}
-                    onChange={(e) => setCardOptions({ ...cardOptions, mergeSubtasks: e.target.checked })}
-                  />
-                  Gộp sub-task vào thẻ cha
-                </label>
-                <div className="menu-sep" role="separator" />
-                <div className="menu-heading">Màu thẻ</div>
-                {COLOR_SCHEMES.map((c) => (
-                  <label key={c.id} className="bd-card-opt">
-                    <input
-                      type="radio"
-                      name="bd-card-color"
-                      checked={cardOptions.colorBy === c.id}
-                      onChange={() => setCardOptions({ ...cardOptions, colorBy: c.id })}
-                    />
-                    {c.label}
-                  </label>
-                ))}
-              </div>
+              <CardOptionsForm options={cardOptions} onChange={setCardOptions} />
             </Popover>
           )}
           {boardUrl && (

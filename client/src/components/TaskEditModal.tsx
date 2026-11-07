@@ -332,7 +332,7 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
         const failures = await uploadPending(task.id, pending);
         setPending(NO_ATTACHMENTS);
         if (failures.length > 0) {
-          setError(`Đã lưu công việc, nhưng một số đính kèm chưa lên Jira:\n${failures.join("\n")}`);
+          setError(`Đã lưu việc, nhưng một số đính kèm chưa lên Jira:\n${failures.join("\n")}`);
           api.getTaskAttachments(task.id).then(setExisting).catch(() => {});
           setSaving(false);
           return;
@@ -660,14 +660,14 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.ctrlKey && !e.metaKey) e.preventDefault();
             }}
-            aria-label="Tên công việc"
-            placeholder="Tên công việc"
+            aria-label="Tên việc"
+            placeholder="Tên việc"
           />
         </div>
 
         <div className="td-body">
           {/* One column: the facts first (who, when, how much), what the work is after them. */}
-          <aside className="td-side" aria-label="Chi tiết công việc">
+          <aside className="td-side" aria-label="Chi tiết việc">
             {transitionsError && <small className="field-note is-error">{transitionsError}</small>}
             {transitions && reachable.length === 0 && (
               <small className="field-note">Quy trình Jira không cho chuyển tiếp từ “{task.statusName}”. Có thể cần điều kiện khác hoặc quyền riêng.</small>

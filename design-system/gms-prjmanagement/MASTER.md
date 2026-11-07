@@ -92,7 +92,7 @@ Mỗi họ tín hiệu có 5 bậc: `-wash` (nền) · `-soft` · `-line` (viề
 - **Thanh lọc** (`.tf-bar`, 40px, điều khiển 28px): dùng chung cho Kế hoạch và Nhân lực. Bộ lọc đang bật là nền mực.
 - **Trang mặc định** là Hôm nay; sau đó nhớ lăng kính cuối theo dự án (`gms.view.<site>.<project>`). `?view=gantt|board|resource|report|settings|today` mở thẳng; `timesheet` là bí danh của Nhân lực · Giờ đã ghi.
 - **Nhân lực có ba chế độ**: Mức tải · Giờ đã ghi · Kỹ năng. Người không được xem danh sách thành viên chỉ có "Giờ đã ghi".
-- **Cài đặt dự án** (`ProjectSettings`): một trang, menu trái (Lịch làm việc, SLA, Nhập KBKT), mỗi mục có nút Lưu ở chân, chỉ bật khi có thay đổi.
+- **Cài đặt dự án** (`ProjectSettings`): một trang, menu trái (Lịch làm việc, SLA, Nhập KBKT, Thẻ trên board), mỗi mục có nút Lưu ở chân, chỉ bật khi có thay đổi.
 - **Mô hình lưu**: panel và tờ bên (chi tiết việc, hồ sơ nhân lực, tờ ghi giờ) **đóng là lưu**, lỗi thì ở lại và nói lý do. Hộp thoại có hậu quả (xoá, hoàn thành sprint): nút rõ ràng, Esc = huỷ không hỏi. Trang Cài đặt: Lưu ở chân mục.
 - **Lớp phủ** đăng ký ở `layers.ts` (`useLayer`): Esc đóng lớp trên cùng, phím tắt đứng yên phía sau.
 

@@ -542,7 +542,7 @@ export default function ResourceView({
       {mode === "skills" && <SkillMatrixView users={users} profiles={pool?.profiles ?? []} onProfileSaved={upsertProfile} />}
       {mode === "load" && filtering && (
         <div className="rv-notice">
-          Đang lọc: mức tải bên dưới chỉ tính các công việc khớp bộ lọc, không phải toàn bộ khối lượng của mỗi người.
+          Đang lọc: mức tải bên dưới chỉ tính các việc khớp bộ lọc, không phải toàn bộ khối lượng của mỗi người.
         </div>
       )}
       {mode === "load" && (
@@ -585,7 +585,7 @@ export default function ResourceView({
               title="Việc chưa có người phụ trách"
             >
               <Icon name="alert" size={13} />
-              {load.unassigned.length} công việc chưa gán
+              {load.unassigned.length} việc chưa gán
               <Icon name="chevronDown" size={12} className="rv-pill-caret" />
             </button>
 

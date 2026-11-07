@@ -296,7 +296,7 @@ aiRouter.post("/chat", requireProject, express.json({ limit: CHAT_BODY_LIMIT }),
             runId,
             itemCount: result.items.length,
             warnings: result.warnings,
-            summary: `Đã dựng ${result.items.length} công việc, chờ người duyệt. Hãy nói ngắn gọn kế hoạch gồm những giai đoạn nào và nhắc người dùng bấm vào bảng để kiểm tra trước khi tạo trên Jira.`,
+            summary: `Đã dựng ${result.items.length} việc, chờ người duyệt. Hãy nói ngắn gọn kế hoạch gồm những giai đoạn nào và nhắc người dùng bấm vào bảng để kiểm tra trước khi tạo trên Jira.`,
           };
         } catch (err) {
           await plans.failRun(runId, (err as Error).message).catch(() => {});

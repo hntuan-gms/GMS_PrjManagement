@@ -29,7 +29,7 @@ export type ImportField =
   | "fixVersions";
 
 export const FIELD_LABELS: Record<ImportField, string> = {
-  summary: "Tên công việc",
+  summary: "Tên việc",
   issueType: "Loại",
   description: "Mô tả",
   assignee: "Người phụ trách",
@@ -98,7 +98,7 @@ export function parseTable(raw: string, delimiter = detectDelimiter(raw)): strin
 /* ------------------------------------------------------------------ mapping */
 
 const ALIASES: Record<ImportField, string[]> = {
-  summary: ["summary", "title", "name", "task", "ten", "ten cong viec", "cong viec", "tieu de", "noi dung"],
+  summary: ["summary", "title", "name", "task", "ten", "ten cong viec", "cong viec", "ten viec", "viec", "tieu de", "noi dung"],
   issueType: ["type", "issue type", "issuetype", "loai", "loai cong viec"],
   description: ["description", "desc", "mo ta", "chi tiet"],
   assignee: ["assignee", "owner", "nguoi phu trach", "phu trach", "nguoi thuc hien", "giao cho", "pic"],
@@ -196,7 +196,7 @@ export function buildRows(table: string[][], mapping: Array<ImportField | null>,
   return body.map((r, i) => {
     const problems: string[] = [];
     const value: ImportRow = { summary: cell(r, "summary") };
-    if (!value.summary) problems.push("Thiếu tên công việc.");
+    if (!value.summary) problems.push("Thiếu tên việc.");
 
     const type = cell(r, "issueType");
     if (type) {

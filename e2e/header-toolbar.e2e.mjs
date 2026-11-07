@@ -177,8 +177,8 @@ await step("menu 'Nhập / Xuất' có đủ ba mục và duyệt được bằn
   await page.keyboard.press("ArrowDown");
   const items = await page.$$eval(".io-menu [role=menuitem]", (b) => b.map((x) => x.textContent));
   assert.equal(items.length, 3, items.join("|"));
-  assert.ok(items[0].includes("Nhập công việc") && items[1].includes("Nhập KBKT") && items[2].includes("Xuất CSV"));
-  assert.equal(await page.evaluate(() => document.activeElement?.textContent.includes("Nhập công việc")), true);
+  assert.ok(items[0].includes("Nhập việc") && items[1].includes("Nhập KBKT") && items[2].includes("Xuất CSV"));
+  assert.equal(await page.evaluate(() => document.activeElement?.textContent.includes("Nhập việc")), true);
   await page.keyboard.press("ArrowDown");
   assert.equal(await page.evaluate(() => document.activeElement?.textContent.includes("Nhập KBKT")), true);
   await page.keyboard.press("Escape");

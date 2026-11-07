@@ -650,11 +650,11 @@ Tất cả ở `.playwright-mcp/` (API giả lập, Chrome, 1440×900 trừ khi 
 | 0-1 … 0-5 | ✅ | đợt 0 | `Avatar`, `TaskPicker`, `PersonPicker` + `assignHints`, `TimeInput`, `dateLabels`; mỗi cái có test |
 | 0-6 | ✅ | đợt 0 | `layers.ts`, `useLayer`. Đã đăng ký: hộp chọn dự án, ô lệnh, bảng phím tắt, `Dialog`, tờ ghi giờ, hồ sơ nhân lực, khung chi tiết. **Không đăng ký** trợ lý (`ChatDock`) và thẻ "chưa gán": cả hai không phải modal, đăng ký sẽ chặn phím `1–4` khi chúng mở |
 | A1 … A4 | ✅ | đợt A | `layers.e2e.mjs`. A4 do vòng `Gantt` của thư viện gọi `preventDefault` cho mọi phím: nghe phím ở pha capture |
-| A5 … A7 | ✅ | đợt A | A7 mới đổi chuỗi trong `CreateTaskModal`, `TaskEditModal`, `GanttView`, `PlanReviewModal`; còn ~70 chỗ "công việc" khác (e2e đang so khớp), để một lượt riêng |
+| A5 … A7 | ✅ | đợt A | A7: "công việc" → "việc" ở toàn bộ client, máy chủ (lỗi, lý do sức khoẻ, prompt) và e2e; giữ "Luồng công việc" (workflow) và "Nội dung công việc đã làm"; cột nhập CSV nhận thêm "Tên việc" |
 | A8, A9 | ✅ | đợt A | `DateField` / `TimeInput` thay ô gốc, e2e sửa theo (`fillDate`) |
 | A10 … A15 | ✅ | đợt A | |
 | B1 … B3, B5, B6 | ✅ | đợt B | rail 56px; Nhân lực ba chế độ; huy hiệu 2 tuần tới; hộp chọn dự án |
-| B4 | ✅ (thiếu mục Board) | đợt B | `ProjectSettings`: Lịch làm việc, SLA, Nhập KBKT. Mục "Board" (tuỳ chọn thẻ) chưa chuyển vì nó là state theo từng board trong `BoardView` |
+| B4 | ✅ | đợt B | `ProjectSettings`: Lịch làm việc, SLA, Nhập KBKT, Thẻ trên board (`BoardCardSettings`, `CardOptionsForm` dùng chung với nút "Thẻ" của Bảng; board lấy từ `readLastCardScope`) |
 | C1 | ✅ | | thanh vô hình + `UnscheduledLayer`; `plan-scheduling.e2e.mjs` |
 | C2, C3 | ✅ | | kiểm bằng ảnh 1280/1500 |
 | C4 | ✅ | | `WbsCellEditor`, `wbsCells.ts`; cần `onUpdate` ở `ProjectWorkspace` (đã nối) |
@@ -665,5 +665,5 @@ Tất cả ở `.playwright-mcp/` (API giả lập, Chrome, 1440×900 trừ khi 
 | E1, E2 | ✅ | | `boardFilter.ts`; `shared-filter.e2e.mjs`. Nhịp dự án vẫn giữ các `select` (đã đọc mặc định từ bộ lọc chung) |
 | F1 … F10 | ✅ | | F5 `timesheet-inline.e2e.mjs`; F1/F10 `assign-hints.e2e.mjs` |
 | G1 … G9 | ✅ | | |
-| e2e mới (§12.3) | ✅ trừ một | | có: `layers`, `plan-scheduling`, `shared-filter`, `assign-hints`, `timesheet-inline`, `settings-page`. Thay `task-detail-layout` bằng các bước trong `task-detail-polish`/`transition-fields` đã sửa; chưa viết `pulse-today.e2e.mjs` (H2/H3/H6 có test thuần ở `projectPulse.test.ts`, `today.test.ts`) |
-| H1 … H15 | ✅ | | H13: trợ lý đẩy nội dung bằng `padding-right: var(--chat-w)` (vẫn là khung nổi, chưa thành tờ bên như khung chi tiết) |
+| e2e mới (§12.3) | ✅ | | có: `layers`, `plan-scheduling`, `shared-filter`, `assign-hints`, `timesheet-inline`, `settings-page`, `pulse-today`. Thay `task-detail-layout` bằng các bước trong `task-detail-polish`/`transition-fields` đã sửa. `pulse-today` bắt được một lỗi thật: vòng tròn "xong" ở Hôm nay chỉ báo lỗi khi bước xong bị validator từ chối, giờ mở khung chi tiết để nhập |
+| H1 … H15 | ✅ | | H13: trợ lý là tờ bên phải toàn chiều cao (`today.css`), đẩy nội dung bằng `padding-right: var(--chat-w)`; dưới 900px phủ lên |

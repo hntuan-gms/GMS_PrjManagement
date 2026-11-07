@@ -75,7 +75,7 @@ const FIELD_VI: Record<string, string> = {
   sprint: "Sprint",
   link: "Liên kết",
   attachment: "Đính kèm",
-  parent: "Công việc cha",
+  parent: "Việc cha",
   "epic link": "Epic",
   resolution: "Kết quả",
   issuetype: "Loại",

@@ -437,7 +437,7 @@ function judgeHealth(input: {
   if (input.criticalOverdue > 0) {
     flag(
       input.criticalOverdue > 2 ? "off_track" : "at_risk",
-      `${input.criticalOverdue} công việc trên đường găng đã quá hạn — mỗi ngày trễ ở đây đẩy lùi ngày kết thúc.`
+      `${input.criticalOverdue} việc trên đường găng đã quá hạn — mỗi ngày trễ ở đây đẩy lùi ngày kết thúc.`
     );
   }
 
@@ -445,12 +445,12 @@ function judgeHealth(input: {
     const share = input.overdue / input.openScheduled;
     flag(
       share > 0.2 ? "off_track" : "at_risk",
-      `${input.overdue}/${input.openScheduled} công việc đang mở đã quá hạn (${Math.round(share * 100)}%).`
+      `${input.overdue}/${input.openScheduled} việc đang mở đã quá hạn (${Math.round(share * 100)}%).`
     );
   }
 
   if (input.notStarted > 0) {
-    flag("at_risk", `${input.notStarted} công việc đã tới ngày bắt đầu nhưng vẫn ở trạng thái chưa làm.`);
+    flag("at_risk", `${input.notStarted} việc đã tới ngày bắt đầu nhưng vẫn ở trạng thái chưa làm.`);
   }
 
   if (reasons.length === 0) {
@@ -458,7 +458,7 @@ function judgeHealth(input: {
       input.spi !== null
         ? `hoàn thành ${input.actualPct}%, kế hoạch ${input.plannedPct}%`
         : `dự án mới ở giai đoạn đầu (kế hoạch mới yêu cầu ${input.plannedPct}%)`;
-    return { health, reasons: [`Không có công việc quá hạn, không trễ baseline — ${detail}.`] };
+    return { health, reasons: [`Không có việc quá hạn, không trễ baseline — ${detail}.`] };
   }
 
   reasons.sort((a, b) => rank[b.level] - rank[a.level]);
@@ -476,7 +476,7 @@ export function progressHeadline(m: ProgressMetrics): string {
   const parts = [
     `Tình trạng: ${HEALTH_LABEL[m.health]}`,
     `hoàn thành ${m.actualPct}% (kế hoạch ${m.plannedPct}%${m.spi !== null ? `, SPI ${m.spi}` : ""})`,
-    `${m.counts.done}/${m.counts.total} công việc xong`,
+    `${m.counts.done}/${m.counts.total} việc xong`,
     `${m.counts.overdue} quá hạn`,
   ];
   if (m.schedule.plannedEnd) {

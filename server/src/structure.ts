@@ -60,7 +60,7 @@ export function checkStructure(
   let subtask = me.subtask;
   if (change.issueType !== undefined) {
     const t = types.find((x) => x.name.toLowerCase() === change.issueType!.toLowerCase());
-    if (!t) return `Dự án không có loại công việc "${change.issueType}".`;
+    if (!t) return `Dự án không có loại việc "${change.issueType}".`;
     typeName = t.name;
     subtask = t.subtask;
   }
@@ -70,7 +70,7 @@ export function checkStructure(
   if (parentKey) {
     const parent = nodes.get(parentKey);
     if (!parent) return `Không tìm thấy việc cha ${parentKey} trong dự án.`;
-    if (parentKey === id) return "Một công việc không thể làm cha của chính nó.";
+    if (parentKey === id) return "Một việc không thể làm cha của chính nó.";
     if (isDescendant(nodes, parentKey, id)) {
       return `${parentKey} đang nằm dưới ${id}; đặt làm cha sẽ tạo vòng lặp cha–con.`;
     }

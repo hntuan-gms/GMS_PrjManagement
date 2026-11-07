@@ -87,6 +87,25 @@ export function readCardOptions(boardKey: string): CardOptions {
   }
 }
 
+const lastScopeKey = (project: string) => `gms.board.cardScope.${project}`;
+
+/** The board whose cards the Bảng tab drew last ("status" for the status board): what the settings page edits. */
+export function readLastCardScope(project: string): string | null {
+  try {
+    return localStorage.getItem(lastScopeKey(project));
+  } catch {
+    return null;
+  }
+}
+
+export function rememberCardScope(project: string, scope: string): void {
+  try {
+    localStorage.setItem(lastScopeKey(project), scope);
+  } catch {
+    // Private mode: the settings page then has no board to edit.
+  }
+}
+
 export function writeCardOptions(boardKey: string, options: CardOptions): void {
   try {
     localStorage.setItem(storageKey(boardKey), JSON.stringify(options));

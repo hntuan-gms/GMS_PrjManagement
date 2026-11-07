@@ -41,7 +41,7 @@ export default function BulkStatusMenu({ tasks, disabled, onApply, label, classN
       menuLabel="Đổi trạng thái"
       menuClassName="bulk-status-menu"
       disabled={disabled}
-      title={title ?? "Đổi trạng thái các công việc đã chọn theo quy trình của Jira"}
+      title={title ?? "Đổi trạng thái các việc đã chọn theo quy trình của Jira"}
       label={label ?? "Đổi trạng thái…"}
     >
       {({ close }) => (
@@ -130,7 +130,7 @@ function BulkStatusPanel({ tasks, onApply }: { tasks: Task[]; onApply: Props["on
       {error && <div className="tf-empty is-error">{error}</div>}
       {!targets && !error && <div className="tf-empty">Đang hỏi quy trình Jira…</div>}
       {targets && targets.length === 0 && (
-        <div className="tf-empty">Quy trình không cho các công việc đã chọn chuyển sang trạng thái nào khác từ trạng thái hiện tại.</div>
+        <div className="tf-empty">Quy trình không cho các việc đã chọn chuyển sang trạng thái nào khác từ trạng thái hiện tại.</div>
       )}
       {targets?.map((t) => (
         <button
@@ -144,7 +144,7 @@ function BulkStatusPanel({ tasks, onApply }: { tasks: Task[]; onApply: Props["on
             {t.status}
             {t.fields.length > 0 && <small>Cần nhập: {t.fields.map((f) => f.name).join(", ")}</small>}
           </span>
-          <span className="bulk-count" title={`${t.ids.length} trong ${tasks.length} công việc chuyển được`}>
+          <span className="bulk-count" title={`${t.ids.length} trong ${tasks.length} việc chuyển được`}>
             {t.ids.length}/{tasks.length}
           </span>
         </button>

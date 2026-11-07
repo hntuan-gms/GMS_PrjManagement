@@ -137,7 +137,7 @@ export default function CommandBar({ tasks, commands, initialMode = "command", o
   let lastGroup = "";
   const renderRow = (row: Row, i: number): ReactNode => {
     const group =
-      row.kind === "command" ? (q ? "Lệnh" : row.cmd.group) : row.kind === "task" ? "Công việc" : row.kind === "create" ? "Tạo việc" : "Trợ lý";
+      row.kind === "command" ? (q ? "Lệnh" : row.cmd.group) : row.kind === "task" ? "Việc" : row.kind === "create" ? "Tạo việc" : "Trợ lý";
     const heading = group !== lastGroup ? <div className="cmdk-group" key={`g-${group}-${i}`}>{group}</div> : null;
     lastGroup = group;
     const cls = `cmdk-row${i === active ? " is-active" : ""}`;

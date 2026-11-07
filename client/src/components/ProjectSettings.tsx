@@ -2,11 +2,13 @@ import { useCallback, useRef } from "react";
 import { SETTINGS_SECTIONS, type SettingsSection } from "../settingsSections";
 import type { SlaSettingsResponse, WorkCalendarSettings } from "../types";
 import { useDialogs } from "./dialogContext";
+import BoardCardSettings from "./BoardCardSettings";
 import KbktSettingsSection from "./KbktSettings";
 import SlaSettingsModal from "./SlaSettingsModal";
 import WorkCalendarModal from "./WorkCalendarModal";
 
 interface Props {
+  projectKey: string;
   section: SettingsSection;
   onSectionChange: (s: SettingsSection) => void;
   /** The policy the workspace holds (it also carries the calendar). Null until the first read answers. */
@@ -24,7 +26,7 @@ interface Props {
  * changed; "Huỷ" puts the saved values back). Anyone can read; only a project admin can save (the section
  * says so in one line, the server checks again).
  */
-export default function ProjectSettings({ section, onSectionChange, sla, onSlaSaved, onCalendarSaved, backLabel, onBack }: Props) {
+export default function ProjectSettings({ projectKey, section, onSectionChange, sla, onSlaSaved, onCalendarSaved, backLabel, onBack }: Props) {
   const { confirm } = useDialogs();
   // Whether the section on screen has edits not saved; reset when the section changes (it is remounted).
   const dirty = useRef(false);
@@ -85,6 +87,7 @@ export default function ProjectSettings({ section, onSectionChange, sla, onSlaSa
             <p className="sla-muted">Đang tải…</p>
           ))}
         {section === "kbkt" && <KbktSettingsSection onDirtyChange={onDirtyChange} />}
+        {section === "board" && <BoardCardSettings projectKey={projectKey} />}
       </main>
     </div>
   );

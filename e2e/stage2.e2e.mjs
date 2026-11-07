@@ -309,7 +309,7 @@ const SHEET = [
   "Việc cuối\tTask\t2026-11-10\t2\tDEMO-2",
 ].join("\n");
 await step("dán từ Excel: tự nhận cột theo tiêu đề, xem trước và chỉ ra dòng lỗi", async () => {
-  await ioAction(page, "Nhập công việc");
+  await ioAction(page, "Nhập việc");
   await page.fill(".import-modal textarea", SHEET);
   await page.waitForSelector(".import-preview table");
   const mapped = await page.$$eval(".import-map select", (s) => s.map((x) => x.value));
@@ -324,7 +324,7 @@ await step("nhập: các dòng hợp lệ được tạo, dòng hỏng và con c
   await page.locator(".import-modal button.primary", { hasText: /^Nhập 5/ }).click();
   await page.waitForSelector(".import-result");
   const text = await page.textContent(".import-result");
-  assert(text.includes("Đã tạo 3 công việc"), text);
+  assert(text.includes("Đã tạo 3 việc"), text);
   assert(/Dòng 3[^]*không hiểu/.test(text), "dòng 3 phải bị chặn vì ngày");
   assert(/Dòng 4[^]*chưa được tạo/.test(text), "con của dòng hỏng phải bị chặn");
   assert(/Dòng 5[^]*Jira từ chối/.test(text), "dòng 5 do Jira từ chối");
@@ -334,7 +334,7 @@ await step("nhập: các dòng hợp lệ được tạo, dòng hỏng và con c
     ["Giai đoạn mới", null], ["Thiết kế màn hình", "#1"], ["LỖI do Jira", null], ["Việc cuối", "DEMO-2"],
   ]);
 });
-await step("đóng → bảng WBS có các công việc vừa nhập, việc con nằm dưới việc cha", async () => {
+await step("đóng → bảng WBS có các việc vừa nhập, việc con nằm dưới việc cha", async () => {
   await page.locator(".import-result .primary").click();
   await page.waitForSelector(".import-modal", { state: "detached" });
   await page.waitForFunction(() => [...document.querySelectorAll(".wbs-row")].some((r) => r.textContent.includes("Thiết kế màn hình")));
@@ -344,13 +344,13 @@ await step("đóng → bảng WBS có các công việc vừa nhập, việc con
   assert(epic >= 0 && story === epic + 1, `Epic ${epic}, Story ${story}`);
 });
 await step("bảng không có cột Tên thì không cho nhập và nói rõ", async () => {
-  await ioAction(page, "Nhập công việc");
+  await ioAction(page, "Nhập việc");
   await page.fill(".import-modal textarea", "Cột A\tCột B\nxxx\tyyy");
   await page.waitForSelector(".import-map");
   // Headers nobody recognises: the first column is assumed to be the title. Taking that away leaves nothing to import.
   await page.waitForFunction(() => document.querySelector(".import-map select")?.value === "summary");
   await page.locator(".import-map select").first().selectOption("");
-  await page.waitForFunction(() => document.querySelector(".import-modal .modal-error")?.textContent.includes("Tên công việc"));
+  await page.waitForFunction(() => document.querySelector(".import-modal .modal-error")?.textContent.includes("Tên việc"));
   assert.equal(await page.locator(".import-modal button.primary").isDisabled(), true);
   await page.locator(".import-modal .modal-close").click();
 });

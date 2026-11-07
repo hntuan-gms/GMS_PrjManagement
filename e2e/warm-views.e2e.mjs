@@ -27,6 +27,10 @@ page.on("request", (r) => {
   if (m && r.method() === "GET") counts[m[1]]++;
 });
 const snapshot = () => ({ ...counts });
+const seen = [];
+page.on("request", (r) => {
+  if (/\/api\/(tasks|board|timesheet|progress)(\?|$)/.test(r.url()) && r.method() === "GET") seen.push(Date.now() + " " + r.url());
+});
 
 await page.goto(process.env.E2E_APP ?? "http://localhost:5173/");
 await page.waitForSelector(".wbs-row");
@@ -54,7 +58,7 @@ await step("Báo cáo hiện số liệu ngay, không có request mới", async 
 });
 await step("cả ba tab không gọi thêm API nào", async () => {
   await page.waitForTimeout(600);
-  assert.deepEqual(snapshot(), before);
+  assert.deepEqual(snapshot(), before, "requests: " + seen.join(" | "));
 });
 
 console.log("\n== Việc đổi thì hỏi lại ==");

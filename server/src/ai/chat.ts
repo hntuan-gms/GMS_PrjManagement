@@ -58,7 +58,7 @@ export type ChatEvent =
  * of every message up and eventually overflow the window.
  */
 function projectSnapshot(tasks: Task[], today: string, limit = 150): string {
-  if (tasks.length === 0) return "Dự án chưa có công việc nào.";
+  if (tasks.length === 0) return "Dự án chưa có việc nào.";
 
   const late = tasks.filter((t) => t.dueDate && t.dueDate < today && t.statusCategory !== "done");
   const done = tasks.filter((t) => t.statusCategory === "done").length;
@@ -79,8 +79,8 @@ function projectSnapshot(tasks: Task[], today: string, limit = 150): string {
   });
 
   return [
-    `Tổng: ${tasks.length} công việc — ${done} xong, ${inProgress} đang làm, ${late.length} quá hạn. Hôm nay: ${today}.`,
-    tasks.length > limit ? `(hiển thị ${limit} công việc đáng chú ý nhất)` : "",
+    `Tổng: ${tasks.length} việc — ${done} xong, ${inProgress} đang làm, ${late.length} quá hạn. Hôm nay: ${today}.`,
+    tasks.length > limit ? `(hiển thị ${limit} việc đáng chú ý nhất)` : "",
     "",
     "id | tên | loại | trạng thái | % | phụ trách | ngày | chờ (việc đi trước, kiểu phụ thuộc)",
     ...lines,
@@ -125,13 +125,13 @@ function systemPrompt(projectKey: string, tasks: Task[], today: string, team: Ji
     "",
     "Nguyên tắc:",
     "- Chỉ trả lời dựa trên dữ liệu dự án bên dưới hoặc kết quả công cụ. Không có dữ liệu thì nói thẳng là không biết, tuyệt đối không bịa số.",
-    "- Khi nói về tiến độ, dẫn ra mã công việc cụ thể (ví dụ AI-12) để người dùng kiểm chứng được.",
+    "- Khi nói về tiến độ, dẫn ra mã việc cụ thể (ví dụ AI-12) để người dùng kiểm chứng được.",
     "- Không tự tính hay hứa hẹn ngày tháng ngoài những gì dữ liệu đã có.",
     "",
     "Công cụ:",
-    "- Chia một khối công việc lớn thành nhiều task → create_plan. Kết quả là bản nháp chờ người duyệt, KHÔNG tự lên Jira.",
+    "- Chia một khối việc lớn thành nhiều task → create_plan. Kết quả là bản nháp chờ người duyệt, KHÔNG tự lên Jira.",
     "  Đừng tự liệt kê kế hoạch dạng văn bản thay cho công cụ này.",
-    "- Người dùng yêu cầu thêm ĐÚNG MỘT công việc cụ thể → create_task. Cái này ghi thẳng lên Jira,",
+    "- Người dùng yêu cầu thêm ĐÚNG MỘT việc cụ thể → create_task. Cái này ghi thẳng lên Jira,",
     `  nên chỉ gọi khi người dùng thực sự bảo tạo. Loại issue đang dùng trong dự án: ${issueTypesInUse(tasks)}.`,
     "- Gán/đổi người phụ trách → assign_task. Bỏ gán → unassign_task.",
     "  Người dùng gọi tên (kể cả viết không dấu, ví dụ 'vo dinh quang') → truyền nguyên tên vào tham số assignee;",
@@ -174,7 +174,7 @@ function systemPrompt(projectKey: string, tasks: Task[], today: string, team: Ji
     "- Mơ hồ (không rõ việc nào, người nào, sprint nào) → hỏi lại một câu ngắn thay vì đoán.",
     "",
     "Quy tắc gán người:",
-    "- TUYỆT ĐỐI không gán người cho Epic. Epic là vùng chứa, trải dài toàn bộ thời gian của các công việc con,",
+    "- TUYỆT ĐỐI không gán người cho Epic. Epic là vùng chứa, trải dài toàn bộ thời gian của các việc con,",
     "  gán người vào đó sẽ khoá cứng lịch của họ suốt cả giai đoạn. Chỉ gán cho task/story/bug lá.",
     "- Khi người dùng không chỉ đích danh ai, ưu tiên người có ÍT NGÀY TRÙNG LỊCH nhất, rồi mới đến người tải thấp hơn.",
     "  Người tải trung bình thấp vẫn có thể kẹt cứng đúng tuần cần làm — hãy đọc conflictDays, đừng chỉ nhìn loadPercent.",

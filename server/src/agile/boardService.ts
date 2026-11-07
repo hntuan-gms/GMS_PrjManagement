@@ -618,9 +618,9 @@ export class BoardService {
     const pattern = new RegExp(`^${this.ctx.projectKey}-\\d+$`);
     const clean = [...new Set(keys.map((k) => String(k).trim()).filter(Boolean))];
     const foreign = clean.filter((k) => !pattern.test(k));
-    if (clean.length === 0) throw badRequest("Chưa chọn công việc nào.");
+    if (clean.length === 0) throw badRequest("Chưa chọn việc nào.");
     if (foreign.length > 0) {
-      throw badRequest(`Chỉ thao tác được với công việc của dự án ${this.ctx.projectKey}: ${foreign.join(", ")}`);
+      throw badRequest(`Chỉ thao tác được với việc của dự án ${this.ctx.projectKey}: ${foreign.join(", ")}`);
     }
     return clean;
   }

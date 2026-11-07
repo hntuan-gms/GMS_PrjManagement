@@ -570,7 +570,7 @@ export class TaskService {
       throw new AppError(
         400,
         "TRANSITION_REFUSED",
-        `Jira không cho chuyển ${id} sang "${toStatus}": ${said || "quy trình từ chối bước này."} Mở công việc trên Jira để xem điều kiện còn thiếu.`
+        `Jira không cho chuyển ${id} sang "${toStatus}": ${said || "quy trình từ chối bước này."} Mở việc trên Jira để xem điều kiện còn thiếu.`
       );
     }
   }
@@ -578,7 +578,7 @@ export class TaskService {
   /** Issue keys outside the session's project are refused before Jira is asked anything. */
   assertOwnKey(id: string): void {
     if (!new RegExp(`^${this.ctx.projectKey}-\\d+$`).test(id)) {
-      throw badRequest(`Chỉ thao tác được với công việc của dự án ${this.ctx.projectKey}.`);
+      throw badRequest(`Chỉ thao tác được với việc của dự án ${this.ctx.projectKey}.`);
     }
   }
 
@@ -665,7 +665,7 @@ export class TaskService {
         const type = (await this.jira.getIssue(id)).fields?.issuetype?.name;
         if (!isAssignableType(type)) {
           throw badRequest(
-            `${id} là Epic nên không gán người phụ trách được. Hãy gán cho các công việc con của nó.`
+            `${id} là Epic nên không gán người phụ trách được. Hãy gán cho các việc con của nó.`
           );
         }
       }
@@ -1016,8 +1016,8 @@ export class TaskService {
    */
   async previewTypeChange(keys: string[], typeName: string): Promise<{ plan: TypeMovePlan; sources: MoveSource[]; targetStatuses: TargetStatus[] }> {
     const unique = [...new Set(keys.map((k) => k.trim().toUpperCase()).filter(Boolean))];
-    if (unique.length === 0) throw badRequest("Chưa chọn công việc nào.");
-    if (unique.length > 100) throw badRequest("Mỗi lần đổi loại tối đa 100 công việc.");
+    if (unique.length === 0) throw badRequest("Chưa chọn việc nào.");
+    if (unique.length > 100) throw badRequest("Mỗi lần đổi loại tối đa 100 việc.");
     for (const k of unique) this.assertOwnKey(k);
 
     const [types, statusesByType, issues] = await Promise.all([
@@ -1225,7 +1225,7 @@ export class TaskService {
       const summary = String(row.summary ?? "").trim();
       const fail = (message: string) => errors.push({ row: n, summary, message });
       if (!summary) {
-        fail("Thiếu tên công việc.");
+        fail("Thiếu tên việc.");
         continue;
       }
 

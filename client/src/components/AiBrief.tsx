@@ -163,7 +163,7 @@ export default function AiBrief({
         <div className="ai-body">
           <div className="ai-thinking">
             <span className="chat-spinner" />
-            AI đang đọc đồ thị công việc: chuỗi phụ thuộc, ai đang quá tải, việc nào đang chặn việc khác...
+            AI đang đọc đồ thị việc: chuỗi phụ thuộc, ai đang quá tải, việc nào đang chặn việc khác...
           </div>
           <div className="ai-skeleton" />
           <div className="ai-skeleton ai-skeleton-short" />

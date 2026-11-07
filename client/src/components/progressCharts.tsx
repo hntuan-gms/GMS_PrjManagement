@@ -117,7 +117,7 @@ export function ScheduleTimeline({ schedule, asOf }: { schedule: ProgressMetrics
   // sentence above ("Dự kiến xong 16/9/2027") rather than "16/09" here.
   const short = (iso: string | null): string => (iso ? shortDay(iso, asOf) : "—");
   if (!start || !plannedEnd) {
-    return <p className="pr-muted">Chưa có công việc nào được lên lịch.</p>;
+    return <p className="pr-muted">Chưa có việc nào được lên lịch.</p>;
   }
   const late = slipDays !== null && slipDays > 0;
   const endMax = [plannedEnd, baselineEnd ?? plannedEnd, asOf].sort().at(-1)!;

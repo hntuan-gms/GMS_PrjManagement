@@ -31,7 +31,7 @@ export function displaySwitch(page, label) {
   return page.locator(".view-menu .switch-row", { hasText: label }).locator("input");
 }
 
-/** Clicks an entry of the "Nhập / Xuất" menu ("Nhập công việc", "Nhập KBKT", "Xuất CSV"). */
+/** Clicks an entry of the "Nhập / Xuất" menu ("Nhập việc", "Nhập KBKT", "Xuất CSV"). */
 export async function ioAction(page, label) {
   await page.locator(".gantt-toolbar button", { hasText: "Nhập / Xuất" }).click();
   await page.locator(".io-menu button", { hasText: label }).click();

@@ -187,7 +187,7 @@ export default function ResourceUnassigned({
             onLostPointerCapture={onGripUp}
           >
             <Icon name="grip" size={14} className="rv-un-grip" />
-            <strong id={titleId}>{tasks.length} công việc chưa gán</strong>
+            <strong id={titleId}>{tasks.length} việc chưa gán</strong>
             <button type="button" className="icon-btn rv-un-close" onClick={onClose} aria-label="Đóng danh sách chưa gán" title="Đóng">
               <Icon name="x" size={14} />
             </button>
@@ -198,11 +198,11 @@ export default function ResourceUnassigned({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Lọc theo mã hoặc tên…"
-            aria-label="Lọc công việc chưa gán"
+            aria-label="Lọc việc chưa gán"
           />
           {shown.length === 0 ? (
             <div className="rv-un-empty">
-              {tasks.length === 0 ? "Mọi công việc đã có người phụ trách." : "Không có công việc nào khớp."}
+              {tasks.length === 0 ? "Mọi việc đã có người phụ trách." : "Không có việc nào khớp."}
             </div>
           ) : (
             <ul className="rv-un-list">

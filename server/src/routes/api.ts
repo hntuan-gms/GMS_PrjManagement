@@ -104,7 +104,7 @@ apiRouter.post("/tasks", requireProject, async (req, res, next) => {
   try {
     const input = req.body as TaskCreateInput;
     if (!input.summary || !input.issueType) {
-      next(badRequest("Cần nhập tên công việc và loại issue."));
+      next(badRequest("Cần nhập tên việc và loại issue."));
       return;
     }
     res.status(201).json(await req.auth!.taskService!.createTask(input));
@@ -221,7 +221,7 @@ apiRouter.post("/tasks/bulk", requireProject, async (req, res, next) => {
     const input = req.body as BulkTaskCreateInput;
     const summaries = (input.summaries ?? []).map((s) => s.trim()).filter(Boolean);
     if (summaries.length === 0 || !input.issueType) {
-      next(badRequest("Cần nhập ít nhất một tên công việc và loại issue."));
+      next(badRequest("Cần nhập ít nhất một tên việc và loại issue."));
       return;
     }
     res.status(201).json(await req.auth!.taskService!.createTasksBulk({ ...input, summaries }));
@@ -242,7 +242,7 @@ apiRouter.post("/tasks/change-type", requireProject, async (req, res, next) => {
     const keys = Array.isArray(body.keys) ? body.keys.map(String) : [];
     const issueType = typeof body.issueType === "string" ? body.issueType.trim() : "";
     if (keys.length === 0 || !issueType) {
-      next(badRequest("Cần chọn công việc và loại issue mới."));
+      next(badRequest("Cần chọn việc và loại issue mới."));
       return;
     }
     const svc = req.auth!.taskService!;
@@ -288,7 +288,7 @@ apiRouter.patch("/tasks/:id", requireProject, async (req, res, next) => {
       return;
     }
     if (input.issueType !== undefined && (typeof input.issueType !== "string" || !input.issueType.trim())) {
-      next(badRequest("Loại công việc không hợp lệ."));
+      next(badRequest("Loại việc không hợp lệ."));
       return;
     }
     // Written straight into a DATE column; a malformed value would surface as a
@@ -435,7 +435,7 @@ async function ownAttachment(req: express.Request) {
   const attId = String(req.params.attId);
   if (!/^\d{1,12}$/.test(attId)) throw notFound("Không tìm thấy tệp đính kèm.");
   const file = (await req.auth!.jira.getAttachments(req.params.id)).find((f) => String(f.id) === attId);
-  if (!file) throw notFound("Không tìm thấy tệp đính kèm trên công việc này.");
+  if (!file) throw notFound("Không tìm thấy tệp đính kèm trên việc này.");
   return file;
 }
 

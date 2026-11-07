@@ -95,7 +95,7 @@ export function fieldsNamedIn(message: string, editable: Record<string, JiraFiel
 /**
  * The same match, keeping fields a one-line form cannot fill: knowing the refusal is about
  * a user picker called "RootCause" still lets the caller name it and point at Jira, which
- * beats a bare "Mở công việc trên Jira để xem điều kiện còn thiếu".
+ * beats a bare "Mở việc trên Jira để xem điều kiện còn thiếu".
  */
 export function fieldsNamedInAny(message: string, fields: Record<string, JiraFieldMeta> | undefined): TransitionField[] {
   const text = foldName(message);

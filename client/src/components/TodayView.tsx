@@ -7,6 +7,7 @@ import { formatDayMonth, WEEKDAY_LONG } from "../humanDate";
 import { suggestWorklogs } from "../logSuggest";
 import { buildToday, upcomingHeading } from "../today";
 import { toast } from "../toast";
+import { neededFieldsFrom } from "../transitionFields";
 import { isAssignableType, type Session, type Task, type TaskUpdateInput } from "../types";
 import { isoWeekday } from "../workCalendar";
 import { useWorkCalendar } from "./workCalendarContext";
@@ -109,7 +110,14 @@ export default function TodayView({ session, tasks, today, capacityHours, onOpen
         n.delete(t.id);
         return n;
       });
-      toast(e instanceof Error ? e.message : `Không chuyển được ${t.id}.`, { tone: "error" });
+      // A validator the workflow's screen did not show: the detail window asks for what is missing.
+      const need = neededFieldsFrom(e);
+      if (need) {
+        toast(`Chuyển ${t.id} sang ${need.toStatusName ?? "Xong"} cần nhập: ${need.fields.map((f) => f.name).join(", ")}.`, { tone: "info" });
+        onOpenTask(t);
+      } else {
+        toast(e instanceof Error ? e.message : `Không chuyển được ${t.id}.`, { tone: "error" });
+      }
     } finally {
       setBusy((s) => {
         const n = new Set(s);

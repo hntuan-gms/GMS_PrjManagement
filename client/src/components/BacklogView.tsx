@@ -578,7 +578,7 @@ export default function BacklogView(props: Props) {
                     <input
                       autoFocus
                       value={draft}
-                      placeholder="Tên công việc"
+                      placeholder="Tên việc"
                       onChange={(e) => setDraft(e.target.value)}
                       onKeyDown={(e) => {
                         if (e.key === "Enter") submitDraft(section.id);

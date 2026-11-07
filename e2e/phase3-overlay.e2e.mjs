@@ -110,7 +110,7 @@ await step("CSV luôn có % hoàn thành, phụ thuộc, baseline và độ lệ
   const [dl] = await Promise.all([page.waitForEvent("download"), ioAction(page, "Xuất CSV")]);
   const lines = fs.readFileSync(await dl.path(), "utf8").replace(/^﻿/, "").split(/\r?\n/).filter(Boolean);
   const header = lines[0].split(",");
-  assert.deepEqual(header.slice(0, 2), ["Mã", "Tên công việc"]);
+  assert.deepEqual(header.slice(0, 2), ["Mã", "Tên việc"]);
   for (const h of ["Phụ thuộc (việc trước)", "Baseline bắt đầu", "Baseline kết thúc", "Lệch baseline (ngày)"]) {
     assert.ok(header.includes(h), "thiếu cột " + h);
   }

@@ -86,7 +86,7 @@ export class TimesheetService {
 
   private assertKey(key: string): void {
     if (!new RegExp(`^${this.ctx.projectKey}-\\d+$`).test(key)) {
-      throw badRequest(`Chỉ ghi giờ được cho công việc của dự án ${this.ctx.projectKey}.`);
+      throw badRequest(`Chỉ ghi giờ được cho việc của dự án ${this.ctx.projectKey}.`);
     }
   }
 

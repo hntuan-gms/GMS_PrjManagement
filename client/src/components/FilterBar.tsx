@@ -75,7 +75,7 @@ interface Props {
   /** Class and ref for the search box itself (the board's "/" shortcut and its tests find it there). */
   searchInputClassName?: string;
   searchInputRef?: Ref<HTMLInputElement>;
-  /** What the "12/80" counter counts; "công việc" unless the view says otherwise (the board's "thẻ"). */
+  /** What the "12/80" counter counts; "việc" unless the view says otherwise (the board's "thẻ"). */
   countLabel?: string;
   /** More sections at the foot of the "Bộ lọc" panel, for what only one view has (the board's own quick filters). */
   panelExtras?: ReactNode;
@@ -256,7 +256,7 @@ export default function FilterBar({
   jql,
   searchInputClassName,
   searchInputRef,
-  countLabel = "công việc",
+  countLabel = "việc",
   panelExtras,
   panelExtrasActive = 0,
   extraActive,
@@ -360,8 +360,8 @@ export default function FilterBar({
                 onKeyDown={(e) => {
                   if (e.key === "Escape") onChange({ ...filter, text: "" });
                 }}
-                placeholder="Tìm theo mã hoặc tên công việc..."
-                aria-label="Tìm công việc"
+                placeholder="Tìm theo mã hoặc tên việc..."
+                aria-label="Tìm việc"
               />
               {filter.text && (
                 <button

@@ -28,7 +28,7 @@ export async function createProgressReport(input: {
 }): Promise<{ report: StoredReport; warnings: string[] }> {
   const metrics = computeProgress(input.tasks, input.asOf);
   if (metrics.counts.total === 0) {
-    throw badRequest("Dự án chưa có công việc nào để lập báo cáo tiến độ.");
+    throw badRequest("Dự án chưa có việc nào để lập báo cáo tiến độ.");
   }
 
   const evidence = buildEvidence(input.tasks, input.asOf, input.teamNames ?? []);

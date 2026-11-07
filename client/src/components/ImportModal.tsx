@@ -138,7 +138,7 @@ export default function ImportModal({ tasks, onClose, onImported }: Props) {
     <div className="modal-overlay" onClick={running ? undefined : onClose}>
       <div className="modal import-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <span className="modal-id">Nhập công việc</span>
+          <span className="modal-id">Nhập việc</span>
           <button className="modal-close" onClick={onClose} disabled={!!running}>
             ✕
           </button>
@@ -147,7 +147,7 @@ export default function ImportModal({ tasks, onClose, onImported }: Props) {
         {outcome ? (
           <div className="import-result">
             <p>
-              <b>Đã tạo {outcome.created} công việc</b> trên Jira
+              <b>Đã tạo {outcome.created} việc</b> trên Jira
               {outcome.errors.length + outcome.blocked.length > 0 ? `, ${outcome.errors.length + outcome.blocked.length} dòng chưa nhập được:` : "."}
             </p>
             {outcome.errors.length + outcome.blocked.length > 0 && (
@@ -191,7 +191,7 @@ export default function ImportModal({ tasks, onClose, onImported }: Props) {
               </div>
               <small className="field-note">
                 Tệp Excel (.xlsx) chưa đọc trực tiếp: hãy chọn “Lưu thành CSV UTF-8”, hoặc bôi đen các ô rồi dán vào ô trên. “Việc cha” có thể là mã
-                (ABC-12) hoặc số dòng trong bảng (ví dụ 1 = dòng đầu tiên), nên một bảng có thể mô tả cả cây công việc.
+                (ABC-12) hoặc số dòng trong bảng (ví dụ 1 = dòng đầu tiên), nên một bảng có thể mô tả cả cây việc.
               </small>
             </div>
 
@@ -218,7 +218,7 @@ export default function ImportModal({ tasks, onClose, onImported }: Props) {
                 </div>
 
                 {!mapping.includes("summary") ? (
-                  <div className="modal-error">Chọn cột nào là “Tên công việc”.</div>
+                  <div className="modal-error">Chọn cột nào là “Tên việc”.</div>
                 ) : (
                   <>
                     <div className="import-preview">
@@ -275,7 +275,7 @@ export default function ImportModal({ tasks, onClose, onImported }: Props) {
                 Huỷ
               </button>
               <button className="primary" onClick={run} disabled={!!running || ok === 0 || tooMany || !mapping.includes("summary")}>
-                {running ? "Đang nhập…" : `Nhập ${ok} công việc`}
+                {running ? "Đang nhập…" : `Nhập ${ok} việc`}
               </button>
             </div>
           </>

@@ -254,7 +254,7 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
         {id}
       </button>
     ) : (
-      <span key={id} className="pr-issue pr-issue-missing" title="Công việc này không còn trong dự án">
+      <span key={id} className="pr-issue pr-issue-missing" title="Việc này không còn trong dự án">
         {id}
       </span>
     );
@@ -456,7 +456,7 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
           </section>
 
           <section className="pr-card">
-            <h3>Trạng thái công việc</h3>
+            <h3>Trạng thái việc</h3>
             <StatusDonut
               counts={{ done: m.counts.done, inProgress: m.counts.inProgress, todo: m.counts.todo }}
               onSelect={(state) => setDrill({ kind: "state", state })}
@@ -656,7 +656,7 @@ function TaskDrawer({
 
   function exportCsv() {
     downloadCsv(csvName("bao-cao", asOf), [
-      ["Mã", "Tên công việc", "Trạng thái", "Phụ trách", "Bắt đầu", "Hạn", "Hạn baseline", "% hoàn thành", "Đường găng"],
+      ["Mã", "Tên việc", "Trạng thái", "Phụ trách", "Bắt đầu", "Hạn", "Hạn baseline", "% hoàn thành", "Đường găng"],
       ...rows.map((t) => [
         t.id,
         t.summary,
@@ -678,7 +678,7 @@ function TaskDrawer({
           <div>
             <b>{title}</b>
             <span className="pr-muted">
-              {rows.length === all.length ? `${all.length} công việc` : `${rows.length}/${all.length} công việc`}
+              {rows.length === all.length ? `${all.length} việc` : `${rows.length}/${all.length} việc`}
             </span>
           </div>
           <button className="pr-drawer-close" onClick={onClose} aria-label="Đóng">
@@ -704,7 +704,7 @@ function TaskDrawer({
           </button>
         </div>
         {rows.length === 0 ? (
-          <p className="pr-muted pr-drawer-empty">{all.length > 0 ? "Không có công việc nào khớp tìm kiếm." : "Không có công việc nào."}</p>
+          <p className="pr-muted pr-drawer-empty">{all.length > 0 ? "Không có việc nào khớp tìm kiếm." : "Không có việc nào."}</p>
         ) : (
           <ul className="pr-drawer-list">
             {rows.map((t) => {

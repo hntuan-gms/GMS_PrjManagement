@@ -1,4 +1,4 @@
-export type SettingsSection = "calendar" | "sla" | "kbkt";
+export type SettingsSection = "calendar" | "sla" | "kbkt" | "board";
 
 /**
  * The sections of the project settings page. The board's card options are not here: they live in the
@@ -8,4 +8,5 @@ export const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string }> = 
   { id: "calendar", label: "Lịch làm việc" },
   { id: "sla", label: "SLA" },
   { id: "kbkt", label: "Nhập KBKT" },
+  { id: "board", label: "Thẻ trên board" },
 ];

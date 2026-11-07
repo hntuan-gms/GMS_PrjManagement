@@ -429,10 +429,10 @@ export const EDIT_TOOLS: FunctionDeclaration[] = [
 ];
 
 const LABELS: Record<string, string> = {
-  get_task: "Đang xem chi tiết công việc...",
-  search_tasks: "Đang tìm công việc...",
-  update_task: "Đang cập nhật công việc trên Jira...",
-  change_issue_type: "Đang đổi loại công việc trên Jira...",
+  get_task: "Đang xem chi tiết việc...",
+  search_tasks: "Đang tìm việc...",
+  update_task: "Đang cập nhật việc trên Jira...",
+  change_issue_type: "Đang đổi loại việc trên Jira...",
   add_dependency: "Đang nối phụ thuộc...",
   remove_dependency: "Đang gỡ phụ thuộc...",
   set_baseline: "Đang lưu baseline...",
@@ -445,7 +445,7 @@ const LABELS: Record<string, string> = {
   get_task_comments: "Đang đọc bình luận...",
   add_comment: "Đang đăng bình luận lên Jira...",
   get_task_history: "Đang đọc lịch sử thay đổi...",
-  task_digest: "Đang tổng hợp tình trạng công việc...",
+  task_digest: "Đang tổng hợp tình trạng việc...",
   find_similar_tasks: "Đang tìm việc giống nhau...",
   set_view_filter: "Đang áp bộ lọc lên màn hình...",
 };
@@ -507,7 +507,7 @@ export async function runEditTool(
 /* Shared                                                                     */
 /* -------------------------------------------------------------------------- */
 
-const notFound = (id: string): ToolOutcome => ({ response: { error: `Không tìm thấy công việc ${id} trong dự án này.` } });
+const notFound = (id: string): ToolOutcome => ({ response: { error: `Không tìm thấy việc ${id} trong dự án này.` } });
 
 function brief(t: Task) {
   return {
@@ -754,7 +754,7 @@ async function runUpdateTask(args: Record<string, unknown>, ctx: ToolContext): P
   if (str(args, "issueType") && fold(str(args, "issueType")) !== fold(t.issueType)) {
     // The edit call cannot change a type across workflows (Jira: "The issue type
     // selected is invalid"); change_issue_type uses Jira's Move, which can.
-    return { response: { error: "Đổi loại công việc phải dùng công cụ change_issue_type, không dùng update_task." } };
+    return { response: { error: "Đổi loại việc phải dùng công cụ change_issue_type, không dùng update_task." } };
   }
 
   // Schedule: resolved to (start, duration) — the pair updateTask and the
@@ -830,7 +830,7 @@ async function runAddDependency(args: Record<string, unknown>, ctx: ToolContext)
   const succ = findTaskIn(ctx.tasks, str(args, "successorId"));
   if (!pred) return notFound(str(args, "predecessorId"));
   if (!succ) return notFound(str(args, "successorId"));
-  if (pred.id === succ.id) return { response: { error: "Một công việc không thể phụ thuộc chính nó." } };
+  if (pred.id === succ.id) return { response: { error: "Một việc không thể phụ thuộc chính nó." } };
   const type = (DEP_TYPES.includes(str(args, "type").toUpperCase() as DependencyType)
     ? str(args, "type").toUpperCase()
     : "FS") as DependencyType;
@@ -886,7 +886,7 @@ async function runSetBaseline(args: Record<string, unknown>, ctx: ToolContext): 
   const targets = ids
     ? ids.map((id) => findTaskIn(ctx.tasks, id)).filter((t): t is Task => !!t)
     : ctx.tasks.filter((t) => t.startDate);
-  if (targets.length === 0) return { response: { error: "Không có công việc nào có lịch để lưu baseline." } };
+  if (targets.length === 0) return { response: { error: "Không có việc nào có lịch để lưu baseline." } };
   if (targets.length > 150) return { response: { error: `Quá nhiều việc (${targets.length}); chọn theo Epic hoặc danh sách cụ thể.` } };
 
   const failed: string[] = [];
@@ -1034,7 +1034,7 @@ async function runMoveToSprint(args: Record<string, unknown>, ctx: ToolContext):
   const ids = (Array.isArray(args.taskIds) ? args.taskIds.map(String) : [])
     .map((id) => findTaskIn(ctx.tasks, id)?.id)
     .filter((id): id is string => !!id);
-  if (ids.length === 0) return { response: { error: "Không tìm thấy công việc nào trong danh sách." } };
+  if (ids.length === 0) return { response: { error: "Không tìm thấy việc nào trong danh sách." } };
 
   const target = fold(str(args, "sprint"));
   if (target === "backlog") {

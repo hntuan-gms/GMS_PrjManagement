@@ -608,7 +608,7 @@ function LogWorkModal({
           <button className="modal-close" onClick={onClose}>✕</button>
         </div>
         <label className="field">
-          <span>Công việc</span>
+          <span>Việc</span>
           <select value={issueKey} onChange={(e) => setIssueKey(e.target.value)} disabled={!!editing}>
             {editing && !options.some((t) => t.id === editing.issueKey) && (
               <option value={editing.issueKey}>

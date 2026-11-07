@@ -101,7 +101,7 @@ await step("xuất CSV: BOM + đúng cột + có dữ liệu", async () => {
   const [dl] = await Promise.all([page.waitForEvent("download"), ioAction(page, "Xuất CSV")]);
   const txt = fs.readFileSync(await dl.path(), "utf8");
   assert.ok(txt.charCodeAt(0) === 0xfeff, "thiếu BOM");
-  assert.ok(txt.includes("Mã,Tên công việc") && txt.includes("DEMO-5"), txt.slice(0, 120));
+  assert.ok(txt.includes("Mã,Tên việc") && txt.includes("DEMO-5"), txt.slice(0, 120));
 });
 
 console.log("\n== Gantt: thao tác hàng loạt ==");
@@ -314,7 +314,7 @@ await step("tạo nhanh có chọn loại + người", async () => {
 });
 
 console.log("\n== Báo cáo ==");
-await step("lọc theo người → số công việc khớp đúng máy chủ", async () => {
+await step("lọc theo người → số việc khớp đúng máy chủ", async () => {
   await tab("Nhịp dự án"); await page.waitForSelector(".pr-filters");
   const all = (await mock("/api/progress?asOf=" + localToday())).metrics.counts.total;
   await page.locator(".pr-filter", { hasText: "Người phụ trách" }).locator("select").selectOption({ label: "Nguyễn Anh" });
@@ -334,7 +334,7 @@ await step("bấm tile mở danh sách chi tiết: có tìm kiếm, sắp xếp,
   await page.locator(".pr-tile:not([disabled])").first().click();
   await page.waitForSelector(".pr-drawer-tools");
   const [dl] = await Promise.all([page.waitForEvent("download"), page.locator(".pr-drawer-tools button", { hasText: "Xuất CSV" }).click()]);
-  assert.ok(fs.readFileSync(await dl.path(), "utf8").includes("Mã,Tên công việc"));
+  assert.ok(fs.readFileSync(await dl.path(), "utf8").includes("Mã,Tên việc"));
   await page.fill(".pr-drawer-tools input", "zzzz");
   await page.waitForFunction(() => document.body.textContent.includes("khớp tìm kiếm"));
   await page.keyboard.press("Escape");
