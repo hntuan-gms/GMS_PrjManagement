@@ -75,6 +75,16 @@ export function placeBar(spans: ColumnSpan[], start: string, end: string): BarPl
   return { left, width: edge(to, true) - left, clippedLeft: start < first, clippedRight: end > last };
 }
 
+/**
+ * Where "today" sits inside one week or month column, as shares (0–1) of that column: the same day-wide mark
+ * the opened rows draw with `placeBar`, so the load grid and the rows beneath it show one line, not two.
+ */
+export function todayInColumn(start: string, end: string, today: string): { left: number; width: number } | null {
+  if (today < start || today > end) return null;
+  const length = diffDays(start, end) + 1;
+  return { left: diffDays(start, today) / length, width: 1 / length };
+}
+
 /** A task's own dates as the bar draws them: a missing or inverted due date is a one-day bar. */
 export function taskBarDates(task: Pick<Task, "startDate" | "dueDate">): { start: string; end: string } | null {
   if (!task.startDate) return null;

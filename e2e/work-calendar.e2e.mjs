@@ -121,7 +121,7 @@ await step("mục SLA chỉ tóm tắt lịch và chuyển được sang mục L
   await openSettings(page, "SLA");
   await page.waitForSelector(".sla-modal");
   const summary = page.locator(".sla-calendar-summary");
-  assert.match(await summary.textContent(), /T2–T6 · 13 ngày lễ · 1 ngày làm bù/);
+  assert.match(await summary.textContent(), /T2–T6 · 08:00–12:00, 13:00–17:00 · UTC\+7 · 13 ngày lễ · 1 ngày làm bù/);
   await summary.locator("button", { hasText: "Mở Lịch làm việc" }).click();
   await cal().waitFor();
   assert.equal(await page.locator(".sla-modal:not(.cal-modal)").count(), 0, "mục SLA không còn hiện");

@@ -131,6 +131,18 @@ export function isWeekend(iso: string): boolean {
 
 /* -------------------------------------------------------------------------- */
 
+/**
+ * The two thresholds "how busy is this person" is judged by, shared by the heatmap (Mức tải) and the
+ * hours grid (Giờ đã ghi) so one day cannot be "light" in one and "full" in the other: under half the
+ * capacity is light, from there to the whole of it is healthy, above it is over.
+ */
+export const LIGHT_BELOW = 0.5;
+export const OVER_ABOVE = 1.0001;
+export function ratioBand(ratio: number): "light" | "healthy" | "over" {
+  if (ratio > OVER_ABOVE) return "over";
+  return ratio < LIGHT_BELOW ? "light" : "healthy";
+}
+
 function bandFor(capacity: number, allocated: number, ratio: number, weekendOrOff: boolean): LoadBand {
   if (weekendOrOff || capacity <= 0) {
     // Work scheduled onto a day the person does not have is its own failure
@@ -142,9 +154,7 @@ function bandFor(capacity: number, allocated: number, ratio: number, weekendOrOf
   // under 50%", which overlap — a 30% day is both. Split at 50% instead, so
   // every cell has exactly one colour and yellow means something specific:
   // this person has room for more work.
-  if (ratio > 1.0001) return "over";
-  if (ratio < 0.5) return "light";
-  return "healthy";
+  return ratioBand(ratio);
 }
 
 export const BAND_LABEL: Record<LoadBand, string> = {

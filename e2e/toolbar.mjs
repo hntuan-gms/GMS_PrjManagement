@@ -8,6 +8,21 @@ export async function openFilterPanel(page) {
 }
 
 /**
+ * Switches one of the quick filters ("Của tôi", "Quá hạn", "Chưa có ngày", "Bị chặn") in the top of the
+ * "Bộ lọc" panel and closes the panel. They are chips while on, so `quickIsOn` reads the chip.
+ */
+export async function quickFilter(page, label) {
+  await openFilterPanel(page);
+  await page.locator(".tf-quick-row", { hasText: label }).first().click();
+  await page.keyboard.press("Escape");
+}
+
+/** Whether a quick filter is on: its chip is on the active line. `key` is mine / overdue / unscheduled / blocked / sla. */
+export async function quickIsOn(page, key) {
+  return (await page.locator(`.tf-active .tf-chip[data-quick="${key}"]`).count()) > 0;
+}
+
+/**
  * Ticks one value of one facet ("Trạng thái" → "In Progress") and closes the panel again.
  * `value` may be a RegExp when a plain substring would match several ("High" vs "Highest").
  */
@@ -19,11 +34,17 @@ export async function pickFacet(page, label, value) {
   await page.keyboard.press("Escape");
 }
 
-/** Opens the "Hiển thị" panel (chart switches and table columns) unless it is already open. */
-export async function openDisplay(page) {
-  if (!(await page.locator(".view-menu").count())) {
-    await page.locator(".gantt-toolbar button", { hasText: "Hiển thị" }).click();
+/** Opens the "⋯" menu at the end of the Gantt toolbar (group all, display options, import / export, shortcuts) unless open. */
+export async function openMore(page) {
+  if (!(await page.locator(".more-menu").count())) {
+    await page.locator(".gantt-toolbar button[aria-label='Thêm']").click();
+    await page.waitForSelector(".more-menu");
   }
+}
+
+/** Opens the display options (chart switches and table columns): they are a section of the "⋯" menu. */
+export async function openDisplay(page) {
+  await openMore(page);
 }
 
 /** One row of the "Hiển thị" panel's switches. */
@@ -33,7 +54,7 @@ export function displaySwitch(page, label) {
 
 /** Clicks an entry of the "Nhập / Xuất" menu ("Nhập việc", "Nhập KBKT", "Xuất CSV"). */
 export async function ioAction(page, label) {
-  await page.locator(".gantt-toolbar button", { hasText: "Nhập / Xuất" }).click();
+  await openMore(page);
   await page.locator(".io-menu button", { hasText: label }).click();
 }
 

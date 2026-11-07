@@ -155,7 +155,7 @@ await step("ghi giờ: form gập sẵn, mở bằng '+ Ghi giờ' ngay cạnh '
   await page.locator(".td-logtoggle").click();
   await page.locator("#td-logform .log-hours").waitFor();
 });
-await step("Kết thúc sửa được: đổi thì thời lượng đổi theo; ước lượng và đã ghi cùng một hàng", async () => {
+await step("Kết thúc sửa được: đổi thì thời lượng đổi theo; ước lượng một dòng, đã ghi + Ghi giờ dòng dưới", async () => {
   assert.equal(await page.locator(".td-calc").count(), 0, "Kết thúc không còn là giá trị chỉ đọc");
   const start = page.locator(".field:has(> span:text-is('Lịch')) input[aria-label='Ngày bắt đầu']");
   const end = page.locator(".field:has(> span:text-is('Lịch')) input[aria-label='Ngày kết thúc']");
@@ -173,7 +173,7 @@ await step("Kết thúc sửa được: đổi thì thời lượng đổi theo;
   assert.equal(await end.inputValue(), plus(2), "đổi thời lượng phải đổi Kết thúc");
   const est = await page.locator(".td-effort .td-est").boundingBox();
   const spent = await page.locator(".td-effort .td-spent-row").boundingBox();
-  assert.ok(Math.abs(est.y - spent.y) < 12 && spent.x > est.x + est.width - 2, JSON.stringify([est, spent]));
+  assert.ok(spent.y > est.y + est.height - 2, JSON.stringify([est, spent]));
 });
 await step("facts: tên và giá trị cùng một dòng", async () => {
   for (const label of ["Ưu tiên", "Nhãn", "Loại", "Sprint"]) {
@@ -216,6 +216,16 @@ await step("ô mô tả và ô bình luận cùng kiểu ô nhập của ứng d
   await page.locator(".td-box textarea").focus();
   const ring = await page.locator(".td-box").evaluate((el) => getComputedStyle(el).boxShadow);
   assert.notEqual(ring, "none");
+});
+
+console.log("\n== Cột Tên việc khi khung chi tiết mở ==");
+await step("mở khung chi tiết ở 1440: cột Tên việc còn ít nhất 200px, cột phụ nhường chỗ", async () => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openTask("DEMO-5");
+  await page.waitForTimeout(300);
+  const w = await page.locator(".wbs-row", { hasText: "DEMO-6" }).first().locator(".wbs-col-name").evaluate((el) => el.getBoundingClientRect().width);
+  assert.ok(w >= 200, `cột tên chỉ rộng ${Math.round(w)}px`);
+  await page.setViewportSize({ width: 1400, height: 900 });
 });
 
 assert.equal(problems.length, 0, "lỗi trong trình duyệt: " + problems.join("; "));

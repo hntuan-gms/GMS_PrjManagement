@@ -107,12 +107,30 @@ Mỗi họ tín hiệu có 5 bậc: `-wash` (nền) · `-soft` · `-line` (viề
 - **Ô ngày**: dùng `DateField` (luôn DD/MM/YYYY, nhận "t6", "mai", "+3n", "15/11"). Không dùng `<input type="date">` trần cho ngày người dùng đọc lại (nó hiện theo ngôn ngữ trình duyệt: "10/29/2026").
 - **Trạng thái**: `StatusGlyph` + tên workflow mờ. **Ưu tiên**: `PriorityMark` (chỉ hiện cạnh tên khi cao/thấp). **Loại**: `IssueTypeIcon` nét mảnh một màu.
 - **Ô nhập**: mặc định từ `controls.css` (`:where()`), cao 34px trong cửa sổ, 28–30px trên thanh. `<select>` dùng `appearance: base-select`. Không `<datalist>` (dùng `SuggestInput`). Không `window.confirm/prompt` (dùng `useDialogs()`).
+- **Số liệu**: `Metric` (`components/Metric.tsx`): số lớn font sans 600, nhãn `--ink-3`, không viền, không icon, xếp một hàng (`MetricRow`); số 0 thì không vẽ. Dùng ở Nhịp dự án và Giờ đã ghi. Pill lọc người ở Mức tải vẫn là pill vì nó là bộ lọc.
+- **Lọc nhanh**: "Của tôi", "Quá hạn" và công tắc riêng của từng màn là hàng công tắc ở đầu panel "Bộ lọc" (`FilterBar` `quick`), hiện thành chip khi bật. Thanh Kế hoạch: tìm · Bộ lọc · Đã lưu | Ngày/Tuần/Tháng · Về hôm nay | ↶ · `⋯` (nhóm, hiển thị, nhập/xuất, phím tắt).
 - **Icon**: `Icons.tsx`, lưới 24, nét 1.75. Không emoji làm icon (kể cả 🎯, ✦).
+
+### Thuật ngữ: một khái niệm, một tên
+
+| Dùng | Bỏ |
+|---|---|
+| Người | Người phụ trách |
+| Ưu tiên | Độ ưu tiên |
+| Epic | Giai đoạn (Epic), Theo giai đoạn |
+| Công suất | Năng lực (của một người hay nhóm: số giờ có thể làm) |
+| Giờ đã ghi | Giờ làm |
+| Sub-task | Việc con, Công việc con |
+| Loại việc | Loại issue |
+| việc | công việc (trừ "ngày làm việc", "Giờ làm việc", "Lịch làm việc": đó là khái niệm khác) |
+
+`grep` các tên ở cột phải trong chuỗi JSX phải trống. Phần nhận dạng dữ liệu nhập (tiêu đề cột CSV, JQL) vẫn chấp nhận cả hai cách gọi.
 
 ## 4. Luật bố cục dày đặc
 
 - **Không có thứ gì chiếm chỗ trong luồng khi chọn** (thanh thao tác hàng loạt `position: fixed`), vì nó làm bảng nhảy giữa hai lần bấm của một double-click.
 - Mã issue không bao giờ bị cắt: cột Mã rộng theo mã dài nhất (`--wbs-key-w`).
+- **Bảng WBS hẹp lại** (khung chi tiết hay trợ lý mở, kéo vách ngăn vào): cột Tên việc giữ tối thiểu 200px (`wbsFit.ts`). Cột phụ bỏ dần từ bên phải, rồi Người chỉ còn avatar, rồi Trạng thái chỉ còn glyph. Người và Trạng thái không bao giờ bị bỏ hẳn.
 - Ô Nhân lực không có việc thì **trống** (không "0%"); tải là chiều cao cột, chỉ quá tải mới đỏ.
 - Kiểm tra ở 1280px và 1500px; sáng và tối.
 

@@ -687,3 +687,56 @@ body:has(.gantt-toolbar) .draft-text {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* A narrow table: the person is an avatar and the status a glyph (wbsFit.ts); the name keeps its floor. */
+.wbs-col-extra.is-compact {
+  padding-inline: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.wbs-col-extra.is-compact .wbs-status-name,
+.wbs-col-extra.is-compact .wbs-person-name {
+  display: none;
+}
+.wbs-col-name {
+  min-width: 0;
+}
+
+/* The "⋯" menu at the end of the toolbar: group all, display options, import / export, shortcuts. */
+.more-menu {
+  min-width: 300px;
+}
+.more-menu .menu-heading {
+  margin-top: var(--space-3, 12px);
+}
+.more-menu .menu-heading:first-of-type {
+  margin-top: 0;
+}
+.more-menu .view-colorby {
+  margin-bottom: var(--space-2, 8px);
+}
+.more-menu .menu-item kbd {
+  margin-left: auto;
+}
+/* "Mặc định" and "Tất cả" at the foot of the column list: the same size as the rest of the panel. */
+.view-menu .col-chooser-foot .text-btn {
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--ink-2);
+}
+.selection-shift-label {
+  color: var(--ink-3);
+  font-size: var(--font-size-sm);
+}
+
+/* Bars selected in the table are outlined; the ones the pointer is not on keep their colour. */
+g.bar > g[data-selected] rect {
+  stroke: var(--info);
+  stroke-width: 2px;
+}
+/* A release name on its own plate; labels beside short bars get a halo where they cross a release line. */
+.release-plate {
+  fill: var(--sheet);
+  opacity: 0.92;
+}

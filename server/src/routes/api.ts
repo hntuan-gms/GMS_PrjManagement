@@ -273,7 +273,7 @@ apiRouter.patch("/tasks/:id", requireProject, async (req, res, next) => {
       return;
     }
     if (input.priority !== undefined && typeof input.priority !== "string") {
-      next(badRequest("Độ ưu tiên không hợp lệ."));
+      next(badRequest("Ưu tiên không hợp lệ."));
       return;
     }
     for (const field of ["components", "fixVersions"] as const) {

@@ -1,3 +1,4 @@
+import StatusGlyph from "./StatusGlyph";
 import { useRef, useState, type DragEvent } from "react";
 import { api } from "../api";
 import { canonicalIssueType, idleDays, initials, isOverdue, lanesOf, shortDate, totalWeight, unitLabel, type Swimlane } from "../boardModel";
@@ -57,8 +58,12 @@ interface Hint {
   beforeKey: string | null;
 }
 
-/** Columns the user folded away, per board: a column's name is the only stable handle Jira gives it. */
-const collapsedKey = (snapshot: BoardSnapshot) => `gms.board.collapsedColumns.${snapshot.board?.id ?? "status"}`;
+/**
+ * Empty columns are folded to a strip unless the person opened them; the opened ones are remembered per board
+ * (a column's name is the only stable handle Jira gives it). Before, the person had to fold each empty column
+ * by hand, and a board with two empty columns spent two fifths of its width on "0 việc".
+ */
+const collapsedKey = (snapshot: BoardSnapshot) => `gms.board.openedColumns.${snapshot.board?.id ?? "status"}`;
 
 function readCollapsed(snapshot: BoardSnapshot): Set<string> {
   try {
@@ -82,7 +87,7 @@ export default function KanbanBoard({ snapshot, issues, swimlane, today, onMove,
   const [draft, setDraft] = useState("");
   const [quickOpts, setQuickOpts] = useState<QuickOptions>({ issueType: createTypes[0] ?? "Task", assigneeAccountId: null });
   const [collapsedLanes, setCollapsedLanes] = useState<Set<string>>(new Set());
-  const [folded, setFolded] = useState<Set<string>>(() => readCollapsed(snapshot));
+  const [opened, setOpened] = useState<Set<string>>(() => readCollapsed(snapshot));
   const transitionCache = useRef(new Map<string, Set<string>>());
 
   const columns = snapshot.columns;
@@ -91,14 +96,14 @@ export default function KanbanBoard({ snapshot, issues, swimlane, today, onMove,
   const counts = columns.map((_, ci) => issues.filter((i) => columnOf(i) === ci).length);
   // Only an empty column folds: a card that lands in one (a drop, a move made elsewhere)
   // must never be hidden behind a strip, so it simply unfolds while it holds anything.
-  const isFolded = (ci: number) => folded.has(columns[ci].name) && counts[ci] === 0;
+  const isFolded = (ci: number) => !opened.has(columns[ci].name) && counts[ci] === 0;
 
   function setFold(name: string, on: boolean) {
-    setFolded((prev) => {
-      if (prev.has(name) === on) return prev;
+    setOpened((prev) => {
+      if (prev.has(name) === !on) return prev;
       const next = new Set(prev);
-      if (on) next.add(name);
-      else next.delete(name);
+      if (on) next.delete(name);
+      else next.add(name);
       try {
         localStorage.setItem(collapsedKey(snapshot), JSON.stringify([...next]));
       } catch {
@@ -256,8 +261,13 @@ export default function KanbanBoard({ snapshot, issues, swimlane, today, onMove,
                 {c.unmapped && <span className="bd-unmapped-tag">chưa gắn cột</span>}
               </span>
               <span className={`bd-colcount${over ? " is-over" : ""}`} title={c.max !== null ? `Giới hạn WIP: tối đa ${c.max}` : undefined}>
-                {inCol}
-                {c.max !== null && <span className="bd-wip">/{c.max}</span>} việc
+                {(inCol > 0 || c.max !== null) && (
+                  <>
+                    {inCol}
+                    {c.max !== null && <span className="bd-wip">/{c.max}</span>}
+                    {inCol > 0 && " việc"}
+                  </>
+                )}
               </span>
               {snapshot.estimation && inCol > 0 && (
                 <span className="bd-colweight" title="Tổng ước lượng">
@@ -303,9 +313,9 @@ export default function KanbanBoard({ snapshot, issues, swimlane, today, onMove,
                 }
               >
                 <span className={`bd-chevron ${collapsed ? "" : "is-open"}`} aria-hidden="true" />
-                {swimlane === "assignee" && <span className="bd-avatar">{lane.id === "none" ? "?" : initials(lane.label)}</span>}
+                {swimlane === "assignee" && <span className="bd-avatar">{lane.id === "none" ? "" : initials(lane.label)}</span>}
                 <b>{lane.label}</b>
-                <span className="bd-muted">{lane.issues.length} việc</span>
+                {lane.issues.length > 0 && <span className="bd-muted">{lane.issues.length} việc</span>}
               </button>
             )}
             {!collapsed && (
@@ -319,6 +329,7 @@ export default function KanbanBoard({ snapshot, issues, swimlane, today, onMove,
                     return (
                       <div
                         key={c.name}
+                        data-col={c.name}
                         className={`bd-col is-folded ${drag ? (allowed ? "is-droppable" : "is-blocked") : ""} ${isHint ? "is-hover" : ""}`}
                         onDragOver={(e) => overColumn(e, ci, lane.id)}
                         onDrop={(e) => drop(e, ci, lane.accountId)}
@@ -332,6 +343,7 @@ export default function KanbanBoard({ snapshot, issues, swimlane, today, onMove,
                   return (
                     <div
                       key={c.name}
+                      data-col={c.name}
                       className={`bd-col ${drag ? (allowed ? "is-droppable" : "is-blocked") : ""} ${isHint ? "is-hover" : ""}`}
                       onDragOver={(e) => overColumn(e, ci, lane.id)}
                       onDrop={(e) => drop(e, ci, lane.accountId)}
@@ -567,7 +579,10 @@ function Card({
                     <span className="bd-key">{c.key}</span>
                     <span className="bd-subtask-summary">{c.summary}</span>
                   </button>
-                  <span className={`bl-status bl-status-${c.statusCategory}`}>{c.statusName}</span>
+                  <span className="bl-status">
+                    <StatusGlyph category={c.statusCategory} name={c.statusName} size={12} />
+                    {c.statusName}
+                  </span>
                 </li>
               ))}
             </ul>

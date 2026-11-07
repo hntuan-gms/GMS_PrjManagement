@@ -148,17 +148,23 @@ await step("thẻ cha liệt kê sub-task: 1/2, bấm mở danh sách", async ()
   await toggle.click();
   assert.equal(await page.locator(".bd-subtasks-list li").count(), 2);
 });
-await step("'Gộp sub-task vào thẻ cha' ẩn thẻ riêng của sub-task", async () => {
+await step("'Gộp sub-task vào thẻ cha' bật sẵn; tắt thì sub-task có thẻ riêng", async () => {
   const before = await page.locator(".bd-card").count();
+  await page.locator(".bd-cardbtn").click();
+  const merge = page.locator(".bd-card-opt", { hasText: "Gộp sub-task" }).locator("input");
+  assert.equal(await merge.isChecked(), true);
+  await merge.uncheck();
+  await page.keyboard.press("Escape");
+  await page.waitForFunction((n) => document.querySelectorAll(".bd-card").length === n + 2, before);
   await page.locator(".bd-cardbtn").click();
   await page.locator(".bd-card-opt", { hasText: "Gộp sub-task" }).locator("input").check();
   await page.keyboard.press("Escape");
-  await page.waitForFunction((n) => document.querySelectorAll(".bd-card").length === n - 2, before);
+  await page.waitForFunction((n) => document.querySelectorAll(".bd-card").length === n, before);
 });
 await step("chọn trường hiện trên thẻ + màu thẻ theo ưu tiên", async () => {
   await page.locator(".bd-cardbtn").click();
-  await page.locator(".bd-card-opt", { hasText: /^\s*Độ ưu tiên\s*$/ }).locator("input").uncheck();
-  await page.locator(".bd-card-opt", { hasText: /Theo độ ưu tiên/ }).locator("input").check();
+  await page.locator(".bd-card-opt", { hasText: /^\s*Ưu tiên\s*$/ }).locator("input").uncheck();
+  await page.locator(".bd-card-opt", { hasText: /Theo ưu tiên/ }).locator("input").check();
   await page.keyboard.press("Escape");
   assert.equal(await page.locator(".bd-card .bd-prio").count(), 0, "đã tắt hiện ưu tiên");
   assert.ok((await page.locator(".bd-card.has-accent").count()) > 0, "thẻ phải có viền màu");
@@ -211,7 +217,7 @@ await step("chọn nhiều việc rồi gán cho một người (từng việc m
   assert.ok(patches.every((p) => p.b.assigneeAccountId === "chi"));
 });
 await step("'Năng lực' của sprint: bảng từng người, người nghỉ cả sprint được đánh dấu", async () => {
-  await page.locator(".bl-action", { hasText: "Năng lực" }).first().click();
+  await page.locator(".bl-action", { hasText: "Công suất" }).first().click();
   await page.waitForSelector(".cap-table");
   assert.ok((await page.locator(".cap-table tbody tr").count()) >= 4);
   assert.ok((await page.textContent(".cap-table")).includes("80h"));
@@ -248,8 +254,8 @@ await step("Agile → Sprint & burnup: cam kết/thêm/xong và đường burnup
   assert.equal(await page.locator(".ag-tile").count(), 4);
   assert.ok(await page.locator(".ag-scope-line").count());
 });
-await step("Agile → Luồng công việc: 3 dải theo trạng thái", async () => {
-  await page.locator(".ag-tabs button", { hasText: "Luồng công việc" }).click();
+await step("Agile → Luồng việc: 3 dải theo trạng thái", async () => {
+  await page.locator(".ag-tabs button", { hasText: "Luồng việc" }).click();
   await page.waitForSelector("path.ag-band");
   assert.equal(await page.locator("path.ag-band").count(), 3);
 });

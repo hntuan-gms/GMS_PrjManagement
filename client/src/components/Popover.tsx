@@ -83,13 +83,21 @@ export default function Popover({
     const el = menuRef.current;
     if (!open || !el) return;
     el.style.transform = "";
+    // As tall as the room under (or over, for an upward panel) its trigger: a panel opened low in the window
+    // used to be cut by the window's edge while the CSS cap left it a fixed 560px.
+    const trig = triggerRef.current?.getBoundingClientRect();
+    el.style.maxHeight = "";
+    if (trig) {
+      const room = (placement === "top" ? trig.top : window.innerHeight - trig.bottom) - 6 - 12;
+      if (room > 120) el.style.maxHeight = `${Math.min(room, 560)}px`;
+    }
     const r = el.getBoundingClientRect();
     const margin = 8;
     const over = r.right - (window.innerWidth - margin);
     const under = margin - r.left;
     if (over > 0) el.style.transform = `translateX(${-Math.min(over, Math.max(0, r.left - margin))}px)`;
     else if (under > 0) el.style.transform = `translateX(${under}px)`;
-  }, [open]);
+  }, [open, placement]);
 
   // Opened from the keyboard: land on the first item instead of leaving focus on the trigger.
   useEffect(() => {

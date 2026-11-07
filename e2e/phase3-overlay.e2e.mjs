@@ -2,7 +2,7 @@
 import { chromium } from "playwright-core";
 import fs from "node:fs";
 import assert from "node:assert/strict";
-import { displaySwitch, ioAction, openDisplay } from "./toolbar.mjs";
+import { displaySwitch, ioAction, openDisplay, quickFilter } from "./toolbar.mjs";
 
 const API = process.env.E2E_API ?? "http://localhost:4000";
 const browser = await chromium.launch({ channel: "chrome", headless: true });
@@ -139,7 +139,7 @@ await step("chưa chọn điều kiện → không cho lưu; thấy bộ lọc n
   await page.keyboard.press("Escape");
 });
 await step("lưu 'Của tôi' + chia sẻ → lưu dạng @me, nút ghi tên bộ lọc", async () => {
-  await page.locator(".tf-bar .tf-btn", { hasText: "Của tôi" }).click();
+  await quickFilter(page, "Của tôi");
   await page.waitForFunction(() => document.querySelector(".tf-count")?.textContent.includes("1/9"));
   await menuBtn().click();
   await page.fill('.sf-form input[type="text"]', "Phần việc riêng");

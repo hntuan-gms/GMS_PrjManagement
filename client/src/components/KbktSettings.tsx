@@ -131,7 +131,7 @@ export function SettingsForm({
   return (
     <div className="kb-settings-body">
       {error && <div className="modal-error">{error}</div>}
-      <h4>Loại issue</h4>
+      <h4>Loại việc</h4>
       <div className="kb-grid">
         <label className="field">
           <span>Story</span>
@@ -161,10 +161,8 @@ export function SettingsForm({
         ))}
       </div>
 
-      <h4>Trường của Jira</h4>
+      <h4 title="Mỗi phần của test case và lỗi vào một trường riêng của Jira; phần để &quot;Trong Mô tả&quot; vẫn nằm ở Mô tả">Trường của Jira</h4>
       <p className="kb-muted">
-        Mỗi phần của test case / lỗi có thể vào một trường riêng của Jira (Module, Test Steps, Expected Result…); phần để
-        "Trong Mô tả" vẫn nằm ở Mô tả như trước.{" "}
         {draft.fieldMap ? (
           <button
             className="link-btn"

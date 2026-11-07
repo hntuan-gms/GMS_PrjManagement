@@ -9,7 +9,7 @@ import { csvName, downloadCsv, type CsvCell } from "../csv";
 import { computeCriticalPath } from "../criticalPath";
 import { resolveBaselines } from "../baselineGeometry";
 import { orderByWbs, resolveRanges, toGanttTasks, type BarColorBy, type OrderedTask } from "../ganttMapping";
-import { readPalette, withAlpha } from "../themeColors";
+import { readPalette } from "../themeColors";
 import { useAppearance } from "../useAppearance";
 import { ROW_HEIGHTS, getDensity } from "../theme";
 import { isAssignableType, type DependencyType, type JiraUser, type ProjectVersion, type ResourcePool, type Task, type TaskTransition, type TaskUpdateInput } from "../types";
@@ -19,6 +19,7 @@ import { toast } from "../toast";
 import { changeSchedule, scheduleOf } from "../scheduleFields";
 import { formatPredecessors, parsePredecessors } from "../predecessorsText";
 import { predecessorProblem } from "../predecessorCheck";
+import { fitColumns, MIN_NAME_PX } from "../wbsFit";
 import { KIND_OF_COLUMN, editableKinds, neighbourStop, nextRowFor, stopsFor, type CellKind } from "../wbsCells";
 import { buildResourceLoad } from "../resourceAllocation";
 import { isTypingTarget, overlayOpen } from "../shortcuts";
@@ -316,7 +317,7 @@ const COLUMNS: ColumnDef[] = [
   {
     id: "priority",
     label: "Ưu tiên",
-    long: "Độ ưu tiên",
+    long: "Ưu tiên",
     width: 76,
     cell: (t) => (t.priority ? <span className="wbs-prio"><PriorityMark priority={t.priority} /> {t.priority}</span> : "—"),
   },
@@ -351,7 +352,7 @@ const COLUMNS: ColumnDef[] = [
   {
     id: "assignee",
     label: "Người",
-    long: "Người phụ trách",
+    long: "Người",
     width: 120,
     cell: (t) =>
       t.assigneeName ? (
@@ -486,7 +487,7 @@ const DEFAULT_COLUMNS: ColumnId[] = ["status", "assignee", "pct"];
 const COLUMNS_KEY = "gms.gantt.columns";
 const KEY_COL_WIDTH = 64;
 const MIN_NAME_WIDTH = 180;
-const MIN_NAME_FLOOR = 120;
+const MIN_NAME_FLOOR = MIN_NAME_PX;
 
 function loadColumns(): ColumnId[] {
   try {
@@ -556,6 +557,8 @@ interface Props {
    * list. `visibleOrder` comes along because only this view knows which rows are
    * on screen and in what order, which is what a Shift range is measured in.
    */
+  /** Ctrl A: select exactly these rows (the ones on screen, after filter and collapse). */
+  onSelectMany?: (ids: string[]) => void;
   onSelect: (
     id: string,
     modifiers: { toggle: boolean; range: boolean },
@@ -593,6 +596,8 @@ interface Props {
   onOpenImport: () => void;
   /** Opens the KBKT test-case workbook import — beside "Xuất CSV": import next to export. */
   onImportKbkt: () => void;
+  /** The "?" sheet, from the "⋯" menu. */
+  onOpenShortcuts?: () => void;
   /** "+ Thêm việc" under the last row: one sentence (quickAdd syntax) → one task. */
   onQuickCreate?: (text: string) => Promise<void>;
   /** In-place editing of the Người / Trạng thái cells (plan §6.1.4). */
@@ -659,7 +664,7 @@ function AddRow({ top, width, parent, onCreate }: { top: number; width: number; 
             (e.target as HTMLInputElement).blur();
           }
         }}
-        placeholder={asChild && parent ? `Việc con của ${parent.id}… (Shift Tab để bỏ)` : "Thêm việc…"}
+        placeholder={asChild && parent ? `Sub-task của ${parent.id}… (Shift Tab để bỏ)` : "Thêm việc…"}
         aria-label="Thêm việc"
       />
       <kbd>Enter</kbd>
@@ -673,6 +678,7 @@ export default function GanttView({
   onToggleCollapse,
   selectedId,
   onSelect,
+  onSelectMany,
   selectedIds,
   filter,
   onFilterChange,
@@ -692,6 +698,7 @@ export default function GanttView({
   undo,
   onOpenImport,
   onImportKbkt,
+  onOpenShortcuts,
   onQuickCreate,
   users,
   onAssign,
@@ -787,6 +794,10 @@ export default function GanttView({
   const maxListWidth = Math.min(Math.max(MIN_LIST_WIDTH, bodySize.width - MIN_CHART_WIDTH), Math.floor(bodySize.width * 0.6));
   const listWidth = Math.min(maxListWidth, Math.max(MIN_LIST_WIDTH, listWidthOverride ?? defaultListWidth));
   const ganttHeight = Math.max(ROW_HEIGHT, bodySize.height - HEADER_HEIGHT - SCROLLBAR_RESERVE);
+  // Narrow table (the detail panel or the assistant is open, or the divider was dragged in): the name keeps
+  // MIN_NAME_PX and the columns give way (wbsFit.ts) instead of every one staying put while the name shrinks.
+  const fitted = useMemo(() => fitColumns(columns, listWidth - keyColWidth - MIN_NAME_PX), [columns, listWidth, keyColWidth]);
+  const shownColumns = fitted.columns;
 
   // Trackpad pinch (and Ctrl+wheel) only — a plain two-finger scroll must keep
   // panning the chart, not hijack it into a zoom. Browsers report pinch-to-zoom
@@ -1167,6 +1178,8 @@ export default function GanttView({
       api.getTaskTransitions(task.id).then(setCellTransitions, () => setCellTransitions([]));
     }
   };
+  const openCellEditorRef = useRef(openCellEditor);
+  openCellEditorRef.current = openCellEditor;
   const kindsOf = useCallback(
     (row: Pick<WbsRow, "task" | "hasChildren">) =>
       editableKinds({
@@ -1422,6 +1435,47 @@ export default function GanttView({
     window.addEventListener("gms:gantt-today", onToday);
     return () => window.removeEventListener("gms:gantt-today", onToday);
   }, []);
+  // J / K, Ctrl A, S and A from the workspace's keyboard layer (ProjectWorkspace dispatches them: it owns the gating
+  // for typing and open layers). The row under the cursor is the selected one.
+  const planKeys = useRef({ rowOrder, selectedId, onSelect, onSelectMany, byId, onAssign, onTransition });
+  planKeys.current = { rowOrder, selectedId, onSelect, onSelectMany, byId, onAssign, onTransition };
+  useEffect(() => {
+    const onMove = (ev: Event) => {
+      const k = planKeys.current;
+      const delta = (ev as CustomEvent<{ delta: number }>).detail?.delta ?? 1;
+      if (k.rowOrder.length === 0) return;
+      const at = k.selectedId ? k.rowOrder.indexOf(k.selectedId) : -1;
+      const next = k.rowOrder[Math.max(0, Math.min(k.rowOrder.length - 1, at < 0 ? 0 : at + delta))];
+      if (!next) return;
+      k.onSelect(next, { toggle: false, range: false }, k.rowOrder);
+      document.querySelector(`.wbs-row[data-row-id="${CSS.escape(next)}"]`)?.scrollIntoView({ block: "nearest" });
+    };
+    const onAll = () => {
+      const k = planKeys.current;
+      k.onSelectMany?.(k.rowOrder);
+    };
+    const onPick = (ev: Event) => {
+      const k = planKeys.current;
+      const kind = (ev as CustomEvent<{ kind: "status" | "assignee" }>).detail?.kind;
+      const task = k.selectedId ? k.byId.get(k.selectedId) : null;
+      if (!task || !kind) return;
+      if (kind === "assignee" && !(k.onAssign && isAssignableType(task.issueType))) return;
+      if (kind === "status" && !k.onTransition) return;
+      const row = document.querySelector<HTMLElement>(`.wbs-row[data-row-id="${CSS.escape(task.id)}"]`);
+      // The cell when its column is shown; the row's own box when not (the picker needs somewhere to hang).
+      const anchor = row?.querySelector<HTMLElement>(`[data-cell="${kind}"]`) ?? row;
+      if (!anchor) return;
+      openCellEditorRef.current(task, kind, anchor.getBoundingClientRect());
+    };
+    window.addEventListener("gms:gantt-move", onMove);
+    window.addEventListener("gms:gantt-select-all", onAll);
+    window.addEventListener("gms:gantt-pick", onPick);
+    return () => {
+      window.removeEventListener("gms:gantt-move", onMove);
+      window.removeEventListener("gms:gantt-select-all", onAll);
+      window.removeEventListener("gms:gantt-pick", onPick);
+    };
+  }, []);
   // The first time the plan is on screen it opens at today (a third of the way in), not at the oldest bar.
   const openedAtToday = useRef(false);
   useEffect(() => {
@@ -1577,6 +1631,69 @@ export default function GanttView({
     [windowed, rows, drawn]
   );
 
+  // The month label stays in view: the library centres "Tháng 11, 2026" on its month, so scrolled to the middle of a
+  // month the label sits half off the left edge and reads ", 2026". Its x is moved to keep it inside the visible
+  // part of its month (the library's own x is remembered in data-cx; a re-render that writes a new x wins).
+  const hasHeader = bodySize.width > 0 && rows.length > 0;
+  useEffect(() => {
+    if (!bodyEl || !hasHeader) return;
+    const first = bodyEl.querySelector<SVGTextElement>("text._2q1Kt");
+    const headerSvg = first?.closest("svg") ?? null;
+    const scroller = headerSvg?.parentElement ?? null;
+    if (!headerSvg || !scroller) return;
+    let frame = 0;
+    function place() {
+      frame = 0;
+      const labels = Array.from(headerSvg!.querySelectorAll<SVGTextElement>("text._2q1Kt"));
+      if (labels.length === 0) return;
+      const left = scroller!.scrollLeft;
+      const centres = labels.map((el) => {
+        const attr = el.getAttribute("x") ?? "0";
+        if (el.dataset.sx !== attr) el.dataset.cx = attr;
+        // Measured once per text: measuring forces layout, and a label's width only changes with its words.
+        if (el.dataset.half === undefined || el.dataset.halfOf !== el.textContent) {
+          el.dataset.half = String(el.getComputedTextLength() / 2);
+          el.dataset.halfOf = el.textContent ?? "";
+        }
+        return Number(el.dataset.cx);
+      });
+      labels.forEach((el, i) => {
+        const half = Number(el.dataset.half);
+        const c = centres[i];
+        const room = i + 1 < centres.length ? (centres[i + 1] - c) / 2 : i > 0 ? (c - centres[i - 1]) / 2 : half;
+        const x = Math.min(Math.max(c, left + half + 8), c + Math.max(0, room - half - 4));
+        const next = String(Math.round(x));
+        if (el.getAttribute("x") !== next) el.setAttribute("x", next);
+        el.dataset.sx = el.getAttribute("x") ?? "";
+      });
+    }
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(place);
+    };
+    scroller.addEventListener("scroll", schedule);
+    // Only the header is watched (a zoom rewrites its labels); the rows below change on every scroll step.
+    const observer = new MutationObserver(schedule);
+    observer.observe(headerSvg, { subtree: true, childList: true, attributes: true, attributeFilter: ["x"] });
+    schedule();
+    return () => {
+      scroller.removeEventListener("scroll", schedule);
+      observer.disconnect();
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, [bodyEl, hasHeader, viewMode, columnWidth]);
+
+  // The rows selected in the table get an outline on their bars too (the bars are read by row index, like the overlays).
+  useEffect(() => {
+    if (!bodyEl) return;
+    const bars = bodyEl.querySelectorAll<SVGGElement>("g.bar > g");
+    drawnGanttTasks.forEach((t, i) => {
+      const el = bars[i];
+      if (!el) return;
+      if (selectedIds.has(t.id) || t.id === selectedId) el.setAttribute("data-selected", "");
+      else el.removeAttribute("data-selected");
+    });
+  }, [bodyEl, selectedIds, selectedId, drawnGanttTasks, measureKey]);
+
   // gantt-task-react does NOT size its TaskList wrapper to listCellWidth itself —
   // it only forwards that value as a `rowWidth` prop and expects the consumer's own
   // TaskListHeader/TaskListTable to apply it. Without an explicit width here, these
@@ -1588,19 +1705,19 @@ export default function GanttView({
     <div className="wbs-header" style={{ height: HEADER_HEIGHT, width: listWidth }}>
       <div className="wbs-col wbs-col-key">Mã</div>
       <div className="wbs-col wbs-col-name">Tên việc</div>
-      {columns.map((c) => (
+      {shownColumns.map((c) => (
         <div
           key={c.id}
-          className={`wbs-col wbs-col-extra ${c.align === "right" ? "is-right" : ""}`}
-          style={{ width: c.width }}
+          className={`wbs-col wbs-col-extra ${c.align === "right" ? "is-right" : ""}${c.compact ? " is-compact" : ""}`}
+          style={{ width: c.fitWidth }}
           title={c.long}
         >
-          {c.label}
+          {c.compact ? "" : c.label}
         </div>
       ))}
     </div>
     ),
-    [columns, listWidth]
+    [shownColumns, listWidth]
   );
 
   const buildTable = useCallback(
@@ -1676,7 +1793,7 @@ export default function GanttView({
               {task.summary}
             </span>
           </div>
-          {columns.map((c) => {
+          {shownColumns.map((c) => {
             const editable = (c.id === "assignee" && onAssign && isAssignableType(task.issueType)) || (c.id === "status" && onTransition);
             const kind = KIND_OF_COLUMN[c.id];
             const boxKind = !editable && kind && kinds.has(kind) ? kind : null;
@@ -1684,10 +1801,10 @@ export default function GanttView({
               <div
                 key={c.id}
                 data-cell={c.id}
-                className={`wbs-col wbs-col-extra wbs-cell-${c.id} ${c.align === "right" ? "is-right" : ""}${editable ? " is-editable" : ""}${
+                className={`wbs-col wbs-col-extra wbs-cell-${c.id} ${c.align === "right" ? "is-right" : ""}${c.compact ? " is-compact" : ""}${editable ? " is-editable" : ""}${
                   cursorKind !== null && cursorKind === kind ? " wbs-cell-cursor" : ""
                 }`}
-                style={{ width: c.width }}
+                style={{ width: c.fitWidth }}
                 title={editable ? (c.id === "assignee" ? "Bấm để giao người" : "Bấm để đổi trạng thái") : undefined}
                 onClick={
                   editable
@@ -1714,7 +1831,7 @@ export default function GanttView({
     ),
     // openCellEditor and the edit helpers only set state; onAssign/onTransition/onUpdate decide what is editable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [rows, matchIds, selectedIds, selectedId, showCriticalPath, criticalIds, listWidth, columns, collapsed, ranges, today, sla, onSelect, onOpenEdit, onToggleCollapse, onAssign, onTransition, onUpdate, unscheduledIds, cursor, boxEdit]
+    [rows, matchIds, selectedIds, selectedId, showCriticalPath, criticalIds, listWidth, shownColumns, collapsed, ranges, today, sla, onSelect, onOpenEdit, onToggleCollapse, onAssign, onTransition, onUpdate, unscheduledIds, cursor, boxEdit]
   );
   const table = useMemo(() => (windowed ? null : buildTable(rows)), [windowed, buildTable, rows]);
   const rowIndex = useMemo(() => (windowed ? new Map(rows.map((r, i) => [r.task.id, i])) : null), [windowed, rows]);
@@ -1739,35 +1856,34 @@ export default function GanttView({
         showSearch
         leading={<SavedFilterMenu filter={filter} onApply={onFilterChange} myAccountId={myAccountId} />}
         jql={jql}
-        extras={
-          <>
-            {/* Kept on screen while it is switched on, even if SLA was turned off since, so it can be switched off. */}
-            {(sla || filter.onlySlaBreached) && (
-              <button
-                type="button"
-                className={`tf-btn${filter.onlySlaBreached ? " is-on" : ""}`}
-                aria-pressed={filter.onlySlaBreached}
-                onClick={() => onFilterChange({ ...filter, onlySlaBreached: !filter.onlySlaBreached })}
-                title="Quá hạn SLA"
-              >
-                <Icon name="clock" size={14} />
-                Trễ SLA{slaBreached ? ` (${slaBreached.size})` : ""}
-              </button>
-            )}
-            {(unscheduledIds.size > 0 || onlyUnscheduled) && (
-              <button
-                type="button"
-                className={`tf-btn warning-pill${unscheduledOnly ? " is-on" : ""}`}
-                aria-pressed={unscheduledOnly}
-                onClick={() => setOnlyUnscheduled((v) => !v)}
-                title="Chỉ hiện việc chưa có ngày"
-              >
-                <Icon name="alert" size={14} />
-                <span className="fb-label">Chưa có ngày</span> ({unscheduledIds.size})
-              </button>
-            )}
-          </>
-        }
+        onClearExtras={() => setOnlyUnscheduled(false)}
+        quick={[
+          // Kept while it is switched on, even if SLA was turned off since, so it can be switched off.
+          ...(sla || filter.onlySlaBreached
+            ? [
+                {
+                  key: "sla",
+                  label: `Trễ SLA${slaBreached ? ` (${slaBreached.size})` : ""}`,
+                  icon: "clock" as const,
+                  on: filter.onlySlaBreached,
+                  onToggle: () => onFilterChange({ ...filter, onlySlaBreached: !filter.onlySlaBreached }),
+                  title: "Quá hạn SLA",
+                },
+              ]
+            : []),
+          ...(unscheduledIds.size > 0 || onlyUnscheduled
+            ? [
+                {
+                  key: "unscheduled",
+                  label: `Chưa có ngày (${unscheduledIds.size})`,
+                  icon: "alert" as const,
+                  on: unscheduledOnly,
+                  onToggle: () => setOnlyUnscheduled((v) => !v),
+                  title: "Chỉ hiện việc chưa có ngày",
+                },
+              ]
+            : []),
+        ]}
         trailing={
           <>
             <div className="seg-group" role="group" aria-label="Chia theo">
@@ -1805,131 +1921,122 @@ export default function GanttView({
             >
               <Icon name="undo" />
             </button>
-            <button
-              type="button"
-              className="tb-btn tb-icon"
-              onClick={() => onSetCollapsed(parentIds)}
-              disabled={parentIds.length === 0}
-              aria-label="Thu gọn tất cả nhóm"
-              title="Thu gọn tất cả"
-            >
-              <Icon name="collapseAll" />
-            </button>
-            <button
-              type="button"
-              className="tb-btn tb-icon"
-              onClick={() => onSetCollapsed([])}
-              disabled={collapsed.size === 0}
-              aria-label="Mở rộng tất cả nhóm"
-              title="Mở rộng tất cả"
-            >
-              <Icon name="expandAll" />
-            </button>
             <span className="tb-sep" aria-hidden="true" />
             <Popover
-              className="tb-btn"
-              align="end"
-              ariaLabel="Hiển thị"
-              menuLabel="Tuỳ chọn hiển thị"
-              menuClassName="view-menu"
-              title="Hiển thị"
-              label={
-                <>
-                  <Icon name="eye" />
-                  <span className="tb-label">Hiển thị</span>
-                </>
-              }
-            >
-              <div className="menu-heading">Tô màu theo</div>
-              <div className="seg-group view-colorby" role="group" aria-label="Tô màu thanh theo">
-                {(Object.keys(COLOR_BY_LABEL) as BarColorBy[]).map((k) => (
-                  <button
-                    key={k}
-                    type="button"
-                    className={colorBy === k ? "active" : ""}
-                    aria-pressed={colorBy === k}
-                    onClick={() => {
-                      setColorBy(k);
-                      saveColorBy(k);
-                    }}
-                  >
-                    {COLOR_BY_LABEL[k]}
-                  </button>
-                ))}
-              </div>
-              <div className="menu-heading">Biểu đồ</div>
-              <SwitchRow
-                icon="critical"
-                label="Đường găng"
-                checked={showCriticalPath}
-                onChange={setShowCriticalPath}
-              />
-              <SwitchRow
-                icon="link"
-                label="Phụ thuộc"
-                checked={showDependencies}
-                onChange={setShowDependencies}
-              />
-              <SwitchRow
-                icon="layers"
-                label="Baseline"
-                checked={showBaseline}
-                onChange={(next) => {
-                  setShowBaseline(next);
-                  saveShowBaseline(next);
-                }}
-              />
-              <div className="menu-sep" role="separator" />
-              <div className="menu-heading">Cột</div>
-              <div className="col-grid">
-                {COLUMNS.map((c) => (
-                  <label key={c.id} className="col-chooser-item">
-                    <input type="checkbox" checked={columnIds.includes(c.id)} onChange={() => toggleColumn(c.id)} />
-                    {c.long}
-                  </label>
-                ))}
-              </div>
-              <div className="col-chooser-foot">
-                <button
-                  type="button"
-                  className="text-btn"
-                  onClick={() => {
-                    setColumnIds(DEFAULT_COLUMNS);
-                    saveColumns(DEFAULT_COLUMNS);
-                  }}
-                >
-                  Mặc định
-                </button>
-                <button
-                  type="button"
-                  className="text-btn"
-                  onClick={() => {
-                    const all = COLUMNS.map((c) => c.id);
-                    setColumnIds(all);
-                    saveColumns(all);
-                  }}
-                >
-                  Tất cả
-                </button>
-              </div>
-            </Popover>
-            <Popover
-              className="tb-btn"
+              className="tb-btn tb-icon"
               role="menu"
               align="end"
-              ariaLabel="Nhập / Xuất"
-              menuLabel="Nhập / Xuất"
-              menuClassName="io-menu"
-              title="Nhập / Xuất"
-              label={
-                <>
-                  <Icon name="importExport" />
-                  <span className="tb-label">Nhập / Xuất</span>
-                </>
-              }
+              caret={false}
+              ariaLabel="Thêm"
+              menuLabel="Hiển thị, nhập, xuất"
+              menuClassName="more-menu view-menu io-menu"
+              title="Hiển thị, nhập, xuất"
+              label={<Icon name="more" />}
             >
               {({ close }) => (
                 <>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="menu-item"
+                    disabled={parentIds.length === 0}
+                    aria-label="Thu gọn tất cả nhóm"
+                    onClick={() => {
+                      close();
+                      onSetCollapsed(parentIds);
+                    }}
+                  >
+                    <Icon name="collapseAll" />
+                    Thu gọn tất cả
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="menu-item"
+                    disabled={collapsed.size === 0}
+                    aria-label="Mở rộng tất cả nhóm"
+                    onClick={() => {
+                      close();
+                      onSetCollapsed([]);
+                    }}
+                  >
+                    <Icon name="expandAll" />
+                    Mở rộng tất cả
+                  </button>
+                  <div className="menu-sep" role="separator" />
+                  <div className="menu-heading">Tô màu theo</div>
+                  <div className="seg-group view-colorby" role="group" aria-label="Tô màu thanh theo">
+                    {(Object.keys(COLOR_BY_LABEL) as BarColorBy[]).map((k) => (
+                      <button
+                        key={k}
+                        type="button"
+                        className={colorBy === k ? "active" : ""}
+                        aria-pressed={colorBy === k}
+                        onClick={() => {
+                          setColorBy(k);
+                          saveColorBy(k);
+                        }}
+                      >
+                        {COLOR_BY_LABEL[k]}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="menu-heading">Biểu đồ</div>
+                  <SwitchRow
+                    icon="critical"
+                    label="Đường găng"
+                    checked={showCriticalPath}
+                    onChange={setShowCriticalPath}
+                  />
+                  <SwitchRow
+                    icon="link"
+                    label="Phụ thuộc"
+                    checked={showDependencies}
+                    onChange={setShowDependencies}
+                  />
+                  <SwitchRow
+                    icon="layers"
+                    label="Baseline"
+                    checked={showBaseline}
+                    onChange={(next) => {
+                      setShowBaseline(next);
+                      saveShowBaseline(next);
+                    }}
+                  />
+                  <div className="menu-sep" role="separator" />
+                  <div className="menu-heading">Cột</div>
+                  <div className="col-grid">
+                    {COLUMNS.map((c) => (
+                      <label key={c.id} className="col-chooser-item">
+                        <input type="checkbox" checked={columnIds.includes(c.id)} onChange={() => toggleColumn(c.id)} />
+                        {c.long}
+                      </label>
+                    ))}
+                  </div>
+                  <div className="col-chooser-foot">
+                    <button
+                      type="button"
+                      className="text-btn"
+                      onClick={() => {
+                        setColumnIds(DEFAULT_COLUMNS);
+                        saveColumns(DEFAULT_COLUMNS);
+                      }}
+                    >
+                      Mặc định
+                    </button>
+                    <button
+                      type="button"
+                      className="text-btn"
+                      onClick={() => {
+                        const all = COLUMNS.map((c) => c.id);
+                        setColumnIds(all);
+                        saveColumns(all);
+                      }}
+                    >
+                      Tất cả
+                    </button>
+                  </div>
+                  <div className="menu-sep" role="separator" />
                   <button
                     type="button"
                     role="menuitem"
@@ -1940,10 +2047,7 @@ export default function GanttView({
                     }}
                   >
                     <Icon name="upload" />
-                    <span className="menu-item-text">
-                      Nhập việc…
-                      <small>Từ file CSV hoặc dán từ Excel</small>
-                    </span>
+                    Nhập việc…
                   </button>
                   <button
                     type="button"
@@ -1955,12 +2059,8 @@ export default function GanttView({
                     }}
                   >
                     <Icon name="upload" />
-                    <span className="menu-item-text">
-                      Nhập KBKT…
-                      <small>Tạo/cập nhật test case và lỗi trong Jira từ kịch bản kiểm thử .xlsx</small>
-                    </span>
+                    Nhập KBKT…
                   </button>
-                  <div className="menu-sep" role="separator" />
                   <button
                     type="button"
                     role="menuitem"
@@ -1971,55 +2071,28 @@ export default function GanttView({
                     }}
                   >
                     <Icon name="download" />
-                    <span className="menu-item-text">
-                      Xuất CSV
-                      <small>Bảng WBS theo cột và bộ lọc đang chọn, kèm %, phụ thuộc và baseline</small>
-                    </span>
+                    Xuất CSV
                   </button>
+                  {onOpenShortcuts && (
+                    <>
+                      <div className="menu-sep" role="separator" />
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="menu-item"
+                        onClick={() => {
+                          close();
+                          onOpenShortcuts();
+                        }}
+                      >
+                        <Icon name="keyboard" />
+                        Phím tắt
+                        <kbd>?</kbd>
+                      </button>
+                    </>
+                  )}
                 </>
               )}
-            </Popover>
-            <Popover
-              className="tb-btn tb-icon"
-              align="end"
-              caret={false}
-              ariaLabel="Thao tác và phím tắt"
-              menuLabel="Thao tác và phím tắt"
-              menuClassName="help-menu"
-              title="Thao tác và phím tắt"
-              label={<Icon name="help" />}
-            >
-              <div className="menu-heading">Chọn việc</div>
-              <dl className="help-list">
-                <dt>Nhấp</dt>
-                <dd>chọn một việc</dd>
-                <dt>
-                  <kbd>Ctrl</kbd>/<kbd>Cmd</kbd> + nhấp
-                </dt>
-                <dd>chọn thêm</dd>
-                <dt>
-                  <kbd>Shift</kbd> + nhấp
-                </dt>
-                <dd>chọn cả dải</dd>
-                <dt>Nhấp đúp</dt>
-                <dd>mở chi tiết</dd>
-                <dt>
-                  <kbd>Esc</kbd>
-                </dt>
-                <dd>bỏ chọn</dd>
-              </dl>
-              <div className="menu-sep" role="separator" />
-              <div className="menu-heading">Biểu đồ</div>
-              <dl className="help-list">
-                <dt>
-                  <kbd>Ctrl</kbd>/<kbd>Cmd</kbd> + <kbd>Z</kbd>
-                </dt>
-                <dd>hoàn tác thao tác kéo thanh</dd>
-                <dt>
-                  <kbd>Ctrl</kbd> + cuộn
-                </dt>
-                <dd>phóng to / thu nhỏ trục thời gian</dd>
-              </dl>
             </Popover>
           </>
         }
@@ -2058,7 +2131,7 @@ export default function GanttView({
                 handleWidth={6}
                 fontFamily="var(--font-sans)"
                 fontSize="12px"
-                todayColor={withAlpha(chartPalette.son, chartPalette.dark ? 0.08 : 0.05)}
+                todayColor="transparent"
                 arrowColor={chartPalette.ink4}
                 ganttHeight={ganttHeight}
                 listCellWidth={`${listWidth}px`}

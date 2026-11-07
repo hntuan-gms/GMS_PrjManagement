@@ -617,3 +617,10 @@ button.td-add-btn:hover:not(:disabled) {
   min-width: 128px;
   white-space: nowrap;
 }
+
+/* Ước lượng on one line, what has been logged (and the way to log more) under it. */
+.td-effort {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}

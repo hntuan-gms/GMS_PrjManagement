@@ -32,7 +32,6 @@ export default function ShortcutSheet({ onClose }: { onClose: () => void }) {
       >
         <header>
           <h2>Phím tắt</h2>
-          <span className="muted">Không chạy khi đang gõ trong ô nhập.</span>
           <button type="button" className="icon-btn" aria-label="Đóng" onClick={onClose}>
             <Icon name="x" />
           </button>

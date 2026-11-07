@@ -42,10 +42,13 @@ await step("từ Backlog của board Scrum đổi sang Kanban: bảng hiện ra,
   assert.equal(await page.locator(".bd-seg").count(), 0, "board Kanban không có Sprint/Backlog");
 });
 await step("không còn nút ⟳ riêng; có 'Mở trên Jira'", async () => {
-  const right = await page.textContent(".bd-top-right");
+  const right = await page.textContent(".bd-filters .tf-right");
   assert.ok(!right.includes("⟳"), right);
-  assert.equal(await page.locator(".bd-top-right button:not(.bd-cardbtn)").count(), 0);
-  assert.ok(right.includes("Mở trên Jira"));
+  assert.equal(await page.locator(".bd-filters .tf-right button:not(.bd-cardbtn)").count(), 0);
+  assert.equal(await page.locator(".bd-filters a.bd-link[aria-label='Mở trên Jira']").count(), 1);
+  // One row of chrome: the board switch, search and filter share the line.
+  const top = await page.$$eval(".bd-switcher, .bd-filters .tf-search, .bd-filters .tf-add", (els) => els.map((e) => Math.round(e.getBoundingClientRect().top)));
+  assert.ok(Math.max(...top) - Math.min(...top) < 12, "ba tầng chrome: " + top);
 });
 await step("đổi lại Scrum rồi về Kanban vẫn hiện (không kẹt ở trạng thái cũ)", async () => {
   await page.locator(".bd-switcher").click();
@@ -62,16 +65,18 @@ console.log("\n== Bộ lọc ==");
 await step("không có facet Trạng thái trên board; có Người/Loại/Epic/Nhãn/Ưu tiên", async () => {
   await page.locator(".bd-filters .tf-add").click();
   const names = await page.$$eval(".bd-filters .tf-facet-name", (b) => b.map((x) => x.textContent.trim()));
-  for (const k of ["Người phụ trách", "Loại", "Epic", "Nhãn", "Ưu tiên"]) assert.ok(names.includes(k), k + " thiếu: " + names);
+  for (const k of ["Người", "Loại", "Epic", "Nhãn", "Ưu tiên"]) assert.ok(names.includes(k), k + " thiếu: " + names);
   assert.ok(!names.includes("Trạng thái"), "Trạng thái không nên có trên bảng: " + names);
   await page.keyboard.press("Escape");
 });
-await step("thanh lọc của Bảng cùng kiểu với Kế hoạch: Tìm · Của tôi · Quá hạn · Bộ lọc", async () => {
+await step("thanh lọc của Bảng cùng kiểu với Kế hoạch: Tìm · Bộ lọc; Của tôi, Quá hạn, Bị chặn là công tắc trong panel", async () => {
   const bar = page.locator(".bd-filters .tf-bar");
   assert.equal(await bar.locator(".tf-search").count(), 1);
-  const flat = (await bar.locator(".tf-left").textContent()).replace(/\s+/g, " ");
-  const at = (k) => flat.indexOf(k);
-  assert.ok(at("Của tôi") >= 0 && at("Quá hạn") > at("Của tôi") && flat.lastIndexOf("Bộ lọc") > at("Quá hạn"), flat);
+  assert.equal(await bar.locator(".tf-add").count(), 1);
+  await page.locator(".bd-filters .tf-add").click();
+  const rows = await page.$$eval(".tf-quick-row", (r) => r.map((x) => x.textContent.trim()));
+  assert.deepEqual(rows, ["Của tôi", "Quá hạn", "Bị chặn"]);
+  await page.keyboard.press("Escape");
 });
 await step("chọn một giá trị → chip, đếm thẻ, gỡ chip thì hết lọc", async () => {
   await page.locator(".bd-filters .tf-add").click();
@@ -85,32 +90,38 @@ await step("chọn một giá trị → chip, đếm thẻ, gỡ chip thì hết
 });
 
 console.log("\n== Cột trống ==");
-await step("thu gọn cột Backlog (trống) thành dải hẹp, cột khác rộng ra", async () => {
-  const before = (await page.locator(".bd-colhead", { hasText: "In Progress" }).boundingBox()).width;
-  await head("Backlog").hover();
-  await page.getByRole("button", { name: "Thu gọn cột Backlog" }).click();
+await step("cột trống gập sẵn thành dải hẹp, không ghi '0 việc'; cột còn lại rộng ra", async () => {
   await page.waitForSelector(".bd-col.is-folded");
   const w = (await page.locator(".bd-colhead.is-folded").first().boundingBox()).width;
-  assert.ok(w >= 38 && w <= 44, "dải thu gọn rộng " + w);
-  const after = (await page.locator(".bd-colhead", { hasText: "In Progress" }).boundingBox()).width;
-  assert.ok(after >= before, `cột còn lại không rộng ra: ${before} -> ${after}`);
+  assert.ok(w >= 38 && w <= 44, "dải gập rộng " + w);
+  const heads = await page.$$eval(".bd-colhead:not(.is-folded) .bd-colcount", (e) => e.map((x) => x.textContent.trim()));
+  assert.ok(heads.every((t) => !/^0\s*việc/.test(t)), "còn '0 việc': " + heads);
 });
-await step("cột thu gọn còn sau khi tải lại trang", async () => {
+await step("mở một cột trống bằng nút trên dải", async () => {
+  const before = await page.locator(".bd-colhead.is-folded").count();
+  await page.getByRole("button", { name: /Mở rộng cột/ }).first().click();
+  await page.waitForFunction((n) => document.querySelectorAll(".bd-colhead.is-folded").length === n - 1, before);
+});
+await step("cột đã mở còn mở sau khi tải lại trang", async () => {
+  const folded = await page.locator(".bd-colhead.is-folded").count();
   await page.reload();
-  await page.waitForSelector(".wbs-row");
-  await tab("Bảng");
-  await page.waitForSelector(".bd-col.is-folded");
+  await page.waitForSelector(".bd-board .bd-card");
+  assert.equal(await page.locator(".bd-colhead.is-folded").count(), folded);
 });
 await step("cột có thẻ không có nút thu gọn", async () => {
   assert.equal(await head("In Progress").getByRole("button", { name: /Thu gọn/ }).count(), 0);
 });
-await step("mở rộng lại bằng nút trên dải", async () => {
-  await page.getByRole("button", { name: "Mở rộng cột Backlog" }).first().click();
-  await page.waitForFunction(() => !document.querySelector(".bd-col.is-folded"));
+await step("thu gọn lại cột trống vừa mở", async () => {
+  const before = await page.locator(".bd-colhead.is-folded").count();
+  const open = page.locator(".bd-colhead:not(.is-folded)", { has: page.getByRole("button", { name: /Thu gọn cột/ }) }).first();
+  await open.getByRole("button", { name: /Thu gọn cột/ }).click();
+  await page.waitForFunction((n) => document.querySelectorAll(".bd-colhead.is-folded").length === n + 1, before);
 });
 
 console.log("\n== Tạo việc ở mọi cột ==");
 await step("có '+ Tạo việc' ở mọi cột (hiện khi rê chuột)", async () => {
+  // Empty columns are folded; opened, each of the five has one.
+  while (await page.locator(".bd-colhead.is-folded").count()) await page.getByRole("button", { name: /Mở rộng cột/ }).first().click();
   assert.equal(await page.locator(".bd-col .bd-add").count(), 5);
   const col = page.locator(".bd-col").nth(2);
   assert.equal(await col.locator(".bd-add").evaluate((e) => getComputedStyle(e).opacity), "0");
@@ -159,8 +170,6 @@ await step("không có banner xanh; có ⓘ giải thích và nút tạo board S
     await route.fulfill({ response: res, json: body });
   });
   await page.reload();
-  await page.waitForSelector(".wbs-row");
-  await tab("Bảng");
   await page.waitForSelector(".bd-board .bd-card");
   assert.equal(await page.locator(".bd-fallback").count(), 0, "banner chiếm chiều cao");
   await page.getByRole("button", { name: "Vì sao board này không có Sprint?" }).click();

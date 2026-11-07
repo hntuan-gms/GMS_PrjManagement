@@ -77,7 +77,9 @@ export default function TimelineMarkers({ bodyEl, rows, ranges, versions, showRe
               <g key={v.id} className={`release-line${v.released ? " is-released" : ""}`}>
                 <title>{`Phiên bản ${v.name} · phát hành ${dmy(v.releaseDate!)}${v.released ? " (đã phát hành)" : ""}`}</title>
                 <line x1={x} x2={x} y1={0} y2={chartHeight} />
-                <text x={x + 4} y={12}>
+                {/* On a plate, so the name does not run into the label of the row it passes over. */}
+                <rect className="release-plate" x={x + 2} y={2} width={Math.round(v.name.length * 6.4) + 20} height={14} rx={3} />
+                <text x={x + 6} y={12}>
                   ⚑ {v.name}
                 </text>
               </g>

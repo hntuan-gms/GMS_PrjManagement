@@ -415,7 +415,7 @@ export function SprintPlanModal({
 
             {proposal.team.length > 0 && (
               <details className="bd-plan-capacity">
-                <summary>Năng lực nhóm trong sprint này</summary>
+                <summary>Công suất nhóm trong sprint này</summary>
                 <CapacityTable
                   rows={capacityRows(proposal.team, chosenForCapacity, snapshot)}
                   window={proposal.window}

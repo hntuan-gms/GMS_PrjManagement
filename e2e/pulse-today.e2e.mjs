@@ -73,7 +73,7 @@ await step("vòng tròn cuối dòng: bước xong cần ô nhập thì mở khu
 });
 
 await step("'Ghi giờ' mở tờ bên; Esc đóng tờ, không đóng trang", async () => {
-  await page.locator(".today-log-strip button.primary").click();
+  await page.locator(".today-log-btn").click();
   await page.locator(".side-sheet").waitFor();
   await page.keyboard.press("Escape");
   await page.locator(".side-sheet").waitFor({ state: "detached" });
@@ -81,7 +81,7 @@ await step("'Ghi giờ' mở tờ bên; Esc đóng tờ, không đóng trang", a
 });
 
 await step("bấm một lăng kính khi tờ Ghi giờ đang mở: tờ đóng, lăng kính mở", async () => {
-  await page.locator(".today-log-strip button.primary").click();
+  await page.locator(".today-log-btn").click();
   await page.locator(".side-sheet").waitFor();
   await page.locator(".toolbar-tabs button", { hasText: "Bảng" }).click();
   await page.locator(".side-sheet").waitFor({ state: "detached" });

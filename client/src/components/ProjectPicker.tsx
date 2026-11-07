@@ -3,6 +3,7 @@ import { fold } from "../csvImport";
 import { api } from "../api";
 import type { ProjectSummary, Session } from "../types";
 import { useLayer } from "../useLayer";
+import { Icon } from "./Icons";
 import { readViewCache, viewCacheScope, writeViewCache } from "../viewCache";
 
 interface Props {
@@ -98,9 +99,9 @@ export default function ProjectPicker({ session, variant, onSelect, onCancel, on
       </div>
 
       <label className="field">
-        <span>Tìm dự án</span>
         <input
           autoFocus
+          aria-label="Tìm dự án"
           value={filter}
           onChange={(e) => {
             setFilter(e.target.value);
@@ -148,13 +149,14 @@ export default function ProjectPicker({ session, variant, onSelect, onCancel, on
               onClick={() => choosing === null && choose(p.key)}
               onMouseMove={() => i !== active && setActive(i)}
             >
-              {p.avatarUrl ? (
-                <img className="project-avatar" src={p.avatarUrl} alt="" />
-              ) : (
-                <span className="project-avatar project-avatar-blank" aria-hidden="true" />
-              )}
+              {p.avatarUrl && <img className="project-avatar" src={p.avatarUrl} alt="" />}
               <span className="project-key">{p.key}</span>
               <span className="project-name">{p.name}</span>
+              {session.project?.key === p.key && (
+                <span className="project-current" role="img" aria-label="Đang mở">
+                  <Icon name="check" size={14} />
+                </span>
+              )}
               {choosing === p.key && <span className="muted-inline">Đang mở...</span>}
             </div>
             </Fragment>

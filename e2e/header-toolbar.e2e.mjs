@@ -3,7 +3,7 @@
 // nothing. The keyboard layer (Ctrl K, C, 1-4, ?) is checked here too. Behaviour of the client against the stand-in API.
 import assert from "node:assert/strict";
 import { chromium } from "playwright-core";
-import { displaySwitch, ioAction, openDisplay, pickFacet } from "./toolbar.mjs";
+import { displaySwitch, ioAction, openDisplay, openFilterPanel, openMore, pickFacet, quickFilter, quickIsOn } from "./toolbar.mjs";
 
 const browser = await chromium.launch({ channel: "chrome", headless: true });
 const page = await browser.newPage({ viewport: { width: 1500, height: 900 } });
@@ -110,13 +110,14 @@ await step("điều khiển header cao 28–30px", async () => {
 });
 
 console.log("\n== Toolbar một hàng ==");
-await step("không còn dải hướng dẫn tĩnh; có nút ? mở bảng thao tác", async () => {
+await step("không còn dải hướng dẫn tĩnh; menu ⋯ có mục Phím tắt mở bảng phím tắt", async () => {
   assert.equal(await page.locator(".selection-idle").count(), 0);
   assert.equal(await page.getByText("Nhấp để chọn ·").count(), 0);
-  await page.locator("button[aria-label='Thao tác và phím tắt']").click();
-  const help = await page.textContent(".help-menu");
-  assert.ok(help.includes("chọn cả dải") && help.includes("mở chi tiết"), help);
+  await openMore(page);
+  await page.locator(".more-menu [role=menuitem]", { hasText: "Phím tắt" }).click();
+  await page.waitForSelector(".shortcut-sheet");
   await page.keyboard.press("Escape");
+  await page.waitForFunction(() => !document.querySelector(".shortcut-sheet"));
 });
 await step("một hàng ở 1500px, điều khiển cao 32px, không tràn", async () => {
   const bar = await box(".gantt-toolbar");
@@ -137,7 +138,7 @@ await step("sáu ô lọc chi tiết gộp trong một bảng 'Bộ lọc'", asy
   assert.equal(await page.locator(".gantt-toolbar .tf-select:not(.sf-select)").count(), 0);
   await page.locator(".tf-add").click();
   const heads = await page.$$eval(".tf-facet-head .tf-facet-name", (b) => b.map((x) => x.textContent));
-  for (const k of ["Người phụ trách", "Trạng thái", "Loại", "Epic", "Nhãn", "Ưu tiên"]) assert.ok(heads.includes(k), k + " thiếu: " + heads);
+  for (const k of ["Người", "Trạng thái", "Loại", "Epic", "Nhãn", "Ưu tiên"]) assert.ok(heads.includes(k), k + " thiếu: " + heads);
   await page.keyboard.press("Escape");
 });
 await step("lọc → chip có nút bỏ lọc, nhãn đầy đủ trong title; bỏ chip thì hết lọc", async () => {
@@ -171,18 +172,21 @@ await step("'Hiển thị' gom Đường găng, Phụ thuộc, Baseline và cộ
   await sw.click();
   await page.keyboard.press("Escape");
 });
-await step("menu 'Nhập / Xuất' có đủ ba mục và duyệt được bằng phím mũi tên", async () => {
-  const trigger = page.locator(".gantt-toolbar button", { hasText: "Nhập / Xuất" });
+await step("menu ⋯ có nhóm, nhập, xuất, phím tắt và duyệt được bằng phím mũi tên", async () => {
+  const trigger = page.locator(".gantt-toolbar button[aria-label='Thêm']");
   await trigger.focus();
   await page.keyboard.press("ArrowDown");
-  const items = await page.$$eval(".io-menu [role=menuitem]", (b) => b.map((x) => x.textContent));
-  assert.equal(items.length, 3, items.join("|"));
-  assert.ok(items[0].includes("Nhập việc") && items[1].includes("Nhập KBKT") && items[2].includes("Xuất CSV"));
-  assert.equal(await page.evaluate(() => document.activeElement?.textContent.includes("Nhập việc")), true);
+  await page.waitForSelector(".more-menu [role=menuitem]");
+  const items = await page.$$eval(".more-menu [role=menuitem]", (b) => b.map((x) => x.textContent.trim()));
+  assert.ok(items.some((t) => t.startsWith("Thu gọn tất cả")) && items.some((t) => t.startsWith("Mở rộng tất cả")), items.join("|"));
+  assert.ok(items.some((t) => t.startsWith("Nhập việc")) && items.some((t) => t.startsWith("Nhập KBKT")) && items.some((t) => t.startsWith("Xuất CSV")), items.join("|"));
+  assert.ok(items.some((t) => t.startsWith("Phím tắt")), items.join("|"));
+  assert.equal(await page.evaluate(() => document.activeElement?.textContent.includes("Thu gọn tất cả")), true);
+  // "Mở rộng tất cả" is disabled while nothing is collapsed: the arrow skips it.
   await page.keyboard.press("ArrowDown");
-  assert.equal(await page.evaluate(() => document.activeElement?.textContent.includes("Nhập KBKT")), true);
+  assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("role") === "menuitem" && !document.activeElement.textContent.includes("Thu gọn")), true);
   await page.keyboard.press("Escape");
-  assert.equal(await page.locator(".io-menu").count(), 0);
+  assert.equal(await page.locator(".more-menu").count(), 0);
 });
 await step("nút chỉ có biểu tượng đều có tên truy cập", async () => {
   const unnamed = await page.$$eval(".toolbar button, .gantt-toolbar button", (bs) =>
@@ -205,9 +209,9 @@ await step("chọn hàng không làm dịch bảng, và không che toolbar", asy
   await page.fill(".tf-search input", "");
 });
 await step("Esc đóng bảng đang mở mà KHÔNG xoá lựa chọn; Esc lần nữa mới bỏ chọn", async () => {
-  await page.locator("button[aria-label='Thao tác và phím tắt']").click();
+  await openMore(page);
   await page.keyboard.press("Escape");
-  assert.equal(await page.locator(".help-menu").count(), 0);
+  assert.equal(await page.locator(".more-menu").count(), 0);
   assert.equal(await page.locator(".selection-bar").count(), 1, "Esc trong bảng đã xoá lựa chọn");
   await page.locator(".gantt-toolbar").click({ position: { x: 4, y: 4 } });
   await page.keyboard.press("Escape");
@@ -215,17 +219,20 @@ await step("Esc đóng bảng đang mở mà KHÔNG xoá lựa chọn; Esc lần
 });
 
 console.log("\n== Chưa có ngày ==");
-await step("cảnh báo 'Chưa có ngày (n)' vẫn ở hàng nhanh và mở được task", async () => {
-  const pill = page.locator(".gantt-toolbar .warning-pill");
-  assert.match((await pill.textContent()).trim(), /^Chưa có ngày \(\d+\)$/);
+await step("'Chưa có ngày (n)' là công tắc đầu panel Bộ lọc, hiện thành chip, mở được task", async () => {
+  await openFilterPanel(page);
+  const row = page.locator(".tf-quick-row", { hasText: "Chưa có ngày" });
+  assert.match((await row.textContent()).trim(), /^Chưa có ngày \(\d+\)$/);
+  await page.keyboard.press("Escape");
   // A filter now, not a list: only the rows without dates remain, and a double-click opens one.
-  await pill.click();
+  await quickFilter(page, "Chưa có ngày");
+  assert.equal(await quickIsOn(page, "unscheduled"), true);
   await page.waitForFunction(() => document.querySelectorAll(".wbs-row").length === 1);
   await page.locator(".wbs-row").first().locator(".wbs-col-name").dblclick();
   await page.waitForSelector(".modal .modal-id");
   await page.click(".modal-close");
   await page.waitForSelector(".modal", { state: "detached" });
-  await pill.click();
+  await quickFilter(page, "Chưa có ngày");
 });
 await step("ioAction vẫn tải CSV", async () => {
   const [dl] = await Promise.all([page.waitForEvent("download"), ioAction(page, "Xuất CSV")]);

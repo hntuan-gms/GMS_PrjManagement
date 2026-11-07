@@ -223,7 +223,7 @@ boardRouter.get("/sprints/:id/capacity", async (req, res, next) => {
       getWorkCalendar(session.cloudId, session.projectKey!).catch(() => DEFAULT_WORK_CALENDAR),
     ]);
     const target = snapshot.sprints.find((s) => s.id === sprintId);
-    if (snapshot.mode !== "agile" || !target) throw badRequest("Chỉ xem được năng lực của sprint đang chạy hoặc chưa bắt đầu.");
+    if (snapshot.mode !== "agile" || !target) throw badRequest("Chỉ xem được công suất của sprint đang chạy hoặc chưa bắt đầu.");
 
     const window = plannedWindow(snapshot, target, today, offset, calendar);
     const [members, profiles, absences] = await Promise.all([

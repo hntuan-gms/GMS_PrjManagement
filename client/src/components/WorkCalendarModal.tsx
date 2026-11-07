@@ -11,6 +11,7 @@ import {
   type DatedEntry,
 } from "../workCalendarForm";
 import DateField from "./DateField";
+import TimeInput from "./TimeInput";
 import { useDialogs } from "./dialogContext";
 import { Icon } from "./Icons";
 
@@ -30,11 +31,22 @@ interface Props {
   onDirtyChange?: (dirty: boolean) => void;
 }
 
-const DEFAULT: Calendar = { workDays: [1, 2, 3, 4, 5], holidays: [], makeUpDays: [] };
+const DEFAULT_PERIODS = [
+  { start: "08:00", end: "12:00" },
+  { start: "13:00", end: "17:00" },
+];
+const DEFAULT: Calendar = { workDays: [1, 2, 3, 4, 5], holidays: [], makeUpDays: [], periods: DEFAULT_PERIODS, tzOffsetMinutes: 420 };
+const OFFSETS = Array.from({ length: 27 }, (_, i) => i - 12);
 
 function normalize(c: WorkCalendarSettings | null): Calendar {
   if (!c) return DEFAULT;
-  return { workDays: [...c.workDays].sort((a, b) => a - b), holidays: c.holidays ?? [], makeUpDays: c.makeUpDays ?? [] };
+  return {
+    workDays: [...c.workDays].sort((a, b) => a - b),
+    holidays: c.holidays ?? [],
+    makeUpDays: c.makeUpDays ?? [],
+    periods: c.periods ?? DEFAULT_PERIODS,
+    tzOffsetMinutes: c.tzOffsetMinutes ?? 420,
+  };
 }
 
 /**
@@ -203,8 +215,51 @@ export default function WorkCalendarModal({ initial, canEdit: canEditHint, onClo
           </section>
 
           <section className="sla-section">
-            <h3>Ngày lễ ({draft.holidays.length} ngày)</h3>
-            <p className="field-hint">Không ai làm việc: không tính công suất, không tính giờ kỳ vọng, đồng hồ SLA dừng.</p>
+            <h3 title="Các khung giờ làm việc trong một ngày làm việc; đồng hồ SLA và giờ kỳ vọng đếm theo đây">Giờ làm việc</h3>
+            <div className="sla-periods">
+              {draft.periods.map((p, i) => (
+                <div key={i} className="sla-period">
+                  <span>Khung {i + 1}</span>
+                  <TimeInput
+                    aria-label={`Khung ${i + 1} bắt đầu`}
+                    value={p.start}
+                    onChange={(v) => patch({ periods: draft.periods.map((x, j) => (j === i ? { ...x, start: v } : x)) })}
+                  />
+                  <span>–</span>
+                  <TimeInput
+                    aria-label={`Khung ${i + 1} kết thúc`}
+                    value={p.end}
+                    onChange={(v) => patch({ periods: draft.periods.map((x, j) => (j === i ? { ...x, end: v } : x)) })}
+                  />
+                  {draft.periods.length > 1 && (
+                    <button type="button" className="sla-remove" aria-label={`Xoá khung ${i + 1}`} onClick={() => patch({ periods: draft.periods.filter((_, j) => j !== i) })}>
+                      ✕
+                    </button>
+                  )}
+                </div>
+              ))}
+              {draft.periods.length < 3 && (
+                <button type="button" className="sla-add" onClick={() => patch({ periods: [...draft.periods, { start: "18:00", end: "20:00" }] })}>
+                  + Thêm khung giờ
+                </button>
+              )}
+            </div>
+            <label className="field sla-tz">
+              <span>Múi giờ của lịch</span>
+              <select value={draft.tzOffsetMinutes} onChange={(e) => patch({ tzOffsetMinutes: Number(e.target.value) })}>
+                {OFFSETS.map((h) => (
+                  <option key={h} value={h * 60}>
+                    UTC{h >= 0 ? "+" : "−"}
+                    {Math.abs(h)}
+                    {h === 7 ? " (Việt Nam)" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </section>
+
+          <section className="sla-section">
+            <h3 title="Không ai làm việc: không tính công suất, không tính giờ kỳ vọng, đồng hồ SLA dừng">Ngày lễ{draft.holidays.length > 0 && ` · ${draft.holidays.length}`}</h3>
             <div className="cal-add cal-add-range">
               <label className="field">
                 <span>Từ ngày</span>
@@ -248,8 +303,7 @@ export default function WorkCalendarModal({ initial, canEdit: canEditHint, onClo
           </section>
 
           <section className="sla-section">
-            <h3>Ngày làm bù ({draft.makeUpDays.length})</h3>
-            <p className="field-hint">Cuối tuần vẫn đi làm.</p>
+            <h3 title="Cuối tuần vẫn đi làm">Ngày làm bù{draft.makeUpDays.length > 0 && ` · ${draft.makeUpDays.length}`}</h3>
             <div className="cal-add cal-add-single">
               <label className="field">
                 <span>Ngày</span>

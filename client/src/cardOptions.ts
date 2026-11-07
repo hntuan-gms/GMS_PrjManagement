@@ -24,10 +24,10 @@ export interface CardOptions {
 export const CARD_FIELDS: Array<{ id: CardField; label: string }> = [
   { id: "type", label: "Loại việc" },
   { id: "key", label: "Mã" },
-  { id: "priority", label: "Độ ưu tiên" },
+  { id: "priority", label: "Ưu tiên" },
   { id: "estimate", label: "Ước lượng" },
   { id: "due", label: "Hạn" },
-  { id: "assignee", label: "Người phụ trách" },
+  { id: "assignee", label: "Người" },
   { id: "epic", label: "Epic" },
   { id: "labels", label: "Nhãn" },
   { id: "versions", label: "Phiên bản" },
@@ -36,10 +36,10 @@ export const CARD_FIELDS: Array<{ id: CardField; label: string }> = [
 
 export const COLOR_SCHEMES: Array<{ id: CardColorBy; label: string }> = [
   { id: "none", label: "Không tô màu" },
-  { id: "priority", label: "Theo độ ưu tiên" },
+  { id: "priority", label: "Theo ưu tiên" },
   { id: "type", label: "Theo loại việc" },
   { id: "epic", label: "Theo Epic" },
-  { id: "assignee", label: "Theo người phụ trách" },
+  { id: "assignee", label: "Theo người" },
 ];
 
 /** What a card showed before this was configurable, plus the sub-task line (it only appears when there are any). */
@@ -57,7 +57,7 @@ export const DEFAULT_CARD_OPTIONS: CardOptions = {
     subtasks: true,
   },
   colorBy: "none",
-  mergeSubtasks: false,
+  mergeSubtasks: true,
 };
 
 const storageKey = (boardKey: string) => `gms.board.cardOptions.${boardKey}`;
@@ -98,8 +98,29 @@ export function readLastCardScope(project: string): string | null {
   }
 }
 
-export function rememberCardScope(project: string, scope: string): void {
+/** A board the card settings can name: what the Bảng tab saw last, for the title and the board switch. */
+export interface RememberedBoard {
+  scope: string;
+  name: string;
+  kind: "scrum" | "kanban" | "status";
+}
+
+const boardsKey = (project: string) => `gms.board.cardBoards.${project}`;
+
+export function readRememberedBoards(project: string): RememberedBoard[] {
   try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(boardsKey(project)) ?? "[]");
+    return Array.isArray(parsed)
+      ? parsed.filter((b): b is RememberedBoard => !!b && typeof b.scope === "string" && typeof b.name === "string" && typeof b.kind === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+export function rememberCardScope(project: string, scope: string, boards?: RememberedBoard[]): void {
+  try {
+    if (boards) localStorage.setItem(boardsKey(project), JSON.stringify(boards));
     localStorage.setItem(lastScopeKey(project), scope);
   } catch {
     // Private mode: the settings page then has no board to edit.

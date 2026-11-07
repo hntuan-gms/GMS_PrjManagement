@@ -180,9 +180,18 @@ export default function BoardView({
   }, [cardScope]);
   // The project settings page edits the card options of the board last drawn here.
   const hasSnapshot = snapshot !== null;
+  const boardsForSettings = useMemo(
+    () =>
+      snapshot
+        ? snapshot.boards.length > 0
+          ? snapshot.boards.map((b) => ({ scope: String(b.id), name: b.name, kind: b.type === "scrum" ? ("scrum" as const) : ("kanban" as const) }))
+          : [{ scope: "status", name: `Bảng ${projectKey}`, kind: "status" as const }]
+        : [],
+    [snapshot, projectKey]
+  );
   useEffect(() => {
-    if (hasSnapshot) rememberCardScope(projectKey, cardScope);
-  }, [hasSnapshot, projectKey, cardScope]);
+    if (hasSnapshot) rememberCardScope(projectKey, cardScope, boardsForSettings);
+  }, [hasSnapshot, projectKey, cardScope, boardsForSettings]);
   function setCardOptions(next: CardOptions) {
     setCardOptionsState(next);
     writeCardOptions(cardScope, next);
@@ -465,7 +474,7 @@ export default function BoardView({
         i.key === key ? { ...i, assigneeAccountId: accountId, assigneeName: person?.displayName ?? null } : i
       ),
       () => api.updateTask(key, { assigneeAccountId: accountId }),
-      { failure: `Không đổi được người phụ trách của ${key}`, touchesTasks: true }
+      { failure: `Không đổi được người của ${key}`, touchesTasks: true }
     );
   }
 
@@ -756,8 +765,38 @@ export default function BoardView({
   return (
     <AssignContext.Provider value={assignCtx}>
     <div className="bd-view">
-      <div className="bd-top">
-        <div className="bd-top-left">
+      {snapshot.fallback && (
+        <div className="bd-fallback">
+          ℹ {snapshot.fallback.message}
+          {snapshot.fallback.reason === "no_board" && (
+            <button className="text-btn" onClick={() => setModal({ kind: "createBoard", type: "scrum" })}>
+              Tạo board Scrum
+            </button>
+          )}
+        </div>
+      )}
+      {quickError && (
+        <div className="bd-fallback" role="status">
+          Jira không chạy được bộ lọc nhanh nên chưa lọc: {quickError}
+        </div>
+      )}
+      {snapshot.truncated && <div className="bd-fallback">Chỉ hiện 800 việc đầu theo thứ hạng.</div>}
+      {notice && (
+        <div className="notice notice-error bd-notice">
+          <span>{notice}</span>
+          <button className="link-btn" onClick={() => setNotice(null)}>Đóng</button>
+        </div>
+      )}
+
+      <div className="bd-filters">
+        <FilterBar
+          tasks={tasks}
+          filter={tf}
+          onChange={setTf}
+          myAccountId={session.user.accountId}
+          facets={barFacets}
+          lead={
+            <>
           {agile ? (
             // One control for "which board" and "another board": it replaces the plain select
             // and the separate "+ Bảng" button that sat beside it.
@@ -869,73 +908,8 @@ export default function BoardView({
               ))}
             </select>
           )}
-        </div>
-        <div className="bd-top-right">
-          {!scrum && snapshot.throughput.length > 0 && (
-            <span className="bd-muted" title="Số việc hoàn thành mỗi tuần, 6 tuần gần nhất">
-              Hoàn thành: <b>{lastThroughput}</b> tuần này · TB {avgThroughput}/tuần
-            </span>
-          )}
-          {/* No refresh button of its own: the header's "Đồng bộ từ Jira" reloads the tasks,
-              and this board re-reads whenever they change. A second ↻ here read as a
-              different action and left people unsure which one to press. */}
-          {view === "board" && (
-            <Popover
-              className="tf-btn bd-cardbtn"
-              caret={false}
-              active={isCustomized(cardOptions)}
-              menuLabel="Tuỳ chọn thẻ"
-              menuClassName="tf-menu bd-card-menu"
-              title="Chọn thông tin hiện trên thẻ và màu thẻ"
-              label={
-                <>
-                  <Icon name="layers" size={14} />
-                  Thẻ
-                </>
-              }
-            >
-              <CardOptionsForm options={cardOptions} onChange={setCardOptions} />
-            </Popover>
-          )}
-          {boardUrl && (
-            <a className="bd-link" href={boardUrl} target="_blank" rel="noreferrer">
-              Mở trên Jira
-              <Icon name="external" size={12} />
-            </a>
-          )}
-        </div>
-      </div>
-
-      {snapshot.fallback && (
-        <div className="bd-fallback">
-          ℹ {snapshot.fallback.message}
-          {snapshot.fallback.reason === "no_board" && (
-            <button className="text-btn" onClick={() => setModal({ kind: "createBoard", type: "scrum" })}>
-              Tạo board Scrum
-            </button>
-          )}
-        </div>
-      )}
-      {quickError && (
-        <div className="bd-fallback" role="status">
-          Jira không chạy được bộ lọc nhanh nên chưa lọc: {quickError}
-        </div>
-      )}
-      {snapshot.truncated && <div className="bd-fallback">Chỉ hiện 800 việc đầu theo thứ hạng.</div>}
-      {notice && (
-        <div className="notice notice-error bd-notice">
-          <span>{notice}</span>
-          <button className="link-btn" onClick={() => setNotice(null)}>Đóng</button>
-        </div>
-      )}
-
-      <div className="bd-filters">
-        <FilterBar
-          tasks={tasks}
-          filter={tf}
-          onChange={setTf}
-          myAccountId={session.user.accountId}
-          facets={barFacets}
+            </>
+          }
           matched={shown.length}
           total={scoped.length}
           countLabel="thẻ"
@@ -943,18 +917,16 @@ export default function BoardView({
           searchInputClassName="bd-search"
           searchInputRef={searchRef}
           leading={filterLeading}
-          extras={
-            <button
-              type="button"
-              className={`tf-btn${boardOnly.onlyBlocked ? " is-on" : ""}`}
-              aria-pressed={boardOnly.onlyBlocked}
-              onClick={() => setBoardOnly({ ...boardOnly, onlyBlocked: !boardOnly.onlyBlocked })}
-              title="Chờ việc đi trước hoặc đã gắn cờ"
-            >
-              <Icon name="lock" size={14} />
-              Bị chặn
-            </button>
-          }
+          quick={[
+            {
+              key: "blocked",
+              label: "Bị chặn",
+              icon: "lock",
+              on: boardOnly.onlyBlocked,
+              onToggle: () => setBoardOnly({ ...boardOnly, onlyBlocked: !boardOnly.onlyBlocked }),
+              title: "Chờ việc đi trước hoặc đã gắn cờ",
+            },
+          ]}
           // The board's own quick filters (Board settings, Quick filters; Jira runs their JQL) live in
           // the panel, so they no longer stand beside "Của tôi" looking like the same thing.
           panelExtras={
@@ -982,16 +954,49 @@ export default function BoardView({
           ))}
           onClearExtras={() => setBoardOnly(EMPTY_BOARD_ONLY)}
           trailing={
-            view === "board" ? (
-              <label className="bd-lanepick">
-                Nhóm theo
-                <select value={swimlane} onChange={(e) => setSwimlane(e.target.value as Swimlane)}>
-                  <option value="none">Không</option>
-                  <option value="assignee">Người phụ trách</option>
-                  <option value="epic">Epic</option>
-                </select>
-              </label>
-            ) : undefined
+            <>
+              {view === "board" && (
+                <label className="bd-lanepick">
+                  Nhóm theo
+                  <select value={swimlane} onChange={(e) => setSwimlane(e.target.value as Swimlane)}>
+                    <option value="none">Không</option>
+                    <option value="assignee">Người</option>
+                    <option value="epic">Epic</option>
+                  </select>
+                </label>
+              )}
+          {!scrum && snapshot.throughput.length > 0 && (
+            <span className="bd-muted" title="Số việc hoàn thành mỗi tuần, 6 tuần gần nhất">
+              Hoàn thành: <b>{lastThroughput}</b> tuần này · TB {avgThroughput}/tuần
+            </span>
+          )}
+          {/* No refresh button of its own: the header's "Đồng bộ từ Jira" reloads the tasks,
+              and this board re-reads whenever they change. A second ↻ here read as a
+              different action and left people unsure which one to press. */}
+          {view === "board" && (
+            <Popover
+              className="tf-btn bd-cardbtn"
+              caret={false}
+              active={isCustomized(cardOptions)}
+              menuLabel="Tuỳ chọn thẻ"
+              menuClassName="tf-menu bd-card-menu"
+              title="Chọn thông tin hiện trên thẻ và màu thẻ"
+              label={
+                <>
+                  <Icon name="layers" size={14} />
+                  Thẻ
+                </>
+              }
+            >
+              <CardOptionsForm options={cardOptions} onChange={setCardOptions} />
+            </Popover>
+          )}
+          {boardUrl && (
+            <a className="bd-link tf-btn tb-icon" href={boardUrl} target="_blank" rel="noreferrer" aria-label="Mở trên Jira" title="Mở trên Jira">
+              <Icon name="external" size={14} />
+            </a>
+          )}
+            </>
           }
         />
       </div>

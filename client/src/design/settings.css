@@ -122,3 +122,33 @@
     padding: 16px;
   }
 }
+
+/* SLA targets: one row per priority, name then hours, in two aligned columns (not three columns that put "High" mid-row). */
+.sla-targets {
+  grid-template-columns: 1fr;
+  gap: 6px;
+  max-width: 340px;
+}
+.sla-target {
+  grid-template-columns: 1fr 96px auto;
+}
+/* Save with nothing to save: the primary button, dimmed like every disabled button, not a grey block that reads as busy. */
+.settings-foot .primary:disabled {
+  opacity: 0.4;
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--on-strong);
+}
+/* Import settings: a long type name stays on one line, cut with an ellipsis. */
+.kb-settings select,
+.kb-grid select {
+  max-width: 100%;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kb-settings .field > span,
+.kb-grid .field > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

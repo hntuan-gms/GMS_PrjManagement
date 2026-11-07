@@ -1,3 +1,4 @@
+import StatusGlyph from "./StatusGlyph";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { shortDate, tzOffsetMinutes, unitLabel } from "../boardModel";
@@ -19,7 +20,7 @@ type Tab = "velocity" | "sprint" | "cfd" | "control" | "created";
 const TABS: Array<{ id: Tab; label: string; needsBoard: boolean }> = [
   { id: "velocity", label: "Vận tốc", needsBoard: true },
   { id: "sprint", label: "Sprint & burnup", needsBoard: true },
-  { id: "cfd", label: "Luồng công việc", needsBoard: false },
+  { id: "cfd", label: "Luồng việc", needsBoard: false },
   { id: "control", label: "Thời gian xử lý", needsBoard: false },
   { id: "created", label: "Tạo và xong", needsBoard: false },
 ];
@@ -130,7 +131,7 @@ export default function AgileReports({ cacheScope, projectKey, issueLink }: Prop
       <button className="ag-head" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
         <span className={`bd-chevron ${open ? "is-open" : ""}`} aria-hidden="true" />
         <h3>Báo cáo Agile</h3>
-        <span className="pr-muted">vận tốc · sprint và burnup · luồng công việc · thời gian xử lý</span>
+        <span className="pr-muted">vận tốc · sprint và burnup · luồng việc · thời gian xử lý</span>
       </button>
 
       {open && (
@@ -260,7 +261,10 @@ function SprintReportBody({ report, unit, issueLink }: { report: SprintReport; u
           <span className="ag-line-summary" title={l.summary}>
             {l.summary}
           </span>
-          <span className={`bl-status bl-status-${l.statusCategory}`}>{l.statusName}</span>
+          <span className="bl-status">
+            <StatusGlyph category={l.statusCategory} name={l.statusName} size={12} />
+            {l.statusName}
+          </span>
           <b>{l.weight > 0 ? `${l.weight} ${unit}` : "—"}</b>
         </li>
       ))

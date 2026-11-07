@@ -1,3 +1,4 @@
+import StatusGlyph from "./StatusGlyph";
 import { useMemo, useState, type DragEvent, type MouseEvent } from "react";
 import { canonicalIssueType, capacityRows, localDate, shortDate, totalWeight, velocityAverage, weightOf } from "../boardModel";
 import { shortRange } from "../dateLabels";
@@ -212,7 +213,7 @@ export default function BacklogView(props: Props) {
       const data = await props.onLoadCapacity(sprint);
       setCapacityOpen((cur) => (cur?.sprintId === sprint.id ? { sprintId: sprint.id, data, error: null } : cur));
     } catch (e) {
-      const error = e instanceof Error ? e.message : "Không tải được năng lực.";
+      const error = e instanceof Error ? e.message : "Không tải được công suất.";
       setCapacityOpen((cur) => (cur?.sprintId === sprint.id ? { sprintId: sprint.id, data: null, error } : cur));
     }
   }
@@ -308,21 +309,21 @@ export default function BacklogView(props: Props) {
                 </span>
               )}
               <span className="bd-muted">
-                {items.length} việc
-                {snapshot.estimation && ` · ${weight} ${unit}`}
-                {sprint?.state === "active" && done.length > 0 && ` · xong ${done.length}`}
+                {[items.length > 0 && `${items.length} việc`, snapshot.estimation && weight > 0 && `${weight} ${unit}`, sprint?.state === "active" && done.length > 0 && `xong ${done.length}`]
+                  .filter(Boolean)
+                  .join(" · ")}
               </span>
 
               {sprint && sprint.state !== "closed" && fill !== null && (
                 <span
                   className={`bl-meter ${over ? "is-over" : ""}`}
-                  title={`${weight} / vận tốc trung bình ${budget} ${unit}`}
+                  title={`Trung bình 3 sprint gần nhất: ${budget} ${unit}`}
                   aria-label={`Đã lên kế hoạch ${weight} trên vận tốc ${budget} ${unit}`}
                 >
                   <span className="bl-meter-fill" style={{ width: `${Math.min(100, (fill / 140) * 100)}%` }} />
                   <span className="bl-meter-mark" style={{ left: `${(100 / 140) * 100}%` }} />
                   <span className="bl-meter-text">
-                    {Math.round((weight / budget!) * 100)}% vận tốc
+                    {weight > 0 ? `${weight} / ${budget} ${unit}` : ""}
                   </span>
                 </span>
               )}
@@ -351,7 +352,7 @@ export default function BacklogView(props: Props) {
                   aria-expanded={capacityOpen?.sprintId === sprint.id}
                   title="Mỗi người còn bao nhiêu giờ trong sprint này"
                 >
-                  Năng lực
+                  Công suất
                 </button>
               )}
               {sprint && (
@@ -425,7 +426,7 @@ export default function BacklogView(props: Props) {
             {sprint && capacityOpen?.sprintId === sprint.id && !isCollapsed && (
               <div className="bl-capacity">
                 {capacityOpen.error && <div className="rv-notice rv-notice-error">{capacityOpen.error}</div>}
-                {!capacityOpen.data && !capacityOpen.error && <span className="bd-muted">Đang tính năng lực…</span>}
+                {!capacityOpen.data && !capacityOpen.error && <span className="bd-muted">Đang tính công suất…</span>}
                 {capacityOpen.data && (
                   <CapacityTable
                     // Unfiltered: a person filter on the list must not make someone look idle.
@@ -482,23 +483,33 @@ export default function BacklogView(props: Props) {
                           </span>
                         )}
                         {issue.flagged && <span className="bd-alert bd-alert-flag">⚑</span>}
-                        {issue.epicSummary && (
+                        {issue.epicSummary ? (
                           <span className="bd-epic bl-epic" title={issue.epicKey ?? ""}>
                             {issue.epicSummary}
                           </span>
+                        ) : (
+                          <span className="bd-spacer" />
                         )}
                         <span onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
                           {props.getTasks([issue.key]).length > 0 ? (
                             <BulkStatusMenu
                               tasks={props.getTasks([issue.key])}
-                              className={`bl-status bl-status-${issue.statusCategory} bl-status-btn`}
+                              className="bl-status bl-status-btn"
                               placement="bottom"
                               title="Đổi trạng thái theo quy trình của Jira"
-                              label={issue.statusName}
+                              label={
+                                <>
+                                  <StatusGlyph category={issue.statusCategory} name={issue.statusName} size={12} />
+                                  {issue.statusName}
+                                </>
+                              }
                               onApply={(statusName, ids, values) => props.onBulkStatus(statusName, ids, values)}
                             />
                           ) : (
-                            <span className={`bl-status bl-status-${issue.statusCategory}`}>{issue.statusName}</span>
+                            <span className="bl-status">
+                              <StatusGlyph category={issue.statusCategory} name={issue.statusName} size={12} />
+                              {issue.statusName}
+                            </span>
                           )}
                         </span>
                         <PriorityMark priority={issue.priority} />

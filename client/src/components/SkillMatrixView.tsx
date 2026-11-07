@@ -7,6 +7,8 @@ interface Props {
   users: Array<{ accountId: string; displayName: string; avatarUrl?: string | null }>;
   profiles: ResourceProfile[];
   onProfileSaved: (profile: ResourceProfile) => void;
+  /** A person's name opens their profile (hours, leave, skills, note). */
+  onOpenProfile?: (accountId: string) => void;
 }
 
 /**
@@ -15,7 +17,7 @@ interface Props {
  * when it proposes an assignee, so filling this in directly improves "ai nên làm
  * việc này". Nothing here is computed from Jira; it is only what the team says.
  */
-export default function SkillMatrixView({ users, profiles, onProfileSaved }: Props) {
+export default function SkillMatrixView({ users, profiles, onProfileSaved, onOpenProfile }: Props) {
   const [query, setQuery] = useState("");
   const [extra, setExtra] = useState<string[]>([]);
   const [newSkill, setNewSkill] = useState("");
@@ -62,30 +64,14 @@ export default function SkillMatrixView({ users, profiles, onProfileSaved }: Pro
           aria-label="Tìm người hoặc kỹ năng"
           onChange={(e) => setQuery(e.target.value)}
         />
-        <form
-          className="sm-add"
-          onSubmit={(e) => {
-            e.preventDefault();
-            addColumn();
-          }}
-        >
-          <input value={newSkill} placeholder="Thêm cột kỹ năng" aria-label="Thêm cột kỹ năng" onChange={(e) => setNewSkill(e.target.value)} />
-          <button type="submit" disabled={!newSkill.trim()}>
-            Thêm
-          </button>
-        </form>
-        <span className="bd-muted sm-note">
-          {matrix.withoutSkills > 0 ? `${matrix.withoutSkills}/${matrix.rows.length} người chưa có kỹ năng nào. ` : ""}
-          Bấm vào ô để bật/tắt.
-        </span>
+        {matrix.columns.length > 0 && matrix.withoutSkills > 0 && (
+          <span className="bd-muted sm-note">{matrix.withoutSkills}/{matrix.rows.length} người chưa có kỹ năng nào</span>
+        )}
       </div>
       {error && <div className="rv-notice rv-notice-error">{error}</div>}
 
-      {matrix.columns.length === 0 ? (
-        <div className="empty-state">
-          Chưa có kỹ năng nào.
-        </div>
-      ) : (
+      {/* Everyone is listed even before the first skill exists: the people are what the matrix is about. */}
+      {(
         <div className="sm-scroll">
           <table className="sm-table">
             <thead>
@@ -97,13 +83,32 @@ export default function SkillMatrixView({ users, profiles, onProfileSaved }: Pro
                     <span className="sm-col-count">{c.count}</span>
                   </th>
                 ))}
+                {/* The way to add a skill is at the head of the table it adds a column to. */}
+                <th className="sm-add-col">
+                  <form
+                    className="sm-add"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      addColumn();
+                    }}
+                  >
+                    <input value={newSkill} placeholder="+ Kỹ năng" aria-label="Thêm cột kỹ năng" onChange={(e) => setNewSkill(e.target.value)} />
+                    {newSkill.trim() && <button type="submit">Thêm</button>}
+                  </form>
+                </th>
               </tr>
             </thead>
             <tbody>
               {rows.map((r) => (
                 <tr key={r.accountId}>
                   <th className="sm-person" scope="row">
-                    <b>{r.displayName}</b>
+                    {onOpenProfile ? (
+                      <button type="button" className="sm-name" onClick={() => onOpenProfile(r.accountId)} title="Mở hồ sơ">
+                        {r.displayName}
+                      </button>
+                    ) : (
+                      <b>{r.displayName}</b>
+                    )}
                     {r.role && <small>{r.role}</small>}
                   </th>
                   {matrix.columns.map((c) => {
@@ -128,7 +133,7 @@ export default function SkillMatrixView({ users, profiles, onProfileSaved }: Pro
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={matrix.columns.length + 1} className="bd-muted">
+                  <td colSpan={matrix.columns.length + 2} className="bd-muted">
                     Không có ai khớp.
                   </td>
                 </tr>

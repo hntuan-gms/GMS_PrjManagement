@@ -36,7 +36,7 @@ await step("lần đầu mở app là trang Hôm nay: lời chào do code dựng
   await page.waitForSelector(".today-view");
   assert.match(await page.textContent(".today-greeting"), /^Chào /);
   assert.equal(await page.locator("[data-view=today][aria-current=page]").count(), 1);
-  assert.ok(await page.locator(".today-log-strip").isVisible());
+  assert.ok(await page.locator(".today-log-btn").isVisible());
 });
 await step("việc của tôi chưa có ngày nằm ở 'Chưa xếp lịch'; bấm mở khung chi tiết", async () => {
   const sec = page.locator(".today-section", { hasText: "Chưa xếp lịch" });

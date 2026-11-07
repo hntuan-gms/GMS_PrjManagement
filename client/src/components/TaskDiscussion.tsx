@@ -62,10 +62,10 @@ function when(iso: string): string {
 
 const FIELD_VI: Record<string, string> = {
   status: "Trạng thái",
-  assignee: "Người phụ trách",
+  assignee: "Người",
   summary: "Tiêu đề",
   description: "Mô tả",
-  priority: "Độ ưu tiên",
+  priority: "Ưu tiên",
   duedate: "Hạn",
   "start date": "Ngày bắt đầu",
   labels: "Nhãn",

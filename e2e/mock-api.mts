@@ -50,7 +50,15 @@ let tasks: any[] = [
   { id: "DEMO-7", summary: "Sửa lỗi hiển thị bảng", issueType: "Bug", wbsParentId: "DEMO-2", startDate: day(1), dueDate: day(3), priority: "Highest", createdAt: STARTED_AT },
   { id: "DEMO-8", summary: "Kiểm thử tích hợp", issueType: "Task", wbsParentId: "DEMO-2", assigneeAccountId: "binh", startDate: day(8), dueDate: day(14), labels: ["milestone"] },
   { id: "DEMO-9", summary: "Công việc chưa có ngày", issueType: "Task", assigneeAccountId: "me", startDate: null, dueDate: null },
-].map((t: any) => ({ ...base, baselineStart: t.startDate, baselineDue: t.dueDate, ...t, assigneeName: nameOf(t.assigneeAccountId ?? null) }));
+].map((t: any) => ({
+  ...base,
+  baselineStart: t.startDate,
+  baselineDue: t.dueDate,
+  // The server keeps due = start + duration - 1; the seed has to obey it or the panel, the bar and an undo disagree.
+  ...(t.startDate && t.dueDate ? { durationDays: Math.round((Date.parse(t.dueDate) - Date.parse(t.startDate)) / 86400000) + 1 } : {}),
+  ...t,
+  assigneeName: nameOf(t.assigneeAccountId ?? null),
+}));
 // Scripts share this process; one that moves dates puts the seed back afterwards.
 const SEED = structuredClone(tasks);
 
@@ -317,7 +325,11 @@ app.get("/api/progress", (req, res) => {
   const q = req.query as Record<string, string>;
   const scope = { assignee: q.assignee || undefined, epic: q.epic || undefined, types: q.type ? q.type.split(",") : [] };
   const snap = (n: number, actual: number, planned: number) => ({ date: day(n), actualPct: actual, plannedPct: planned, spi: 0.9, health: "at_risk", total: 10, done: 3, inProgress: 2, overdue: 1 });
-  res.json({ metrics: computeProgress(tasks, q.asOf || TODAY, scope), latest: null, history: [], trend: [snap(-14, 10, 20), snap(-7, 22, 30), snap(0, 30, 41)] });
+  const metrics = computeProgress(tasks, q.asOf || TODAY, scope);
+  // The last point of the chain is today's measurement, so the chart and the headline say the same number.
+  const m = metrics as unknown as { actualPct: number; plannedPct: number };
+  const now = snap(0, Math.round(m.actualPct * 10) / 10, Math.round(m.plannedPct * 10) / 10);
+  res.json({ metrics, latest: null, history: [], trend: [snap(-14, 5, 12), snap(-7, 11, 20), now] });
 });
 app.get("/api/progress/flow", (req, res) => {
   const days = Number(req.query.days) || 60;

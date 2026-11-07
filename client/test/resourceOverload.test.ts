@@ -57,3 +57,14 @@ describe("loadInRange + summaryWindow", () => {
     assert.equal(w.label, "02/11 – 08/11/2026");
   });
 });
+
+import { ratioBand } from "../src/resourceAllocation";
+describe("ratioBand (shared by Mức tải and Giờ đã ghi)", () => {
+  it("is light under half, healthy up to the whole capacity, over above it", () => {
+    assert.equal(ratioBand(0.3), "light");
+    assert.equal(ratioBand(0.5), "healthy");
+    assert.equal(ratioBand(1), "healthy");
+    assert.equal(ratioBand(1.0001), "healthy");
+    assert.equal(ratioBand(1.02), "over");
+  });
+});

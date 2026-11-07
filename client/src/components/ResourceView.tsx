@@ -35,6 +35,7 @@ import Popover from "./Popover";
 import ResourceModes from "./ResourceModes";
 import type { ResourceMode } from "../lenses";
 import ResourcePersonBlock from "./ResourcePersonBlock";
+import TodayInCell from "./TodayInCell";
 import ResourceProfileDrawer from "./ResourceProfileDrawer";
 import ResourceUnassigned, { type DragState } from "./ResourceUnassigned";
 import SavedFilterMenu from "./SavedFilterMenu";
@@ -420,7 +421,8 @@ export default function ResourceView({
         filter={taskFacets}
         onChange={(f) => onFilterChange({ ...filter, ...f, text: filter.text, people: filter.people })}
         myAccountId={myAccountId}
-        facets={["statuses", "types", "epics", "labels", "priorities", "overdue"]}
+        // Filtering work means nothing on the skills matrix: its row carries only the mode switch.
+        facets={mode === "load" ? ["statuses", "types", "epics", "labels", "priorities", "overdue"] : []}
         matched={filteredTasks.length}
         total={tasks.length}
         leading={
@@ -442,7 +444,7 @@ export default function ResourceView({
             )}
             {/* Applies the whole shared filter, people included, so the Gantt shows
                 the same saved view when you switch back. */}
-            <SavedFilterMenu filter={filter} onApply={onFilterChange} myAccountId={myAccountId} />
+            {mode === "load" && <SavedFilterMenu filter={filter} onApply={onFilterChange} myAccountId={myAccountId} />}
           </>
         }
         trailing={
@@ -539,7 +541,7 @@ export default function ResourceView({
         }
       />
 
-      {mode === "skills" && <SkillMatrixView users={users} profiles={pool?.profiles ?? []} onProfileSaved={upsertProfile} />}
+      {mode === "skills" && <SkillMatrixView users={users} profiles={pool?.profiles ?? []} onProfileSaved={upsertProfile} onOpenProfile={(id) => setProfileId(id)} />}
       {mode === "load" && filtering && (
         <div className="rv-notice">
           Đang lọc: mức tải bên dưới chỉ tính các việc khớp bộ lọc, không phải toàn bộ khối lượng của mỗi người.
@@ -582,7 +584,7 @@ export default function ResourceView({
               aria-expanded={unassignedOpen}
               aria-controls={unassignedId}
               onClick={() => setUnassignedOpen((v) => !v)}
-              title="Việc chưa có người phụ trách"
+              title="Việc chưa giao"
             >
               <Icon name="alert" size={13} />
               {load.unassigned.length} việc chưa gán
@@ -838,9 +840,10 @@ function HeatmapHeader({
           return (
             <div
               key={start}
-              className={`rv-cell rv-head-cell ${today >= start && today <= end ? "is-today" : ""} ${holiday ? "is-holiday" : ""}`}
+              className={`rv-cell rv-head-cell ${today >= start && today <= end ? "is-today" : ""}${today >= start && today <= end && granularity !== "day" ? " is-aggregated" : ""} ${holiday ? "is-holiday" : ""}`}
               title={holiday ? `${when} · Ngày lễ: ${holiday}` : holidays > 0 ? `${when} · ${holidays} ngày lễ` : when}
             >
+              {granularity !== "day" && <TodayInCell start={start} end={end} today={today} />}
               {granularity === "week" ? weekColumnLabel(start) : granularity === "month" ? monthLabels(start).tiny : start.slice(8, 10)}
             </div>
           );

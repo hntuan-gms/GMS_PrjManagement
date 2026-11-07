@@ -5,7 +5,6 @@ import type { SlaSettings, SlaSettingsResponse } from "../types";
 import { useDialogs } from "./dialogContext";
 import DateField from "./DateField";
 import NumberInput from "./NumberInput";
-import TimeInput from "./TimeInput";
 import { describeWorkDays } from "../workCalendarForm";
 
 interface Props {
@@ -21,8 +20,6 @@ interface Props {
   /** Embedded: tells the page whether there are unsaved edits, so it can ask before leaving the section. */
   onDirtyChange?: (dirty: boolean) => void;
 }
-
-const OFFSETS = Array.from({ length: 27 }, (_, i) => i - 12);
 
 /** Rows with no target carry no meaning, so they do not make the form "changed". */
 function comparable(s: SlaSettings): string {
@@ -158,22 +155,17 @@ export default function SlaSettingsModal({ current, onClose, onSaved, onOpenCale
 
           <div className="field-row">
             <label className="field">
-              <span>Áp dụng cho việc tạo từ ngày</span>
+              <span title="Để trống: tính từ hôm nay khi bật. Việc tạo trước ngày này không bị tính SLA">Áp dụng cho việc tạo từ ngày</span>
               <DateField value={draft.appliesFrom ?? ""} ariaLabel="Áp dụng từ ngày" onChange={(iso) => patch({ appliesFrom: iso || null })} />
-              <small className="field-hint">Để trống: tính từ hôm nay khi bật. Việc tạo trước ngày này không bị tính SLA.</small>
             </label>
             <label className="field">
-              <span>Báo "Sắp trễ" khi còn ≤ (% thời hạn)</span>
+              <span title="0 = không báo sắp trễ">Báo "Sắp trễ" khi còn ≤ (% thời hạn)</span>
               <NumberInput value={draft.warnPercent} min={0} max={90} integer onChange={(v) => v != null && patch({ warnPercent: v })} />
-              <small className="field-hint">0 = không báo sắp trễ.</small>
             </label>
           </div>
 
           <section className="sla-section">
-            <h3>Thời hạn theo mức ưu tiên (giờ làm việc)</h3>
-            <p className="field-hint">
-              Một ngày làm việc = {hoursPerDay} giờ theo khung giờ bên dưới. Để trống = mức đó không tính SLA.
-            </p>
+            <h3 title={`Một ngày làm việc = ${hoursPerDay} giờ theo khung giờ của lịch. Để trống = mức đó không tính SLA`}>Thời hạn theo ưu tiên (giờ làm việc)</h3>
             <div className="sla-targets">
               {priorityRows.length === 0 && <em className="sla-muted">Đang tải danh sách mức ưu tiên…</em>}
               {priorityRows.map((row) => (
@@ -194,8 +186,7 @@ export default function SlaSettingsModal({ current, onClose, onSaved, onOpenCale
           </section>
 
           <section className="sla-section">
-            <h3>Loại việc áp dụng</h3>
-            <p className="field-hint">Không chọn loại nào = mọi loại việc trừ Epic.</p>
+            <h3 title="Không chọn loại nào = mọi loại việc trừ Epic">Loại việc áp dụng</h3>
             <div className="sla-checks">
               {typeRows.map((t) => (
                 <label key={t} className="sla-check">
@@ -206,55 +197,13 @@ export default function SlaSettingsModal({ current, onClose, onSaved, onOpenCale
             </div>
           </section>
 
-          <section className="sla-section">
-            <h3>Giờ làm việc</h3>
-            <p className="field-hint sla-calendar-summary">
-              Ngày làm việc: {describeWorkDays(draft.workDays)} · {draft.holidays.length} ngày lễ · {(draft.makeUpDays ?? []).length} ngày làm bù.{" "}
-              <button type="button" className="text-btn" onClick={() => void openCalendar()}>
-                Mở Lịch làm việc & ngày lễ…
-              </button>
-            </p>
-            <div className="sla-periods">
-              {draft.periods.map((p, i) => (
-                <div key={i} className="sla-period">
-                  <span>Khung {i + 1}</span>
-                  <TimeInput
-                    aria-label={`Khung ${i + 1} bắt đầu`}
-                    value={p.start}
-                    onChange={(v) => patch({ periods: draft.periods.map((x, j) => (j === i ? { ...x, start: v } : x)) })}
-                  />
-                  <span>–</span>
-                  <TimeInput
-                    aria-label={`Khung ${i + 1} kết thúc`}
-                    value={p.end}
-                    onChange={(v) => patch({ periods: draft.periods.map((x, j) => (j === i ? { ...x, end: v } : x)) })}
-                  />
-                  {draft.periods.length > 1 && (
-                    <button type="button" className="sla-remove" aria-label={`Xoá khung ${i + 1}`} onClick={() => patch({ periods: draft.periods.filter((_, j) => j !== i) })}>
-                      ✕
-                    </button>
-                  )}
-                </div>
-              ))}
-              {draft.periods.length < 3 && (
-                <button type="button" className="sla-add" onClick={() => patch({ periods: [...draft.periods, { start: "18:00", end: "20:00" }] })}>
-                  + Thêm khung giờ
-                </button>
-              )}
-            </div>
-            <label className="field sla-tz">
-              <span>Múi giờ của lịch</span>
-              <select value={draft.tzOffsetMinutes} onChange={(e) => patch({ tzOffsetMinutes: Number(e.target.value) })}>
-                {OFFSETS.map((h) => (
-                  <option key={h} value={h * 60}>
-                    UTC{h >= 0 ? "+" : "−"}
-                    {Math.abs(h)}
-                    {h === 7 ? " (Việt Nam)" : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </section>
+          <p className="field-hint sla-calendar-summary">
+            Lịch: {describeWorkDays(draft.workDays)} · {draft.periods.map((p) => `${p.start}–${p.end}`).join(", ")} · UTC{draft.tzOffsetMinutes >= 0 ? "+" : "−"}
+            {Math.abs(draft.tzOffsetMinutes) / 60} · {draft.holidays.length} ngày lễ · {(draft.makeUpDays ?? []).length} ngày làm bù.{" "}
+            <button type="button" className="text-btn" onClick={() => void openCalendar()}>
+              Mở Lịch làm việc…
+            </button>
+          </p>
 
         </fieldset>
   );

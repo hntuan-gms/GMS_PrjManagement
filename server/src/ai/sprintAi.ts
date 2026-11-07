@@ -183,7 +183,7 @@ export async function planSprint(input: {
     "",
     "NGUYÊN TẮC:",
     "1. Tôn trọng thứ hạng backlog (thứ tự bên dưới là ưu tiên của Product Owner). Chỉ bỏ qua một việc xếp cao khi có lý do rõ — và đưa nó vào deferred kèm lý do.",
-    `2. Ngân sách: ${velocity.average !== null ? `vận tốc trung bình ${velocity.average} ${velocity.unit}/sprint (3 sprint gần nhất). Tổng (việc đã có trong sprint + việc chọn) không nên vượt quá con số này.` : `chưa có lịch sử sprint. Dựa vào năng lực nhóm: ${workDays} ngày-người trong sprint.`}`,
+    `2. Ngân sách: ${velocity.average !== null ? `vận tốc trung bình ${velocity.average} ${velocity.unit}/sprint (3 sprint gần nhất). Tổng (việc đã có trong sprint + việc chọn) không nên vượt quá con số này.` : `chưa có lịch sử sprint. Dựa vào công suất nhóm: ${workDays} ngày-người trong sprint.`}`,
     "3. Đừng chọn việc bị chặn bởi việc khác chưa xong, trừ khi việc chặn nó cũng được chọn (và xếp trước) hoặc đang trong sprint hiện tại sắp xong.",
     "4. Ưu tiên gom việc cùng Epic/cùng mục tiêu để sprint giao được một thứ trọn vẹn thay vì nhiều mảnh rời.",
     "5. Cân nhắc người vắng mặt: nếu một người có ít ngày làm việc, đừng dồn nhiều việc đã gán cho họ.",

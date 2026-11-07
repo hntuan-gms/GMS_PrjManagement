@@ -8,6 +8,7 @@ import Popover from "./Popover";
 import { initialsOf as initials } from "../avatar";
 
 import { dismissForNavigation } from "../layers";
+import { usePhone } from "../usePhone";
 import { LENSES, type SyncState, type WorkspaceView } from "../lenses";
 
 interface Props {
@@ -134,27 +135,25 @@ export default function Toolbar({
       </span>
     );
 
-  const lenses = LENSES;
+  // A phone has the board and Hôm nay (the rail); the other lenses need room they do not have.
+  const phone = usePhone();
+  const lenses = phone ? LENSES.filter((l) => l.id === "board") : LENSES;
 
   return (
     <>
       <nav className="app-rail" aria-label="Điều hướng">
-        <button type="button" className="rail-mark" aria-label="GMS · về Hôm nay" data-tip="Về Hôm nay  G H" onClick={() => {
-            dismissForNavigation();
-            onViewChange("today");
-          }}>
-          <span aria-hidden="true">G</span>
-        </button>
+        <span className="rail-mark" aria-hidden="true">
+          <span>G</span>
+        </span>
         <RailButton icon="plus" label="Tạo việc" keys="C" onClick={onAddTask} />
         <span className="rail-sep" aria-hidden="true" />
         <RailButton icon="sun" label="Hôm nay" keys="G H" view="today" active={view === "today"} onClick={() => onViewChange("today")} />
         <RailButton
           icon="plan"
           label="Dự án"
-          keys="1–4"
           view="plan"
           active={lensView !== null}
-          onClick={() => onViewChange(lensView ?? "gantt")}
+          onClick={() => onViewChange(lensView ?? (phone ? "board" : "gantt"))}
         />
         <span className="rail-fill" />
         {onOpenAssistant && <RailButton icon="chat" label="Trợ lý" onClick={onOpenAssistant} />}
@@ -259,7 +258,6 @@ export default function Toolbar({
             >
               {({ close }) => (
                 <>
-                  <div className="menu-heading">{site.name}</div>
                   <button
                     type="button"
                     role="menuitem"

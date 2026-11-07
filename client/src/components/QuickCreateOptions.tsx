@@ -29,7 +29,7 @@ export default function QuickCreateOptions({ types, members, value, onChange }: 
         <select
           value={value.assigneeAccountId ?? ""}
           onChange={(e) => onChange({ ...value, assigneeAccountId: e.target.value || null })}
-          aria-label="Người phụ trách"
+          aria-label="Người"
         >
           <option value="">Chưa gán</option>
           {members.map((m) => (

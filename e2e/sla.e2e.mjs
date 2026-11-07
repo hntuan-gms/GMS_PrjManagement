@@ -3,7 +3,7 @@
 // The stand-in's seed makes DEMO-3 late, DEMO-4 done on time and DEMO-7 within its deadline.
 import { chromium } from "playwright-core";
 import assert from "node:assert/strict";
-import { fillDate, openDisplay, openSettings } from "./toolbar.mjs";
+import { fillDate, openDisplay, openFilterPanel, openSettings, quickFilter, quickIsOn } from "./toolbar.mjs";
 
 const APP = process.env.E2E_APP ?? "http://localhost:5173/";
 const browser = await chromium.launch({ channel: "chrome", headless: true });
@@ -31,7 +31,12 @@ const backToPlan = async () => {
   await page.locator(".settings-back").click();
   await page.waitForSelector(".wbs-row");
 };
-const slaButton = () => page.locator(".gantt-toolbar button", { hasText: "Trễ SLA" });
+// "Trễ SLA" is a switch at the top of the "Bộ lọc" panel: opened to read it, closed again.
+const slaRow = async () => {
+  await openFilterPanel(page);
+  return page.locator(".tf-quick-row", { hasText: "Trễ SLA" });
+};
+const closePanel = () => page.keyboard.press("Escape");
 
 await page.request.post(new URL("/api/__restore", APP).href);
 await page.goto(APP);
@@ -40,14 +45,14 @@ await page.waitForSelector(".wbs-row");
 console.log("\n== SLA: cài đặt ==");
 await step("SLA tắt mặc định: không có nút 'Trễ SLA'", async () => {
   await page.waitForTimeout(300);
-  assert.equal(await slaButton().count(), 0);
+  assert.equal(await (await slaRow()).count(), 0);
+  await closePanel();
 });
 
 await step("menu dự án → Cài đặt dự án → SLA mở mục với lịch mặc định", async () => {
   await openSettings(page, "SLA");
   await page.waitForSelector(".sla-modal");
-  const times = await page.$$eval(".sla-modal input[aria-label^='Khung']", (els) => els.map((e) => e.value));
-  assert.deepEqual(times, ["08:00", "12:00", "13:00", "17:00"]);
+  assert.match(await page.textContent(".sla-modal .sla-calendar-summary"), /08:00–12:00, 13:00–17:00/);
   // The site's priorities fill the target table.
   await page.waitForFunction(() => document.querySelectorAll(".sla-target").length === 5);
   assert.equal(await page.locator(".sla-target", { hasText: "Highest" }).locator("input").inputValue(), "4");
@@ -60,22 +65,27 @@ await step("bật SLA, áp dụng từ 60 ngày trước, lưu", async () => {
   // Saved: the page stays and its Save goes back to disabled (nothing left to save).
   await page.waitForFunction(() => document.querySelector(".sla-modal button.primary")?.disabled);
   await backToPlan();
-  await slaButton().waitFor();
+  await (await slaRow()).waitFor();
+  await closePanel();
 });
 
-await step("khung giờ chồng nhau bị máy chủ từ chối; 'Huỷ' trả về giá trị đã lưu, không hỏi", async () => {
+await step("Giờ làm việc nằm ở Lịch làm việc: khung chồng nhau bị máy chủ từ chối; 'Huỷ' trả về giá trị đã lưu, không hỏi", async () => {
   await openSettings(page, "SLA");
   await page.waitForSelector(".sla-modal");
-  const end1 = page.locator(".sla-modal input[aria-label='Khung 1 kết thúc']");
+  assert.equal(await page.locator(".sla-modal input[aria-label='Khung 1 kết thúc']").count(), 0, "SLA không còn khung giờ");
+  assert.match(await page.textContent(".sla-modal .sla-calendar-summary"), /08:00–12:00, 13:00–17:00 · UTC\+7/);
+  await openSettings(page, "Lịch làm việc");
+  await page.waitForSelector(".cal-modal");
+  const end1 = page.locator(".cal-modal input[aria-label='Khung 1 kết thúc']");
   await end1.fill("13:30");
   await end1.press("Enter");
-  await page.locator(".sla-modal button.primary").click();
-  await page.waitForSelector(".sla-modal .modal-error");
-  assert.match(await page.textContent(".sla-modal .modal-error"), /chồng nhau/);
-  await page.locator(".sla-modal .settings-foot button", { hasText: "Huỷ" }).click();
+  await page.locator(".cal-modal button.primary").click();
+  await page.waitForSelector(".cal-modal .modal-error");
+  assert.match(await page.textContent(".cal-modal .modal-error"), /chồng nhau/);
+  await page.locator(".cal-modal .settings-foot button", { hasText: "Huỷ" }).click();
   assert.equal(await page.locator(".dlg").count(), 0, "Huỷ trên trang Cài đặt không hỏi lại");
   assert.equal(await end1.inputValue(), "12:00");
-  assert.equal(await page.locator(".sla-modal button.primary").isDisabled(), true);
+  assert.equal(await page.locator(".cal-modal button.primary").isDisabled(), true);
   await backToPlan();
 });
 
@@ -94,11 +104,12 @@ await step("cột 'SLA': trễ / đúng hạn / còn hạn / không áp dụng",
 });
 
 await step("nút 'Trễ SLA (1)' lọc đúng việc trễ, bấm lại thì bỏ lọc", async () => {
-  assert.match(await slaButton().textContent(), /Trễ SLA \(1\)/);
-  await slaButton().click();
+  assert.match(await (await slaRow()).textContent(), /Trễ SLA \(1\)/);
+  await closePanel();
+  await quickFilter(page, "Trễ SLA");
   await page.waitForFunction(() => document.querySelector(".tf-count")?.textContent.includes("1/9"));
-  assert.equal(await slaButton().getAttribute("aria-pressed"), "true");
-  await slaButton().click();
+  assert.equal(await quickIsOn(page, "sla"), true);
+  await quickFilter(page, "Trễ SLA");
   await page.waitForFunction(() => !document.querySelector(".tf-count"));
 });
 

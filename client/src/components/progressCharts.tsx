@@ -246,11 +246,11 @@ export function PeopleBars({
           <button key={p.accountId ?? "none"} className="pr-bar-row pr-person-row" onClick={() => onSelect(p.accountId, p.name)}>
             <span className="pr-bar-name">
               <span className={`pr-avatar ${p.accountId ? "" : "pr-avatar-none"}`} aria-hidden="true">
-                {p.accountId ? initials(p.name) : "?"}
+                {p.accountId ? initials(p.name) : ""}
               </span>
               {p.name}
             </span>
-            <span className="pr-stack">
+            <span className="pr-person-stack">
               {p.done > 0 && <span className="pr-stack-seg pr-state-bg-done" style={{ width: seg(p.done) }} />}
               {p.inProgress > 0 && <span className="pr-stack-seg pr-state-bg-inProgress" style={{ width: seg(p.inProgress) }} />}
               {todo > 0 && <span className="pr-stack-seg pr-state-bg-todo" style={{ width: seg(todo) }} />}

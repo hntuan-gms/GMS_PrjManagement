@@ -7,6 +7,8 @@ import ChatMarkdown from "./ChatMarkdown";
 import { Icon } from "./Icons";
 import type { ChatMessage, ChatSessionSummary, Money, UsageStats } from "../types";
 import { useDialogs } from "./dialogContext";
+import { isOpen as layersOpen } from "../layers";
+import { isTypingTarget } from "../shortcuts";
 
 interface Props {
   /**
@@ -433,6 +435,28 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
     void ask(text);
   };
 
+  // The textarea grows with what is typed (up to ~5 lines) instead of cutting a long line in half.
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+  }, [input, open]);
+  // Esc collapses the dock from anywhere, not only with focus inside it, unless a layer is on top of it.
+  useEffect(() => {
+    if (!open) return;
+    function onEsc(e: KeyboardEvent) {
+      if (e.key !== "Escape" || e.defaultPrevented || layersOpen()) return;
+      const t = e.target as HTMLElement | null;
+      if (t?.closest?.(".chat-dock") || isTypingTarget(t)) return; // the dock's own handler, or a field's own Esc
+      e.stopPropagation();
+      setOpen(false);
+    }
+    window.addEventListener("keydown", onEsc, true);
+    return () => window.removeEventListener("keydown", onEsc, true);
+  }, [open]);
+
   if (!open) return null;
 
   return (
@@ -565,12 +589,6 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
       )}
 
       <div className="chat-messages" ref={scrollRef}>
-        {messages.length === 0 && !live && (
-          <div className="chat-empty">
-            <p>Hỏi về dự án, hoặc nhờ lập kế hoạch.</p>
-          </div>
-        )}
-
         {messages.map((m) => (
           <div key={m.id} className={`chat-msg chat-msg-${m.role}`}>
             {m.thinking && <ThinkingBlock text={m.thinking} />}
@@ -781,7 +799,8 @@ export default function ChatDock({ storageKey, onOpenPlan, onOpenReport, onProje
         <textarea
           rows={1}
           value={input}
-          placeholder="Hỏi về dự án, hoặc yêu cầu lập kế hoạch..."
+          placeholder="Hỏi về dự án…"
+          ref={inputRef}
           onChange={(e) => setInput(e.target.value)}
           onPaste={(e) => {
             // A pasted screenshot arrives as a file on the clipboard; pasted text is left alone.

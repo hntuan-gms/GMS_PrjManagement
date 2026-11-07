@@ -37,7 +37,9 @@ calendarRouter.put("/", async (req, res, next) => {
   try {
     const members = await taskService!.listMembers();
     if (!members.rolesReadable) throw slaAdminOnly("lịch làm việc của dự án");
-    const calendar = validateCalendar(req.body);
+    // A body that leaves out a field (the hours, the timezone) keeps what is stored for it.
+    const stored = await getSlaSettings(session.cloudId, session.projectKey!);
+    const calendar = validateCalendar({ ...calendarOf(stored), ...(req.body ?? {}) });
     const saved = await patchSlaSettings(session.cloudId, session.projectKey!, session.accountId, calendar);
     res.json({ calendar: calendarOf(saved), canEdit: true });
   } catch (err) {

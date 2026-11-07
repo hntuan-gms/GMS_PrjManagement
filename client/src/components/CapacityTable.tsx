@@ -23,7 +23,7 @@ const COLLAPSED_ROWS = 8;
 /**
  * Per-person capacity for a sprint window: how many working days (leave already taken out) and
  * hours each person has, what they have been given, and what is left. Shared by the Backlog's
- * "Năng lực" panel and the AI plan dialog, so the number planning is judged by is the same in both.
+ * "Công suất" panel and the AI plan dialog, so the number planning is judged by is the same in both.
  */
 export default function CapacityTable({ rows, window, unit, inHours }: Props) {
   const [all, setAll] = useState(false);
@@ -31,7 +31,7 @@ export default function CapacityTable({ rows, window, unit, inHours }: Props) {
   return (
     <div className="cap">
       <div className="cap-head bd-muted">
-        {shortDate(window.start)} → {shortDate(window.end)} · năng lực = ngày làm việc (đã trừ ngày nghỉ) × giờ/ngày
+        {shortDate(window.start)} → {shortDate(window.end)} · công suất = ngày làm việc (đã trừ ngày nghỉ) × giờ/ngày
         {!inHours && ` · ước lượng tính bằng ${unit} nên không trừ được thành giờ còn lại`}
       </div>
       <table className="cap-table">
@@ -39,7 +39,7 @@ export default function CapacityTable({ rows, window, unit, inHours }: Props) {
           <tr>
             <th>Thành viên</th>
             <th>Ngày làm</th>
-            <th>Năng lực</th>
+            <th>Công suất</th>
             <th>Đã giao</th>
             {inHours && <th>Còn lại</th>}
           </tr>

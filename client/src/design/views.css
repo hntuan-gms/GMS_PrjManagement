@@ -799,3 +799,367 @@ button.pr-print {
   box-shadow: inset 0 0 0 2px var(--risk);
   color: var(--risk-text);
 }
+
+/* One bar per person: the done / doing / to-do pieces side by side on one line, filling the middle column.
+   (It used to share .pr-stack, which is a column for the status card, so the pieces wrapped onto two lines.) */
+.pr-person-stack {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  gap: 2px;
+  height: 12px;
+  width: 100%;
+  min-width: 0;
+}
+.pr-person-stack > .pr-stack-seg {
+  flex: none;
+  height: 100%;
+  min-width: 3px;
+}
+
+/* Today in a week or month column: the one day-wide line the opened rows draw, not the whole column's edge. */
+.rv-cell {
+  position: relative;
+}
+.rv-row-person .rv-cell.is-today.is-aggregated,
+.rv-head-cell.is-today.is-aggregated {
+  box-shadow: none;
+}
+.rv-cell-today {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 2px;
+  box-shadow: inset 1px 0 0 var(--son), inset -1px 0 0 var(--son);
+  pointer-events: none;
+}
+
+/* "Vì sao?": plain lines under the sentence they explain, no card and no coloured edge. */
+.pulse-reasons {
+  margin: 0;
+  padding: 0 0 0 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--font-size-md);
+  color: var(--ink-2);
+}
+
+/* Giờ đã ghi: the leave swatch in the legend is a sample cell, not a word. */
+.ts-legend i.ts-away-swatch {
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.bcs-board {
+  display: inline-flex;
+  margin-bottom: var(--space-3, 12px);
+}
+.bcs-board-name {
+  margin: 0 0 var(--space-3, 12px);
+  color: var(--ink-3);
+}
+
+/* ==========================================================================
+   One scale of ink for "how busy" and "how far" (rà soát 2026-11-07, G1/F3): blue is for selection, not for
+   progress. Sprint bars, the backlog meter, the hours grid and the schedule bar use the ink ramp; only
+   work above capacity is red (or warm, on the hours grid).
+   ========================================================================== */
+.bd-view {
+  --pr-actual: var(--ink-2);
+  --pr-progress: var(--ink-4);
+  --pr-todo: var(--line-strong);
+}
+.bl-meter-fill {
+  background: var(--ink-2);
+}
+.bl-meter.is-over .bl-meter-fill {
+  background: var(--risk);
+}
+.pr-timeline-track {
+  background: var(--sunken);
+}
+.pr-timeline-plan {
+  background: var(--line-strong);
+}
+.ts-cell.band-low {
+  background: var(--sunken);
+  color: var(--ink-3);
+}
+.ts-cell.band-mid {
+  background: var(--line-strong);
+  color: var(--ink-2);
+}
+.ts-cell.band-full {
+  background: var(--ink-2);
+  color: var(--on-strong);
+  font-weight: 600;
+}
+.ts-legend i.band-low {
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.ts-legend i.band-mid {
+  background: var(--line-strong);
+}
+.ts-legend i.band-full {
+  background: var(--ink-2);
+}
+.release-line line {
+  stroke: var(--ink-3);
+}
+.release-line text {
+  fill: var(--ink-3);
+}
+
+/* Liên kết Jira in the task panel: way, key (mono, ink), title, status glyph; × only when hovered. */
+.pred-list li > .pred-text .tl-way {
+  color: var(--ink-3);
+}
+.pred-list li > .pred-text .tl-key {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  color: var(--ink);
+  text-decoration: none;
+}
+.pred-list li > .pred-text .tl-key:hover {
+  text-decoration: underline;
+}
+.pred-list li > .pred-text .tl-status {
+  display: inline-flex;
+  vertical-align: middle;
+}
+.pred-list li > .tl-x {
+  flex: none;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink-3);
+  opacity: 0;
+}
+.pred-list li:hover > .tl-x,
+.pred-list li:focus-within > .tl-x,
+.pred-list li > .tl-x:focus-visible {
+  opacity: 1;
+}
+.pred-list li > .tl-x:hover {
+  color: var(--risk-text);
+}
+
+/* A status in a list is a glyph and the workflow's own name, quiet; not a coloured pill (one way to draw it). */
+.bl-status,
+.bl-status-indeterminate,
+.bl-status-done {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  font-weight: 400;
+  color: var(--ink-2);
+}
+button.bl-status-btn {
+  height: auto;
+  min-height: 22px;
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
+}
+button.bl-status-btn:hover {
+  background: var(--sunken);
+}
+@media (hover: none) {
+  .pred-list li > .tl-x {
+    opacity: 1;
+  }
+}
+
+/* Behind the sprint's pace: the bar itself turns red, with the "time elapsed" tick showing where it should be. */
+.sh-bar.is-behind .sh-bar-done {
+  background: var(--risk);
+}
+
+/* Metric: a figure and its label in one row, no card (G6). */
+.metric-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4, 16px) 32px;
+  align-items: flex-start;
+}
+.metric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  box-shadow: none;
+  text-align: left;
+  color: var(--ink);
+}
+button.metric.is-button {
+  cursor: pointer;
+}
+button.metric.is-button:hover .metric-label {
+  color: var(--ink);
+  text-decoration: underline;
+}
+.metric-value {
+  font-family: var(--font-sans);
+  font-size: var(--font-size-page);
+  font-weight: 600;
+  line-height: 1.1;
+}
+.metric-label {
+  font-size: var(--font-size-sm);
+  color: var(--ink-3);
+}
+.metric-sub {
+  font-size: var(--font-size-sm);
+  color: var(--ink-4);
+}
+.metric-crit .metric-value {
+  color: var(--risk-text);
+}
+.metric-serious .metric-value {
+  color: var(--son-text);
+}
+.metric-warn .metric-value {
+  color: var(--warn-text);
+}
+
+/* Nhịp dự án: the scope is on the line that says what the page is about, above the sentence it changes.
+   "Người: Tất cả" · "Epic: Tất cả" · "Loại: Tất cả" · "Đến ngày: …" are one kind of control. */
+.pr-header-main {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  min-width: 0;
+}
+.pr-header-main .pr-filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+}
+.pr-filters .pr-filter {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 4px 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--raised);
+  font-size: var(--font-size-md);
+  color: var(--ink-3);
+}
+.pr-filters .pr-filter select {
+  height: 26px;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  max-width: 180px;
+}
+.pr-filters .pr-filter .date-field input[type="text"] {
+  border: 0;
+  background: transparent;
+  height: 26px;
+  width: 104px;
+}
+.pr-filters .tf-select > .tf-btn {
+  height: 28px;
+  border: 1px solid var(--line);
+  background: var(--raised);
+  color: var(--ink-3);
+}
+/* The big figure is a single number: the sans face keeps "16.7%" from spreading at display size. */
+.pr-meter-figure b {
+  font-family: var(--font-sans);
+  font-weight: 600;
+}
+
+/* A task opened under a person: a quiet bar with its hours, solid only while it is held for a drag. */
+.rv-tl-bar {
+  background: var(--line-strong);
+  color: var(--ink);
+  box-shadow: none;
+}
+.rv-tl-bar.is-conflict {
+  background: var(--risk);
+  color: var(--on-strong);
+}
+.rv-task-row:active .rv-tl-bar:not(.is-conflict) {
+  background: var(--ink-2);
+  color: var(--on-strong);
+}
+
+/* Phase and person bars: a name like "Giai đoạn 2 – Xây dựng" is read, not cut to "Xây dựn". */
+.pr-bar-row {
+  grid-template-columns: minmax(120px, 38%) minmax(60px, 1fr) 84px 58px;
+}
+
+/* Skills matrix: the person's name is a link to the profile; adding a skill happens in the header. */
+.sm-name {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.sm-name:hover {
+  text-decoration: underline;
+}
+.sm-add-col {
+  min-width: 140px;
+}
+.sm-add-col .sm-add {
+  display: flex;
+  gap: 4px;
+}
+.sm-add-col .sm-add input {
+  width: 110px;
+  height: 26px;
+}
+
+/* Nobody on it: an empty circle in the Backlog, on a card and in a lane, not a "?" in one of them. */
+.avatar.is-none {
+  color: transparent;
+}
+/* Backlog row: the Epic follows the title, quiet, and takes the room left; what belongs at the far end stays there. */
+.bl-summary {
+  flex: 0 1 auto;
+}
+.bl-epic {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: transparent;
+  border-color: transparent;
+  color: var(--ink-3);
+}
+
+/* The trend fills its card instead of a 560px strip in a 900px one. */
+.pr-trend-plot {
+  max-width: 880px;
+}

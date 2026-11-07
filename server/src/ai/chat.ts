@@ -132,7 +132,7 @@ function systemPrompt(projectKey: string, tasks: Task[], today: string, team: Ji
     "- Chia một khối việc lớn thành nhiều task → create_plan. Kết quả là bản nháp chờ người duyệt, KHÔNG tự lên Jira.",
     "  Đừng tự liệt kê kế hoạch dạng văn bản thay cho công cụ này.",
     "- Người dùng yêu cầu thêm ĐÚNG MỘT việc cụ thể → create_task. Cái này ghi thẳng lên Jira,",
-    `  nên chỉ gọi khi người dùng thực sự bảo tạo. Loại issue đang dùng trong dự án: ${issueTypesInUse(tasks)}.`,
+    `  nên chỉ gọi khi người dùng thực sự bảo tạo. Loại việc đang dùng trong dự án: ${issueTypesInUse(tasks)}.`,
     "- Gán/đổi người phụ trách → assign_task. Bỏ gán → unassign_task.",
     "  Người dùng gọi tên (kể cả viết không dấu, ví dụ 'vo dinh quang') → truyền nguyên tên vào tham số assignee;",
     "  hệ thống tự tra ra đúng người, không cần gọi công cụ khác để tìm accountId trước.",

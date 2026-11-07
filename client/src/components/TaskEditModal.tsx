@@ -696,7 +696,7 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
                   <Icon name="chevronDown" size={12} className="caret" />
                 </button>
               ) : (
-                <small className="field-note">Epic không có người phụ trách.</small>
+                <small className="field-note">Epic không gán người.</small>
               )}
             </div>
 
@@ -730,7 +730,7 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
             </label>
 
             <div className="field td-row">
-              <span>Công sức</span>
+              <span>Ước lượng</span>
               <div className="td-effort">
                 <span className="td-est">
                   <NumberInput
@@ -746,11 +746,11 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
                       setEstimateTouched(true);
                     }}
                   />
-                  <span className="td-unit">h ước lượng</span>
+                  <span className="td-unit">h</span>
                 </span>
                 <span className="td-spent-row">
                   <span className={`time-spent ${overEstimate ? "is-over" : ""}`}>
-                    <b>{roundHours(spent)}h</b> đã ghi
+                    Đã ghi <b>{roundHours(spent)}h</b>
                   </span>
                   <button type="button" className="td-logtoggle" onClick={() => setLogOpen((o) => !o)} aria-expanded={logOpen} aria-controls="td-logform">
                     <Icon name="plus" size={13} />
@@ -766,7 +766,6 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
               {overEstimate ? <span className="time-over">vượt ước lượng {roundHours(spent - estimate!)}h</span> : null}
               {logOpen && (
                 <div className="td-logform" id="td-logform">
-                  <small className="field-hint">Ghi lên Jira dưới tên bạn.</small>
                   <div className="log-inline">
                     <NumberInput value={logHours} min={0.02} max={24} allowEmpty placeholder="Số giờ" className="log-hours" onChange={setLogHours} />
                     <DateField className="log-date" value={logDate} onChange={setLogDate} ariaLabel="Ngày ghi giờ" />
@@ -775,7 +774,7 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
                       value={logComment}
                       onChange={(e) => setLogComment(e.target.value)}
                       placeholder="Đã làm gì (không bắt buộc)"
-                      aria-label="Nội dung công việc đã làm"
+                      aria-label="Nội dung việc đã làm"
                     />
                     <button type="button" className="primary" onClick={handleLogWork} disabled={logging || !logHours}>
                       {logging ? "Đang ghi..." : "Ghi giờ"}

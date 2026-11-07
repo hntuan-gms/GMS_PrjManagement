@@ -3,6 +3,8 @@ import { api } from "../api";
 import type { IssueLink, LinkType, Task } from "../types";
 import TaskPicker from "./TaskPicker";
 import { Icon } from "./Icons";
+import StatusGlyph from "./StatusGlyph";
+import { linkLabel } from "../linkLabels";
 
 interface Props {
   task: Task;
@@ -27,9 +29,9 @@ interface Way {
 
 const waysOf = (types: LinkType[]): Way[] =>
   types.flatMap((t) => [
-    { value: `${t.name}|outward`, typeName: t.name, direction: "outward" as const, label: t.outward },
+    { value: `${t.name}|outward`, typeName: t.name, direction: "outward" as const, label: linkLabel(t.outward) },
     // Same text both ways ("relates to") would be a duplicate choice.
-    ...(t.inward !== t.outward ? [{ value: `${t.name}|inward`, typeName: t.name, direction: "inward" as const, label: t.inward }] : []),
+    ...(t.inward !== t.outward ? [{ value: `${t.name}|inward`, typeName: t.name, direction: "inward" as const, label: linkLabel(t.inward) }] : []),
   ]);
 
 /**
@@ -45,6 +47,8 @@ export default function TaskLinks({ task, allTasks, onCount, hidden }: Props) {
   const [way, setWay] = useState("");
   const [busy, setBusy] = useState(false);
   const [pickRect, setPickRect] = useState<DOMRect | null>(null);
+  // The add row stays folded behind "+ Liên kết" while there are links; with none it is open.
+  const [adding, setAdding] = useState<boolean | null>(null);
   const pickRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -78,6 +82,7 @@ export default function TaskLinks({ task, allTasks, onCount, hidden }: Props) {
   async function add(otherKey: string) {
     if (!chosen || !otherKey.trim()) return;
     setPickRect(null);
+    setAdding(false);
     setBusy(true);
     setError(null);
     try {
@@ -110,21 +115,32 @@ export default function TaskLinks({ task, allTasks, onCount, hidden }: Props) {
         {links.map((l) => (
           <li key={l.id}>
             <span className="pred-text">
-              <i>{l.label}</i>{" "}
-              <a href={urlOf(l.key)} target="_blank" rel="noreferrer">
-                <b>{l.key}</b>
+              <span className="tl-way">{linkLabel(l.label)}</span>{" "}
+              <a className="tl-key" href={urlOf(l.key)} target="_blank" rel="noreferrer">
+                {l.key}
               </a>{" "}
-              · {l.summary}
-              {l.status && <span className={`link-status is-${l.statusCategory}`}> [{l.status}]</span>}
+              {l.summary}
+              {l.status && (
+                <span className="tl-status" title={l.status}>
+                  {" "}
+                  <StatusGlyph category={l.statusCategory ?? "new"} name={l.status} size={12} />
+                </span>
+              )}
             </span>
-            <button className="link-btn" onClick={() => remove(l)} disabled={busy} aria-label={`Gỡ liên kết ${l.key}`}>
-              gỡ
+            <button className="tl-x" onClick={() => remove(l)} disabled={busy} aria-label={`Gỡ liên kết ${l.key}`} title="Gỡ liên kết">
+              <Icon name="x" size={12} />
             </button>
           </li>
         ))}
       </ul>
       )}
-      {ways.length > 0 && (
+      {ways.length > 0 && !(adding ?? (links !== null && links.length === 0)) && (
+        <button type="button" className="td-add-btn" onClick={() => setAdding(true)}>
+          <Icon name="plus" size={13} />
+          Liên kết
+        </button>
+      )}
+      {ways.length > 0 && (adding ?? (links !== null && links.length === 0)) && (
         <div className="pred-add">
           <select value={way || ways[0].value} onChange={(e) => setWay(e.target.value)} aria-label="Kiểu liên kết">
             {ways.map((w) => (

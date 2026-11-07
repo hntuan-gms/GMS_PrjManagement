@@ -1013,6 +1013,10 @@ export interface WorkCalendarSettings {
   holidays: Array<{ date: string; name: string }>;
   /** Days worked although their weekday is off. Missing in a copy cached before the field existed. */
   makeUpDays?: Array<{ date: string; name: string }>;
+  /** Working periods of a day, "HH:mm", ascending, not overlapping. Missing in a copy cached before they moved here. */
+  periods?: Array<{ start: string; end: string }>;
+  /** The calendar's timezone, minutes east of UTC (420 = UTC+7). */
+  tzOffsetMinutes?: number;
 }
 
 export interface WorkCalendarResponse {

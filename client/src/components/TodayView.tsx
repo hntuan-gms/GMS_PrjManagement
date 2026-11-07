@@ -43,6 +43,14 @@ export default function TodayView({ session, tasks, today, capacityHours, onOpen
   const [busy, setBusy] = useState<Set<string>>(new Set());
   const [cursor, setCursor] = useState(0);
   const [logOpen, setLogOpen] = useState(false);
+  // The first row is not drawn as selected on arrival: only after J / K or a click moved the cursor.
+  const [cursorShown, setCursorShown] = useState(false);
+  // "L" from the workspace's keyboard layer.
+  useEffect(() => {
+    const open = () => setLogOpen(true);
+    window.addEventListener("gms:log-time", open);
+    return () => window.removeEventListener("gms:log-time", open);
+  }, []);
   const [draft, setDraft] = useState("");
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -147,9 +155,11 @@ export default function TodayView({ session, tasks, today, capacityHours, onOpen
     const k = e.key;
     if (k === "j" || k === "ArrowDown") {
       e.preventDefault();
+      setCursorShown(true);
       setCursor((c) => Math.min(order.length - 1, c + 1));
     } else if (k === "k" || k === "ArrowUp") {
       e.preventDefault();
+      setCursorShown(true);
       setCursor((c) => Math.max(0, c - 1));
     } else if (k === "Enter" && order[cursor]) {
       e.preventDefault();
@@ -179,10 +189,11 @@ export default function TodayView({ session, tasks, today, capacityHours, onOpen
     return (
       <li
         key={t.id}
-        className={`today-row${i === cursor ? " is-cursor" : ""}${done ? " is-done" : ""}${extra ? ` ${extra}` : ""}`}
+        className={`today-row${cursorShown && i === cursor ? " is-cursor" : ""}${done ? " is-done" : ""}${extra ? ` ${extra}` : ""}`}
         data-today-row={i}
         onClick={() => {
           setCursor(i);
+          setCursorShown(true);
           onOpenTask(t);
         }}
       >
@@ -221,11 +232,15 @@ export default function TodayView({ session, tasks, today, capacityHours, onOpen
               {weekday}, {d} tháng {m}
               {y !== new Date().getFullYear() ? `, ${y}` : ""}
             </p>
-            {session.project?.name && <p className="today-project">{session.project.name}</p>}
             <h1 className="today-greeting">
               Chào {firstName(session.user.displayName)}. <span>{data.greeting}</span>
             </h1>
           </div>
+          <button type="button" className="today-log-btn" onClick={() => setLogOpen(true)}>
+            <Icon name="clock" size={14} />
+            Ghi giờ
+            <kbd>L</kbd>
+          </button>
           <dl className="today-counts">
             {data.counts.doing > 0 && (
               <div>
@@ -355,17 +370,6 @@ export default function TodayView({ session, tasks, today, capacityHours, onOpen
         )}
       </div>
 
-      <div className="today-log-strip">
-        <span>
-          <Icon name="clock" size={15} />
-          Ghi giờ hôm nay
-        </span>
-        <button type="button" className="primary" onClick={() => setLogOpen(true)}>
-          Ghi giờ
-          <kbd>G T</kbd>
-        </button>
-      </div>
-
       {logOpen && (
         <LogSheet
           tasks={tasks}
@@ -452,7 +456,7 @@ function LogSheet({
     }
     setSending(false);
     if (ok > 0) {
-      toast(`Đã ghi ${ok} mục giờ làm hôm nay.`, { tone: "success" });
+      toast(`Đã ghi ${ok} mục giờ hôm nay.`, { tone: "success" });
       onLogged();
       onClose();
     }
@@ -462,9 +466,6 @@ function LogSheet({
     <aside className="side-sheet" role="dialog" aria-label="Ghi giờ hôm nay" onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), onClose())}>
       <header className="side-sheet-head">
         <h2>Ghi giờ hôm nay</h2>
-        <span className="muted">
-          năng lực {capacityHours}h{logged ? ` · đã ghi ${logged}h` : ""}
-        </span>
         <button type="button" className="icon-btn" aria-label="Đóng" onClick={onClose}>
           <Icon name="x" />
         </button>
@@ -514,7 +515,6 @@ function LogSheet({
             </button>
           </>
         )}
-        <p className="log-note">Ghi bằng tài khoản Jira của bạn</p>
         {pickAt && (
           <TaskPicker
             anchor={pickAt}
@@ -528,7 +528,15 @@ function LogSheet({
       </div>
       <footer className="side-sheet-foot">
         <span>
-          Tổng <b>{total}h</b> / {capacityHours}h
+          {capacityHours > 0 ? (
+            <>
+              Đã ghi <b>{logged ?? 0}h</b> · thêm <b>{total}h</b> / {capacityHours}h
+            </>
+          ) : (
+            <>
+              Đã ghi <b>{logged ?? 0}h</b> · thêm <b>{total}h</b>
+            </>
+          )}
         </span>
         <button type="button" className="primary" onClick={send} disabled={sending || total <= 0}>
           {sending ? "Đang ghi…" : "Ghi tất cả"}

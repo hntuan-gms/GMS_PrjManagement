@@ -81,7 +81,11 @@ export default function SprintHeader(props: Props) {
           title="Xem burndown"
           label={
             <>
-              <span className="sh-bar" aria-label={`Xong ${done}/${scope} ${unit}`}>
+              <span
+                className={`sh-bar${pace === "behind" ? " is-behind" : ""}`}
+                aria-label={`Xong ${done}/${scope} ${unit}`}
+                title={pace === "ahead" ? "Nhanh hơn nhịp" : pace === "ok" ? "Đúng nhịp" : pace === "behind" ? "Chậm hơn nhịp" : undefined}
+              >
                 <span className="sh-bar-done" style={{ width: `${scope ? (done / scope) * 100 : 0}%` }} />
                 <span className="sh-bar-doing" style={{ width: `${scope ? (doing / scope) * 100 : 0}%` }} />
                 <span className="sh-bar-time" style={{ left: `${elapsedPct}%` }} title={`Đã qua ${elapsedPct}% thời gian`} />
@@ -100,9 +104,6 @@ export default function SprintHeader(props: Props) {
             <span><i className="sh-time-key" /> Thời gian đã qua</span>
           </div>
         </Popover>
-        <span className={`sh-pace sh-pace-${pace}`}>
-          {pace === "ahead" ? "▲ Nhanh hơn nhịp" : pace === "ok" ? "● Đúng nhịp" : pace === "behind" ? "▼ Chậm hơn nhịp" : "Mới bắt đầu"}
-        </span>
         <span className="bd-spacer" />
         <button onClick={props.onComplete}>Hoàn thành sprint</button>
         <Popover
@@ -149,7 +150,6 @@ export default function SprintHeader(props: Props) {
           )}
         </Popover>
       </div>
-      {sprint.goal && <p className="sh-goal">{sprint.goal}</p>}
 
       {(insight.loading || insight.data || insight.error) && (
         <div className="sh-ai">

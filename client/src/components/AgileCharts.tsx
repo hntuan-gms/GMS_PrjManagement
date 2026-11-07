@@ -173,7 +173,7 @@ export function CfdChart({ cfd }: { cfd: FlowReport["cfd"] }) {
           </span>
         ))}
       </div>
-      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Luồng công việc theo trạng thái trong ${n} ngày, hiện có ${totals[n - 1]} việc`}>
+      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Luồng việc theo trạng thái trong ${n} ngày, hiện có ${totals[n - 1]} việc`}>
         <Axes ticks={ticks} top={top} unit="việc" />
         {areas.map(({ s, idx, d }) => (
           <path key={s.statusId} className={`ag-band ag-band-${s.category}`} style={{ fillOpacity: Math.max(0.35, 1 - idx * 0.22) }} d={d}>

@@ -50,7 +50,7 @@ export default function AssigneePicker({ issueType, issueKey, accountId, name, m
         type="button"
         className={`bd-assignee ${name ? "" : "is-empty"}`}
         title={name ?? "Chưa gán"}
-        aria-label="Đổi người phụ trách"
+        aria-label="Đổi người"
         draggable={false}
         onClick={(e) => {
           e.stopPropagation();

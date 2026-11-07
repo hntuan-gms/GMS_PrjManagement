@@ -86,11 +86,11 @@ describe("validateSlaSettings", () => {
 });
 
 describe("validateCalendar", () => {
-  const ok = { workDays: [1, 2, 3, 4, 5], holidays: [], makeUpDays: [] };
+  const ok = { workDays: [1, 2, 3, 4, 5], holidays: [], makeUpDays: [], periods: DEFAULT_SLA_SETTINGS.periods, tzOffsetMinutes: 420 };
   const refuses = (raw: unknown, pattern: RegExp) =>
     assert.throws(() => validateCalendar(raw), (e: unknown) => e instanceof AppError && e.status === 400 && /^Lịch làm việc:/.test(e.message) && pattern.test(e.message));
 
-  it("keeps only the three calendar fields, sorted and de-duplicated", () => {
+  it("keeps only the calendar fields, sorted and de-duplicated", () => {
     const out = validateCalendar({
       ...ok,
       makeUpDays: [
@@ -107,7 +107,18 @@ describe("validateCalendar", () => {
         { date: "2027-01-30", name: "Làm bù Tết" },
         { date: "2027-02-20", name: "Làm bù" },
       ],
+      periods: DEFAULT_SLA_SETTINGS.periods,
+      tzOffsetMinutes: 420,
     });
+  });
+
+  it("owns the working hours of the day and the timezone", () => {
+    refuses({ ...ok, periods: [] }, /khung giờ/);
+    refuses({ ...ok, periods: [{ start: "08:00", end: "12:00" }, { start: "11:00", end: "17:00" }] }, /chồng nhau/);
+    refuses({ ...ok, tzOffsetMinutes: 9999 }, /múi giờ/);
+    const out = validateCalendar({ ...ok, periods: [{ start: "13:00", end: "17:00" }, { start: "08:00", end: "12:00" }], tzOffsetMinutes: 0 });
+    assert.deepEqual(out.periods, [{ start: "08:00", end: "12:00" }, { start: "13:00", end: "17:00" }]);
+    assert.equal(out.tzOffsetMinutes, 0);
   });
 
   it("refuses a bad make-up day, and a day that is both a holiday and a make-up day", () => {
@@ -118,7 +129,7 @@ describe("validateCalendar", () => {
 
   it("splits a policy into its calendar and SLA parts without losing a field", () => {
     const s = withSlaDefaults({ enabled: true, makeUpDays: [{ date: "2027-01-30", name: "Làm bù" }] });
-    assert.deepEqual(calendarOf(s), { workDays: s.workDays, holidays: s.holidays, makeUpDays: s.makeUpDays });
+    assert.deepEqual(calendarOf(s), { workDays: s.workDays, holidays: s.holidays, makeUpDays: s.makeUpDays, periods: s.periods, tzOffsetMinutes: s.tzOffsetMinutes });
     const sla = slaFieldsOf(s);
     assert.equal("holidays" in sla || "workDays" in sla || "makeUpDays" in sla, false);
     assert.deepEqual({ ...sla, ...calendarOf(s) }, s);

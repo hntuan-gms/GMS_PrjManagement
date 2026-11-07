@@ -13,6 +13,7 @@ import { cellTooltip } from "../resourceTimeline";
 import type { JiraUser, Task } from "../types";
 import type { WorkCalendar } from "../workCalendar";
 import { Icon } from "./Icons";
+import TodayInCell from "./TodayInCell";
 import Avatar from "./Avatar";
 import PersonPicker from "./PersonPicker";
 import StatusGlyph from "./StatusGlyph";
@@ -144,7 +145,7 @@ export default function PersonBlock({
                 <span className={person.capacityHoursPerDay > 12 ? "rv-cap-odd" : undefined} title={person.capacityHoursPerDay > 12 ? "Kiểm tra lại số giờ/ngày trong hồ sơ" : undefined}>
                   {person.capacityHoursPerDay}h/ngày
                 </span>{" "}
-                · {person.tasks.length} việc
+                {person.tasks.length > 0 && <>· {person.tasks.length} việc</>}
               </small>
             </span>
           </button>
@@ -178,9 +179,10 @@ export default function PersonBlock({
         {cells.map((c) => (
           <div
             key={c.key}
-            className={`rv-cell band-${c.band} ${c.isToday ? "is-today" : ""}`}
+            className={`rv-cell band-${c.band} ${c.isToday ? "is-today" : ""}${c.isToday && granularity !== "day" ? " is-aggregated" : ""}`}
             title={cellTooltip(c)}
           >
+            {c.isToday && granularity !== "day" && <TodayInCell start={c.start} end={c.end} today={today} />}
             {/* A skyline, not a number: the bar's height is the load, an empty cell is a free one,
                 and only work above capacity turns red (plan §6.7). The figure is in the tooltip. */}
             {c.capacity > 0 && c.ratio > 0 && (

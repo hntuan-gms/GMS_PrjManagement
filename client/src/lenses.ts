@@ -36,3 +36,16 @@ export type SyncState =
   | { kind: "limited"; minutes: number }
   | { kind: "error"; message: string };
 
+
+/** The `?view=` value for a place. Nhân lực in "Giờ đã ghi" is written `timesheet`, so the link reopens that mode. */
+export function viewParam(view: WorkspaceView, resourceMode?: ResourceMode): string {
+  return view === "resource" && resourceMode === "ts" ? "timesheet" : view;
+}
+
+/** The query string with `view` set to this place and every other parameter (project, report…) kept. */
+export function withViewParam(search: string, view: WorkspaceView, resourceMode?: ResourceMode): string {
+  const q = new URLSearchParams(search);
+  q.set("view", viewParam(view, resourceMode));
+  const s = q.toString();
+  return s ? `?${s}` : "";
+}

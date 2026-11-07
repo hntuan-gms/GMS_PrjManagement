@@ -3,7 +3,7 @@ import fs from "node:fs";
 import assert from "node:assert/strict";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { ioAction, openFilterPanel, openTimesheet, pickFacet } from "./toolbar.mjs";
+import { ioAction, openFilterPanel, openMore, openTimesheet, pickFacet, quickFilter } from "./toolbar.mjs";
 
 const OUT = path.join(path.dirname(fileURLToPath(import.meta.url)), "shots");
 fs.mkdirSync(OUT, { recursive: true });
@@ -68,7 +68,7 @@ await step("lọc theo ưu tiên (giống bộ lọc của Bảng)", async () =>
   await clearFilter();
 });
 await step("'Của tôi' → 1/9 và nhắc task chưa có ngày", async () => {
-  await page.locator(".tf-bar .tf-btn", { hasText: "Của tôi" }).click();
+  await quickFilter(page, "Của tôi");
   await page.waitForFunction(() => document.querySelector(".tf-count")?.textContent.includes("1/9"));
   await clearFilter();
 });
@@ -79,21 +79,22 @@ await step("tìm theo chữ khớp cả tên người phụ trách", async () =>
   await clearFilter();
 });
 await step("Thu gọn / Mở rộng tất cả", async () => {
-  await page.locator(".gantt-toolbar button[aria-label='Thu gọn tất cả nhóm']").click();
+  await openMore(page);
+  await page.locator(".more-menu button[aria-label='Thu gọn tất cả nhóm']").click();
   await page.waitForFunction(() => document.querySelectorAll(".wbs-row").length === 3);
-  await page.locator(".gantt-toolbar button[aria-label='Mở rộng tất cả nhóm']").click();
+  await openMore(page);
+  await page.locator(".more-menu button[aria-label='Mở rộng tất cả nhóm']").click();
   await page.waitForFunction(() => document.querySelectorAll(".wbs-row").length >= 8);
 });
 await step("'Chưa có ngày' là bộ lọc: chỉ còn dòng chưa có ngày, nhấp đúp mở việc", async () => {
-  const pill = page.locator(".gantt-toolbar .warning-pill");
-  await pill.click();
+  await quickFilter(page, "Chưa có ngày");
   await page.waitForFunction(() => document.querySelectorAll(".wbs-row").length === 1);
   await page.locator(".wbs-row", { hasText: "DEMO-9" }).locator(".wbs-col-name").dblclick();
   await page.waitForSelector(".modal .modal-id");
   assert.equal((await page.textContent(".modal .modal-id")).trim(), "DEMO-9");
   await page.click(".modal-close");
   await page.waitForSelector(".modal", { state: "detached" });
-  await pill.click();
+  await quickFilter(page, "Chưa có ngày");
   await page.waitForFunction(() => document.querySelectorAll(".wbs-row").length >= 8);
 });
 await step("'Hôm nay' không gây lỗi", async () => { await page.locator(".gantt-toolbar button", { hasText: "Hôm nay" }).click(); });
@@ -208,7 +209,7 @@ await step("tab 'Lịch sử thay đổi' dịch tên trường", async () => {
   await page.locator(".td-tabs button", { hasText: "Lịch sử" }).click();
   await page.waitForSelector(".td-activity");
   const t = await page.textContent(".td");
-  assert.ok(t.includes("Trạng thái") && t.includes("Ước lượng") && t.includes("Người phụ trách"), t.slice(0, 200));
+  assert.ok(t.includes("Trạng thái") && t.includes("Ước lượng") && t.includes("Người"), t.slice(0, 200));
 });
 await step("đổi ưu tiên + thêm nhãn → PATCH có priority & labels đầy đủ", async () => {
   await reset();
@@ -239,7 +240,7 @@ await step("tab Nguồn lực: có bộ lọc, KHÔNG có ô người phụ trá
   await page.waitForSelector(".resource-view .tf-bar");
   await openFilterPanel(page);
   const facets = await page.$$eval(".resource-view .tf-facet-head", (b) => b.map((x) => x.textContent));
-  assert.ok(facets.some((t) => t.includes("Trạng thái")) && !facets.some((t) => t.includes("Người phụ trách")), facets.join("|"));
+  assert.ok(facets.some((t) => t.includes("Trạng thái")) && !facets.some((t) => t.includes("Người")), facets.join("|"));
   await page.keyboard.press("Escape");
 });
 await step("lọc → hiện cảnh báo mức tải chỉ tính phần khớp", async () => {
@@ -289,7 +290,7 @@ await step("đổi người ngay trên thẻ → PATCH", async () => {
 await step("panel Bộ lọc có Loại / Epic / Nhãn / Ưu tiên, và không có Trạng thái (cột đã là trạng thái)", async () => {
   await page.locator(".bd-filters .tf-add").click();
   const t = await page.$$eval(".bd-filters .tf-facet-name", (b) => b.map((x) => x.textContent.trim()));
-  for (const k of ["Người phụ trách", "Loại", "Epic", "Nhãn", "Ưu tiên"]) assert.ok(t.includes(k), k + " thiếu: " + t);
+  for (const k of ["Người", "Loại", "Epic", "Nhãn", "Ưu tiên"]) assert.ok(t.includes(k), k + " thiếu: " + t);
   assert.ok(!t.includes("Trạng thái"), "Trạng thái không nên có trên bảng: " + t);
   await page.keyboard.press("Escape");
 });
@@ -317,7 +318,7 @@ console.log("\n== Báo cáo ==");
 await step("lọc theo người → số việc khớp đúng máy chủ", async () => {
   await tab("Nhịp dự án"); await page.waitForSelector(".pr-filters");
   const all = (await mock("/api/progress?asOf=" + localToday())).metrics.counts.total;
-  await page.locator(".pr-filter", { hasText: "Người phụ trách" }).locator("select").selectOption({ label: "Nguyễn Anh" });
+  await page.locator(".pr-filter", { hasText: "Người" }).locator("select").selectOption({ label: "Nguyễn Anh" });
   const want = (await mock("/api/progress?asOf=" + localToday() + "&assignee=anh")).metrics.counts.total;
   assert.ok(want < all, "dữ liệu thử không đủ để phân biệt");
   await page.waitForFunction((w) => document.querySelector(".pr-sub")?.textContent.includes(w + " việc"), want);
@@ -390,7 +391,7 @@ await step("form tạo việc gửi kèm Ưu tiên, Nhãn và Ước lượng (k
   await page.locator(".cmdk-row", { hasText: "biểu mẫu đầy đủ" }).click();
   await page.waitForSelector(".modal .task-input-field");
   await page.fill(".modal .task-input-field", "Việc có ưu tiên và nhãn");
-  await page.locator(".modal .field", { hasText: "Độ ưu tiên" }).locator("select").selectOption("High");
+  await page.locator(".modal .field", { hasText: "Ưu tiên" }).locator("select").selectOption("High");
   const labelBox = page.locator(".modal .labels-input input");
   await labelBox.fill("backend");
   await labelBox.press("Enter");

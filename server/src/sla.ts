@@ -21,10 +21,17 @@ export interface WorkCalendarSettings {
   holidays: Array<{ date: string; name: string }>;
   /** Days worked although their weekday is not in workDays ("ngày làm bù", e.g. a Saturday before Tết). */
   makeUpDays: Array<{ date: string; name: string }>;
+  /** Working periods of a day, "HH:mm", ascending and not overlapping. */
+  periods: Array<{ start: string; end: string }>;
+  /**
+   * The calendar's timezone, minutes east of UTC. Fixed in the project rather than taken from each
+   * browser, so everyone sees the same deadline for the same issue.
+   */
+  tzOffsetMinutes: number;
 }
 
 /** The fields that belong to the calendar rather than to the SLA policy itself. */
-export const CALENDAR_KEYS = ["workDays", "holidays", "makeUpDays"] as const;
+export const CALENDAR_KEYS = ["workDays", "holidays", "makeUpDays", "periods", "tzOffsetMinutes"] as const;
 
 export interface SlaSettings extends WorkCalendarSettings {
   /** Off until someone turns it on, so a project's old work never shows up as "late" by surprise. */
@@ -37,13 +44,6 @@ export interface SlaSettings extends WorkCalendarSettings {
   warnPercent: number;
   /** Issue types measured; empty = every type except Epic. */
   issueTypes: string[];
-  /** Working periods of a day, "HH:mm", ascending and not overlapping. */
-  periods: Array<{ start: string; end: string }>;
-  /**
-   * The calendar's timezone, minutes east of UTC. Fixed in the policy rather than
-   * taken from each browser, so everyone sees the same deadline for the same issue.
-   */
-  tzOffsetMinutes: number;
 }
 
 export const DEFAULT_SLA_SETTINGS: SlaSettings = {
@@ -125,23 +125,7 @@ export function validateSlaSettings(raw: unknown): SlaSettings {
 
   const issueTypes = [...new Set((Array.isArray(b.issueTypes) ? b.issueTypes : []).map((t: unknown) => name(t)).filter(Boolean))] as string[];
 
-  const periods = (Array.isArray(b.periods) ? b.periods : []).map((p: any) => ({ start: String(p?.start ?? ""), end: String(p?.end ?? "") }));
-  if (periods.length === 0 || periods.length > 3) fail("cần từ 1 đến 3 khung giờ làm việc.");
-  for (const p of periods) {
-    if (!HHMM.test(p.start) || !HHMM.test(p.end)) fail(`khung giờ "${p.start}–${p.end}" phải có dạng HH:mm.`);
-    if (minutesOf(p.start) >= minutesOf(p.end)) fail(`khung giờ "${p.start}–${p.end}" phải kết thúc sau khi bắt đầu.`);
-  }
-  periods.sort((x: { start: string }, y: { start: string }) => minutesOf(x.start) - minutesOf(y.start));
-  for (let i = 1; i < periods.length; i++) {
-    if (minutesOf(periods[i].start) < minutesOf(periods[i - 1].end)) {
-      fail(`khung giờ "${periods[i - 1].start}–${periods[i - 1].end}" và "${periods[i].start}–${periods[i].end}" bị chồng nhau.`);
-    }
-  }
-
   const calendar = validateCalendar(b, fail);
-
-  const tz = b.tzOffsetMinutes == null ? DEFAULT_SLA_SETTINGS.tzOffsetMinutes : Number(b.tzOffsetMinutes);
-  if (!Number.isInteger(tz) || tz < -720 || tz > 840) fail("múi giờ không hợp lệ.");
 
   return {
     enabled: b.enabled === true,
@@ -149,11 +133,7 @@ export function validateSlaSettings(raw: unknown): SlaSettings {
     targets,
     warnPercent: warn,
     issueTypes,
-    workDays: calendar.workDays,
-    periods,
-    holidays: calendar.holidays,
-    makeUpDays: calendar.makeUpDays,
-    tzOffsetMinutes: tz,
+    ...calendar,
   };
 }
 
@@ -183,12 +163,28 @@ export function validateCalendar(raw: unknown, onFail: (m: string) => never = ca
   const off = new Set(holidays.map((h) => h.date));
   const clash = makeUpDays.find((m) => off.has(m.date));
   if (clash) onFail(`ngày ${clash.date.split("-").reverse().join("/")} không thể vừa là ngày lễ vừa là ngày làm bù.`);
-  return { workDays, holidays, makeUpDays };
+  const periods = (Array.isArray(b.periods) ? b.periods : []).map((p: any) => ({ start: String(p?.start ?? ""), end: String(p?.end ?? "") }));
+  if (periods.length === 0 || periods.length > 3) onFail("cần từ 1 đến 3 khung giờ làm việc.");
+  for (const p of periods) {
+    if (!HHMM.test(p.start) || !HHMM.test(p.end)) onFail(`khung giờ "${p.start}–${p.end}" phải có dạng HH:mm.`);
+    if (minutesOf(p.start) >= minutesOf(p.end)) onFail(`khung giờ "${p.start}–${p.end}" phải kết thúc sau khi bắt đầu.`);
+  }
+  periods.sort((x: { start: string }, y: { start: string }) => minutesOf(x.start) - minutesOf(y.start));
+  for (let i = 1; i < periods.length; i++) {
+    if (minutesOf(periods[i].start) < minutesOf(periods[i - 1].end)) {
+      onFail(`khung giờ "${periods[i - 1].start}–${periods[i - 1].end}" và "${periods[i].start}–${periods[i].end}" bị chồng nhau.`);
+    }
+  }
+
+  const tz = b.tzOffsetMinutes == null ? DEFAULT_SLA_SETTINGS.tzOffsetMinutes : Number(b.tzOffsetMinutes);
+  if (!Number.isInteger(tz) || tz < -720 || tz > 840) onFail("múi giờ không hợp lệ.");
+
+  return { workDays, holidays, makeUpDays, periods, tzOffsetMinutes: tz };
 }
 
 /** The calendar fields of a policy. */
 export function calendarOf(s: SlaSettings): WorkCalendarSettings {
-  return { workDays: s.workDays, holidays: s.holidays, makeUpDays: s.makeUpDays };
+  return { workDays: s.workDays, holidays: s.holidays, makeUpDays: s.makeUpDays, periods: s.periods, tzOffsetMinutes: s.tzOffsetMinutes };
 }
 
 /** The SLA fields of a policy, i.e. everything PUT /api/sla/settings may write. */

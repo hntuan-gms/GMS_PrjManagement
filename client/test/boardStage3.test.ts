@@ -127,7 +127,7 @@ describe("card options and colours (3.2)", () => {
   it("knows when the layout is no longer the default", () => {
     assert.equal(isCustomized(DEFAULT_CARD_OPTIONS), false);
     assert.equal(isCustomized(parseCardOptions({ colorBy: "priority" })), true);
-    assert.equal(isCustomized(parseCardOptions({ mergeSubtasks: true })), true);
+    assert.equal(isCustomized(parseCardOptions({ mergeSubtasks: false })), true);
   });
 
   it("colours by priority tone, and gives nothing to an unset priority", () => {

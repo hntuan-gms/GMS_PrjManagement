@@ -1,3 +1,4 @@
+import Metric, { MetricRow } from "./Metric";
 import { useEffect, useMemo, useState } from "react";
 import DateField from "./DateField";
 import { api } from "../api";
@@ -330,11 +331,59 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
     <div className={`progress-view${report || generating ? "" : " is-solo"}`}>
       <div className="pr-main">
         <header className="pr-header">
-          <div>
-            <h2>Nhịp dự án</h2>
+          <div className="pr-header-main">
             <span className="pr-sub">
               {fmtDate(m.asOf)} · {m.counts.total} việc
             </span>
+          <div className="pr-filters">
+            <label className="pr-filter">
+              <span>Người:</span>
+              <select value={assignee} onChange={(e) => setAssignee(e.target.value)}>
+                <option value="">Tất cả</option>
+                <option value="none">Chưa gán</option>
+                {[...people].sort((a, b) => a[1].localeCompare(b[1], "vi")).map(([id, name]) => (
+                  <option key={id} value={id}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="pr-filter">
+              <span>Epic:</span>
+              <select value={epic} onChange={(e) => setEpic(e.target.value)}>
+                <option value="">Tất cả</option>
+                {epics.map((x) => (
+                  <option key={x.id} value={x.id}>
+                    {x.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <MultiSelect
+              label="Loại"
+              allLabel="Tất cả"
+              options={[...workTypes].sort((a, b) => a.localeCompare(b, "vi")).map((v) => ({ value: v, label: v }))}
+              selected={types}
+              onChange={setTypes}
+            />
+            <label className="pr-filter">
+              <span>Đến ngày:</span>
+              <DateField value={asOf} onChange={(v) => v && setAsOf(v)} ariaLabel="Tính đến ngày" />
+            </label>
+            {(scoped || asOf !== today) && (
+              <button
+                className="text-btn"
+                onClick={() => {
+                  setAssignee("");
+                  setEpic("");
+                  setTypes(new Set());
+                  setAsOf(today);
+                }}
+              >
+                Đặt lại
+              </button>
+            )}
+          </div>
             {start.note && <span className="pr-sub pr-scope-note">{start.note}</span>}
           </div>
           {/* The verdict is the pulse sentence below; a coloured badge beside it said it twice. */}
@@ -365,6 +414,7 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
           </div>
         </header>
         <PulseBlock
+          reasons={showReasons ? m.healthReasons : null}
           metrics={m}
           tasks={tasks}
           decisions={decisions}
@@ -380,67 +430,11 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
           </div>
         )}
 
-        <div className="pr-filters">
-          <label className="pr-filter">
-            Người phụ trách
-            <select value={assignee} onChange={(e) => setAssignee(e.target.value)}>
-              <option value="">Tất cả</option>
-              <option value="none">Chưa gán</option>
-              {[...people].sort((a, b) => a[1].localeCompare(b[1], "vi")).map(([id, name]) => (
-                <option key={id} value={id}>
-                  {name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="pr-filter">
-            Giai đoạn (Epic)
-            <select value={epic} onChange={(e) => setEpic(e.target.value)}>
-              <option value="">Tất cả</option>
-              {epics.map((x) => (
-                <option key={x.id} value={x.id}>
-                  {x.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <MultiSelect
-            label="Loại"
-            options={[...workTypes].sort((a, b) => a.localeCompare(b, "vi")).map((v) => ({ value: v, label: v }))}
-            selected={types}
-            onChange={setTypes}
-          />
-          <label className="pr-filter">
-            Tính đến ngày
-            <DateField value={asOf} onChange={(v) => v && setAsOf(v)} ariaLabel="Tính đến ngày" />
-          </label>
-          {(scoped || asOf !== today) && (
-            <button
-              className="text-btn"
-              onClick={() => {
-                setAssignee("");
-                setEpic("");
-                setTypes(new Set());
-                setAsOf(today);
-              }}
-            >
-              Đặt lại
-            </button>
-          )}
-        </div>
         {(scoped || asOf !== today) && (
           <div className="rv-notice">
             Đang xem {scoped ? "một phần của dự án" : "toàn dự án"}
             {asOf !== today ? ` tính đến ${fmtDate(asOf)}` : ""}. Báo cáo AI bên phải vẫn viết cho toàn dự án theo ngày của nó.
           </div>
-        )}
-
-        {showReasons && (
-          <ul className={`pr-reasons pr-reasons-${m.health}`}>
-            {m.healthReasons.map((r, i) => (
-              <li key={i}>{r}</li>
-            ))}
-          </ul>
         )}
 
         {/* ---- glance row: the three questions a PM asks first ---- */}
@@ -473,22 +467,18 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
           <section className="pr-card pr-card-schedule">
             <h3>Thời hạn</h3>
             <ScheduleTimeline schedule={m.schedule} asOf={m.asOf} />
-            <div className="pr-tiles">
+            <MetricRow className="pr-tiles">
               {attention.filter((a) => a.value > 0).map((a) => (
-                <button
+                <Metric
                   key={a.kind}
-                  className={`pr-tile ${a.value > 0 ? `pr-tile-${a.tone}` : "pr-tile-zero"}`}
+                  className="pr-tile"
+                  value={a.value}
+                  label={a.label}
+                  tone={a.tone === "neutral" ? undefined : a.tone}
                   onClick={() => setDrill({ kind: a.kind } as Drill)}
-                  disabled={a.value === 0}
-                >
-                  <span className="pr-tile-icon" aria-hidden="true">
-                    {a.value > 0 ? a.icon : "✓"}
-                  </span>
-                  <b>{a.value}</b>
-                  <span>{a.label}</span>
-                </button>
+                />
               ))}
-            </div>
+            </MetricRow>
           </section>
         </div>
 
@@ -508,7 +498,7 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
         <div className="pr-columns">
           <section className="pr-card">
             <div className="pr-card-head">
-              <h3>Theo giai đoạn</h3>
+              <h3>Theo Epic</h3>
               <span className="pr-key-legend" aria-hidden="true">
                 <i className="pr-swatch pr-swatch-done" /> thực tế <i className="pr-tick-key" /> kế hoạch
               </span>
@@ -517,37 +507,30 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
           </section>
 
           <section className="pr-card">
-            <h3>Theo người phụ trách</h3>
+            <h3>Theo người</h3>
             <PeopleBars people={m.people} onSelect={(accountId, label) => setDrill({ kind: "person", accountId, label })} />
           </section>
         </div>
 
-        <section className="pr-card">
-          <div className="pr-card-head">
-            <h3>Xu hướng theo ngày</h3>
-            <span className="pr-muted">toàn dự án · số đo, không cần báo cáo AI</span>
-          </div>
-          {(overview.trend?.length ?? 0) >= 2 ? (
+        {/* A card with nothing to draw is not drawn: both trends need two points before they say anything. */}
+        {(overview.trend?.length ?? 0) >= 2 && (
+          <section className="pr-card">
+            <div className="pr-card-head">
+              <h3>Xu hướng theo ngày</h3>
+            </div>
             <ProgressTrendChart
               unit="ngày"
               points={overview.trend!.map((p) => ({ asOf: p.date, actualPct: p.actualPct, plannedPct: p.plannedPct }))}
             />
-          ) : (
-            <p className="pr-muted">
-              Cần ít nhất 2 ngày số đo.
-            </p>
-          )}
-        </section>
+          </section>
+        )}
 
+        {overview.history.length > 0 && (
         <section className="pr-card">
           <div className="pr-card-head">
             <h3>Xu hướng qua các lần phân tích</h3>
           </div>
-          {overview.history.length >= 2 ? (
-            <ProgressTrendChart points={overview.history} onSelect={openReport} />
-          ) : (
-            <p className="pr-muted">Cần ít nhất 2 lần phân tích AI để thấy xu hướng theo thời gian.</p>
-          )}
+          {overview.history.length >= 2 && <ProgressTrendChart points={overview.history} onSelect={openReport} />}
           {overview.history.length > 0 && (
             <div className="pr-history">
               {[...overview.history].reverse().map((p) => (
@@ -571,6 +554,7 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
             </div>
           )}
         </section>
+        )}
 
         <AgileReports
           cacheScope={cacheScope}
@@ -853,6 +837,7 @@ function resolveDrill(drill: Drill, tasks: Task[], asOf: string, scope: Progress
  * agree with the numbers below it (projectPulse.ts).
  */
 function PulseBlock({
+  reasons,
   metrics,
   tasks,
   decisions,
@@ -861,6 +846,8 @@ function PulseBlock({
   onOpenResources,
   onOpenPersonLoad,
 }: {
+  /** "Vì sao?": the measured reasons behind the sentence, opened right under it. */
+  reasons: string[] | null;
   metrics: ProgressMetrics;
   tasks: Task[];
   decisions: PulseDecision[];
@@ -903,6 +890,13 @@ function PulseBlock({
       {/* One colour for the whole sentence, by level: it used to be two (orange "Có rủi ro chậm", black "tiến độ."). */}
       <p className={`pulse-lead ${verdictClass}`}>{head.lead}</p>
       {head.detail && <p className="pulse-detail">{head.detail}</p>}
+      {reasons && reasons.length > 0 && (
+        <ul className="pulse-reasons">
+          {reasons.map((r, i) => (
+            <li key={i}>{r}</li>
+          ))}
+        </ul>
+      )}
       {shown.length > 0 && (
         <>
           {/* Rows, not cards: three bordered cards with a coloured edge each is the stock dashboard

@@ -65,14 +65,14 @@ console.log("\n== Tờ ghi giờ (Hôm nay) ==");
 await step("Esc đóng tờ Ghi giờ hôm nay, kể cả khi tiêu điểm không nằm trong tờ", async () => {
   await page.goto(HOME + "?view=today");
   await page.waitForSelector(".today-view");
-  await page.locator(".today-log-strip button.primary").click();
+  await page.locator(".today-log-btn").click();
   await page.waitForSelector(".side-sheet");
   await page.mouse.click(300, 400);
   await page.keyboard.press("Escape");
   await gone(".side-sheet");
 });
 await step("Bấm Trợ lý khi tờ ghi giờ mở: tờ đóng và trợ lý mở", async () => {
-  await page.locator(".today-log-strip button.primary").click();
+  await page.locator(".today-log-btn").click();
   await page.waitForSelector(".side-sheet");
   await page.locator(".app-rail button[aria-label='Trợ lý']").click();
   await gone(".side-sheet");

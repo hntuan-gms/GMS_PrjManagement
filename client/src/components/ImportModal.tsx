@@ -182,7 +182,7 @@ export default function ImportModal({ tasks, onClose, onImported }: Props) {
                   setText(e.target.value);
                   setFileName(null);
                 }}
-                placeholder={"Tên\tLoại\tNgười phụ trách\tBắt đầu\tSố ngày\tViệc cha\nGiai đoạn 1\tEpic\nKhảo sát\tStory\tLan\t05/11/2026\t3\t1"}
+                placeholder={"Tên\tLoại\tNgười\tBắt đầu\tSố ngày\tViệc cha\nGiai đoạn 1\tEpic\nKhảo sát\tStory\tLan\t05/11/2026\t3\t1"}
                 spellCheck={false}
               />
               <div className="import-file">

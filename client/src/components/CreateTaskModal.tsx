@@ -487,7 +487,7 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate, initi
 
         <div className="field-row field-row-2">
           <label className="field">
-            <span className="field-label-text">Người phụ trách</span>
+            <span className="field-label-text">Người</span>
             {isAssignableType(issueType) ? (
               <select value={assigneeAccountId} onChange={(e) => setAssigneeAccountId(e.target.value)}>
                 <option value="">Chưa gán</option>
@@ -499,12 +499,12 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate, initi
               </select>
             ) : (
               <span className="field-note">
-                Epic không có người phụ trách.
+                Epic không gán người.
               </span>
             )}
           </label>
           <label className="field">
-            <span className="field-label-text">Độ ưu tiên</span>
+            <span className="field-label-text">Ưu tiên</span>
             <select value={priority} onChange={(e) => setPriority(e.target.value)}>
               <option value="">Mặc định</option>
               {priorityOptions.map((p) => (

@@ -740,3 +740,124 @@ body:has(.selection-bar) .toaster {
     scrollbar-width: none;
   }
 }
+
+/* The mark at the top of the rail is a mark, not a button. */
+.rail-mark {
+  cursor: default;
+}
+.project-current {
+  margin-left: auto;
+  display: inline-flex;
+  color: var(--ink-2);
+}
+
+/* "Bộ lọc" panel: the quick switches first (Của tôi, Quá hạn, …), then the value lists. */
+.tf-quick {
+  display: flex;
+  flex-direction: column;
+  padding: 2px 0 6px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+}
+.tf-quick-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-md);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.tf-quick-row:hover {
+  background: var(--sunken);
+}
+.tf-quick-row.is-on {
+  color: var(--ink);
+  font-weight: 500;
+}
+.tf-quick-label {
+  flex: 1;
+  min-width: 0;
+}
+.tf-quick-row input[type="checkbox"] {
+  margin: 0;
+  accent-color: var(--ink);
+}
+
+/* ==========================================================================
+   Phone (≤ 767px): Hôm nay and the board as a list (usePhone.phoneView). The rail becomes a bar along the
+   bottom, the header keeps the project and the board lens, the board's columns stack, the panel is the screen.
+   ========================================================================== */
+@media (max-width: 767px) {
+  :root {
+    --rail-w: 0px;
+    --rail-h: 56px;
+  }
+  .app {
+    height: 100dvh;
+    padding-left: 0;
+    padding-bottom: var(--rail-h);
+  }
+  .app-rail {
+    inset: auto 0 0 0;
+    width: auto;
+    height: var(--rail-h);
+    flex-direction: row;
+    justify-content: space-around;
+    align-items: center;
+    gap: 0;
+    padding: 4px 8px;
+    border-right: 0;
+    border-top: 1px solid var(--line);
+  }
+  .app-rail .rail-mark,
+  .app-rail .rail-sep,
+  .app-rail .rail-fill {
+    display: none;
+  }
+  .app-rail [data-tip]::after {
+    display: none;
+  }
+  body:has(.selection-bar) .toaster,
+  .toaster {
+    bottom: calc(var(--rail-h) + 12px);
+  }
+  .selection-bar {
+    bottom: calc(var(--rail-h) + 8px);
+  }
+  .toolbar .project-switch .proj-key {
+    display: none;
+  }
+  /* Board: the columns stack, each with its name above its cards; a folded (empty) column is not drawn. */
+  .bd-colheads {
+    display: none;
+  }
+  .bd-cols {
+    grid-template-columns: 1fr !important;
+    min-width: 0 !important;
+    gap: 14px;
+  }
+  .bd-col.is-folded {
+    display: none;
+  }
+  .bd-col[data-col]::before {
+    content: attr(data-col);
+    display: block;
+    padding: 4px 2px 6px;
+    font-size: var(--font-size-sm);
+    font-weight: 700;
+    color: var(--ink-3);
+  }
+  .bd-filters .tf-bar {
+    flex-wrap: wrap;
+  }
+  .bd-filters .tf-right {
+    display: none;
+  }
+  .today-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

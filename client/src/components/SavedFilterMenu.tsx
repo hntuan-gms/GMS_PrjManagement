@@ -132,7 +132,7 @@ export default function SavedFilterMenu({ filter, onApply, myAccountId }: Props)
           if (!open) void load();
         }}
         aria-expanded={open}
-        title="Lưu bộ lọc đang chọn thành bộ lọc có tên, áp dụng lại hoặc chia sẻ với cả dự án"
+        title="Bộ lọc đã lưu"
       >
         <span className="sf-trigger-label">{active ? `Bộ lọc: ${active.name}` : "Bộ lọc đã lưu"}</span>
         <Icon name="chevronDown" size={12} className="caret" />

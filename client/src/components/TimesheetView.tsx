@@ -1,3 +1,5 @@
+import { ratioBand } from "../resourceAllocation";
+import Metric, { MetricRow } from "./Metric";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import DateField from "./DateField";
 import Avatar from "./Avatar";
@@ -45,10 +47,11 @@ const away = (p: TimesheetPerson, d: string) => isAway(p, d);
 function band(hours: number, capacity: number): "none" | "low" | "mid" | "full" | "over" {
   if (hours <= 0) return "none";
   const r = hours / Math.max(capacity, 0.01);
-  if (r > 1.05) return "over";
-  if (r >= 0.95) return "full";
-  if (r >= 0.5) return "mid";
-  return "low";
+  // The thresholds are the heatmap's (resourceAllocation.ratioBand); "healthy" splits into short of the day and the whole day.
+  const b = ratioBand(r);
+  if (b === "over") return "over";
+  if (b === "light") return "low";
+  return r >= 1 - 1e-9 ? "full" : "mid";
 }
 
 export default function TimesheetView({
@@ -266,7 +269,7 @@ export default function TimesheetView({
         <button onClick={exportCsv} disabled={!sheet || grid.rows.length === 0} title="Tải bảng chấm công về file CSV mở được bằng Excel">
           Xuất CSV
         </button>
-        <button className="primary" onClick={() => setLogFor({ date: today >= from && today <= to ? today : from })}>
+        <button onClick={() => setLogFor({ date: today >= from && today <= to ? today : from })}>
           + Ghi giờ
         </button>
       </div>
@@ -281,29 +284,11 @@ export default function TimesheetView({
 
       {sheet && (
         <>
-          <div className="ts-tiles">
-            <div className="ts-tile">
-              <span className="ts-tile-label">Đã ghi</span>
-              <b className="ts-tile-value">{totals.logged}h</b>
-              <span className="ts-tile-sub">
-                {pct !== null ? `${pct}% / ${totals.expected}h` : "Chưa tới ngày làm việc nào"}
-              </span>
-            </div>
-            <div className={`ts-tile ${totals.withGaps > 0 ? "is-warn" : ""}`}>
-              <span className="ts-tile-label">Còn ngày chưa ghi</span>
-              <b className="ts-tile-value">
-                {totals.withGaps > 0 && <span aria-hidden="true">● </span>}
-                {totals.withGaps} người
-              </b>
-            </div>
-            <div className={`ts-tile ${totals.overDays > 0 ? "is-over" : ""}`}>
-              <span className="ts-tile-label">Vượt công suất</span>
-              <b className="ts-tile-value">
-                {totals.overDays > 0 && <span aria-hidden="true">▲ </span>}
-                {totals.overDays} ngày-người
-              </b>
-            </div>
-          </div>
+          <MetricRow className="ts-tiles">
+            <Metric value={`${totals.logged}h`} label="Đã ghi" sub={pct !== null ? `${pct}% / ${totals.expected}h` : undefined} />
+            {totals.withGaps > 0 && <Metric value={totals.withGaps} label="người còn ngày chưa ghi" tone="warn" />}
+            {totals.overDays > 0 && <Metric value={totals.overDays} label="ngày-người vượt công suất" tone="serious" />}
+          </MetricRow>
 
           <div className="ts-grid-scroll">
             <table className={`ts-grid ${mode === "month" ? "is-month" : ""}`}>
@@ -409,11 +394,11 @@ export default function TimesheetView({
 
           <div className="ts-legend">
             <span><i className="band-low" /> dưới 50% công suất</span>
-            <span><i className="band-mid" /> 50–95%</span>
+            <span><i className="band-mid" /> 50% đến dưới 100%</span>
             <span><i className="band-full" /> đủ ngày</span>
             <span><i className="band-over" />▲ vượt công suất</span>
             <span><span className="ts-gap">●</span> ngày làm việc chưa ghi</span>
-            <span><span className="ts-away">Nghỉ</span> nghỉ phép</span>
+            <span><i className="ts-away-swatch" /> nghỉ phép</span>
           </div>
 
           {detail && (

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode, type Ref } from "
 import { priorityRank, summarize } from "../boardModel";
 import { EMPTY_TASK_FILTER, facetCount, isTaskFiltering, type TaskFilter } from "../taskFilter";
 import type { Task } from "../types";
-import { Icon } from "./Icons";
+import { Icon, type IconName } from "./Icons";
 import Popover from "./Popover";
 
 export type FilterFacet =
@@ -23,7 +23,7 @@ type SetFacet = Exclude<FilterFacet, "overdue">;
 const SET_FACETS: SetFacet[] = ["people", "statuses", "types", "epics", "labels", "priorities", "components", "versions", "sprints"];
 
 const FACET_LABEL: Record<SetFacet, string> = {
-  people: "Người phụ trách",
+  people: "Người",
   statuses: "Trạng thái",
   types: "Loại",
   epics: "Epic",
@@ -45,6 +45,15 @@ export interface JqlControl {
   onClear: () => void;
 }
 
+export interface QuickToggle {
+  key: string;
+  label: string;
+  icon: IconName;
+  on: boolean;
+  onToggle: () => void;
+  title?: string;
+}
+
 export interface Option {
   value: string;
   label: string;
@@ -61,10 +70,17 @@ interface Props {
   /** "12 / 80" counter shown while filtering. */
   matched?: number;
   total?: number;
+  /** Rendered before everything else in the row: which board, which sprint view (the Bảng tab's chrome). */
+  lead?: ReactNode;
   /** Rendered after the search box — the saved-filter menu. */
   leading?: ReactNode;
   /** More quick filters, after "Quá hạn" (the Gantt's "Chưa có ngày"). */
   extras?: ReactNode;
+  /**
+   * Switches at the top of the "Bộ lọc" panel, beside "Của tôi" and "Quá hạn" (the Gantt's "Chưa có ngày" and
+   * "Trễ SLA", the board's "Bị chặn"). Each one that is on is a chip, so nothing hides in a closed panel.
+   */
+  quick?: QuickToggle[];
   /** Right-hand end of the row: whatever the view itself needs (zoom, display, import/export). */
   trailing?: ReactNode;
   /** Adds the free-text box that narrows `filter.text`. */
@@ -100,11 +116,14 @@ function toggled(set: Set<string>, value: string): Set<string> {
 
 export function MultiSelect({
   label,
+  allLabel,
   options,
   selected,
   onChange,
 }: {
   label: string;
+  /** With it the button reads "Loại: Tất cả" while nothing is picked, like the selects beside it. */
+  allLabel?: string;
   options: Option[];
   selected: Set<string>;
   onChange: (next: Set<string>) => void;
@@ -136,8 +155,7 @@ export function MultiSelect({
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
       >
-        {label}
-        {selected.size > 0 ? ` (${selected.size})` : ""}
+        {allLabel ? `${label}: ${selected.size > 0 ? selected.size : allLabel}` : `${label}${selected.size > 0 ? ` (${selected.size})` : ""}`}
         <Icon name="chevronDown" size={10} className="fb-icon" />
       </button>
       {open && (
@@ -248,8 +266,10 @@ export default function FilterBar({
   facets = ALL_FACETS,
   matched,
   total,
+  lead,
   leading,
   extras,
+  quick = [],
   trailing,
   showSearch,
   className,
@@ -321,11 +341,21 @@ export default function FilterBar({
   }, [tasks]);
 
   const mine = filter.people.has(myAccountId);
-  const filtering = isTaskFiltering(filter) || !!extraActive;
+  // "Của tôi" and "Quá hạn" lead; the view's own switches follow. All live in the panel, as chips while on.
+  const switches: QuickToggle[] = [
+    ...(has("people")
+      ? [{ key: "mine", label: "Của tôi", icon: "user" as IconName, on: mine, onToggle: () => onChange({ ...filter, people: toggled(filter.people, myAccountId) }), title: "Việc của tôi (M)" }]
+      : []),
+    ...(has("overdue")
+      ? [{ key: "overdue", label: "Quá hạn", icon: "alert" as IconName, on: filter.onlyOverdue, onToggle: () => onChange({ ...filter, onlyOverdue: !filter.onlyOverdue }), title: "Quá hạn và chưa xong (O)" }]
+      : []),
+    ...quick,
+  ];
+  const filtering = isTaskFiltering(filter) || !!extraActive || switches.some((q) => q.on);
 
   // Components, versions and sprints only earn a place once the project uses them.
   const shown = SET_FACETS.filter((f) => has(f) && (!["components", "versions", "sprints"].includes(f) || options[f].length > 0));
-  const activeCount = shown.filter((f) => filter[f].size > 0).length + panelExtrasActive;
+  const activeCount = shown.filter((f) => filter[f].size > 0).length + panelExtrasActive + switches.filter((q) => q.on).length;
 
   function labelOf(f: SetFacet, value: string): string {
     return options[f].find((o) => o.value === value)?.label ?? value;
@@ -348,6 +378,7 @@ export default function FilterBar({
     <>
       <div className={`tf-bar${className ? ` ${className}` : ""}`}>
         <div className="tf-left">
+          {lead}
           {showSearch && (
             <div className="tf-search">
               <Icon name="search" size={14} className="tf-search-icon" />
@@ -360,7 +391,7 @@ export default function FilterBar({
                 onKeyDown={(e) => {
                   if (e.key === "Escape") onChange({ ...filter, text: "" });
                 }}
-                placeholder="Tìm theo mã hoặc tên việc..."
+                placeholder="Tìm việc…"
                 aria-label="Tìm việc"
               />
               {filter.text && (
@@ -434,32 +465,8 @@ export default function FilterBar({
             </div>
           )}
           {leading}
-          {has("people") && (
-            <button
-              type="button"
-              className={`tf-btn${mine ? " is-on" : ""}`}
-              aria-pressed={mine}
-              onClick={() => onChange({ ...filter, people: toggled(filter.people, myAccountId) })}
-              title="Việc của tôi"
-            >
-              <Icon name="user" size={14} />
-              <span className="fb-label">Của tôi</span>
-            </button>
-          )}
-          {has("overdue") && (
-            <button
-              type="button"
-              className={`tf-btn${filter.onlyOverdue ? " is-on" : ""}`}
-              aria-pressed={filter.onlyOverdue}
-              onClick={() => onChange({ ...filter, onlyOverdue: !filter.onlyOverdue })}
-              title="Quá hạn và chưa xong"
-            >
-              <Icon name="alert" size={14} />
-              <span className="fb-label">Quá hạn</span>
-            </button>
-          )}
           {extras}
-          {(shown.length > 0 || panelExtras) && (
+          {(shown.length > 0 || panelExtras || switches.length > 0) && (
             <Popover
               className="tf-btn tf-add"
               caret={false}
@@ -475,6 +482,17 @@ export default function FilterBar({
                 </>
               }
             >
+              {switches.length > 0 && (
+                <div className="tf-quick" role="group" aria-label="Lọc nhanh">
+                  {switches.map((q) => (
+                    <label key={q.key} className={`tf-quick-row${q.on ? " is-on" : ""}`} title={q.title}>
+                      <Icon name={q.icon} size={14} />
+                      <span className="tf-quick-label">{q.label}</span>
+                      <input type="checkbox" role="switch" checked={q.on} onChange={q.onToggle} aria-label={q.label} />
+                    </label>
+                  ))}
+                </div>
+              )}
               <FacetAccordion
                 facets={shown.map((f) => ({ key: f, label: FACET_LABEL[f], options: options[f], selected: filter[f] }))}
                 openKey={openFacet}
@@ -489,6 +507,14 @@ export default function FilterBar({
       </div>
       {filtering && (
         <div className="tf-active">
+          {switches.filter((q) => q.on).map((q) => (
+            <span key={q.key} className="tf-chip" data-quick={q.key}>
+              <span className="tf-chip-label">{q.label}</span>
+              <button type="button" className="tf-chip-x" aria-label={`Bỏ lọc ${q.label}`} onClick={q.onToggle}>
+                <Icon name="x" size={12} />
+              </button>
+            </span>
+          ))}
           {chips.map((c) => (
             <span key={c.facet} className="tf-chip" title={c.full}>
               <span className="tf-chip-label">{c.text}</span>

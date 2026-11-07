@@ -286,7 +286,7 @@ export default function AiBrief({
                           <dl className="ai-facts">
                             {r.owner && (
                               <>
-                                <dt>Người phụ trách</dt>
+                                <dt>Người</dt>
                                 <dd>
                                   <span className="pr-avatar" aria-hidden="true">
                                     {initials(r.owner)}

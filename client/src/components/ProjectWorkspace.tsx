@@ -12,7 +12,7 @@ import { dropViewCache, noteViewsStale, readViewCache, viewCacheScope, writeView
 import { warmBoardAndTimesheet, warmProgress } from "../warmViews";
 import { computeSla, slaIds } from "../sla";
 import SavedFilterMenu from "./SavedFilterMenu";
-import { toWorkCalendar } from "../workCalendar";
+import { dayLabel, isWorkingDate, toWorkCalendar } from "../workCalendar";
 import type {
   BulkTaskCreateResult,
   DependencyType,
@@ -48,7 +48,7 @@ import { useDialogs } from "./dialogContext";
 import { TransitionFieldsDialog } from "./TransitionFields";
 import { neededFieldsFrom } from "../transitionFields";
 import Toolbar from "./Toolbar";
-import { LENSES, parseView, type ResourceMode, type SyncState, type WorkspaceView } from "../lenses";
+import { LENSES, parseView, withViewParam, type ResourceMode, type SyncState, type WorkspaceView } from "../lenses";
 import ResourceModes from "./ResourceModes";
 import TimesheetView from "./TimesheetView";
 import TodayView from "./TodayView";
@@ -59,9 +59,10 @@ import ShortcutSheet from "./ShortcutSheet";
 import Toaster from "./Toaster";
 import { toast } from "../toast";
 import { parseQuickAdd } from "../quickAdd";
-import { createSequence, isTypingTarget, overlayOpen } from "../shortcuts";
+import { SEQUENCES, createSequence, isTypingTarget, overlayOpen, shortcutIdFor } from "../shortcuts";
 import { isOpen as layersOpen } from "../layers";
 import { setDensity, setThemeChoice } from "../theme";
+import { phoneView, usePhone } from "../usePhone";
 
 interface Props {
   session: Session;
@@ -165,30 +166,48 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
   const viewKey = `gms.view.${session.site.cloudId}.${session.project?.key ?? ""}`;
   const resourceModeKey = `gms.resmode.${session.site.cloudId}.${session.project?.key ?? ""}`;
   const [start] = useState(() => initialView(viewKey));
-  const [view, setViewState] = useState<WorkspaceView>(() => (initialReportId ? "report" : start.view));
+  const [viewChosen, setViewState] = useState<WorkspaceView>(() => (initialReportId ? "report" : start.view));
+  // A phone shows Hôm nay and the board; what was chosen is kept, so a rotated or resized window gets it back.
+  const phone = usePhone();
+  const view = phoneView(viewChosen, phone);
   // Nhân lực has three modes. Someone who may not see the member list (resourceAccess "denied") only has
   // "Giờ đã ghi": the mode in use is derived, never stored as something they cannot have.
   const [resourceModeState, setResourceModeState] = useState<ResourceMode>(() => start.resourceMode ?? savedResourceMode(resourceModeKey));
   const resourceMode: ResourceMode = resourceAccess === "denied" ? "ts" : resourceModeState;
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const resourceModeRef = useRef(resourceMode);
+  resourceModeRef.current = resourceMode;
+  // The place the settings page was opened from, for its "← Quay lại" (a lens or Hôm nay; never "settings" itself).
+  const settingsFrom = useRef<WorkspaceView>("today");
+  // True while the settings page sits on a history entry of its own that "← Quay lại" can simply go back from.
+  const settingsPushed = useRef(false);
+  /** The address follows the place: `?view=` is written on every change, so a link, F5 and Back all agree. */
+  const writeUrl = useCallback((v: WorkspaceView, mode: ResourceMode, push: boolean) => {
+    try {
+      const url = window.location.pathname + withViewParam(window.location.search, v, mode) + window.location.hash;
+      if (url === window.location.pathname + window.location.search + window.location.hash) return;
+      if (push) window.history.pushState({ gms: true }, "", url);
+      else window.history.replaceState({ gms: true }, "", url);
+    } catch {
+      /* no history (sandboxed frame) */
+    }
+  }, []);
   const setResourceMode = useCallback(
     (m: ResourceMode) => {
       setResourceModeState(m);
+      resourceModeRef.current = m;
+      if (viewRef.current === "resource") writeUrl("resource", m, false);
       try {
         localStorage.setItem(resourceModeKey, m);
       } catch {
         /* private mode */
       }
     },
-    [resourceModeKey]
+    [resourceModeKey, writeUrl]
   );
-  const viewRef = useRef(view);
-  viewRef.current = view;
-  // The place the settings page was opened from, for its "← Về …" (a lens or Hôm nay; never "settings" itself).
-  const settingsFrom = useRef<WorkspaceView>("today");
-  const setView = useCallback(
+  const rememberView = useCallback(
     (v: WorkspaceView) => {
-      if (v === "settings" && viewRef.current !== "settings") settingsFrom.current = viewRef.current;
-      setViewState(v);
       // Settings is a page you go to and come back from, not somewhere a project should reopen on.
       if (v === "settings") return;
       try {
@@ -199,6 +218,42 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
     },
     [viewKey]
   );
+  const setView = useCallback(
+    (v: WorkspaceView) => {
+      const from = viewRef.current;
+      if (v === "settings" && from !== "settings") {
+        settingsFrom.current = from;
+        settingsPushed.current = true;
+      } else if (v !== "settings") {
+        settingsPushed.current = false;
+      }
+      setViewState(v);
+      rememberView(v);
+      writeUrl(v, resourceModeRef.current, v !== from);
+    },
+    [rememberView, writeUrl]
+  );
+  // First render: put the place in the address (replace, not push) so the entry Back returns to names its lens.
+  useEffect(() => {
+    writeUrl(viewRef.current, resourceModeRef.current, false);
+  }, [writeUrl]);
+  // Back / Forward change the lens instead of leaving the app.
+  useEffect(() => {
+    function onPop() {
+      const parsed = parseView(new URLSearchParams(window.location.search).get("view"));
+      if (!parsed) return;
+      if (parsed.resourceMode) setResourceModeState(parsed.resourceMode);
+      else if (parsed.view === "resource" && resourceModeRef.current === "ts") {
+        const saved = savedResourceMode(resourceModeKey);
+        setResourceModeState(saved === "ts" ? "load" : saved);
+      }
+      if (parsed.view === "settings" && viewRef.current !== "settings") settingsFrom.current = viewRef.current;
+      setViewState(parsed.view);
+      rememberView(parsed.view);
+    }
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [rememberView, resourceModeKey]);
   // The layers this shell adds on top of the views: Ctrl K, "?", and a request to open the assistant.
   const [cmdk, setCmdk] = useState<null | "command" | "create">(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -567,8 +622,9 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
       e.preventDefault();
       void undoRef.current();
     }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // Capture phase, like the shortcut listener: the bar just dragged keeps focus and stops every keydown it gets.
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, [editingTask, creating, reviewRunId, importing, importingKbkt, view]);
 
   async function handleSync() {
@@ -890,7 +946,10 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
       const was = before.find((t) => t.id === id);
       if (was && (was.startDate !== startDate || was.durationDays !== durationDays)) {
         const entry = makeEntry(`dời ${id}`, before, [id, ...cascade.keys(), ...updated.cascaded.map((t) => t.id)]);
-        if (entry) setUndoStack((s) => pushEntry(s, entry));
+        if (entry) {
+          setUndoStack((s) => pushEntry(s, entry));
+          toast(`Đã dời ${id}`, { ms: 4000, action: { label: "Hoàn tác", hint: "Ctrl Z", run: () => void undoRef.current() } });
+        }
       }
     } catch (e) {
       if ((taskVersion.current.get(id) ?? 0) > seq) return; // superseded by a newer drag
@@ -909,7 +968,10 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
       setTasks((prev) => applyTaskUpdate(prev, updated, seq));
       if (before.find((t) => t.id === id)?.percentComplete !== percentComplete) {
         const entry = makeEntry(`đổi % ${id}`, before, [id]);
-        if (entry) setUndoStack((s) => pushEntry(s, entry));
+        if (entry) {
+          setUndoStack((s) => pushEntry(s, entry));
+          toast(`Đã đổi % của ${id}`, { ms: 4000, action: { label: "Hoàn tác", hint: "Ctrl Z", run: () => void undoRef.current() } });
+        }
       }
     } catch (e) {
       if ((taskVersion.current.get(id) ?? 0) > seq) return;
@@ -968,7 +1030,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
       setTasks((prev) => applyTaskUpdate(prev, updated, seq));
     } catch (e) {
       if ((taskVersion.current.get(taskId) ?? 0) > seq) return;
-      setSyncError(e instanceof Error ? e.message : "Không thể gán người phụ trách.");
+      setSyncError(e instanceof Error ? e.message : "Không thể gán người.");
       await refreshTasks();
     }
   }
@@ -1102,10 +1164,27 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
   const previewCreate = (text: string): CreatePreview | null => {
     if (!text.trim()) return null;
     const r = parseQuickAdd(text, quickCtx());
+    const dur = r.fields.durationDays ?? 0;
     return {
       title: r.title,
-      line: r.preview,
-      chips: r.tokens.map((t) => ({ label: t.label, kind: t.kind, warn: !!(t.ambiguous || t.unresolved) })),
+      line: "",
+      chips: r.tokens.map((t) => {
+        const chip = { label: t.label, kind: t.kind, warn: !!(t.ambiguous || t.unresolved), title: undefined as string | undefined };
+        if (t.kind === "date" && typeof t.value === "string") {
+          const start = t.value.split("/")[0];
+          // The end the task will get, so the chip says the span ("CN 8/11 → 10/11") and nothing repeats it below.
+          if (!t.value.includes("/") && dur > 1) {
+            const end = addDays(start, dur - 1);
+            chip.label = `${t.label} → ${end.slice(8, 10)}/${end.slice(5, 7)}`;
+          }
+          // A day the project does not work: still allowed (people do plan weekend work), but not silently.
+          if (!isWorkingDate(start, workCalendar)) {
+            chip.warn = true;
+            chip.title = dayLabel(start, workCalendar) ? `Ngày nghỉ: ${dayLabel(start, workCalendar)}` : "Ngày nghỉ";
+          }
+        }
+        return chip;
+      }),
     };
   };
 
@@ -1277,70 +1356,168 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
   ];
 
   // The keyboard layer (plan §7). Letter keys never fire while typing or with any layer open.
-  const sequence = useMemo(() => createSequence({ "g h": "go-today", "g t": "go-time", "g s": "go-settings" }), []);
+  // One table: `shortcutIdFor` (shortcuts.ts, tested against the "?" sheet) names the shortcut, `run` below acts on it.
+  const sequence = useMemo(() => createSequence(SEQUENCES), []);
   const toggleOverdue = () => setTaskFilter({ ...taskFilter, onlyOverdue: !taskFilter.onlyOverdue });
-  const keyState = useRef({ go, goResource, openSettings, toggleMine, toggleOverdue, handleSync, handleBulkAssign, handleDeleteSelected, toggleDraft });
-  keyState.current = { go, goResource, openSettings, toggleMine, toggleOverdue, handleSync, handleBulkAssign, handleDeleteSelected, toggleDraft };
+  const keyState = useRef({ go, goResource, openSettings, toggleMine, toggleOverdue, handleSync, handleBulkAssign, handleBulkShift, handleDeleteSelected, toggleDraft, selectedTasks });
+  keyState.current = { go, goResource, openSettings, toggleMine, toggleOverdue, handleSync, handleBulkAssign, handleBulkShift, handleDeleteSelected, toggleDraft, selectedTasks };
   const blockers = !!(editingTask || creating || reviewRunId || importing || importingKbkt || cmdk || shortcutsOpen);
   useEffect(() => {
+    /** Returns true when the key was used (the caller then stops it). */
+    function run(id: string): boolean {
+      const ks = keyState.current;
+      const onPlan = view === "gantt";
+      switch (id) {
+        case "help":
+          setShortcutsOpen(true);
+          return true;
+        case "create":
+          setCmdk("create");
+          return true;
+        case "sync":
+          void ks.handleSync();
+          return true;
+        case "mine":
+          ks.toggleMine();
+          return true;
+        case "overdue":
+          ks.toggleOverdue();
+          return true;
+        case "draft":
+          void ks.toggleDraft();
+          return true;
+        case "clear-filter":
+          setTaskFilter(EMPTY_TASK_FILTER);
+          return true;
+        case "lens-1":
+        case "lens-2":
+        case "lens-3":
+        case "lens-4": {
+          const lens = LENSES[Number(id.slice(-1)) - 1];
+          if (lens) ks.go(lens.id);
+          return true;
+        }
+        case "go-today":
+          ks.go("today");
+          return true;
+        case "go-time":
+          ks.goResource("ts");
+          return true;
+        case "go-settings":
+          ks.openSettings();
+          return true;
+        case "today":
+          if (!onPlan) return false;
+          window.dispatchEvent(new Event("gms:gantt-today"));
+          return true;
+        case "assign-me":
+          if (selectedIds.size === 0) return false;
+          ks.handleBulkAssign(session.user.accountId);
+          return true;
+        case "delete":
+          if (selectedIds.size === 0) return false;
+          void ks.handleDeleteSelected();
+          return true;
+        case "shift-back":
+        case "shift-fwd":
+          if (!onPlan || selectedIds.size === 0) return false;
+          void ks.handleBulkShift(id === "shift-back" ? -1 : 1);
+          return true;
+        case "next":
+        case "prev":
+          if (!onPlan) return false;
+          window.dispatchEvent(new CustomEvent("gms:gantt-move", { detail: { delta: id === "next" ? 1 : -1 } }));
+          return true;
+        case "select-all":
+          if (!onPlan) return false;
+          window.dispatchEvent(new Event("gms:gantt-select-all"));
+          return true;
+        case "status":
+        case "assign": {
+          if (!onPlan || selectedIds.size === 0) return false;
+          if (selectedIds.size === 1) {
+            window.dispatchEvent(new CustomEvent("gms:gantt-pick", { detail: { kind: id === "status" ? "status" : "assignee" } }));
+            return true;
+          }
+          // Several rows: the selection bar's own controls.
+          const bar = document.querySelector<HTMLElement>(".selection-bar");
+          if (id === "status") bar?.querySelector<HTMLElement>(".selection-trigger")?.click();
+          else {
+            const select = bar?.querySelector<HTMLSelectElement>("select.selection-select");
+            select?.focus();
+            (select as (HTMLSelectElement & { showPicker?: () => void }) | null | undefined)?.showPicker?.();
+          }
+          return true;
+        }
+        case "copy-key": {
+          const keys = ks.selectedTasks().map((t) => t.id);
+          if (keys.length === 0 && selectedId) keys.push(selectedId);
+          if (keys.length === 0) return false;
+          const text = keys.join(" ");
+          navigator.clipboard?.writeText(text).then(
+            () => toast(keys.length === 1 ? `Đã sao chép ${text}` : `Đã sao chép ${keys.length} mã`, { ms: 2500 }),
+            () => toast("Không sao chép được.", { tone: "error" })
+          );
+          return true;
+        }
+        case "search": {
+          // The search box of whatever is on screen; none (Today, Cài đặt) falls back to the command bar.
+          const box = Array.from(document.querySelectorAll<HTMLInputElement>(".app-body input[type=search], .app-body .tf-search input")).find(
+            (el) => el.offsetParent !== null
+          );
+          if (box) {
+            box.focus();
+            box.select();
+          } else {
+            setCmdk("command");
+          }
+          return true;
+        }
+        case "log-time":
+          if (view !== "today") return false;
+          window.dispatchEvent(new Event("gms:log-time"));
+          return true;
+        default:
+          return false;
+      }
+    }
     function onKey(e: KeyboardEvent) {
-      const k = e.key;
-      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && k.toLowerCase() === "k") {
+      const id = shortcutIdFor(e);
+      if (id === "command") {
         e.preventDefault();
         // Behind a picker or dialog the command bar would open under it; the open panel itself does not count.
         if (layersOpen("cmdk", "task-detail")) return;
         setCmdk((c) => (c ? null : "command"));
         return;
       }
-      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && k.toLowerCase() === "p") {
+      if (id === "projects") {
         e.preventDefault();
         if (layersOpen("task-detail")) return;
         onSwitchProject();
         return;
       }
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (blockers || isTypingTarget(e.target) || overlayOpen()) return;
-      const ks = keyState.current;
-      const seqHit = sequence.feed(k);
-      if (seqHit === "pending") {
-        e.preventDefault();
+      // The second key of "G x" comes first: S, T and H are shortcuts of their own after nothing.
+      if (sequence.pending && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const hit = sequence.feed(e.key);
+        if (hit && hit !== "pending") {
+          e.preventDefault();
+          run(hit);
+          return;
+        }
+      }
+      if (id) {
+        if (run(id)) e.preventDefault();
         return;
       }
-      if (seqHit === "go-today") return ks.go("today");
-      if (seqHit === "go-time") return ks.goResource("ts");
-      if (seqHit === "go-settings") return ks.openSettings();
-      if (k === "?") {
-        e.preventDefault();
-        setShortcutsOpen(true);
-      } else if (k === "c") {
-        e.preventDefault();
-        setCmdk("create");
-      } else if (k >= "1" && k <= "4" && k.length === 1) {
-        const lens = LENSES[Number(k) - 1];
-        if (lens) ks.go(lens.id);
-      } else if (k === "R" && e.shiftKey) {
-        void ks.handleSync();
-      } else if (k === "m") {
-        ks.toggleMine();
-      } else if (k === "o") {
-        ks.toggleOverdue();
-      } else if (k === "D" && e.shiftKey) {
-        void ks.toggleDraft();
-      } else if (k === "F" && e.shiftKey) {
-        setTaskFilter(EMPTY_TASK_FILTER);
-      } else if (k === "t" && view === "gantt") {
-        window.dispatchEvent(new Event("gms:gantt-today"));
-      } else if (k === "i" && selectedIds.size > 0) {
-        ks.handleBulkAssign(session.user.accountId);
-      } else if (k === "Delete" && selectedIds.size > 0) {
-        void ks.handleDeleteSelected();
-      }
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (sequence.feed(e.key) === "pending") e.preventDefault();
     }
     // Capture phase: a focused Gantt bar (just dragged or clicked) stops every keydown it gets, so Shift D
     // and the rest never reached `window` while the bar still had focus.
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [blockers, sequence, onSwitchProject, view, selectedIds, session.user.accountId, setTaskFilter]);
+  }, [blockers, sequence, onSwitchProject, view, selectedIds, selectedId, session.user.accountId, setTaskFilter]);
 
   // A failed write used to be a red strip pushing the plan down; it is a toast now (plan §5.6).
   useEffect(() => {
@@ -1441,7 +1618,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
                 const v = e.target.value;
                 if (v) handleBulkAssign(v === "__none__" ? null : v);
               }}
-              aria-label="Gán người phụ trách cho các việc đã chọn"
+              aria-label="Gán người cho các việc đã chọn"
             >
               <option value="">Gán cho…</option>
               <option value="__none__">Bỏ gán</option>
@@ -1472,6 +1649,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
               <option value="clear">Xoá baseline</option>
             </select>
             <span className="selection-shift">
+              <span className="selection-shift-label">Dời</span>
               <button
                 disabled={deleting || bulkBusy !== null}
                 onClick={() => handleBulkShift(-shiftDays)}
@@ -1544,7 +1722,10 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
               tasks={tasks}
               today={todayIso()}
               capacityHours={
-                pool?.profiles.find((p) => p.accountId === session.user.accountId)?.capacityHoursPerDay ?? pool?.defaultCapacityHours ?? 8
+                // A day the project does not work has no capacity to fill (a Saturday is not 8 hours).
+                isWorkingDate(todayIso(), workCalendar)
+                  ? (pool?.profiles.find((p) => p.accountId === session.user.accountId)?.capacityHoursPerDay ?? pool?.defaultCapacityHours ?? 8)
+                  : 0
               }
               onOpenTask={openTask}
               onUpdateTask={updateOne}
@@ -1558,6 +1739,10 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
               onToggleCollapse={toggleCollapse}
               selectedId={selectedId}
               onSelect={handleSelect}
+              onSelectMany={(ids) => {
+                setSelectedIds(new Set(ids));
+                setSelectedId(ids[0] ?? null);
+              }}
               selectedIds={selectedIds}
               filter={taskFilter}
               onFilterChange={setTaskFilter}
@@ -1576,6 +1761,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
               jql={{ state: jqlState, onRun: runJql, onClear: () => setTaskFilter({ ...taskFilter, jql: "" }) }}
               undo={{ label: undoing ? null : (undoStack.at(-1)?.label ?? null), onUndo: () => void undo() }}
               onOpenImport={() => setImporting(true)}
+              onOpenShortcuts={() => setShortcutsOpen(true)}
               onImportKbkt={() => setImportingKbkt(true)}
               onQuickCreate={(text) => quickCreate(text, false)}
               users={users}
@@ -1642,7 +1828,11 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
                   ? "Hôm nay"
                   : (LENSES.find((l) => l.id === settingsFrom.current)?.label ?? "Hôm nay")
               }
-              onBack={() => go(settingsFrom.current === "settings" ? "today" : settingsFrom.current)}
+              onBack={() => {
+                // Opened from a lens by this session: that is the previous history entry, so go back to it.
+                if (settingsPushed.current && window.history.state?.gms) window.history.back();
+                else go(settingsFrom.current === "settings" ? "today" : settingsFrom.current);
+              }}
             />
           ) : (
             <ProgressReportView

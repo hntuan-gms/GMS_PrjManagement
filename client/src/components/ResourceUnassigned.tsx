@@ -202,7 +202,7 @@ export default function ResourceUnassigned({
           />
           {shown.length === 0 ? (
             <div className="rv-un-empty">
-              {tasks.length === 0 ? "Mọi việc đã có người phụ trách." : "Không có việc nào khớp."}
+              {tasks.length === 0 ? "Mọi việc đã có người." : "Không có việc nào khớp."}
             </div>
           ) : (
             <ul className="rv-un-list">

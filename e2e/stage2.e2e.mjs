@@ -81,23 +81,25 @@ await step("việc cha chỉ gồm việc hợp lệ: không có chính nó và 
 });
 await step("issue link của Jira hiện cạnh phụ thuộc, có chiều đúng, không kèm đoạn giải thích", async () => {
   const text = await page.locator(".modal .td-section", { has: page.locator(".td-section-title", { hasText: "Liên kết Jira" }) }).textContent();
-  assert(text.includes("is blocked by") && text.includes("DEMO-3"), text);
+  assert(text.includes("bị chặn bởi") && text.includes("DEMO-3"), text);
   assert(!text.includes("Chỉ để tham khảo"), "còn đoạn giải thích dưới Liên kết Jira");
 });
 await step("thêm liên kết 'relates to' DEMO-7, rồi gỡ", async () => {
   const box = page.locator(".modal .td-section", { has: page.locator(".td-section-title", { hasText: "Liên kết Jira" }) });
-  await box.locator("select[aria-label='Kiểu liên kết']").selectOption({ label: "relates to" });
+  await box.locator("button", { hasText: /^\s*Liên kết\s*$/ }).click();
+  await box.locator("select[aria-label='Kiểu liên kết']").selectOption({ label: "liên quan đến" });
   await box.locator("button", { hasText: "Chọn việc" }).click();
   await page.locator(".cell-picker input").fill("DEMO-7");
   await page.locator(".cell-picker-item", { hasText: "DEMO-7" }).first().click();
-  await page.waitForFunction(() => document.querySelector(".modal")?.textContent.includes("relates to") && document.querySelector(".modal")?.textContent.includes("DEMO-7"));
+  await page.waitForFunction(() => document.querySelector(".modal")?.textContent.includes("liên quan đến") && document.querySelector(".modal")?.textContent.includes("DEMO-7"));
   const posted = (await log()).find((l) => l.m === "POST" && l.p === "/api/tasks/DEMO-5/issue-links");
   assert.deepEqual(posted.b, { typeName: "Relates", otherKey: "DEMO-7", direction: "outward" });
-  await box.locator("li", { hasText: "DEMO-7" }).locator("button", { hasText: "gỡ" }).click();
+  await box.locator("li", { hasText: "DEMO-7" }).locator("button[aria-label^='Gỡ liên kết']").click({ force: true });
   await page.waitForFunction(() => !document.querySelector(".modal ul.pred-list")?.textContent.includes("DEMO-7"));
 });
 await step("một mã không có thì Jira từ chối và lỗi hiện ngay tại chỗ", async () => {
   const box = page.locator(".modal .td-section", { has: page.locator(".td-section-title", { hasText: "Liên kết Jira" }) });
+  if (!(await box.locator("button", { hasText: "Chọn việc" }).count())) await box.locator("button", { hasText: /^\s*Liên kết\s*$/ }).click();
   await box.locator("button", { hasText: "Chọn việc" }).click();
   await page.locator(".cell-picker input").fill("DEMO-999");
   await page.locator(".cell-picker-item", { hasText: "Dùng mã này" }).click();

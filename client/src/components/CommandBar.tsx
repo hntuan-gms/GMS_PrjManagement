@@ -27,7 +27,7 @@ export interface CreatePreview {
   /** One line under the title: type · person · dates · priority… */
   line: string;
   /** Spans of the input that were recognised, for the chips. */
-  chips: Array<{ label: string; kind: string; warn?: boolean }>;
+  chips: Array<{ label: string; kind: string; warn?: boolean; title?: string }>;
 }
 
 interface Props {
@@ -180,7 +180,7 @@ export default function CommandBar({ tasks, commands, initialMode = "command", o
             {p && (p.chips.length > 0 || p.line) && (
               <span className="cmdk-chips">
                 {p.chips.map((c, k) => (
-                  <span key={k} className={`qa-chip qa-${c.kind}${c.warn ? " is-warn" : ""}`}>
+                  <span key={k} className={`qa-chip qa-${c.kind}${c.warn ? " is-warn" : ""}`} title={c.title}>
                     {c.label}
                   </span>
                 ))}
