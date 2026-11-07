@@ -344,11 +344,44 @@ await step("lượt đã ghi: không có 'Tạo lại' / 'Sửa'", async () => {
   assert.equal(await page.locator(".chat-act[aria-label='Tạo lại']").count(), 0);
   assert.equal(await page.locator(".chat-msg-user .chat-act[aria-label='Sửa']").count(), 0);
 });
-await step("danh sách cuộc trò chuyện mở được và đóng lại", async () => {
+await step("danh sách cuộc trò chuyện là ngăn kéo phủ lên: mở ra không làm dịch hội thoại hay ô soạn", async () => {
+  const before = { c: await page.locator(".chat-composer").boundingBox(), m: await page.locator(".chat-messages").boundingBox() };
   await page.locator(".chat-session-btn").click();
-  await page.waitForSelector(".chat-sessions");
+  await page.waitForSelector(".chat-side.is-open .chat-sessions");
+  await page.waitForTimeout(400);
+  const after = { c: await page.locator(".chat-composer").boundingBox(), m: await page.locator(".chat-messages").boundingBox() };
+  assert.deepEqual(after, before, "hội thoại hoặc ô soạn bị dịch khi mở danh sách");
+  // The drawer lies over the conversation; the scrim closes it.
+  const side = await page.locator(".chat-side").boundingBox();
+  assert(side.width > 200 && side.width <= 290, String(side.width));
+  const scrim = await page.locator(".chat-scrim").boundingBox();
+  assert(scrim.width > side.width + 10, `không còn chỗ ngoài ngăn kéo để bấm: ${scrim.width} vs ${side.width}`);
+  await page.mouse.click(scrim.x + scrim.width - 6, scrim.y + 200);
+  await page.waitForSelector(".chat-side:not(.is-open)", { state: "attached" });
+  await page.waitForTimeout(350);
+  assert.equal(await page.locator(".chat-side").isVisible(), false, "ngăn kéo đóng rồi phải ẩn");
+});
+await step("phóng to: thanh bên lịch sử cố định bên trái, hội thoại căn giữa phần còn lại", async () => {
+  await page.locator(".chat-dock button[aria-label='Mở rộng']").click();
+  await page.waitForSelector(".chat-dock.is-max .chat-side.is-open");
+  await page.waitForTimeout(700);
+  const side = await page.locator(".chat-side").boundingBox();
+  const main = await page.locator(".chat-main").boundingBox();
+  const comp = await page.locator(".chat-composer").boundingBox();
+  assert(Math.abs(side.width - 288) <= 2, String(side.width));
+  assert(Math.abs(side.x + side.width - main.x) <= 2, "thanh bên phải sát cạnh vùng trả lời");
+  // The composer is centred in the area beside the sidebar.
+  assert(Math.abs(comp.x + comp.width / 2 - (main.x + main.width / 2)) <= 2, `lệch tâm ${comp.x + comp.width / 2} vs ${main.x + main.width / 2}`);
+  // The header button folds the sidebar, and the conversation re-centres in the full width.
   await page.locator(".chat-session-btn").click();
-  await page.waitForSelector(".chat-sessions", { state: "detached" });
+  await page.waitForTimeout(500);
+  assert((await page.locator(".chat-side").boundingBox()).width <= 1, "thanh bên chưa gập");
+  await page.locator(".chat-session-btn").click();
+  await page.waitForTimeout(500);
+  await page.locator(".chat-dock button[aria-label='Thu nhỏ']").click();
+  await page.waitForFunction(() => !document.querySelector(".chat-dock")?.classList.contains("is-max"));
+  await page.waitForTimeout(500);
+  assert.equal(await page.locator(".chat-side").isVisible(), false, "thu nhỏ rồi thì ngăn kéo phải đóng");
 });
 
 console.log("\n== Điện thoại ==");

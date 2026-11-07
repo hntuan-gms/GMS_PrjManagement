@@ -191,6 +191,7 @@ export default function ChatDock({
   const [tween, setTween] = useState(false);
   const motion = useRef<Run | null>(null);
   const tweenTimer = useRef<number | undefined>(undefined);
+  const sideTimer = useRef<number | undefined>(undefined);
   const [unread, setUnread] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(() => readStored(storageKey));
@@ -280,6 +281,20 @@ export default function ChatDock({
     setEditing(null);
   }
 
+  /** Picking something from the list closes the drawer; a docked sidebar (maximised) stays where it is. */
+  function closeDrawer() {
+    if (!win.maximized) setShowSessions(false);
+  }
+
+  /** Maximise / restore. Going wide, the sidebar comes in a beat after the window has started to grow. */
+  function toggleMax() {
+    const goingWide = !win.maximized;
+    window.clearTimeout(sideTimer.current);
+    glide(win.toggleMaximized);
+    if (goingWide) sideTimer.current = window.setTimeout(() => setShowSessions(true), 180);
+    else setShowSessions(false);
+  }
+
   function newChat() {
     abortRef.current?.abort();
     setLive(null);
@@ -288,13 +303,13 @@ export default function ChatDock({
     setError(null);
     setSessionId(null);
     writeStored(storageKey, null);
-    setShowSessions(false);
+    closeDrawer();
     resetComposerState();
     requestAnimationFrame(() => inputRef.current?.focus());
   }
 
   function openSession(id: string) {
-    if (id === sessionId) return setShowSessions(false);
+    if (id === sessionId) return closeDrawer();
     abortRef.current?.abort();
     setLive(null);
     setError(null);
@@ -303,7 +318,7 @@ export default function ChatDock({
     setMessages([]);
     setSessionId(id);
     writeStored(storageKey, id);
-    setShowSessions(false);
+    closeDrawer();
     resetComposerState();
   }
 
@@ -319,10 +334,7 @@ export default function ChatDock({
     if (!(await dialogs.confirm({ message: "Xoá cuộc trò chuyện này? Bạn sẽ không mở lại được.", tone: "danger" }))) return;
     setSessions((prev) => prev?.filter((x) => x.id !== id) ?? prev);
     await api.deleteChatSession(id).catch((e: Error) => setError(e.message));
-    if (id === sessionId) {
-      newChat();
-      if (showSessions) setShowSessions(true);
-    }
+    if (id === sessionId) newChat();
   }
 
   const currentTitle =
@@ -397,7 +409,13 @@ export default function ChatDock({
     }
     change();
   }
-  useEffect(() => () => window.clearTimeout(tweenTimer.current), []);
+  useEffect(
+    () => () => {
+      window.clearTimeout(tweenTimer.current);
+      window.clearTimeout(sideTimer.current);
+    },
+    []
+  );
 
   const askRef = useRef<(text: string) => void>(() => {});
   const lastNonce = useRef<number | null>(null);
@@ -746,7 +764,7 @@ export default function ChatDock({
         className="chat-dock-header"
         onPointerDown={win.startMove}
         onDoubleClick={(e) => {
-          if (!phone && !(e.target as HTMLElement).closest("button, input, a")) glide(win.toggleMaximized);
+          if (!phone && !(e.target as HTMLElement).closest("button, input, a")) toggleMax();
         }}
       >
         <button
@@ -768,7 +786,7 @@ export default function ChatDock({
             <button
               type="button"
               className="chat-icon-btn"
-              onClick={() => glide(win.toggleMaximized)}
+              onClick={toggleMax}
               title={win.maximized ? "Thu nhỏ" : "Mở rộng"}
               aria-label={win.maximized ? "Thu nhỏ" : "Mở rộng"}
             >
@@ -807,6 +825,7 @@ export default function ChatDock({
                     onClick={() => {
                       close();
                       win.reset();
+                      setShowSessions(false);
                     }}
                   >
                     <Icon name="refresh" />
@@ -836,7 +855,11 @@ export default function ChatDock({
         </div>
       </div>
 
-      {showSessions && (
+      <div className="chat-body">
+      {/* The conversation list: a docked sidebar when the window is maximised, a drawer over the conversation
+          when it is not. Either way it is always in the DOM, so opening and closing can be played. */}
+      <aside className={`chat-side${showSessions ? " is-open" : ""}`} aria-label="Các cuộc trò chuyện" inert={!showSessions}>
+        <div className="chat-side-inner">
         <div className="chat-sessions">
           <button type="button" className="chat-sessions-new" onClick={newChat}>
             <Icon name="plus" size={13} /> Cuộc trò chuyện mới
@@ -851,7 +874,7 @@ export default function ChatDock({
           ) : shownSessions.length === 0 ? (
             <div className="chat-sessions-empty">{q ? "Không có kết quả." : "Chưa có cuộc trò chuyện nào."}</div>
           ) : (
-            <ul>
+            <ul aria-label="Gần đây">
               {shownSessions.map((x) => (
                 <li key={x.id} className={x.id === sessionId ? "is-current" : ""}>
                   {renaming === x.id ? (
@@ -886,8 +909,11 @@ export default function ChatDock({
             </ul>
           )}
         </div>
-      )}
+        </div>
+      </aside>
+      <div className={`chat-scrim${showSessions ? " is-on" : ""}`} aria-hidden="true" onClick={() => setShowSessions(false)} />
 
+      <div className="chat-main">
       {showUsage && (
         <div className="chat-usage-panel">
           <div className="chat-usage-grid">
@@ -1144,6 +1170,8 @@ export default function ChatDock({
         selectedKeys={selectedKeys.filter((k) => knownKeys.has(k))}
         onAttachSelected={() => addTasks(selectedKeys)}
       />
+      </div>
+      </div>
 
       {dropActive && (
         <div className="chat-drop-hint" aria-hidden="true">

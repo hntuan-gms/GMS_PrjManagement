@@ -239,9 +239,32 @@ button.chat-icon-btn:hover:not(:disabled),
 }
 .chat-dock.is-max .chat-composer-wrap {
   width: 100%;
-  max-width: 800px;
+  max-width: 788px;
   align-self: center;
   box-sizing: border-box;
+}
+/* Maximised, the empty state is centred in the space beside the sidebar and the suggestions wrap as chips. */
+.chat-dock.is-max .chat-empty {
+  align-items: center;
+  gap: 24px;
+}
+.chat-dock.is-max .chat-hello {
+  font-size: var(--font-size-display);
+}
+.chat-dock.is-max .chat-mark {
+  width: 36px;
+  height: 36px;
+  font-size: var(--font-size-title);
+}
+.chat-dock.is-max .chat-suggestions {
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+}
+.chat-dock.is-max .chat-suggestion {
+  width: auto;
+  border-radius: var(--radius-full);
 }
 .chat-jump {
   position: absolute;
@@ -662,16 +685,158 @@ button.chat-act:hover:not(:disabled) {
   box-shadow: none;
 }
 
-/* ---- the conversation list ---- */
+/* ---- below the title bar: the conversation list beside the conversation ---- */
+.chat-body {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+}
+.chat-main {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Not maximised (and on a phone): the list is a drawer that slides in over the conversation and never moves it. */
+.chat-side {
+  position: absolute;
+  inset: 0 auto 0 0;
+  z-index: 9;
+  width: min(280px, 86%);
+  background: var(--sheet);
+  border-right: 1px solid var(--line);
+  box-shadow: var(--shadow-lg);
+  transform: translateX(-103%);
+  visibility: hidden;
+  transition:
+    transform var(--d-3) var(--e-in),
+    visibility 0s linear var(--d-3);
+}
+.chat-side.is-open {
+  transform: none;
+  visibility: visible;
+  transition:
+    transform var(--d-3) var(--e-out),
+    visibility 0s;
+}
+.chat-side-inner {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+.chat-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  background: color-mix(in srgb, var(--ink) 16%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--d-3) var(--e-out);
+}
+.chat-scrim.is-on {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Maximised: a sidebar beside the conversation, like a full page of chat. It opens by widening, and its
+   content keeps a fixed width inside so the names do not re-wrap while it moves. */
+.chat-dock.is-max .chat-scrim {
+  display: none;
+}
+.chat-dock.is-max .chat-side {
+  position: relative;
+  inset: auto;
+  flex: none;
+  width: 0;
+  background: var(--paper);
+  border-right-color: transparent;
+  box-shadow: none;
+  transform: none;
+  overflow: hidden;
+  opacity: 0;
+  transition:
+    width var(--d-4) var(--e-move),
+    opacity var(--d-3) var(--e-out),
+    border-color var(--d-3) var(--e-out),
+    visibility 0s linear var(--d-4);
+}
+.chat-dock.is-max .chat-side.is-open {
+  width: 288px;
+  opacity: 1;
+  border-right-color: var(--line);
+  transition:
+    width var(--d-4) var(--e-move),
+    opacity var(--d-4) var(--e-out) 60ms,
+    border-color var(--d-3) var(--e-out),
+    visibility 0s;
+}
+.chat-dock.is-max .chat-side-inner {
+  width: 288px;
+}
+
+/* ---- the list itself ---- */
+.chat-side .chat-sessions {
+  flex: 1 1 0;
+  max-height: none;
+  min-height: 0;
+  padding: 10px 10px 12px;
+  border: 0;
+  background: transparent;
+  animation: none;
+  overflow-y: auto;
+}
 .chat-sessions-search {
   width: 100%;
-  margin-bottom: 6px;
+  margin: 2px 0 8px;
 }
 .chat-sessions-new {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 0 12px;
+  min-height: 36px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--raised);
   color: var(--ink);
+  font-weight: 500;
+}
+button.chat-sessions-new:hover:not(:disabled) {
+  background: var(--sunken);
+}
+.chat-side .chat-sessions ul {
+  gap: 1px;
+}
+.chat-side .chat-sessions ul::before {
+  content: attr(aria-label);
+  padding: 4px 10px 6px;
+  font-size: var(--font-size-sm);
+  color: var(--ink-3);
+}
+.chat-side .chat-sessions li {
+  border-radius: var(--radius-lg);
+}
+.chat-side .chat-sessions li:hover {
+  background: var(--sunken);
+}
+.chat-side .chat-sessions li.is-current {
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+}
+.chat-side .chat-sessions-item {
+  padding: 7px 10px;
+}
+.chat-side .chat-sessions-name {
+  font-size: var(--font-size-md);
+  font-weight: 500;
+}
+.chat-side .chat-sessions-meta {
+  font-size: var(--font-size-xs);
+  color: var(--ink-3);
 }
 
 /* ---- the box a message is written in ---- */
