@@ -1,27 +1,49 @@
-import Metric, { MetricRow } from "./Metric";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import DateField from "./DateField";
 import { api } from "../api";
 import { computeCriticalPath } from "../criticalPath";
-import { todayIso } from "../resourceAllocation";
+import { addDays, buildResourceLoad, todayIso, type ResourceLoad } from "../resourceAllocation";
 import { csvName, downloadCsv } from "../csv";
-import { isAssignableType, type JiraUser, type ProgressMetrics, type ProgressOverview, type ProgressReport, type ProgressScope, type Task } from "../types";
+import {
+  isAssignableType,
+  type JiraUser,
+  type ProgressMetrics,
+  type ProgressOverview,
+  type ProgressReport,
+  type ProgressScope,
+  type ResourceAbsence,
+  type ResourceProfile,
+  type Task,
+  type TaskUpdateInput,
+} from "../types";
 import { isViewFresh, readViewCache, writeViewCache } from "../viewCache";
 import { overviewParams, warmInFlight } from "../warmViews";
 import { buildReportLink } from "../deepLink";
 import type { SlaView } from "../sla";
 import AgileReports from "./AgileReports";
 import AiBrief from "./AiBrief";
-import { MultiSelect } from "./FilterBar";
 import ProgressTrendChart from "./ProgressTrendChart";
 import ReportCompare from "./ReportCompare";
-import { PeopleBars, PhaseBars, ProgressGauge, ScheduleTimeline, StatusDonut, type WorkState } from "./progressCharts";
+import PersonPicker from "./PersonPicker";
+import Popover from "./Popover";
+import Spinner from "./Spinner";
+import { EpicTable, PeopleTable, ProgressLine } from "./progressCharts";
 import { useDialogs } from "./dialogContext";
-import { pulseDecisions, pulseHeadline, type PulseDecision } from "../projectPulse";
+import { pct, pulseDecisions, pulseHeadline, STATE_LABEL, type PulseAction, type PulseDecision, type WorkState } from "../projectPulse";
 import { scopeFromTaskFilter } from "../reportScope";
+import { changeSchedule, scheduleOf } from "../scheduleFields";
+import { formatDayMonth } from "../humanDate";
 import type { TaskFilter } from "../taskFilter";
+import { useWorkCalendar } from "./workCalendarContext";
 import { Icon } from "./Icons";
 import { toast } from "../toast";
+
+/** What Nhân lực knows about people that Jira does not: hours a day and leave. Optional: without it, 8h and no leave. */
+export interface ReportPool {
+  profiles: ResourceProfile[];
+  absences: ResourceAbsence[];
+  defaultCapacityHours?: number;
+}
 
 interface Props {
   tasks: Task[];
@@ -39,31 +61,37 @@ interface Props {
   projectKey: string;
   /** The workspace is still on its saved copy of the tasks; asking now would be answered twice. */
   refreshing?: boolean;
-  /** The project's computed SLA; null while SLA is off (no SLA tiles). */
+  /** The project's computed SLA; null while SLA is off (no SLA counts). */
   sla?: SlaView | null;
-  /** For the "Cần bạn quyết" cards: who can be suggested, and the one-click actions. */
+  /** For "Cần bạn quyết": who can be picked, and the one-click actions. */
   users?: JiraUser[];
+  /** The signed-in account, for "Của tôi" in the scope menu. */
+  meAccountId?: string;
   onAssign?: (taskId: string, accountId: string) => Promise<void>;
+  /** One field edit, the way the task panel saves it (shown at once, put back if Jira refuses). */
+  onUpdateTask?: (taskId: string, patch: TaskUpdateInput) => Promise<void>;
+  /** "Chụp baseline": freezes the current dates of these tasks as their baseline. */
+  onSaveBaseline?: (taskIds: string[]) => Promise<void>;
   onOpenResources?: () => void;
   /**
    * "Xem lịch Anh" on an overload row: Nhân lực, that person opened, scrolled to the first overloaded day.
    * Without it the row falls back to onOpenResources (the tab, no person).
    */
   onOpenPersonLoad?: (accountId: string, date?: string) => void;
+  /** The next two weeks' load as Nhân lực computes it — the same object behind the lens badge. */
+  nearLoad?: ResourceLoad | null;
+  /** Profiles and leave, for the person picker's "rảnh / trùng n ngày" hints. */
+  pool?: ReportPool | null;
   /** The plan's filter: what it holds that the report can say (one person, one Epic, types) is where this page starts. */
   taskFilter?: TaskFilter;
 }
 
 /**
- * The progress report tab — a dashboard and an analyst side by side.
- *
- * - **Left, the dashboard**: every figure computed server-side from the project
- *   as it is right now (no model, no cost, never stale), drawn as charts so the
- *   state reads at a glance. Every chart is a way in: clicking a segment, a bar
- *   or a tile opens the tasks behind it.
- * - **Right, the AI brief** (AiBrief): a dated piece of reasoning over the task
- *   graph — causes, forecast, owned actions — on its own surface so it is never
- *   mistaken for a measured number.
+ * "Nhịp dự án". The page answers three questions, top to bottom: are we on time (one sentence and one bar),
+ * why ("Vì sao?" under the bar), and what do I need to do ("Cần bạn quyết", each row with its action). Epics
+ * and people follow as two plain tables whose cells are words, then the trend once there are three days of
+ * it. Every figure is computed (server/src/progress.ts, projectPulse.ts); the AI brief is a separate,
+ * dated layer on its own surface to the right, offered by one button.
  */
 
 /** What a drill-down shows. Resolved against live `tasks`, so it is never capped like the metric lists. */
@@ -78,7 +106,7 @@ const DRILL_TITLE: Record<string, string> = {
   overdue: "Việc quá hạn",
   slipped: "Việc trễ so với baseline",
   notStarted: "Tới ngày nhưng chưa bắt đầu",
-  unassigned: "Việc đang mở chưa gán người",
+  unassigned: "Việc đang mở chưa có người",
   undated: "Việc chưa có ngày",
   noBaseline: "Việc chưa có baseline",
   dueSoon: "Hạn trong 7 ngày tới",
@@ -101,12 +129,31 @@ function toUtc(iso: string): number {
 
 const daysBetween = (from: string, to: string) => Math.round((toUtc(to) - toUtc(from)) / 86_400_000);
 
-function signed(n: number): string {
-  const v = Math.round(n * 10) / 10;
-  return v > 0 ? `+${v}` : `${v}`;
+/** A server message in Vietnamese is shown as it is; anything else ("Not Found") is not a sentence for this page. */
+function vietnameseOr(message: string, fallback: string): string {
+  return /[àáảãạăằắẳẵặâầấẩẫậđèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵ]/i.test(message) ? message : fallback;
 }
 
-export default function ProgressReportView({ tasks, focusReportId, canGenerate, onOpenEdit, cacheScope, projectKey, refreshing, sla = null, users, onAssign, onOpenResources, onOpenPersonLoad, taskFilter }: Props) {
+export default function ProgressReportView({
+  tasks,
+  focusReportId,
+  canGenerate,
+  onOpenEdit,
+  cacheScope,
+  projectKey,
+  refreshing,
+  sla = null,
+  users,
+  meAccountId,
+  onAssign,
+  onUpdateTask,
+  onSaveBaseline,
+  onOpenResources,
+  onOpenPersonLoad,
+  nearLoad = null,
+  pool = null,
+  taskFilter,
+}: Props) {
   const dialogs = useDialogs();
   // Where the page starts: the plan's filter, as far as the report can say it (reportScope.ts). Read once.
   const [start] = useState(() => scopeFromTaskFilter(taskFilter));
@@ -126,6 +173,8 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
   const [warnings, setWarnings] = useState<string[]>([]);
   const [drill, setDrill] = useState<Drill | null>(null);
   const [showReasons, setShowReasons] = useState(false);
+  const [agileOpen, setAgileOpen] = useState(false);
+  const agileRef = useRef<HTMLDivElement>(null);
   // What the dashboard is looking at. The AI report beside it is always the whole
   // project as of its own day; only the live figures follow these.
   const today = useMemo(() => todayIso(), []);
@@ -135,7 +184,7 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
   const [types, setTypes] = useState<Set<string>>(() => new Set(start.types));
   const [reloadTick, setReloadTick] = useState(0);
   const [comparing, setComparing] = useState(false);
-  const [linkNote, setLinkNote] = useState<string | null>(null);
+  const calendar = useWorkCalendar();
   const scope = useMemo<ProgressScope>(
     () => ({ assignee: assignee || undefined, epic: epic || undefined, types: [...types] }),
     [assignee, epic, types]
@@ -143,11 +192,17 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
   const scoped = !!(assignee || epic || types.size > 0);
 
   const taskById = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
-  // The "Cần bạn quyết" rows, worked out here because the quality chips below must not repeat one of them.
-  const decisions = useMemo(
-    () => (overview ? pulseDecisions(overview.metrics, tasks, users ?? [], todayIso()) : []),
-    [overview, tasks, users]
-  );
+  // Worked out over the whole plan (the critical path needs every edge), then cut to the scope on screen:
+  // looking at one person, only the rows about their work — or their overload — are theirs to decide.
+  const decisions = useMemo(() => {
+    if (!overview) return [];
+    const all = pulseDecisions(overview.metrics, tasks, users ?? [], todayIso(), calendar, nearLoad);
+    if (!scoped) return all;
+    const ids = scopedTaskIds(tasks, scope);
+    return all.filter((d) =>
+      d.kind === "overloaded" ? !scope.assignee || d.actions.some((a) => a.accountId === scope.assignee) : d.taskIds.some((id) => ids.has(id))
+    );
+  }, [overview, tasks, users, calendar, nearLoad, scoped, scope]);
   const critical = useMemo(() => computeCriticalPath(tasks), [tasks]);
 
   // Refetched whenever the workspace's tasks change — an edit in the Gantt or a
@@ -200,6 +255,11 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
     };
   }, [focusReportId]);
 
+  // Opened from the ⋯ menu: brought into view, since it is drawn at the foot of the page.
+  useEffect(() => {
+    if (agileOpen) agileRef.current?.scrollIntoView({ block: "start", behavior: "smooth" });
+  }, [agileOpen]);
+
   const report = shown ?? overview?.latest ?? null;
 
   async function generate() {
@@ -211,7 +271,10 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
       setWarnings(result.warnings);
       setOverview((prev) => (prev ? { ...prev, latest: result.report, history: result.history } : prev));
     } catch (e) {
-      setGenError(e instanceof Error ? e.message : "Không tạo được báo cáo.");
+      const msg = vietnameseOr(e instanceof Error ? e.message : "", "Không phân tích được lúc này. Thử lại sau.");
+      setGenError(msg);
+      // A toast, not a strip pushed in above the figures.
+      toast(msg, { tone: "error" });
     } finally {
       setGenerating(false);
     }
@@ -225,7 +288,7 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
       // `latest` may have been the one deleted, so re-read rather than patch.
       setReloadTick((n) => n + 1);
     } catch (e) {
-      setGenError(e instanceof Error ? e.message : "Không xoá được báo cáo.");
+      toast(vietnameseOr(e instanceof Error ? e.message : "", "Không xoá được báo cáo."), { tone: "error" });
     }
   }
 
@@ -234,12 +297,11 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
     const link = buildReportLink(window.location.origin, projectKey, id);
     try {
       await navigator.clipboard.writeText(link);
-      setLinkNote("Đã sao chép liên kết. Người nhận cần có quyền xem dự án này trên Jira.");
+      toast("Đã sao chép liên kết. Người nhận cần có quyền xem dự án này trên Jira.", { tone: "success" });
     } catch {
       // No clipboard permission (or an insecure context): show it so it can still be copied by hand.
       await dialogs.prompt({ title: "Liên kết tới báo cáo này", initial: link });
     }
-    window.setTimeout(() => setLinkNote(null), 6000);
   }
 
   async function openReport(id: string) {
@@ -247,7 +309,7 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
       setShown(await api.getProgressReport(id));
       setWarnings([]);
     } catch (e) {
-      setGenError(e instanceof Error ? e.message : "Không mở được báo cáo.");
+      toast(vietnameseOr(e instanceof Error ? e.message : "", "Không mở được báo cáo."), { tone: "error" });
     }
   }
 
@@ -279,7 +341,7 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
     return (
       <div className="progress-view progress-view-single">
         <div className="pr-loading">
-          <span className="chat-spinner" /> Đang tính tiến độ dự án...
+          <Spinner block label="Đang tính tiến độ dự án" />
         </div>
       </div>
     );
@@ -287,11 +349,11 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
 
   const m = overview.metrics;
   const people = new Map<string, string>();
-  const epics: Array<{ id: string; label: string }> = [];
+  const epics: Array<{ id: string; summary: string }> = [];
   const workTypes = new Set<string>();
   for (const t of tasks) {
     if (!isAssignableType(t.issueType)) {
-      epics.push({ id: t.id, label: `${t.id} · ${t.summary}` });
+      epics.push({ id: t.id, summary: t.summary });
       continue;
     }
     workTypes.add(t.issueType);
@@ -299,268 +361,273 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
   }
   const latestPoint = overview.history.at(-1) ?? null;
   // History points are whole-project, so the delta means nothing on a slice.
-  const moved = !scoped && latestPoint && latestPoint.asOf !== m.asOf ? m.actualPct - latestPoint.actualPct : null;
+  const moved = !scoped && latestPoint && latestPoint.asOf !== m.asOf ? Math.round(m.actualPct - latestPoint.actualPct) : null;
 
-  const attention: Array<{ kind: Drill["kind"]; label: string; value: number; tone: "crit" | "serious" | "warn" | "neutral"; icon: string }> = [
-    { kind: "overdue", label: "Quá hạn", value: m.counts.overdue, tone: "crit", icon: "!" },
-    { kind: "slipped", label: "Trễ baseline", value: m.counts.slipped, tone: "serious", icon: "⏱" },
-    { kind: "dueSoon", label: "Sắp đến hạn (7 ngày)", value: m.counts.dueSoon ?? m.dueSoon.length, tone: "warn", icon: "⏳" },
-    { kind: "notStarted", label: "Chưa bắt đầu", value: m.counts.notStarted, tone: "warn", icon: "▷" },
-    { kind: "unassigned", label: "Chưa gán người", value: m.counts.unassigned, tone: "neutral", icon: "?" },
+  // The counts that open a list, in the order of how much they hurt. A zero is not drawn.
+  const attention: Array<{ kind: Drill["kind"]; label: string; value: number; tone?: "risk" | "warn" }> = [
+    { kind: "overdue", label: "quá hạn", value: m.counts.overdue, tone: "risk" },
+    { kind: "slipped", label: "trễ baseline", value: m.counts.slipped, tone: "risk" },
+    { kind: "notStarted", label: "đến ngày chưa làm", value: m.counts.notStarted, tone: "warn" },
+    { kind: "dueSoon", label: "sắp đến hạn", value: m.counts.dueSoon ?? m.dueSoon.length, tone: "warn" },
+    { kind: "unassigned", label: "chưa gán", value: m.counts.unassigned },
   ];
   // SLA is measured against the clock, not the report's date, so it only sits beside today's figures.
-  // Counted with resolveDrill itself, so a tile and the list it opens always agree.
+  // Counted with resolveDrill itself, so a count and the list it opens always agree.
   if (sla && m.asOf === today) {
-    attention.push(
-      { kind: "slaBreached", label: "Trễ SLA", value: resolveDrill({ kind: "slaBreached" }, tasks, m.asOf, scope, sla).rows.length, tone: "crit", icon: "⏰" },
-      { kind: "slaWarn", label: "Sắp trễ SLA", value: resolveDrill({ kind: "slaWarn" }, tasks, m.asOf, scope, sla).rows.length, tone: "warn", icon: "⏰" }
+    attention.splice(
+      1,
+      0,
+      { kind: "slaBreached", label: "trễ SLA", value: resolveDrill({ kind: "slaBreached" }, tasks, m.asOf, scope, sla).rows.length, tone: "risk" },
+      { kind: "slaWarn", label: "sắp trễ SLA", value: resolveDrill({ kind: "slaWarn" }, tasks, m.asOf, scope, sla).rows.length, tone: "warn" }
     );
   }
 
-  // Anything that makes the charts less trustworthy, as clickable chips.
-  const quality = [
-    m.counts.undated > 0 && { kind: "undated" as const, text: `${m.counts.undated} việc chưa có ngày`, hint: "không được tính vào %" },
-    m.counts.noBaseline > 0 && !decisions.some((d) => d.kind === "no-baseline") && {
-      kind: "noBaseline" as const,
-      text: `${m.counts.noBaseline} việc chưa có baseline`,
-      hint: "kế hoạch đo theo lịch hiện tại nên không bao giờ hiện là chậm",
-    },
-  ].filter((x): x is { kind: "undated" | "noBaseline"; text: string; hint: string } => !!x);
+  // Which Epics have any dated work: without dates an Epic's plan is 0% by construction, which is not "chưa tới lịch".
+  const datedEpics = datedPhases(tasks);
+  // An Epic table only means something when there are Epics; "Ngoài Epic" alone would be the whole project again.
+  const showEpics = m.phases.some((p) => p.id !== null);
+
+  const meName = meAccountId ? (people.get(meAccountId) ?? users?.find((u) => u.accountId === meAccountId)?.displayName) : undefined;
+  const scopeParts = [
+    assignee ? (assignee === meAccountId ? "Của tôi" : assignee === "none" ? "Chưa gán" : (people.get(assignee) ?? "Một người")) : "",
+    epic ? epic : "",
+    types.size === 1 ? [...types][0] : types.size > 1 ? `${types.size} loại việc` : "",
+  ].filter(Boolean);
+  const reset = () => {
+    setAssignee("");
+    setEpic("");
+    setTypes(new Set());
+    setAsOf(today);
+  };
 
   return (
     <div className={`progress-view${report || generating ? "" : " is-solo"}`}>
       <div className="pr-main">
-        <header className="pr-header">
-          <div className="pr-header-main">
-            <span className="pr-sub">
-              {fmtDate(m.asOf)} · {m.counts.total} việc
-            </span>
-          <div className="pr-filters">
-            <label className="pr-filter">
-              <span>Người:</span>
-              <select value={assignee} onChange={(e) => setAssignee(e.target.value)}>
-                <option value="">Tất cả</option>
-                <option value="none">Chưa gán</option>
-                {[...people].sort((a, b) => a[1].localeCompare(b[1], "vi")).map(([id, name]) => (
-                  <option key={id} value={id}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="pr-filter">
-              <span>Epic:</span>
-              <select value={epic} onChange={(e) => setEpic(e.target.value)}>
-                <option value="">Tất cả</option>
-                {epics.map((x) => (
-                  <option key={x.id} value={x.id}>
-                    {x.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <MultiSelect
-              label="Loại"
-              allLabel="Tất cả"
-              options={[...workTypes].sort((a, b) => a.localeCompare(b, "vi")).map((v) => ({ value: v, label: v }))}
-              selected={types}
-              onChange={setTypes}
-            />
-            <label className="pr-filter">
-              <span>Đến ngày:</span>
-              <DateField value={asOf} onChange={(v) => v && setAsOf(v)} ariaLabel="Tính đến ngày" />
-            </label>
-            {(scoped || asOf !== today) && (
-              <button
-                className="text-btn"
-                onClick={() => {
-                  setAssignee("");
-                  setEpic("");
-                  setTypes(new Set());
-                  setAsOf(today);
-                }}
+        <div className="np-page">
+          <header className="pr-header np-bar">
+            <div className="np-bar-left">
+              <Popover
+                className={`np-pick np-scope${scoped ? " is-on" : ""}`}
+                menuClassName="np-scope-menu"
+                menuLabel="Phạm vi"
+                title={start.note ?? undefined}
+                label={
+                  <>
+                    <span className="np-pick-k">Phạm vi</span>
+                    <span className="np-pick-v">{scopeParts.join(" · ") || "Cả dự án"}</span>
+                  </>
+                }
               >
-                Đặt lại
-              </button>
-            )}
-          </div>
-            {start.note && <span className="pr-sub pr-scope-note">{start.note}</span>}
-          </div>
-          {/* The verdict is the pulse sentence below; a coloured badge beside it said it twice. */}
-          <div className="pr-header-tools">
-            {/* No analysis yet: the offer is a button here, not a panel taking a third of the page. */}
-            {canGenerate && !report && (
-              <button className="pr-analyze" onClick={() => void generate()} disabled={generating}>
-                <span className="ai-tag">AI</span>
-                {generating ? "Đang phân tích…" : "Phân tích ngay"}
-              </button>
-            )}
-            <button className="text-btn" onClick={() => setShowReasons((v) => !v)} aria-expanded={showReasons}>
-              {showReasons ? "Ẩn lý do" : "Vì sao?"}
-            </button>
-            {overview.history.length >= 2 && (
-              <button className="text-btn" onClick={() => setComparing(true)}>
-                So sánh
-              </button>
-            )}
-            {report && (
-              <button className="text-btn" onClick={() => void copyLink(report.id)}>
-                Sao chép liên kết
-              </button>
-            )}
-            <button className="text-btn pr-print" onClick={() => window.print()} aria-label="In" title="In">
-              <Icon name="print" size={15} />
-            </button>
-          </div>
-        </header>
-        <PulseBlock
-          reasons={showReasons ? m.healthReasons : null}
-          metrics={m}
-          tasks={tasks}
-          decisions={decisions}
-          onOpenEdit={onOpenEdit}
-          onAssign={onAssign}
-          onOpenResources={onOpenResources}
-          onOpenPersonLoad={onOpenPersonLoad}
-        />
-        {genError && !report && <div className="rv-notice rv-notice-error">{genError}</div>}
-        {linkNote && (
-          <div className="rv-notice" role="status">
-            {linkNote}
-          </div>
-        )}
-
-        {(scoped || asOf !== today) && (
-          <div className="rv-notice">
-            Đang xem {scoped ? "một phần của dự án" : "toàn dự án"}
-            {asOf !== today ? ` tính đến ${fmtDate(asOf)}` : ""}. Báo cáo AI bên phải vẫn viết cho toàn dự án theo ngày của nó.
-          </div>
-        )}
-
-        {/* ---- glance row: the three questions a PM asks first ---- */}
-        <div className="pr-glance">
-          <section className="pr-card pr-card-hero">
-            <h3>Tiến độ</h3>
-            <ProgressGauge actual={m.actualPct} planned={m.plannedPct} />
-            <div className="pr-hero-meta">
-              {m.spi !== null && (
-                <span title="Thực tế ÷ kế hoạch. 1.0 là đúng tiến độ.">
-                  SPI <b>{m.spi}</b>
-                </span>
-              )}
-              {moved !== null && (
-                <span title={`So với báo cáo ngày ${fmtDate(latestPoint!.asOf)}`}>
-                  <b>{signed(moved)}</b> điểm từ {short(latestPoint!.asOf)}
-                </span>
-              )}
-            </div>
-          </section>
-
-          <section className="pr-card">
-            <h3>Trạng thái việc</h3>
-            <StatusDonut
-              counts={{ done: m.counts.done, inProgress: m.counts.inProgress, todo: m.counts.todo }}
-              onSelect={(state) => setDrill({ kind: "state", state })}
-            />
-          </section>
-
-          <section className="pr-card pr-card-schedule">
-            <h3>Thời hạn</h3>
-            <ScheduleTimeline schedule={m.schedule} asOf={m.asOf} />
-            <MetricRow className="pr-tiles">
-              {attention.filter((a) => a.value > 0).map((a) => (
-                <Metric
-                  key={a.kind}
-                  className="pr-tile"
-                  value={a.value}
-                  label={a.label}
-                  tone={a.tone === "neutral" ? undefined : a.tone}
-                  onClick={() => setDrill({ kind: a.kind } as Drill)}
+                <ScopeOptions
+                  heading="Người"
+                  value={assignee}
+                  onPick={setAssignee}
+                  options={[
+                    { value: "", label: "Cả nhóm" },
+                    ...(meAccountId ? [{ value: meAccountId, label: meName ? `Của tôi · ${meName}` : "Của tôi" }] : []),
+                    ...[...people]
+                      .filter(([id]) => id !== meAccountId)
+                      .sort((a, b) => a[1].localeCompare(b[1], "vi"))
+                      .map(([id, name]) => ({ value: id, label: name })),
+                    { value: "none", label: "Chưa gán" },
+                  ]}
                 />
-              ))}
-            </MetricRow>
-          </section>
-        </div>
-
-        {quality.length > 0 && (
-          <div className="pr-quality">
-            <span className="pr-quality-label">
-              <span aria-hidden="true">⚠</span> Độ tin cậy số liệu
-            </span>
-            {quality.map((q) => (
-              <button key={q.kind} className="pr-chip" title={q.hint} onClick={() => setDrill({ kind: q.kind })}>
-                {q.text}
-              </button>
-            ))}
-          </div>
-        )}
-
-        <div className="pr-columns">
-          <section className="pr-card">
-            <div className="pr-card-head">
-              <h3>Theo Epic</h3>
-              <span className="pr-key-legend" aria-hidden="true">
-                <i className="pr-swatch pr-swatch-done" /> thực tế <i className="pr-tick-key" /> kế hoạch
-              </span>
+                {epics.length > 0 && (
+                  <ScopeOptions
+                    heading="Epic"
+                    value={epic}
+                    onPick={setEpic}
+                    options={[{ value: "", label: "Mọi Epic" }, ...epics.map((x) => ({ value: x.id, label: x.summary, key: x.id }))]}
+                  />
+                )}
+                {workTypes.size > 1 && (
+                  <div className="np-scope-group" role="group" aria-label="Loại việc">
+                    <div className="menu-heading">Loại việc</div>
+                    {[...workTypes]
+                      .sort((a, b) => a.localeCompare(b, "vi"))
+                      .map((v) => (
+                        <label key={v} className="np-opt np-check">
+                          <input
+                            type="checkbox"
+                            checked={types.has(v)}
+                            onChange={() =>
+                              setTypes((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(v)) next.delete(v);
+                                else next.add(v);
+                                return next;
+                              })
+                            }
+                          />
+                          {v}
+                        </label>
+                      ))}
+                  </div>
+                )}
+              </Popover>
+              <Popover
+                className={`np-pick np-date${asOf !== today ? " is-on" : ""}`}
+                menuClassName="np-date-menu"
+                menuLabel="Tính đến ngày"
+                label={
+                  <>
+                    <span className="np-pick-k">Đến</span>
+                    <span className="np-pick-v">{asOf === today ? "hôm nay" : fmtDate(asOf)}</span>
+                  </>
+                }
+              >
+                {({ close }) => (
+                  <div className="np-date-body">
+                    <DateField value={asOf} onChange={(v) => v && setAsOf(v)} ariaLabel="Tính đến ngày" />
+                    {asOf !== today && (
+                      <button
+                        type="button"
+                        className="text-btn"
+                        onClick={() => {
+                          setAsOf(today);
+                          close();
+                        }}
+                      >
+                        Về hôm nay
+                      </button>
+                    )}
+                  </div>
+                )}
+              </Popover>
+              {(scoped || asOf !== today) && (
+                <button type="button" className="text-btn np-reset" onClick={reset}>
+                  Đặt lại
+                </button>
+              )}
             </div>
-            <PhaseBars phases={m.phases} onSelect={(id, label) => setDrill({ kind: "phase", id, label })} />
-          </section>
-
-          <section className="pr-card">
-            <h3>Theo người</h3>
-            <PeopleBars people={m.people} onSelect={(accountId, label) => setDrill({ kind: "person", accountId, label })} />
-          </section>
-        </div>
-
-        {/* A card with nothing to draw is not drawn: both trends need two points before they say anything. */}
-        {(overview.trend?.length ?? 0) >= 2 && (
-          <section className="pr-card">
-            <div className="pr-card-head">
-              <h3>Xu hướng theo ngày</h3>
-            </div>
-            <ProgressTrendChart
-              unit="ngày"
-              points={overview.trend!.map((p) => ({ asOf: p.date, actualPct: p.actualPct, plannedPct: p.plannedPct }))}
-            />
-          </section>
-        )}
-
-        {overview.history.length > 0 && (
-        <section className="pr-card">
-          <div className="pr-card-head">
-            <h3>Xu hướng qua các lần phân tích</h3>
-          </div>
-          {overview.history.length >= 2 && <ProgressTrendChart points={overview.history} onSelect={openReport} />}
-          {overview.history.length > 0 && (
-            <div className="pr-history">
-              {[...overview.history].reverse().map((p) => (
-                <span key={p.id} className="pr-history-item">
-                  <button
-                    className={`pr-history-chip ${report?.id === p.id ? "is-current" : ""}`}
-                    onClick={() => openReport(p.id)}
-                    title={p.headline}
-                  >
-                    <span className={`pr-dot-status pr-dot-${p.health}`} aria-hidden="true" />
-                    {short(p.asOf)}
-                    <b>{p.actualPct}%</b>
-                  </button>
-                  {canGenerate && (
-                    <button className="pr-history-del" onClick={() => removeReport(p.id)} aria-label={`Xoá báo cáo ngày ${short(p.asOf)}`} title="Xoá báo cáo này">
-                      ×
+            <div className="pr-header-tools">
+              {/* No analysis yet: the offer is a button here, not a panel taking a third of the page. */}
+              {canGenerate && !report && (
+                <button className="pr-analyze" onClick={() => void generate()} disabled={generating}>
+                  <span className="ai-tag">AI</span>
+                  {generating ? "Đang phân tích…" : "Phân tích"}
+                </button>
+              )}
+              <Popover className="np-more" role="menu" align="end" caret={false} menuLabel="Thêm" ariaLabel="Thêm" title="Thêm" label={<Icon name="more" size={16} />}>
+                {({ close }) => (
+                  <>
+                    {overview.history.length >= 2 && (
+                      <button type="button" role="menuitem" className="menu-item" onClick={() => {
+                          close();
+                          setComparing(true);
+                        }}>
+                        <span className="menu-item-text">So sánh các lần phân tích</span>
+                      </button>
+                    )}
+                    {report && (
+                      <button type="button" role="menuitem" className="menu-item" onClick={() => {
+                          close();
+                          void copyLink(report.id);
+                        }}>
+                        <Icon name="link" />
+                        <span className="menu-item-text">Sao chép liên kết báo cáo</span>
+                      </button>
+                    )}
+                    <button type="button" role="menuitem" className="menu-item" onClick={() => {
+                        close();
+                        setAgileOpen((v) => !v);
+                      }}>
+                      <Icon name="board" />
+                      <span className="menu-item-text">{agileOpen ? "Ẩn báo cáo Agile" : "Báo cáo Agile"}</span>
                     </button>
-                  )}
-                </span>
-              ))}
+                    <button type="button" role="menuitem" className="menu-item" onClick={() => {
+                        close();
+                        window.print();
+                      }}>
+                      <Icon name="print" />
+                      <span className="menu-item-text">In</span>
+                    </button>
+                  </>
+                )}
+              </Popover>
+            </div>
+          </header>
+
+          <Summary
+            metrics={m}
+            decisions={decisions}
+            attention={attention}
+            moved={moved}
+            movedFrom={latestPoint?.asOf ?? null}
+            showReasons={showReasons}
+            onToggleReasons={() => setShowReasons((v) => !v)}
+            onDrill={setDrill}
+          />
+
+          <Decisions
+            decisions={decisions}
+            tasks={tasks}
+            users={users ?? []}
+            meAccountId={meAccountId}
+            pool={pool}
+            today={today}
+            onOpenEdit={onOpenEdit}
+            onAssign={onAssign}
+            onUpdateTask={onUpdateTask}
+            onSaveBaseline={onSaveBaseline}
+            onOpenResources={onOpenResources}
+            onOpenPersonLoad={onOpenPersonLoad}
+          />
+
+          {showEpics && (
+            <section className="np-section" aria-label="Theo Epic">
+              <h2>Theo Epic</h2>
+              <EpicTable phases={m.phases} dated={(id) => datedEpics.has(id)} onSelect={(id, label) => setDrill({ kind: "phase", id, label })} />
+            </section>
+          )}
+
+          {m.people.length > 0 && (
+            <section className="np-section" aria-label="Theo người">
+              <h2>Theo người</h2>
+              <PeopleTable people={m.people} load={nearLoad} onSelect={(accountId, label) => setDrill({ kind: "person", accountId, label })} />
+            </section>
+          )}
+
+          {/* Two points draw a straight line and say nothing; from three a direction can be read. The trend is
+              measured over the whole project, so it is not shown beside a slice of it. */}
+          {!scoped && (overview.trend?.length ?? 0) >= 3 && (
+            <section className="np-section" aria-label="Xu hướng theo ngày">
+              <h2>Xu hướng theo ngày</h2>
+              <ProgressTrendChart unit="ngày" points={overview.trend!.map((p) => ({ asOf: p.date, actualPct: p.actualPct, plannedPct: p.plannedPct }))} />
+            </section>
+          )}
+
+          {overview.history.length > 0 && (
+            <section className="np-section" aria-label="Các lần phân tích">
+              <h2>
+                Các lần phân tích <span className="ai-tag">AI</span>
+              </h2>
+              {overview.history.length >= 3 && <ProgressTrendChart points={overview.history} onSelect={openReport} />}
+              <div className="pr-history">
+                {[...overview.history].reverse().map((p) => (
+                  <span key={p.id} className="pr-history-item">
+                    <button className={`pr-history-chip ${report?.id === p.id ? "is-current" : ""}`} onClick={() => openReport(p.id)} title={p.headline}>
+                      <span className={`pr-dot-status pr-dot-${p.health}`} aria-hidden="true" />
+                      {short(p.asOf)}
+                      <b>{pct(p.actualPct)}</b>
+                    </button>
+                    {canGenerate && (
+                      <button className="pr-history-del" onClick={() => removeReport(p.id)} aria-label={`Xoá báo cáo ngày ${short(p.asOf)}`} title="Xoá báo cáo này">
+                        ×
+                      </button>
+                    )}
+                  </span>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {agileOpen && (
+            <div ref={agileRef} className="np-agile">
+              <AgileReports cacheScope={cacheScope} projectKey={projectKey} issueLink={(key) => issueLink(key)} onClose={() => setAgileOpen(false)} />
             </div>
           )}
-        </section>
-        )}
-
-        <AgileReports
-          cacheScope={cacheScope}
-          projectKey={projectKey}
-          issueLink={(key) => issueLink(key)}
-        />
+        </div>
       </div>
 
       <AiBrief
@@ -593,6 +660,86 @@ export default function ProgressReportView({ tasks, focusReportId, canGenerate, 
       )}
     </div>
   );
+}
+
+/** One radio list in the scope menu (people, Epics), scrolling on its own when long. */
+function ScopeOptions({
+  heading,
+  value,
+  options,
+  onPick,
+}: {
+  heading: string;
+  value: string;
+  options: Array<{ value: string; label: string; key?: string }>;
+  onPick: (value: string) => void;
+}) {
+  return (
+    <div className="np-scope-group" role="radiogroup" aria-label={heading}>
+      <div className="menu-heading">{heading}</div>
+      <div className="np-scope-list">
+        {options.map((o) => (
+          <button
+            key={o.value || "all"}
+            type="button"
+            role="radio"
+            aria-checked={value === o.value}
+            className={`np-opt${value === o.value ? " is-on" : ""}`}
+            onClick={() => onPick(o.value)}
+          >
+            <span className="np-opt-mark" aria-hidden="true">
+              {value === o.value && <Icon name="check" size={14} />}
+            </span>
+            {o.key && <span className="np-key">{o.key}</span>}
+            <span className="np-ellipsis">{o.label}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** The tasks the dashboard's scope covers (person, Epic, types), the narrowing resolveDrill applies. */
+function scopedTaskIds(tasks: Task[], scope: ProgressScope): Set<string> {
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const epicOf = (t: Task): string | null => {
+    let cursor = t.wbsParentId ? byId.get(t.wbsParentId) : undefined;
+    for (let guard = 0; cursor && guard < 20; guard++) {
+      if (!isAssignableType(cursor.issueType)) return cursor.id;
+      cursor = cursor.wbsParentId ? byId.get(cursor.wbsParentId) : undefined;
+    }
+    return null;
+  };
+  return new Set(
+    tasks
+      .filter(
+        (t) =>
+          (!scope.assignee || (t.assigneeAccountId ?? "none") === scope.assignee) &&
+          (!scope.epic || epicOf(t) === scope.epic) &&
+          (!scope.types?.length || scope.types.includes(t.issueType))
+      )
+      .map((t) => t.id)
+  );
+}
+
+/** Epic id → whether any work under it (or, for null, outside every Epic) has a start date. */
+function datedPhases(tasks: Task[]): Set<string | null> {
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const out = new Set<string | null>();
+  for (const t of tasks) {
+    if (!t.startDate || !isAssignableType(t.issueType)) continue;
+    let cursor = t.wbsParentId ? byId.get(t.wbsParentId) : undefined;
+    let epicId: string | null = null;
+    for (let guard = 0; cursor && guard < 20; guard++) {
+      if (!isAssignableType(cursor.issueType)) {
+        epicId = cursor.id;
+        break;
+      }
+      cursor = cursor.wbsParentId ? byId.get(cursor.wbsParentId) : undefined;
+    }
+    out.add(epicId);
+  }
+  return out;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -832,101 +979,371 @@ function resolveDrill(drill: Drill, tasks: Task[], asOf: string, scope: Progress
 }
 
 /**
- * The top of "Nhịp dự án" (plan §6.8): one sentence built by code from the measured figures, then at
- * most three cards that each end in an action. Never the model — it must always be there and always
- * agree with the numbers below it (projectPulse.ts).
+ * The top of "Nhịp dự án": the verdict and the forecast in one line, one bar (done as the fill, the plan as
+ * a tick), the figures under it once, "Vì sao?" for the reasons, then the counts that open a list. Built by
+ * code from the measured figures (projectPulse.ts), never the model, so it is always there and always
+ * agrees with the tables under it.
  */
-function PulseBlock({
-  reasons,
-  metrics,
-  tasks,
+function Summary({
+  metrics: m,
   decisions,
-  onOpenEdit,
-  onAssign,
-  onOpenResources,
-  onOpenPersonLoad,
+  attention,
+  moved,
+  movedFrom,
+  showReasons,
+  onToggleReasons,
+  onDrill,
 }: {
-  /** "Vì sao?": the measured reasons behind the sentence, opened right under it. */
-  reasons: string[] | null;
   metrics: ProgressMetrics;
-  tasks: Task[];
   decisions: PulseDecision[];
-  onOpenEdit: (task: Task) => void;
-  onAssign?: (taskId: string, accountId: string) => Promise<void>;
-  onOpenResources?: () => void;
-  onOpenPersonLoad?: (accountId: string, date?: string) => void;
+  attention: Array<{ kind: Drill["kind"]; label: string; value: number; tone?: "risk" | "warn" }>;
+  /** Points moved since the last saved analysis, and its date; null when there is none or the page is a slice. */
+  moved: number | null;
+  movedFrom: string | null;
+  showReasons: boolean;
+  onToggleReasons: () => void;
+  onDrill: (d: Drill) => void;
 }) {
-  // The sentence leaves out a cause that is already one of the rows below it (projectPulse.ts, H6).
-  const head = useMemo(() => pulseHeadline(metrics, decisions), [metrics, decisions]);
-  const [done, setDone] = useState<Set<string>>(new Set());
-  const byId = new Map(tasks.map((t) => [t.id, t]));
-  const keyOf = (d: PulseDecision) => `${d.kind}:${d.taskIds.join(",")}`;
-
-  async function act(d: PulseDecision) {
-    const a = d.action;
-    const first = a.taskId ?? d.taskIds[0];
-    if (a.kind === "assign" && a.taskId && a.suggestedAccountId && onAssign) {
-      try {
-        await onAssign(a.taskId, a.suggestedAccountId);
-        setDone((s) => new Set(s).add(keyOf(d)));
-        toast(`Đã giao ${a.taskId}.`, { tone: "success" });
-      } catch (e) {
-        toast(e instanceof Error ? e.message : "Không giao được.", { tone: "error" });
-      }
-      return;
-    }
-    if (a.kind === "rebalance") {
-      if (a.accountId && onOpenPersonLoad) return onOpenPersonLoad(a.accountId, a.date);
-      if (onOpenResources) return onOpenResources();
-    }
-    const t = first ? byId.get(first) : undefined;
-    if (t) onOpenEdit(t);
-  }
-
+  // "Vì sao?" leaves out a cause that is already one of the rows below it.
+  const head = useMemo(() => pulseHeadline(m, decisions), [m, decisions]);
   const verdictClass = head.verdict === "bad" ? "is-bad" : head.verdict === "watch" ? "is-watch" : "is-good";
-  const shown = decisions.filter((d) => !done.has(keyOf(d)));
+  const states: WorkState[] = ["done", "inProgress", "todo"];
+  const stateCount: Record<WorkState, number> = { done: m.counts.done, inProgress: m.counts.inProgress, todo: m.counts.todo };
+  const remaining = m.schedule.daysRemaining;
+  const counts = attention.filter((a) => a.value > 0);
+
   return (
-    <section className="pulse" aria-label="Nhịp dự án">
-      {/* One colour for the whole sentence, by level: it used to be two (orange "Có rủi ro chậm", black "tiến độ."). */}
-      <p className={`pulse-lead ${verdictClass}`}>{head.lead}</p>
-      {head.detail && <p className="pulse-detail">{head.detail}</p>}
-      {reasons && reasons.length > 0 && (
-        <ul className="pulse-reasons">
-          {reasons.map((r, i) => (
-            <li key={i}>{r}</li>
-          ))}
-        </ul>
-      )}
-      {shown.length > 0 && (
+    <section className="pulse np-summary" aria-label="Nhịp dự án">
+      <p className="pulse-lead">
+        <span className={`np-verdict ${verdictClass}`}>{head.lead}</span>
+        {head.forecast && <span className="np-forecast">{head.forecast}</span>}
+      </p>
+      {m.counts.total > 0 && (
         <>
-          {/* Rows, not cards: three bordered cards with a coloured edge each is the stock dashboard
-              look, and a decision reads faster as one line with its action at the end. */}
-          <ul className="pulse-decisions">
-            {shown.map((d) => {
-              const first = d.action.taskId ?? d.taskIds[0];
-              const severe = d.kind === "late-blocking" || d.kind === "unassigned-critical";
-              return (
-                <li key={keyOf(d)} className={`pulse-row ${severe ? "is-bad" : "is-watch"}`}>
-                  <div className="pulse-row-text">
-                    <h3>{d.title}</h3>
-                    <p>{d.body}</p>
-                  </div>
-                  <div className="pulse-actions">
-                    {d.action.kind === "assign" && first && byId.get(first) && (
-                      <button type="button" className="text-btn" onClick={() => onOpenEdit(byId.get(first)!)}>
-                        Mở {first}
-                      </button>
-                    )}
-                    <button type="button" onClick={() => void act(d)}>
-                      {d.action.label}
+          <ProgressLine actual={m.actualPct} planned={m.plannedPct} />
+          <div className="np-meta">
+            <span>
+              Đã xong <b>{pct(m.actualPct)}</b>
+              <span className="np-sep">·</span>kế hoạch đến nay {pct(m.plannedPct)}
+              {remaining !== null && remaining > 0 && (
+                <>
+                  <span className="np-sep">·</span>còn {remaining} ngày
+                </>
+              )}
+              {moved !== null && moved !== 0 && movedFrom && (
+                <>
+                  <span className="np-sep">·</span>
+                  {moved > 0 ? "+" : ""}
+                  {moved} điểm từ {short(movedFrom)}
+                </>
+              )}
+            </span>
+            {head.reasons.length > 0 && (
+              <button type="button" className="text-btn np-why" aria-expanded={showReasons} onClick={onToggleReasons}>
+                {showReasons ? "Ẩn lý do" : "Vì sao?"}
+              </button>
+            )}
+          </div>
+          {showReasons && (
+            <ul className="pulse-reasons">
+              {head.reasons.map((r, i) => (
+                <li key={i}>{r}</li>
+              ))}
+            </ul>
+          )}
+          <div className="np-facts">
+            <span className="np-facts-group">
+              <span className="np-total">{m.counts.total} việc</span>
+              {states.map(
+                (k) =>
+                  stateCount[k] > 0 && (
+                    <button key={k} type="button" className="np-fact" onClick={() => onDrill({ kind: "state", state: k })}>
+                      <b>{stateCount[k]}</b> {STATE_LABEL[k]}
                     </button>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
+                  )
+              )}
+              {m.counts.undated > 0 && (
+                <button type="button" className="np-fact is-quiet" title="Không được tính vào %" onClick={() => onDrill({ kind: "undated" })}>
+                  <b>{m.counts.undated}</b> chưa có ngày
+                </button>
+              )}
+            </span>
+            {counts.length > 0 && (
+              <span className="np-facts-group">
+                {counts.map((a) => (
+                  <button
+                    key={a.kind}
+                    type="button"
+                    className={`np-fact pr-tile${a.tone ? ` is-${a.tone}` : ""}`}
+                    onClick={() => onDrill({ kind: a.kind } as Drill)}
+                  >
+                    <b>{a.value}</b> {a.label}
+                  </button>
+                ))}
+              </span>
+            )}
+          </div>
         </>
       )}
     </section>
+  );
+}
+
+/** "DEMO-3 trễ 1 ngày" with the key as a link to the task. */
+function withKeys(text: string, open: (id: string) => void, known: (id: string) => boolean): ReactNode[] {
+  return text.split(/([A-Z][A-Z0-9]+-\d+)/).map((part, i) =>
+    i % 2 === 1 && known(part) ? (
+      <button key={i} type="button" className="np-keylink" onClick={() => open(part)}>
+        {part}
+      </button>
+    ) : (
+      part
+    )
+  );
+}
+
+/**
+ * "Cần bạn quyết": at most three things only a person can decide, each a line with its actions at the end.
+ * The actions do the thing (a new due date, another person, a baseline) rather than open a task and leave
+ * the reader to find the field; a row that is dealt with drops out because the figures under it change.
+ */
+function Decisions({
+  decisions,
+  tasks,
+  users,
+  meAccountId,
+  pool,
+  today,
+  onOpenEdit,
+  onAssign,
+  onUpdateTask,
+  onSaveBaseline,
+  onOpenResources,
+  onOpenPersonLoad,
+}: {
+  decisions: PulseDecision[];
+  tasks: Task[];
+  users: JiraUser[];
+  meAccountId?: string;
+  pool: ReportPool | null;
+  today: string;
+  onOpenEdit: (task: Task) => void;
+  onAssign?: (taskId: string, accountId: string) => Promise<void>;
+  onUpdateTask?: (taskId: string, patch: TaskUpdateInput) => Promise<void>;
+  onSaveBaseline?: (taskIds: string[]) => Promise<void>;
+  onOpenResources?: () => void;
+  onOpenPersonLoad?: (accountId: string, date?: string) => void;
+}) {
+  const calendar = useWorkCalendar();
+  const byId = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
+  const [picking, setPicking] = useState<{ taskId: string; anchor: DOMRect } | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const pickTask = picking ? byId.get(picking.taskId) : undefined;
+  // The picker's "rảnh / trùng n ngày" is measured inside the task's own dates, like everywhere else.
+  const pickLoad = useMemo(() => {
+    if (!pickTask?.startDate) return null;
+    const to = pickTask.dueDate && pickTask.dueDate >= pickTask.startDate ? pickTask.dueDate : pickTask.startDate;
+    return buildResourceLoad({
+      tasks,
+      users,
+      profiles: pool?.profiles ?? [],
+      absences: pool?.absences ?? [],
+      defaultCapacityHours: pool?.defaultCapacityHours,
+      from: pickTask.startDate,
+      to,
+      includeIdle: true,
+      calendar,
+    });
+  }, [pickTask, tasks, users, pool, calendar]);
+
+  if (decisions.length === 0) return null;
+  const open = (id: string) => {
+    const t = byId.get(id);
+    if (t) onOpenEdit(t);
+  };
+
+  async function assign(taskId: string, accountId: string) {
+    if (!onAssign) return;
+    try {
+      await onAssign(taskId, accountId);
+      const name = users.find((u) => u.accountId === accountId)?.displayName;
+      toast(`Đã giao ${taskId}${name ? ` cho ${name}` : ""}.`, { tone: "success" });
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Không giao được.", { tone: "error" });
+    }
+  }
+
+  async function run(d: PulseDecision, a: PulseAction, target: HTMLElement) {
+    const taskId = a.taskId ?? d.taskIds[0];
+    switch (a.kind) {
+      case "assign":
+        if (a.taskId && a.suggestedAccountId) await assign(a.taskId, a.suggestedAccountId);
+        return;
+      case "reassign":
+      case "pick":
+        if (taskId) setPicking({ taskId, anchor: target.getBoundingClientRect() });
+        return;
+      case "rebalance":
+        if (a.accountId && onOpenPersonLoad) onOpenPersonLoad(a.accountId, a.date);
+        else onOpenResources?.();
+        return;
+      case "set-baseline": {
+        if (!onSaveBaseline) return;
+        setBusy(d.kind);
+        try {
+          await onSaveBaseline(d.taskIds);
+        } finally {
+          setBusy(null);
+        }
+        return;
+      }
+      default:
+        if (taskId) open(taskId);
+    }
+  }
+
+  return (
+    <section className="np-section np-decide" aria-label="Cần bạn quyết">
+      <h2>
+        Cần bạn quyết <span className="np-count">{decisions.length}</span>
+      </h2>
+      <ul className="pulse-decisions">
+        {decisions.map((d) => {
+          const severe = d.kind === "late-blocking" || d.kind === "unassigned-critical";
+          return (
+            <li key={`${d.kind}:${d.taskIds.join(",")}`} className={`pulse-row ${severe ? "is-bad" : "is-watch"}`}>
+              <div className="pulse-row-text">
+                <h3>{withKeys(d.title, open, (id) => byId.has(id))}</h3>
+                <p>{withKeys(d.body, open, (id) => byId.has(id))}</p>
+              </div>
+              <div className="pulse-actions">
+                {d.actions.map((a, i) => {
+                  const main = i === d.actions.length - 1;
+                  const task = a.taskId ? byId.get(a.taskId) : undefined;
+                  if (a.kind === "reschedule") {
+                    if (!task || !onUpdateTask) return null;
+                    return <RescheduleButton key={a.kind} task={task} today={today} main={main} onSave={onUpdateTask} />;
+                  }
+                  if ((a.kind === "reassign" || a.kind === "pick" || a.kind === "assign") && !onAssign) return null;
+                  if (a.kind === "set-baseline" && !onSaveBaseline) return null;
+                  return (
+                    <button
+                      key={`${a.kind}:${i}`}
+                      type="button"
+                      className={main ? "np-act is-main" : "np-act"}
+                      disabled={busy === d.kind}
+                      title={a.taskId && a.kind !== "assign" ? `${a.label} ${a.taskId}` : undefined}
+                      onClick={(e) => void run(d, a, e.currentTarget)}
+                    >
+                      {a.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      {picking && pickTask && (
+        <PersonPicker
+          anchor={picking.anchor}
+          people={users}
+          task={pickTask}
+          load={pickLoad}
+          calendar={calendar}
+          currentAccountId={pickTask.assigneeAccountId}
+          meAccountId={meAccountId}
+          allowUnassign={false}
+          onPick={(id) => {
+            const taskId = picking.taskId;
+            setPicking(null);
+            if (id && id !== pickTask.assigneeAccountId) void assign(taskId, id);
+          }}
+          onClose={() => setPicking(null)}
+        />
+      )}
+    </section>
+  );
+}
+
+/** "Dời hạn": a new due date for one task, with tomorrow / +3 / +7 as one click. The start stays. */
+function RescheduleButton({
+  task,
+  today,
+  main,
+  onSave,
+}: {
+  task: Task;
+  today: string;
+  main: boolean;
+  onSave: (taskId: string, patch: TaskUpdateInput) => Promise<void>;
+}) {
+  const [draft, setDraft] = useState(() => addDays(today, 1));
+  const [saving, setSaving] = useState(false);
+  const quick: Array<[string, number]> = [
+    ["Mai", 1],
+    ["+3 ngày", 3],
+    ["+1 tuần", 7],
+  ];
+
+  async function save(close: () => void) {
+    const next = changeSchedule(scheduleOf(task.startDate, task.durationDays), "due", draft);
+    if (next.rejected) {
+      toast(
+        next.rejected === "due-before-start" && task.startDate
+          ? `Hạn mới không được trước ngày bắt đầu (${formatDayMonth(task.startDate, today)}).`
+          : "Ngày chưa hợp lệ.",
+        { tone: "error" }
+      );
+      return;
+    }
+    setSaving(true);
+    try {
+      await onSave(task.id, { startDate: next.start, durationDays: next.durationDays });
+      close();
+      toast(`Đã dời hạn ${task.id} sang ${formatDayMonth(draft, today)}.`, { tone: "success" });
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Không dời được hạn.", { tone: "error" });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Popover
+      className={main ? "np-act is-main" : "np-act"}
+      caret={false}
+      align="end"
+      menuLabel={`Dời hạn ${task.id}`}
+      menuClassName="np-resched"
+      title={`Dời hạn ${task.id}`}
+      label="Dời hạn"
+    >
+      {({ close }) => (
+        <form
+          className="np-resched-body"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void save(close);
+          }}
+        >
+          <div className="menu-heading">
+            Hạn mới cho {task.id}
+            {task.dueDate && <span className="np-muted"> · đang là {formatDayMonth(task.dueDate, today)}</span>}
+          </div>
+          <div className="np-resched-quick">
+            {quick.map(([label, n]) => (
+              <button key={n} type="button" className={draft === addDays(today, n) ? "is-on" : ""} onClick={() => setDraft(addDays(today, n))}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <DateField value={draft} onChange={(v) => v && setDraft(v)} ariaLabel="Hạn mới" />
+          <button type="submit" className="primary" disabled={saving || !draft || draft === task.dueDate}>
+            {saving ? "Đang dời…" : "Dời hạn"}
+          </button>
+        </form>
+      )}
+    </Popover>
   );
 }

@@ -109,13 +109,35 @@ await step("tối đa ba dòng 'Cần bạn quyết', mỗi dòng có hành đ�
 });
 
 await step("'Vì sao?' mở rồi ẩn lý do, đổi nhãn theo trạng thái", async () => {
-  const btn = page.locator(".pr-header-tools button", { hasText: /^Vì sao\?$/ });
+  const btn = page.locator(".np-why", { hasText: /^Vì sao\?$/ });
   await btn.click();
-  const hide = page.locator(".pr-header-tools button", { hasText: "Ẩn lý do" });
+  const hide = page.locator(".np-why", { hasText: "Ẩn lý do" });
   await hide.waitFor();
   assert.equal(await hide.getAttribute("aria-expanded"), "true");
+  assert.ok((await page.locator(".pulse-reasons li").count()) > 0);
   await hide.click();
-  await page.locator(".pr-header-tools button", { hasText: /^Vì sao\?$/ }).waitFor();
+  await page.locator(".np-why", { hasText: /^Vì sao\?$/ }).waitFor();
+});
+
+await step("một con số không bị nói hai lần: % chỉ ở thanh, không thập phân, không còn thẻ Tiến độ/Thời hạn", async () => {
+  const lead = await page.textContent(".pulse-lead");
+  assert.doesNotMatch(lead, /%/, "câu nhận định không lặp lại %");
+  const text = await page.textContent(".np-summary");
+  assert.doesNotMatch(text, /\d+\.\d+%/, "không còn % có phần thập phân");
+  assert.equal(await page.locator(".pr-card-hero, .pr-card-schedule, .pr-quality").count(), 0);
+});
+
+await step("dòng quá hạn có 'Dời hạn' và 'Giao lại'; dời hạn gửi đúng một PATCH", async () => {
+  const row = page.locator(".pulse-row", { hasText: "trễ" }).first();
+  await row.waitFor();
+  assert.ok(await row.locator("button", { hasText: "Giao lại" }).count());
+  await row.locator("button", { hasText: "Dời hạn" }).click();
+  await page.locator(".np-resched-quick button", { hasText: "+1 tuần" }).click();
+  await page.locator(".np-resched-body button[type=submit]").click();
+  await page.waitForFunction(async () => (await (await fetch("/api/__log")).json()).log.some((l) => l.m === "PATCH" && "durationDays" in (l.b ?? {})));
+  const patch = (await (await fetch(API + "/api/__log")).json()).log.filter((l) => l.m === "PATCH").at(-1);
+  assert.deepEqual(Object.keys(patch.b).sort(), ["durationDays", "startDate"]);
+  await fetch(API + "/api/__restore", { method: "POST" });
 });
 
 await step("không có lỗi trình duyệt hay hộp thoại gốc", async () => {

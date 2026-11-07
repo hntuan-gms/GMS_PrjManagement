@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { pulseCauses, pulseDecisions, pulseHeadline, stripSpi, suggestAssignee } from "../src/projectPulse";
+import { overloadFromLoad, phaseStatus, pulseCauses, pulseDecisions, pulseHeadline, stripSpi, suggestAssignee } from "../src/projectPulse";
 import type { JiraUser, ProgressMetrics, ProgressTaskRef } from "../src/types";
 import { task } from "./fixtures";
+import { addDays, buildResourceLoad } from "../src/resourceAllocation";
 
 const TODAY = "2026-11-06";
 
@@ -50,7 +51,7 @@ const ref = (id: string, critical: boolean): ProgressTaskRef => ({
 });
 
 describe("pulseHeadline", () => {
-  it("behind: the slip leads, the two worst measured causes follow, then the forecast", () => {
+  it("behind the baseline: the verdict is in days, the forecast names the deadline, the causes wait for 'Vì sao?'", () => {
     const m = metrics(
       {
         health: "off_track",
@@ -65,50 +66,66 @@ describe("pulseHeadline", () => {
     );
     const h = pulseHeadline(m);
     assert.equal(h.verdict, "bad");
-    assert.equal(h.lead, "Chậm 4 ngày so với kế hoạch.");
+    assert.equal(h.lead, "Chậm 4 ngày.");
     assert.equal(h.leadKey, "Chậm 4 ngày");
-    assert.ok(h.lead.startsWith(h.leadKey));
-    assert.equal(
-      h.detail,
-      "Nguyên nhân chính: DEMO-5 trên đường găng đã trễ 2 ngày, và 3 việc trên đường găng chưa có người. Dự kiến xong 24/11 (kế hoạch 20/11)."
-    );
+    assert.equal(h.forecast, "Dự kiến xong 24/11, hạn 20/11.");
+    assert.deepEqual(h.reasons.slice(0, 2), ["DEMO-5 trên đường găng đã trễ 2 ngày.", "3 việc trên đường găng chưa có người."]);
+    // The overall gap is the bar under the sentence, not a reason.
+    assert.equal(h.reasons.some((r) => r.includes("mới xong")), false);
+    assert.match(h.reasons.at(-1)!, /^Chỉ số tiến độ \(SPI\) 0,5: đã làm được 50%/);
   });
 
-  it("on track: no 'nguyên nhân', the figures and the finish date instead", () => {
-    const h = pulseHeadline(metrics());
-    assert.deepEqual(h, {
-      verdict: "good",
-      lead: "Đúng tiến độ.",
-      leadKey: "Đúng tiến độ",
-      detail: "Đã xong 40%, kế hoạch đến hôm nay là 38%. Dự kiến xong 20/11.",
-    });
+  it("behind with no slip in days: the gap in whole points", () => {
+    const h = pulseHeadline(metrics({ health: "off_track", spi: 0.43, actualPct: 16.7, plannedPct: 38.9 }));
+    assert.equal(h.lead, "Chậm 22 điểm.");
+    assert.equal(h.forecast, "Dự kiến xong 20/11.");
   });
 
-  it("ahead of the baseline says so", () => {
-    const m = metrics({ schedule: { start: null, plannedEnd: "2026-11-18", baselineEnd: "2026-11-20", slipDays: -2, daysRemaining: 12 } });
-    assert.equal(pulseHeadline(m).lead, "Đúng tiến độ, sớm 2 ngày so với kế hoạch.");
+  it("on track: the plain verdict and the finish date; SPI still explained under 'Vì sao?'", () => {
+    const h = pulseHeadline(metrics({ actualPct: 40, plannedPct: 39.6 }));
+    assert.equal(h.verdict, "good");
+    assert.equal(h.lead, "Đúng tiến độ.");
+    assert.equal(h.forecast, "Dự kiến xong 20/11.");
+    assert.equal(h.reasons.length, 1);
+    assert.match(h.reasons[0], /SPI\) 1,05/);
   });
 
-  it("at risk without a slip, and an empty project", () => {
+  it("ahead says by how much, in days or in points", () => {
+    const days = metrics({ schedule: { start: null, plannedEnd: "2026-11-18", baselineEnd: "2026-11-20", slipDays: -2, daysRemaining: 12 } });
+    assert.equal(pulseHeadline(days).lead, "Đúng tiến độ, sớm 2 ngày.");
+    assert.equal(pulseHeadline(days).forecast, "Dự kiến xong 18/11, hạn 20/11.");
+    assert.equal(pulseHeadline(metrics({ actualPct: 45, plannedPct: 38 })).lead, "Đi trước 7 điểm.");
+  });
+
+  it("at risk without a measurable gap, and an empty project", () => {
     const risk = pulseHeadline(metrics({ health: "at_risk", spi: null }, { notStarted: 2 }));
     assert.equal(risk.verdict, "watch");
-    assert.equal(risk.lead, "Có rủi ro chậm tiến độ.");
-    assert.match(risk.detail, /^Nguyên nhân chính: 2 việc đã đến ngày bắt đầu mà chưa làm\./);
+    assert.equal(risk.lead, "Có rủi ro chậm.");
+    assert.equal(risk.reasons[0], "2 việc đã đến ngày bắt đầu mà chưa làm.");
+    assert.match(risk.reasons.at(-1)!, /còn quá sớm/);
     const empty = pulseHeadline(metrics({}, { total: 0 }));
     assert.equal(empty.verdict, "watch");
     assert.equal(empty.lead, "Chưa có việc nào để đo tiến độ.");
+    assert.deepEqual(empty.reasons, []);
   });
 
-  it("SPI never reaches the surface", () => {
+  it("SPI is stripped from quoted server reasons; causes are whole percentages", () => {
     assert.equal(stripSpi("Hoàn thành 30% so với kế hoạch 33% (SPI 0.91)."), "Hoàn thành 30% so với kế hoạch 33%.");
     assert.equal(stripSpi("Hoàn thành 10% trong khi kế hoạch là 40% (SPI 0.25, chậm 30 điểm %)."), "Hoàn thành 10% trong khi kế hoạch là 40%.");
-    const causes = pulseCauses(metrics({ spi: 0.5, actualPct: 17, plannedPct: 33 }));
+    const causes = pulseCauses(metrics({ spi: 0.5, actualPct: 16.7, plannedPct: 33.3 }));
     assert.deepEqual(causes, ["mới xong 17% trong khi kế hoạch đến hôm nay là 33%"]);
   });
 
   it("non-critical late work is named when it is the only one", () => {
     const m = metrics({ health: "at_risk", overdue: [{ ...ref("DEMO-4", false), daysLate: 1 }] }, { overdue: 1 });
     assert.deepEqual(pulseCauses(m), ["DEMO-4 đã trễ 1 ngày"]);
+  });
+
+  it("missing baselines are a reason only when no row already says so", () => {
+    const m = metrics({}, { noBaseline: 3 });
+    assert.ok(pulseHeadline(m).reasons.some((r) => r.startsWith("3 việc chưa có baseline")));
+    const row = { kind: "no-baseline" as const, title: "", body: "", taskIds: [], actions: [] };
+    assert.equal(pulseHeadline(m, [row]).reasons.some((r) => r.includes("baseline")), false);
   });
 });
 
@@ -144,9 +161,12 @@ describe("pulseDecisions", () => {
     assert.deepEqual(out[0], {
       kind: "late-blocking",
       title: "P-2 trễ 2 ngày",
-      body: "Đang chặn P-3. Trên đường găng: mỗi ngày trễ đẩy lùi ngày kết thúc.",
+      body: "Phân tích · Nguyễn Anh. Đang chặn P-3. Trên đường găng: mỗi ngày trễ đẩy lùi ngày kết thúc.",
       taskIds: ["P-2"],
-      action: { kind: "open", label: "Xem phụ thuộc", taskId: "P-2" },
+      actions: [
+        { kind: "reschedule", label: "Dời hạn", taskId: "P-2" },
+        { kind: "reassign", label: "Giao lại", taskId: "P-2" },
+      ],
     });
   });
 
@@ -156,7 +176,10 @@ describe("pulseDecisions", () => {
       title: "P-3 chưa có người",
       body: "Trên đường găng, bắt đầu sau 3 ngày. Gợi ý: Nguyễn Anh (rảnh).",
       taskIds: ["P-3"],
-      action: { kind: "assign", label: "Giao cho Anh", taskId: "P-3", suggestedAccountId: "anh" },
+      actions: [
+        { kind: "pick", label: "Chọn…", taskId: "P-3" },
+        { kind: "assign", label: "Giao cho Anh", taskId: "P-3", suggestedAccountId: "anh" },
+      ],
     });
   });
 
@@ -164,7 +187,7 @@ describe("pulseDecisions", () => {
     assert.equal(out[2].title, "Lê Chi quá tải 10/11");
     assert.equal(out[2].body, "2 việc trùng ngày.");
     assert.deepEqual(out[2].taskIds, ["P-5", "P-6"]);
-    assert.deepEqual(out[2].action, { kind: "rebalance", label: "Xem lịch Chi", accountId: "chi", date: "2026-11-10" });
+    assert.deepEqual(out[2].actions, [{ kind: "rebalance", label: "Xem lịch Chi", accountId: "chi", date: "2026-11-10" }]);
   });
 
   it("with the worst handled, plain late work and missing baselines come up", () => {
@@ -174,7 +197,8 @@ describe("pulseDecisions", () => {
     assert.equal(d[0].title, "P-7 trễ 3 ngày");
     assert.equal(d[0].body, "Báo cáo · Trần Bình.");
     assert.deepEqual(d[1].taskIds, ["P-8"]);
-    assert.equal(d[1].action.kind, "set-baseline");
+    assert.deepEqual(d[0].actions.map((a) => a.kind), ["reschedule", "reassign"]);
+    assert.equal(d[1].actions[0].kind, "set-baseline");
   });
 
   it("Epics and parents with sub-tasks are never cards", () => {
@@ -203,34 +227,59 @@ describe("one idea said once (plan H6)", () => {
   const decisions = pulseDecisions(behind, tasks, users, TODAY);
   const keysIn = (text: string) => text.match(/[A-Z]+-\d+/g) ?? [];
 
-  it("a cause that is already a decision row is left out of the sentence", () => {
+  it("a cause that is already a decision row is not repeated under 'Vì sao?'", () => {
     const h = pulseHeadline(behind, decisions);
-    assert.equal(h.lead, "Chậm 4 ngày so với kế hoạch.");
-    assert.doesNotMatch(h.detail, /đường găng/);
-    assert.match(h.detail, /Dự kiến xong 24\/11 \(kế hoạch 20\/11\)\./);
+    assert.equal(h.lead, "Chậm 4 ngày.");
+    assert.equal(h.reasons.some((r) => r.includes("đường găng")), false);
     // what no row can carry stays
-    assert.match(h.detail, /2 việc đã đến ngày bắt đầu mà chưa làm/);
+    assert.ok(h.reasons.includes("2 việc đã đến ngày bắt đầu mà chưa làm."));
   });
 
-  it("no issue key is in both the headline detail and the decision rows", () => {
+  it("no issue key is in both the reasons and the decision rows", () => {
     const h = pulseHeadline(behind, decisions);
     const inRows = new Set(decisions.flatMap((d) => [...d.taskIds, ...keysIn(d.title), ...keysIn(d.body)]));
-    assert.deepEqual(keysIn(h.detail).filter((k) => inRows.has(k)), []);
+    assert.deepEqual(h.reasons.flatMap(keysIn).filter((k) => inRows.has(k)), []);
     // and without rows the cause is still written, with its key
-    assert.match(pulseHeadline(behind).detail, /P-2/);
+    assert.ok(pulseHeadline(behind).reasons.some((r) => r.includes("P-2")));
   });
 
   it("a cause whose row is not shown (cut off at three) is still written", () => {
     const h = pulseHeadline(behind, decisions.filter((d) => d.kind !== "late-blocking"));
-    assert.match(h.detail, /P-2 trên đường găng đã trễ 2 ngày/);
+    assert.ok(h.reasons.includes("P-2 trên đường găng đã trễ 2 ngày."));
   });
 
-  it("only a measured sentence is dropped when nothing else is left to say", () => {
-    const onlyLate = metrics({ health: "at_risk", overdue: [{ ...ref("P-2", true), daysLate: 2 }] }, { overdue: 1 });
-    const d = pulseDecisions(onlyLate, tasks, users, TODAY);
-    const h = pulseHeadline(onlyLate, d);
-    assert.doesNotMatch(h.detail, /Nguyên nhân chính/);
-    assert.doesNotMatch(h.detail, /P-2/);
+  it("the verdict and the forecast never repeat the same slip", () => {
+    const h = pulseHeadline(behind, decisions);
+    assert.doesNotMatch(h.forecast, /trễ|chậm/);
+  });
+});
+
+describe("phaseStatus", () => {
+  const phase = (o: Partial<ProgressMetrics["phases"][number]>) => ({
+    id: "E-1",
+    summary: "Giai đoạn",
+    total: 4,
+    done: 1,
+    actualPct: 43,
+    plannedPct: 100,
+    start: "2026-10-01",
+    end: "2026-11-05",
+    baselineEnd: "2026-11-05",
+    overdue: 1,
+    ...o,
+  });
+  it("in words; the worst signal decides the tone", () => {
+    assert.deepEqual(phaseStatus(phase({}), true), { text: "chậm 57 điểm · 1 quá hạn", tone: "risk" });
+    assert.deepEqual(phaseStatus(phase({ plannedPct: 49, overdue: 0 }), true), { text: "chậm 6 điểm", tone: "warn" });
+    assert.deepEqual(phaseStatus(phase({ plannedPct: 30, overdue: 0, end: "2026-11-09" }), true), {
+      text: "trước 13 điểm · kết thúc trễ 4 ngày",
+      tone: "quiet",
+    });
+  });
+  it("not started, undated and finished say so instead of '0% / 0%'", () => {
+    assert.equal(phaseStatus(phase({ actualPct: 0, plannedPct: 0, overdue: 0 }), true).text, "chưa tới lịch");
+    assert.equal(phaseStatus(phase({ actualPct: 0, plannedPct: 0, overdue: 0 }), false).text, "chưa có ngày");
+    assert.equal(phaseStatus(phase({ done: 4, actualPct: 100 }), true).text, "xong");
   });
 });
 
@@ -240,5 +289,20 @@ describe("suggestAssignee", () => {
     const pick = suggestAssignee(tasks[2], users.slice(1), tasks);
     assert.deepEqual([pick?.user.accountId, pick?.busyDays], ["binh", 2]);
     assert.equal(suggestAssignee(tasks[2], [], tasks), null);
+  });
+});
+
+describe("overload from Nhân lực's own load", () => {
+  it("names the same person and days as buildResourceLoad over the next two weeks", () => {
+    const load = buildResourceLoad({ tasks, users, profiles: [], absences: [], from: TODAY, to: addDays(TODAY, 13), includeIdle: true });
+    const o = overloadFromLoad(load);
+    assert.equal(o?.accountId, "chi");
+    assert.equal(o?.from, "2026-11-10");
+    const row = pulseDecisions(metrics(), tasks, users, TODAY, undefined, load).find((d) => d.kind === "overloaded");
+    assert.equal(row?.title, "Lê Chi quá tải 10/11");
+  });
+  it("nobody over is no row", () => {
+    const load = buildResourceLoad({ tasks: [tasks[3]], users, profiles: [], absences: [], from: TODAY, to: addDays(TODAY, 13), includeIdle: true });
+    assert.equal(overloadFromLoad(load), null);
   });
 });

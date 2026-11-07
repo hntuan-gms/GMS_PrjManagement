@@ -563,7 +563,8 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
 
   // The toolbar's overload count: who is over capacity in the next two weeks. Counting the whole project
   // made the badge red on any large one, which says nothing; this is what can still be acted on.
-  const overloadedPeople = useMemo(() => {
+  // The same two weeks feed Nhịp dự án's "tải 2 tuần" column and its overload row, so the three agree.
+  const nearLoad = useMemo(() => {
     const today = todayIso();
     const span = { from: today, to: addDays(today, 13) };
     return buildResourceLoad({
@@ -575,8 +576,9 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
       from: span.from,
       to: span.to,
       calendar: workCalendar,
-    }).overloadedPeople;
+    });
   }, [tasks, users, pool, workCalendar]);
+  const overloadedPeople = nearLoad.overloadedPeople;
 
   // Esc backs out one layer at a time: closes the edit modal if one is open
   // (matching its own Esc-to-close, if it has one, but this is the fallback),
@@ -873,6 +875,13 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
       if (!(await dialogs.confirm({ message: `Xoá baseline của ${target.length} việc? Không hoàn tác được.`, tone: "danger" }))) return;
       return runBulk("xoá baseline", target.map((t) => t.id), () => ({ baselineStart: null, baselineDue: null }));
     }
+    return saveBaselineFor(picked);
+  }
+
+  /** "Lưu baseline = lịch hiện tại" for these tasks: the selection bar's, and Nhịp dự án's "Chụp baseline". */
+  async function saveBaselineFor(picked: Task[]) {
+    const parentIds = new Set(tasks.map((t) => t.wbsParentId).filter(Boolean));
+    const rollup = (t: Task) => t.issueType.toLowerCase() === "epic" && parentIds.has(t.id);
     const target = picked.filter((t) => t.startDate && !rollup(t));
     const skipped = picked.filter((t) => !target.includes(t)).map((t) => t.id);
     const overwrite = target.filter((t) => t.baselineStart || t.baselineDue).length;
@@ -1898,7 +1907,12 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
               refreshing={showingCache}
               sla={slaView}
               users={users}
+              meAccountId={session.user.accountId}
               onAssign={(taskId, accountId) => updateOne(taskId, { assigneeAccountId: accountId })}
+              onUpdateTask={(taskId, patch) => savePanelField(taskId, patch)}
+              onSaveBaseline={(ids) => saveBaselineFor(tasks.filter((t) => ids.includes(t.id)))}
+              nearLoad={nearLoad}
+              pool={pool ? { profiles: pool.profiles, absences: pool.absences, defaultCapacityHours: pool.defaultCapacityHours } : null}
               onOpenResources={() => go("resource")}
               onOpenPersonLoad={(accountId) => {
                 setFocusPerson({ accountId, nonce: Date.now() });

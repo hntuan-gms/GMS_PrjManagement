@@ -13,6 +13,11 @@ interface Props {
   projectKey: string;
   /** Opens a task from a sprint-report row, when it is one the workspace holds. */
   issueLink: (key: string) => React.ReactNode;
+  /**
+   * Opened from somewhere else (Nhịp dự án's ⋯ menu): drawn open, and its header closes it instead of
+   * folding it. Without it the panel folds itself, as before.
+   */
+  onClose?: () => void;
 }
 
 type Tab = "velocity" | "sprint" | "cfd" | "control" | "created";
@@ -52,8 +57,9 @@ interface Answer<T> {
  * page that does that on every visit would be slow for people who only wanted the health verdict.
  * Nothing here is AI — each figure is counted from Jira's own data.
  */
-export default function AgileReports({ cacheScope, projectKey, issueLink }: Props) {
-  const [open, setOpen] = useState(false);
+export default function AgileReports({ cacheScope, projectKey, issueLink, onClose }: Props) {
+  const [openState, setOpen] = useState(false);
+  const open = onClose ? true : openState;
   const [tab, setTab] = useState<Tab>("velocity");
   const [days, setDays] = useState<30 | 60 | 90>(60);
   const [metric, setMetric] = useState<"cycle" | "lead">("cycle");
@@ -128,11 +134,20 @@ export default function AgileReports({ cacheScope, projectKey, issueLink }: Prop
 
   return (
     <section className="pr-card pr-agile">
-      <button className="ag-head" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
-        <span className={`bd-chevron ${open ? "is-open" : ""}`} aria-hidden="true" />
-        <h3>Báo cáo Agile</h3>
-        <span className="pr-muted">vận tốc · sprint và burnup · luồng việc · thời gian xử lý</span>
-      </button>
+      {onClose ? (
+        <div className="ag-head is-static">
+          <h3>Báo cáo Agile</h3>
+          <button type="button" className="text-btn ag-close" onClick={onClose}>
+            Đóng
+          </button>
+        </div>
+      ) : (
+        <button className="ag-head" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+          <span className={`bd-chevron ${open ? "is-open" : ""}`} aria-hidden="true" />
+          <h3>Báo cáo Agile</h3>
+          <span className="pr-muted">vận tốc · sprint và burnup · luồng việc · thời gian xử lý</span>
+        </button>
+      )}
 
       {open && (
         <div className="ag-body">

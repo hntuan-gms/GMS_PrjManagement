@@ -1,6 +1,6 @@
 import { computeCriticalPath } from "./criticalPath";
 import { formatDayMonth, formatDayRange } from "./humanDate";
-import { addDays, DEFAULT_CAPACITY_HOURS, diffDays } from "./resourceAllocation";
+import { addDays, DEFAULT_CAPACITY_HOURS, diffDays, type ResourceLoad } from "./resourceAllocation";
 import { isAssignableType, type Health, type JiraUser, type ProgressMetrics, type Task } from "./types";
 import { DEFAULT_WORK_CALENDAR, isWorkingDate, workingDates, type WorkCalendar } from "./workCalendar";
 
@@ -21,25 +21,30 @@ export type PulseVerdict = "good" | "watch" | "bad";
 
 export interface PulseHeadline {
   verdict: PulseVerdict;
-  /** The one-line conclusion, e.g. "Chậm 4 ngày so với kế hoạch." */
+  /** The verdict, one short sentence: "Chậm 3 ngày.", "Chậm 22 điểm.", "Đúng tiến độ." */
   lead: string;
-  /** The start of `lead` to colour (--risk, or --st-done when on track), e.g. "Chậm 4 ngày". */
+  /** `lead` without its full stop. */
   leadKey: string;
-  /** Why, and when it is now expected to finish. */
-  detail: string;
+  /** When it is expected to finish, beside the verdict: "Dự kiến xong 25/11, hạn 22/11." Empty when nothing is dated. */
+  forecast: string;
+  /**
+   * "Vì sao?": the measured causes no "Cần bạn quyết" row already carries, then SPI explained. Never the
+   * overall gap: the bar under the sentence already says it, in numbers.
+   */
+  reasons: string[];
 }
+
+/** A percentage as people read it: whole numbers. The server keeps one decimal for its own arithmetic. */
+export const pct = (n: number) => `${Math.round(n)}%`;
+/** "0,43": a decimal written the Vietnamese way. */
+export const decimal = (n: number) => String(Math.round(n * 100) / 100).replace(".", ",");
+const capitalise = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 
 const VERDICT: Record<Health, PulseVerdict> = { on_track: "good", at_risk: "watch", off_track: "bad" };
 
 /** A server health reason without its SPI aside — the term stays in "Chất lượng số liệu". */
 export function stripSpi(reason: string): string {
   return reason.replace(/\s*\(SPI [^)]*\)/g, "").replace(/\s+\./g, ".");
-}
-
-/** "a", "a, và b" — the two most serious causes; more would turn a headline into a list. */
-function joinCauses(causes: string[]): string {
-  const top = causes.slice(0, 2);
-  return top.length === 2 ? `${top[0]}, và ${top[1]}` : top[0];
 }
 
 /**
@@ -50,6 +55,8 @@ function joinCauses(causes: string[]): string {
  */
 export interface PulseCause {
   text: string;
+  /** The overall gap between done and planned: the bar under the verdict already shows it. */
+  gap?: boolean;
   covers?: PulseDecisionKind[];
   ids?: string[];
 }
@@ -79,7 +86,7 @@ export function pulseCauseItems(m: ProgressMetrics): PulseCause[] {
     else causes.push({ text: critLate.length > 0 ? `${otherLate} việc khác đã quá hạn` : `${otherLate} việc đã quá hạn`, covers: lateKinds, ids });
   }
   if (m.counts.notStarted > 0) causes.push({ text: `${m.counts.notStarted} việc đã đến ngày bắt đầu mà chưa làm` });
-  if (m.spi !== null && m.spi < 0.95) causes.push({ text: `mới xong ${m.actualPct}% trong khi kế hoạch đến hôm nay là ${m.plannedPct}%` });
+  if (m.spi !== null && m.spi < 0.95) causes.push({ text: `mới xong ${pct(m.actualPct)} trong khi kế hoạch đến hôm nay là ${pct(m.plannedPct)}`, gap: true });
   return causes;
 }
 
@@ -98,52 +105,50 @@ function coveredBy(cause: PulseCause, decisions: PulseDecision[]): boolean {
 }
 
 /**
- * The conclusion and the forecast. `decisions` are the "Cần bạn quyết" rows shown under it: a cause that is
- * already one of them is left out of the sentence (plan H6 — one idea said once), so the detail keeps the
- * forecast and whatever no row can carry. Without `decisions` every cause is written, as before.
+ * The verdict, the forecast and the reasons. `decisions` are the "Cần bạn quyết" rows shown under it: a
+ * cause already one of them is not repeated in "Vì sao?" (one idea said once).
+ *
+ * The verdict is in days when the forecast end is past the baseline end (what a deadline is measured in),
+ * otherwise in percentage points of work behind the plan ("Chậm 22 điểm"), with the plan and the actual
+ * figure on the bar right under it. The forecast names the baseline date only when it differs, so the same
+ * slip is never said twice in one line.
  */
 export function pulseHeadline(m: ProgressMetrics, decisions: PulseDecision[] = []): PulseHeadline {
   if (m.counts.total === 0) {
     const lead = "Chưa có việc nào để đo tiến độ.";
-    return { verdict: "watch", lead, leadKey: lead.slice(0, -1), detail: "Thêm việc có ngày bắt đầu và kết thúc để thấy nhịp dự án." };
+    return { verdict: "watch", lead, leadKey: lead.slice(0, -1), forecast: "", reasons: [] };
   }
   const verdict = VERDICT[m.health];
   const slip = m.schedule.slipDays;
+  const gap = Math.round(m.plannedPct) - Math.round(m.actualPct);
   let leadKey: string;
-  let lead: string;
-  if (slip !== null && slip > 0) {
-    leadKey = `Chậm ${slip} ngày`;
-    lead = `${leadKey} so với kế hoạch.`;
-  } else if (m.health === "on_track") {
-    leadKey = "Đúng tiến độ";
-    lead = slip !== null && slip < 0 ? `Đúng tiến độ, sớm ${-slip} ngày so với kế hoạch.` : "Đúng tiến độ.";
-  } else if (m.health === "at_risk") {
-    leadKey = "Có rủi ro chậm";
-    lead = "Có rủi ro chậm tiến độ.";
-  } else {
-    leadKey = "Chậm tiến độ";
-    lead = "Chậm tiến độ.";
-  }
+  if (slip !== null && slip > 0) leadKey = `Chậm ${slip} ngày`;
+  else if (m.health !== "on_track" && m.spi !== null && gap >= 1) leadKey = `Chậm ${gap} điểm`;
+  else if (m.health === "on_track") {
+    if (slip !== null && slip < 0) leadKey = `Đúng tiến độ, sớm ${-slip} ngày`;
+    else if (m.spi !== null && gap <= -1) leadKey = `Đi trước ${-gap} điểm`;
+    else leadKey = "Đúng tiến độ";
+  } else leadKey = m.health === "at_risk" ? "Có rủi ro chậm" : "Chậm tiến độ";
 
-  const sentences: string[] = [];
-  if (verdict === "good") {
-    sentences.push(
-      m.spi !== null
-        ? `Đã xong ${m.actualPct}%, kế hoạch đến hôm nay là ${m.plannedPct}%.`
-        : `Dự án mới ở giai đoạn đầu: kế hoạch đến hôm nay mới là ${m.plannedPct}%.`
-    );
-  } else {
-    const items = pulseCauseItems(m);
-    const causes = items.filter((c) => !coveredBy(c, decisions)).map((c) => c.text);
-    if (causes.length > 0) sentences.push(`Nguyên nhân chính: ${joinCauses(causes)}.`);
-    else if (items.length === 0 && m.healthReasons[0]) sentences.push(stripSpi(m.healthReasons[0]));
-  }
   const { plannedEnd, baselineEnd } = m.schedule;
-  if (plannedEnd) {
-    const planned = baselineEnd && baselineEnd !== plannedEnd ? ` (kế hoạch ${formatDayMonth(baselineEnd, m.asOf)})` : "";
-    sentences.push(`Dự kiến xong ${formatDayMonth(plannedEnd, m.asOf)}${planned}.`);
+  const forecast = plannedEnd
+    ? `Dự kiến xong ${formatDayMonth(plannedEnd, m.asOf)}${baselineEnd && baselineEnd !== plannedEnd ? `, hạn ${formatDayMonth(baselineEnd, m.asOf)}` : ""}.`
+    : "";
+
+  const reasons = pulseCauseItems(m)
+    .filter((c) => !c.gap)
+    .filter((c) => !coveredBy(c, decisions))
+    .map((c) => `${capitalise(c.text)}.`);
+  if (m.counts.slipped > 0) reasons.push(`${m.counts.slipped} việc kết thúc muộn hơn baseline.`);
+  if (m.spi !== null) {
+    reasons.push(`Chỉ số tiến độ (SPI) ${decimal(m.spi)}: đã làm được ${Math.round(m.spi * 100)}% khối lượng lẽ ra phải xong đến hôm nay. 1 là đúng kế hoạch.`);
+  } else {
+    reasons.push(`Kế hoạch đến hôm nay mới là ${pct(m.plannedPct)}, còn quá sớm để so nhanh hay chậm.`);
   }
-  return { verdict, lead, leadKey, detail: sentences.join(" ") };
+  if (m.counts.noBaseline > 0 && !decisions.some((d) => d.kind === "no-baseline")) {
+    reasons.push(`${m.counts.noBaseline} việc chưa có baseline: chúng được đo theo lịch hiện tại nên không bao giờ hiện là chậm.`);
+  }
+  return { verdict, lead: `${leadKey}.`, leadKey, forecast, reasons };
 }
 
 /* ------------------------------------------------------------------ decisions */
@@ -151,10 +156,15 @@ export function pulseHeadline(m: ProgressMetrics, decisions: PulseDecision[] = [
 export type PulseDecisionKind = "late-blocking" | "unassigned-critical" | "overloaded" | "overdue" | "no-baseline";
 
 export interface PulseAction {
-  kind: "assign" | "open" | "rebalance" | "set-baseline";
+  /**
+   * reschedule: pick a new due date for `taskId`. reassign / pick: choose a person for `taskId`.
+   * assign: give `taskId` to `suggestedAccountId` in one click. rebalance: open that person's load.
+   * set-baseline: freeze the current dates of the row's tasks as their baseline. open: the task.
+   */
+  kind: "reschedule" | "reassign" | "pick" | "assign" | "open" | "rebalance" | "set-baseline";
   label: string;
   taskId?: string;
-  /** For "assign": the person code suggests; the card still offers "Chọn…". */
+  /** For "assign": the person code suggests. */
   suggestedAccountId?: string;
   /** For "rebalance": whose load to open. */
   accountId?: string;
@@ -167,7 +177,8 @@ export interface PulseDecision {
   title: string;
   body: string;
   taskIds: string[];
-  action: PulseAction;
+  /** What can be done from the row, in the order drawn; the last is the main one. */
+  actions: PulseAction[];
 }
 
 /** Days ahead in which an overload is worth a card. */
@@ -178,6 +189,12 @@ const endOf = (t: Task): string | null => t.dueDate ?? (t.startDate ? addDays(t.
 /** The given name: Vietnamese names end with it ("Trần Bình" → "Bình"). */
 const givenName = (name: string) => name.trim().split(/\s+/).at(-1) ?? name;
 const listIds = (ids: string[], max = 3) => (ids.length > max ? `${ids.slice(0, max).join(", ")} và ${ids.length - max} việc khác` : ids.join(", "));
+
+/** Late work is decided one of two ways: a new date, or someone else. */
+const fixLate = (taskId: string): PulseAction[] => [
+  { kind: "reschedule", label: "Dời hạn", taskId },
+  { kind: "reassign", label: "Giao lại", taskId },
+];
 
 /** Leaf, assignable tasks — progress.ts's "work items". */
 function workItemsOf(tasks: Task[]): Task[] {
@@ -236,7 +253,13 @@ export function pulseDecisions(
   tasks: Task[],
   users: JiraUser[],
   today: string,
-  calendar: WorkCalendar = DEFAULT_WORK_CALENDAR
+  calendar: WorkCalendar = DEFAULT_WORK_CALENDAR,
+  /**
+   * The next two weeks' load as Nhân lực computes it (profiles, leave, the calendar). With it the overload row
+   * names the same person and days as the Nhân lực badge and the "tải 2 tuần" column; without it (tests) the
+   * row is worked out here against the default capacity.
+   */
+  load?: ResourceLoad | null
 ): PulseDecision[] {
   const critical = computeCriticalPath(tasks);
   const work = workItemsOf(tasks);
@@ -271,10 +294,11 @@ export function pulseDecisions(
         kind: "late-blocking",
         title: blocking.length === 1 ? `${worst.task.id} trễ ${worst.daysLate} ngày` : `${blocking.length} việc trễ đang chặn việc khác`,
         body:
-          (blocking.length === 1 ? `Đang chặn ${listIds(worst.blocked)}.` : `Nặng nhất: ${worst.task.id} trễ ${worst.daysLate} ngày, chặn ${listIds(worst.blocked)}.`) +
-          tail,
+          (blocking.length === 1
+            ? `${worst.task.summary} · ${worst.task.assigneeName ?? "chưa có người"}. Đang chặn ${listIds(worst.blocked)}.`
+            : `Nặng nhất: ${worst.task.id} trễ ${worst.daysLate} ngày, chặn ${listIds(worst.blocked)}.`) + tail,
         taskIds: blocking.map((l) => l.task.id),
-        action: { kind: "open", label: "Xem phụ thuộc", taskId: worst.task.id },
+        actions: fixLate(worst.task.id),
       },
     });
   }
@@ -301,15 +325,18 @@ export function pulseDecisions(
         title: unowned.length === 1 ? `${first.id} chưa có người` : `${unowned.length} việc trên đường găng chưa có người`,
         body: `${unowned.length === 1 ? "Trên đường găng" : `Sớm nhất là ${first.id}`}, ${when}.${hint}`,
         taskIds: unowned.map((t) => t.id),
-        action: pick
-          ? { kind: "assign", label: `Giao cho ${givenName(pick.user.displayName)}`, taskId: first.id, suggestedAccountId: pick.user.accountId }
-          : { kind: "assign", label: "Chọn người…", taskId: first.id },
+        actions: pick
+          ? [
+              { kind: "pick", label: "Chọn…", taskId: first.id },
+              { kind: "assign", label: `Giao cho ${givenName(pick.user.displayName)}`, taskId: first.id, suggestedAccountId: pick.user.accountId },
+            ]
+          : [{ kind: "pick", label: "Chọn người…", taskId: first.id }],
       },
     });
   }
 
   /* someone overloaded soon */
-  const overload = worstOverload(open, today, calendar);
+  const overload = load ? overloadFromLoad(load) : worstOverload(open, today, calendar);
   if (overload) {
     const name = nameOf(overload.accountId) || "Một người";
     out.push({
@@ -319,7 +346,7 @@ export function pulseDecisions(
         title: `${name} quá tải ${formatDayRange(overload.from, overload.to, today)}`,
         body: `${overload.concurrent} việc trùng ngày${overload.days > 1 ? `, ${overload.days} ngày quá tải trong 2 tuần tới` : ""}.`,
         taskIds: overload.taskIds,
-        action: { kind: "rebalance", label: nameOf(overload.accountId) ? `Xem lịch ${givenName(name)}` : "Xem lịch", accountId: overload.accountId, date: overload.from },
+        actions: [{ kind: "rebalance", label: nameOf(overload.accountId) ? `Xem lịch ${givenName(name)}` : "Xem lịch", accountId: overload.accountId, date: overload.from }],
       },
     });
   }
@@ -341,7 +368,7 @@ export function pulseDecisions(
             : `${lateAlone.length} việc quá hạn${lateAlone.length < late.length ? " khác" : ""}`,
         body: lateAlone.length === 1 ? `${worst.task.summary} · ${owner}.` : `Lâu nhất: ${worst.task.id} trễ ${worst.daysLate} ngày (${owner}).`,
         taskIds: lateAlone.map((l) => l.task.id),
-        action: { kind: "open", label: `Mở ${worst.task.id}`, taskId: worst.task.id },
+        actions: fixLate(worst.task.id),
       },
     });
   }
@@ -357,7 +384,7 @@ export function pulseDecisions(
         title: `${noBaselineCount} việc chưa có baseline`,
         body: "Chưa có baseline thì không biết việc nào đang chậm so với kế hoạch ban đầu.",
         taskIds: noBaseline,
-        action: { kind: "set-baseline", label: "Chụp baseline" },
+        actions: [{ kind: "set-baseline", label: "Chụp baseline" }],
       },
     });
   }
@@ -407,4 +434,68 @@ function worstOverload(
     };
   }
   return best;
+}
+
+/**
+ * The overload row from Nhân lực's own load (buildResourceLoad over the next two weeks): the person with the
+ * most days over capacity, and their first run of overloaded working days (days off in between do not end
+ * a run). null when nobody is over.
+ */
+export function overloadFromLoad(
+  load: ResourceLoad
+): { accountId: string; from: string; to: string; days: number; concurrent: number; taskIds: string[] } | null {
+  let best: { accountId: string; from: string; to: string; days: number; concurrent: number; taskIds: string[] } | null = null;
+  for (const p of [...load.people].sort((a, b) => a.accountId.localeCompare(b.accountId))) {
+    const overDays = p.days.filter((d) => d.band === "over").length;
+    if (overDays === 0 || (best && overDays <= best.days)) continue;
+    const start = p.days.findIndex((d) => d.band === "over");
+    const run = [p.days[start]];
+    for (let i = start + 1; i < p.days.length; i++) {
+      const d = p.days[i];
+      if (d.band === "over") run.push(d);
+      else if (d.capacityHours > 0) break;
+    }
+    best = {
+      accountId: p.accountId,
+      from: run[0].date,
+      to: run[run.length - 1].date,
+      days: overDays,
+      concurrent: Math.max(...run.map((d) => d.taskIds.length)),
+      taskIds: [...new Set(run.flatMap((d) => d.taskIds))],
+    };
+  }
+  return best;
+}
+
+/* ------------------------------------------------------------------ tables */
+
+export type RowTone = "risk" | "warn" | "quiet";
+
+export type WorkState = "done" | "inProgress" | "todo";
+
+/** How a work state is written in a count: "5 chưa làm". */
+export const STATE_LABEL: Record<WorkState, string> = {
+  done: "xong",
+  inProgress: "đang làm",
+  todo: "chưa làm",
+};
+
+/**
+ * The "lệch" cell of an Epic row, in words: "chậm 57 điểm · 1 quá hạn", "chưa tới lịch", "xong". It replaced
+ * "43% / 100%" and a bare "!1": the reader should not have to know that the second figure was the plan.
+ * `dated` is whether any work under the Epic has dates — without them the plan is 0% by construction.
+ */
+export function phaseStatus(p: ProgressMetrics["phases"][number], dated: boolean): { text: string; tone: RowTone } {
+  if (p.total > 0 && p.done === p.total) return { text: "xong", tone: "quiet" };
+  if (!dated) return { text: "chưa có ngày", tone: "quiet" };
+  const gap = Math.round(p.plannedPct) - Math.round(p.actualPct);
+  const parts: string[] = [];
+  if (Math.round(p.plannedPct) === 0 && Math.round(p.actualPct) === 0) parts.push("chưa tới lịch");
+  else if (gap >= 1) parts.push(`chậm ${gap} điểm`);
+  else if (gap <= -1) parts.push(`trước ${-gap} điểm`);
+  else parts.push("đúng kế hoạch");
+  if (p.overdue > 0) parts.push(`${p.overdue} quá hạn`);
+  if (p.end && p.baselineEnd && p.end > p.baselineEnd) parts.push(`kết thúc trễ ${diffDays(p.baselineEnd, p.end)} ngày`);
+  const tone: RowTone = p.overdue > 0 || gap > 15 ? "risk" : gap >= 5 ? "warn" : "quiet";
+  return { text: parts.join(" · "), tone };
 }

@@ -237,12 +237,17 @@ await step("xu hướng theo ngày vẽ được từ số đo đã lưu, không
   assert.ok((await page.textContent(".progress-view")).includes("Xu hướng theo ngày"));
   assert.ok((await page.locator(".pr-trend svg").first().getAttribute("aria-label")).includes("3 ngày"));
 });
-await step("có nút In (không có 'So sánh' khi chưa đủ 2 báo cáo AI)", async () => {
-  assert.ok(await page.locator(".pr-header-tools").getByRole("button", { name: "In", exact: true }).count());
-  assert.equal(await page.locator(".pr-header-tools button", { hasText: "So sánh" }).count(), 0);
+await step("menu ⋯ có In (không có 'So sánh' khi chưa đủ 2 báo cáo AI)", async () => {
+  await page.locator(".pr-header-tools .np-more").click();
+  assert.ok(await page.getByRole("menuitem", { name: "In", exact: true }).count());
+  assert.equal(await page.getByRole("menuitem", { name: /So sánh/ }).count(), 0);
+  await page.keyboard.press("Escape");
 });
 await step("Agile → Vận tốc: 3 cột + đường trung bình", async () => {
-  await page.locator(".ag-head").click();
+  // Folded away no longer: it is opened from ⋯ and drawn at the foot of the page.
+  assert.equal(await page.locator(".ag-head").count(), 0);
+  await page.locator(".pr-header-tools .np-more").click();
+  await page.getByRole("menuitem", { name: "Báo cáo Agile" }).click();
   await page.waitForSelector(".ag-bar");
   assert.equal(await page.locator(".ag-bar").count(), 3);
   assert.equal(await page.locator(".ag-avg-line").count(), 1);

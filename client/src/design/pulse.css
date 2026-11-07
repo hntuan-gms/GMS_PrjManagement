@@ -1,0 +1,751 @@
+/* ==========================================================================
+   Nhịp dự án (ProgressReportView, progressCharts, ProgressTrendChart).
+   Three questions, top to bottom: are we on time, why, what do I do. One bar, two tables of words,
+   no cards and no coloured edges. Red only beside a word that says why. Loaded last (main.tsx).
+   ========================================================================== */
+
+.pr-main {
+  padding: 14px 28px 48px;
+  gap: 0;
+}
+.np-page {
+  width: 100%;
+  max-width: 1040px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+/* ---- Bar: Phạm vi · Đến … | AI · ⋯ ---- */
+.np-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: nowrap;
+  min-height: 32px;
+}
+.np-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+button.np-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  max-width: 340px;
+  padding: 0 8px 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--raised);
+  color: var(--ink);
+  font-size: var(--font-size-md);
+  white-space: nowrap;
+}
+button.np-pick:hover:not(:disabled) {
+  background: var(--sunken);
+  border-color: var(--line-strong);
+}
+.np-pick-k {
+  color: var(--ink-3);
+}
+.np-pick-v {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+}
+/* A filter that is on is an ink fill (MASTER: "Bộ lọc đang bật là nền mực"). */
+button.np-pick.is-on,
+button.np-pick.is-on:hover:not(:disabled) {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--on-strong);
+}
+button.np-pick.is-on .np-pick-k,
+button.np-pick.is-on .caret {
+  color: color-mix(in srgb, var(--on-strong) 65%, transparent);
+}
+button.np-reset {
+  height: 28px;
+  color: var(--ink-3);
+}
+.pr-header-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+button.np-more {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--ink-3);
+}
+button.np-more:hover:not(:disabled),
+button.np-more.is-open {
+  background: var(--sunken);
+  color: var(--ink);
+}
+
+/* Scope menu: three short groups, each list scrolling on its own. */
+.popover-menu.np-scope-menu {
+  width: 300px;
+  padding: 6px;
+}
+.np-scope-group + .np-scope-group {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+.np-scope-list {
+  max-height: 196px;
+  overflow: auto;
+}
+button.np-opt,
+label.np-opt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  justify-content: flex-start;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink);
+  font-size: var(--font-size-md);
+  font-weight: 400;
+  text-align: left;
+  cursor: pointer;
+}
+button.np-opt:hover:not(:disabled),
+label.np-opt:hover {
+  background: var(--sunken);
+}
+button.np-opt.is-on {
+  font-weight: 500;
+}
+.np-opt-mark {
+  width: 14px;
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  color: var(--ink);
+}
+.np-check input {
+  margin: 0;
+}
+.popover-menu.np-date-menu {
+  padding: 10px;
+}
+.np-date-body {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ---- The verdict, one bar, the figures once ---- */
+.pulse.np-summary {
+  padding: 0;
+  border: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.np-summary .pulse-lead {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 10px;
+  row-gap: 2px;
+  font-size: var(--font-size-page);
+  line-height: 1.35;
+  color: var(--ink);
+}
+.np-verdict {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.np-verdict.is-bad {
+  color: var(--risk-text);
+}
+.np-verdict.is-watch {
+  color: var(--warn-text);
+}
+.np-forecast {
+  font-size: var(--font-size-lead);
+  font-weight: 400;
+  color: var(--ink-2);
+}
+
+.np-line {
+  position: relative;
+  display: block;
+  width: 100%;
+  border-radius: var(--radius-full);
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.np-line.is-lg {
+  height: 10px;
+  margin-top: 4px;
+}
+.np-line.is-sm {
+  height: 6px;
+}
+.np-line-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--ink-2);
+}
+.np-line.is-risk .np-line-fill {
+  background: var(--risk);
+}
+/* The plan: a tick taller than the track, so it reads as "where we should be", not as more progress. */
+.np-line-plan {
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--ink);
+}
+.np-line.is-sm .np-line-plan {
+  top: -3px;
+  bottom: -3px;
+}
+
+.np-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: var(--font-size-md);
+  color: var(--ink-3);
+}
+.np-meta b {
+  color: var(--ink);
+  font-weight: 600;
+  font-family: var(--font-mono);
+}
+.np-sep {
+  margin: 0 6px;
+  color: var(--ink-4);
+}
+button.np-why {
+  flex: none;
+  height: 24px;
+  padding: 0 6px;
+  color: var(--ink-2);
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px;
+}
+.np-summary .pulse-reasons {
+  margin: 0;
+  padding: 10px 14px 10px 30px;
+  border-radius: var(--radius-md);
+  background: var(--sunken);
+  gap: 4px;
+  line-height: 1.55;
+}
+
+.np-facts {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 16px;
+  margin-top: 2px;
+}
+.np-facts-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+}
+.np-total {
+  margin-right: 6px;
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: var(--ink);
+}
+button.np-fact {
+  height: 26px;
+  padding: 0 7px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--ink-2);
+  font-size: var(--font-size-md);
+  font-weight: 400;
+}
+button.np-fact b {
+  margin-right: 3px;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-weight: 500;
+}
+button.np-fact:hover:not(:disabled) {
+  background: var(--sunken);
+  color: var(--ink);
+}
+button.np-fact.is-risk,
+button.np-fact.is-risk b {
+  color: var(--risk-text);
+}
+button.np-fact.is-warn b {
+  color: var(--warn-text);
+}
+button.np-fact.is-quiet,
+button.np-fact.is-quiet b {
+  color: var(--ink-3);
+}
+
+/* ---- Sections ---- */
+.np-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.np-section > h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  color: var(--ink);
+}
+.np-count {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: var(--radius-full);
+  background: var(--sunken);
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+}
+.np-muted {
+  color: var(--ink-3);
+  font-weight: 400;
+}
+
+/* ---- Cần bạn quyết ---- */
+.np-decide .pulse-decisions {
+  margin: 0;
+}
+.np-decide .pulse-row {
+  gap: 20px;
+  padding: 10px 0;
+}
+.np-decide .pulse-row:last-child {
+  border-bottom: 1px solid var(--line);
+}
+.np-decide .pulse-row h3 {
+  font-size: var(--font-size-lg);
+}
+.np-decide .pulse-row p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+button.np-keylink {
+  display: inline;
+  height: auto;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: 0.95em;
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+button.np-keylink:hover:not(:disabled) {
+  background: none;
+  text-decoration-color: currentColor;
+}
+.np-decide .pulse-actions {
+  gap: 6px;
+}
+button.np-act {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--ink-2);
+  font-size: var(--font-size-md);
+  white-space: nowrap;
+}
+button.np-act:hover:not(:disabled),
+button.np-act.is-open {
+  background: var(--sunken);
+  color: var(--ink);
+}
+button.np-act.is-main {
+  border-color: var(--line-strong);
+  background: var(--raised);
+  color: var(--ink);
+  font-weight: 500;
+}
+button.np-act.is-main:hover:not(:disabled),
+button.np-act.is-main.is-open {
+  background: var(--sunken);
+}
+.popover-menu.np-resched {
+  width: 260px;
+  padding: 8px;
+}
+.np-resched-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.np-resched-body .menu-heading {
+  padding: 0;
+}
+.np-resched-quick {
+  display: flex;
+  gap: 4px;
+}
+.np-resched-quick button {
+  flex: 1;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--raised);
+  font-size: var(--font-size-sm);
+}
+.np-resched-quick button.is-on {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--on-strong);
+}
+.np-resched-body button[type="submit"] {
+  height: 30px;
+}
+
+/* ---- Tables: Epic, Người. Rows are buttons (they open the list behind them). ---- */
+.np-table {
+  display: flex;
+  flex-direction: column;
+}
+.np-tr {
+  display: grid;
+  align-items: center;
+  column-gap: 16px;
+  min-height: 38px;
+  padding: 0 8px;
+  border-top: 1px solid var(--line);
+}
+.np-table > .np-tr:last-child {
+  border-bottom: 1px solid var(--line);
+}
+.np-epics .np-tr {
+  grid-template-columns: minmax(180px, 1.4fr) minmax(120px, 1fr) 44px minmax(160px, 1fr);
+}
+.np-people .np-tr {
+  grid-template-columns: minmax(180px, 1.4fr) 72px 72px minmax(200px, 1.4fr);
+}
+.np-th {
+  min-height: 30px;
+  border-top: none;
+  color: var(--ink-3);
+  font-size: var(--font-size-sm);
+}
+button.np-tr {
+  width: 100%;
+  height: auto;
+  border-radius: 0;
+  border-left: none;
+  border-right: none;
+  border-bottom: none;
+  background: transparent;
+  color: var(--ink);
+  font-size: var(--font-size-md);
+  font-weight: 400;
+  text-align: left;
+}
+button.np-tr:hover:not(:disabled) {
+  background: var(--sunken);
+  border-left: none;
+  border-right: none;
+  border-bottom: none;
+}
+.np-table > button.np-tr:last-child,
+.np-table > button.np-tr:last-child:hover:not(:disabled) {
+  border-bottom: 1px solid var(--line);
+}
+.np-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.np-ellipsis {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.np-key {
+  flex: none;
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+}
+.np-num {
+  text-align: right;
+  font-family: var(--font-mono);
+}
+.np-num.is-risk {
+  color: var(--risk-text);
+}
+.np-dev {
+  color: var(--ink-3);
+}
+.np-dev.is-risk {
+  color: var(--risk-text);
+}
+.np-dev.is-warn {
+  color: var(--warn-text);
+}
+.np-avatar {
+  flex: none;
+}
+.np-load {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.np-load-bar {
+  position: relative;
+  flex: none;
+  width: 72px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px var(--line);
+  overflow: hidden;
+}
+.np-load-bar > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--ink-3);
+}
+/* Over capacity: red and hatched, never colour alone (the figure beside it says how much). */
+.np-load-bar.is-over > span {
+  background: repeating-linear-gradient(135deg, var(--risk) 0 3px, var(--risk-soft) 3px 5px);
+}
+.np-load-val {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-sm);
+  color: var(--ink-2);
+}
+.np-load-val b {
+  font-family: var(--font-mono);
+  font-weight: 500;
+}
+.np-load-val.is-risk {
+  color: var(--risk-text);
+}
+
+/* ---- Trend: real pixels, 160px tall ---- */
+.np-trend {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.np-legend {
+  display: flex;
+  gap: 14px;
+  font-size: var(--font-size-sm);
+  color: var(--ink-3);
+}
+.np-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+i.np-swatch {
+  width: 14px;
+  height: 2px;
+  border-radius: 1px;
+}
+i.np-swatch.is-actual {
+  background: var(--ink);
+}
+i.np-swatch.is-planned {
+  background: var(--ink-4);
+}
+.np-trend-plot {
+  position: relative;
+  width: 100%;
+}
+.np-trend-plot svg {
+  display: block;
+  overflow: visible;
+}
+.np-grid {
+  stroke: var(--line);
+  stroke-dasharray: 2 3;
+}
+.np-axis {
+  stroke: var(--line-strong);
+}
+.np-tick {
+  fill: var(--ink-3);
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+.np-path {
+  fill: none;
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.np-path.is-actual {
+  stroke: var(--ink);
+}
+.np-path.is-planned {
+  stroke: var(--ink-4);
+  stroke-dasharray: 4 3;
+}
+.np-crosshair {
+  stroke: var(--line-strong);
+}
+.np-dot {
+  stroke: var(--sheet);
+  stroke-width: 2;
+}
+.np-dot.is-actual {
+  fill: var(--ink);
+}
+.np-dot.is-planned {
+  fill: var(--ink-4);
+}
+.np-tip {
+  position: absolute;
+  top: 0;
+  transform: translateX(10px);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border-radius: var(--radius-md);
+  background: var(--ink);
+  color: var(--on-strong);
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.np-tip.is-left {
+  transform: translateX(calc(-100% - 10px));
+}
+.np-tip-hint {
+  color: color-mix(in srgb, var(--on-strong) 65%, transparent);
+}
+
+/* Báo cáo Agile, opened from ⋯: a section like the others, its header closes it. */
+.np-agile .pr-card {
+  border: none;
+  padding: 0;
+  background: transparent;
+}
+.ag-head.is-static {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: default;
+}
+.ag-head.is-static h3 {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+@media print {
+  .np-bar,
+  button.np-why,
+  .pulse-actions {
+    display: none !important;
+  }
+}
+
+/* The counts keep .pr-tile (what the e2e suites and the SLA count look for) but none of the old tile look. */
+.np-facts button.np-fact {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  text-align: left;
+  line-height: 1;
+}
+.np-facts button.np-fact b {
+  font-size: var(--font-size-md);
+  line-height: 1;
+}
+.np-th .np-num {
+  font-family: inherit;
+}
+.np-facts button.np-fact,
+.np-facts button.np-fact:hover:not(:disabled) {
+  border: none;
+  box-shadow: none;
+  transform: none;
+}
+button.np-reset {
+  padding: 0 6px;
+  font-size: var(--font-size-md);
+  font-weight: 400;
+}
+.np-agile .pr-card.pr-agile,
+.np-agile .pr-card.pr-agile:hover {
+  padding: 0;
+  border: none;
+  box-shadow: none;
+  background: transparent;
+}
+.np-agile .ag-head.is-static {
+  padding: 0;
+  margin-bottom: 8px;
+}
+.np-agile .ag-body {
+  padding: 0;
+}
+button.ag-close {
+  height: 26px;
+  padding: 0 6px;
+  font-size: var(--font-size-md);
+  font-weight: 400;
+  color: var(--ink-3);
+}

@@ -319,18 +319,22 @@ await step("tạo nhanh có chọn loại + người", async () => {
 });
 
 console.log("\n== Báo cáo ==");
-await step("lọc theo người → số việc khớp đúng máy chủ", async () => {
-  await tab("Nhịp dự án"); await page.waitForSelector(".pr-filters");
+await step("Phạm vi → một người: số việc khớp đúng máy chủ, nút Phạm vi nói đang xem ai", async () => {
+  await tab("Nhịp dự án"); await page.waitForSelector(".np-scope");
   const all = (await mock("/api/progress?asOf=" + localToday())).metrics.counts.total;
-  await page.locator(".pr-filter", { hasText: "Người" }).locator("select").selectOption({ label: "Nguyễn Anh" });
+  await page.locator(".np-scope").click();
+  await page.locator(".np-scope-menu .np-opt", { hasText: "Nguyễn Anh" }).click();
+  await page.keyboard.press("Escape");
   const want = (await mock("/api/progress?asOf=" + localToday() + "&assignee=anh")).metrics.counts.total;
   assert.ok(want < all, "dữ liệu thử không đủ để phân biệt");
-  await page.waitForFunction((w) => document.querySelector(".pr-sub")?.textContent.includes(w + " việc"), want);
-  assert.ok((await page.textContent(".rv-notice")).includes("một phần"));
+  await page.waitForFunction((w) => document.querySelector(".np-total")?.textContent.trim() === w + " việc", want);
+  assert.ok((await page.textContent(".np-scope")).includes("Nguyễn Anh"));
+  assert.ok(await page.locator(".np-scope.is-on").count(), "bộ lọc đang bật phải là nền mực");
 });
 await step("đặt lại bộ lọc", async () => {
-  await page.locator(".pr-filters .text-btn", { hasText: "Đặt lại" }).click();
-  await page.waitForFunction(() => !document.querySelector(".pr-filters .text-btn"));
+  await page.locator(".np-reset", { hasText: "Đặt lại" }).click();
+  await page.waitForFunction(() => !document.querySelector(".np-reset"));
+  assert.ok((await page.textContent(".np-scope")).includes("Cả dự án"));
 });
 await step("có ô 'Sắp đến hạn (7 ngày)'", async () => {
   assert.equal(await page.locator(".pr-tile", { hasText: "Sắp đến hạn" }).count(), 1);
