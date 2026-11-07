@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
+import { motionAllowed, playClose, playOpen, type Run } from "../chatMotion";
 import { addFiles, encodeFile, formatSize } from "../chatAttachments";
 import { atBottom, composeMessage, suggestionsFor, type AttachedTask, type ChatView } from "../chatCompose";
 import { streamChat, type RetryMode } from "../chatStream";
@@ -183,6 +184,13 @@ export default function ChatDock({
   const phone = usePhone();
   const win = useFloatingWindow(!phone);
   const [open, setOpen] = useState(false);
+  // Closing plays out before the window is removed: `open` is already false (the rail has let go of its button),
+  // `leaving` keeps the window on screen until it has shrunk back into that button.
+  const [leaving, setLeaving] = useState(false);
+  // Set for the moment after maximise / reset, so the window glides to its new size instead of jumping.
+  const [tween, setTween] = useState(false);
+  const motion = useRef<Run | null>(null);
+  const tweenTimer = useRef<number | undefined>(undefined);
   const [unread, setUnread] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(() => readStored(storageKey));
@@ -348,18 +356,63 @@ export default function ChatDock({
 
   /* ---- opening, closing, focus ---- */
 
+  function closeWindow() {
+    if (!open) return;
+    setOpen(false);
+    const el = win.elRef.current;
+    if (!el || !motionAllowed()) return;
+    motion.current?.cancel();
+    const run = playClose(el, phone);
+    motion.current = run;
+    setLeaving(true);
+    run.finished.then(
+      () => {
+        if (motion.current === run) setLeaving(false);
+      },
+      () => {} // cancelled: it was opened again before it ended
+    );
+  }
+
+  // The window appears by growing out of the rail button. Opened again while it is still leaving, it simply
+  // turns round: the old movement is cancelled and the opening one starts from the full size.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const el = win.elRef.current;
+    motion.current?.cancel();
+    motion.current = null;
+    setLeaving(false);
+    if (!el || !motionAllowed()) return;
+    const run = playOpen(el, phone);
+    motion.current = run;
+    run.finished.catch(() => {});
+    return () => run.cancel();
+  }, [open, phone, win.elRef]);
+
+  /** Runs a change of the window's size (maximise / restore) with a short glide. */
+  function glide(change: () => void) {
+    window.clearTimeout(tweenTimer.current);
+    if (motionAllowed()) {
+      setTween(true);
+      tweenTimer.current = window.setTimeout(() => setTween(false), 380);
+    }
+    change();
+  }
+  useEffect(() => () => window.clearTimeout(tweenTimer.current), []);
+
   const askRef = useRef<(text: string) => void>(() => {});
   const lastNonce = useRef<number | null>(null);
   useEffect(() => {
     if (!openRequest || openRequest.nonce === lastNonce.current) return;
     lastNonce.current = openRequest.nonce;
     if (openRequest.toggle && open) {
-      setOpen(false);
+      closeWindow();
       return;
     }
     setOpen(true);
     const text = openRequest.text?.trim();
     if (text) askRef.current(text);
+    // closeWindow reads the current render's state; the request itself is what this effect reacts to.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openRequest, open]);
 
   useEffect(() => {
@@ -640,7 +693,7 @@ export default function ChatDock({
   const shownSessions = sessions?.filter((x) => !q || x.title.toLowerCase().includes(q));
 
   // Closed, the window is nothing; but a drag of work from the app shows where to drop it to start asking.
-  if (!open) {
+  if (!open && !leaving) {
     if (!dragging) return null;
     return (
       <div
@@ -664,20 +717,24 @@ export default function ChatDock({
 
   const style = phone ? undefined : { left: win.rect.x, top: win.rect.y, width: win.rect.w, height: win.rect.h };
   const showEmpty = messages.length === 0 && !live;
+  // "Chào Tuấn": the given name is the last word of a Vietnamese name.
+  const myName = users.find((u) => u.accountId === meId)?.displayName.trim().split(/\s+/).at(-1);
 
   return (
     <div
       ref={win.elRef}
-      className={`chat-dock${phone ? " is-phone" : ""}${win.maximized ? " is-max" : ""}${win.busy ? ` is-${win.busy}` : ""}${dropActive ? " is-drop" : ""}${dragging && !dropActive ? " is-target" : ""}`}
+      className={`chat-dock${phone ? " is-phone" : ""}${win.maximized ? " is-max" : ""}${win.busy ? ` is-${win.busy}` : ""}${dropActive ? " is-drop" : ""}${dragging && !dropActive ? " is-target" : ""}${tween ? " is-tween" : ""}${leaving ? " is-leaving" : ""}`}
       style={style}
       role="dialog"
       aria-label="Trợ lý"
+      // Grabbing the window mid-glide snaps it to where it was going, so the drag starts from where it really is.
+      onPointerDownCapture={() => tween && setTween(false)}
       onKeyDown={(e) => {
         // Esc closes the window when focus is in it. Renaming, editing and the "@" menu stop their own Esc
         // first, and stopping it here keeps it from also clearing the plan's selection behind.
         if (e.key === "Escape" && !e.defaultPrevented) {
           e.stopPropagation();
-          setOpen(false);
+          closeWindow();
         }
       }}
       onDragEnter={onDragEnter}
@@ -689,7 +746,7 @@ export default function ChatDock({
         className="chat-dock-header"
         onPointerDown={win.startMove}
         onDoubleClick={(e) => {
-          if (!phone && !(e.target as HTMLElement).closest("button, input, a")) win.toggleMaximized();
+          if (!phone && !(e.target as HTMLElement).closest("button, input, a")) glide(win.toggleMaximized);
         }}
       >
         <button
@@ -711,7 +768,7 @@ export default function ChatDock({
             <button
               type="button"
               className="chat-icon-btn"
-              onClick={win.toggleMaximized}
+              onClick={() => glide(win.toggleMaximized)}
               title={win.maximized ? "Thu nhỏ" : "Mở rộng"}
               aria-label={win.maximized ? "Thu nhỏ" : "Mở rộng"}
             >
@@ -773,7 +830,7 @@ export default function ChatDock({
               </>
             )}
           </Popover>
-          <button type="button" className="chat-icon-btn" onClick={() => setOpen(false)} title="Đóng (Esc)" aria-label="Đóng">
+          <button type="button" className="chat-icon-btn" onClick={closeWindow} title="Đóng (Esc)" aria-label="Đóng">
             <Icon name="x" size={14} />
           </button>
         </div>
@@ -875,14 +932,19 @@ export default function ChatDock({
         <div className="chat-messages" ref={scrollRef} onScroll={onScroll} role="log" aria-label="Cuộc trò chuyện" aria-busy={!!live}>
           {showEmpty && (
             <div className="chat-empty">
+              <h2 className="chat-hello">
+                <span className="chat-mark" aria-hidden="true">
+                  G
+                </span>
+                {myName ? `Chào ${myName}` : "Xin chào"}
+              </h2>
               <div className="chat-suggestions">
-                {suggestionsFor(view, selectedKeys.length > 0).map((s) => (
-                  <button key={s} type="button" className="chat-suggestion" onClick={() => void ask(s)}>
+                {suggestionsFor(view, selectedKeys.length > 0).map((s, i) => (
+                  <button key={s} type="button" className="chat-suggestion" style={{ "--i": i } as React.CSSProperties} onClick={() => void ask(s)}>
                     {s}
                   </button>
                 ))}
               </div>
-              <p>Kéo việc từ kế hoạch hoặc bảng vào đây, gõ @ để gọi người.</p>
             </div>
           )}
 

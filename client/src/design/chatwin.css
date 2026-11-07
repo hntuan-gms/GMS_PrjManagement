@@ -6,6 +6,10 @@
 /* Above the task panel (--z-peek) so opening a task from a reply does not bury the conversation;
    under popovers, which the window's own menus and the app's pickers need to draw over it. */
 .chat-dock {
+  /* The assistant is the one place with rounder corners (16px window, 14px box and bubbles): a conversation
+     reads softer than a table, and a child never has a bigger radius than its parent. */
+  --chat-r-win: 16px;
+  --chat-r-box: 14px;
   position: fixed;
   right: auto;
   bottom: auto;
@@ -15,18 +19,34 @@
   display: flex;
   flex-direction: column;
   background: var(--sheet);
-  border: 1px solid var(--line-strong);
-  border-width: 1px;
-  border-radius: var(--radius-xl);
+  border: 1px solid var(--line);
+  border-radius: var(--chat-r-win);
   box-shadow: var(--shadow-float);
   overflow: hidden;
-  animation: chat-in var(--d-3) var(--e-out);
+  /* Opening and closing are played from chatMotion.ts, which knows where the rail button is. */
 }
 @keyframes chat-in {
   from {
     opacity: 0;
     transform: translateY(8px) scale(0.985);
   }
+}
+@keyframes chat-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+/* Maximise and "Đặt lại vị trí" glide to the new size. Only while the class is on: a drag must follow the pointer. */
+.chat-dock.is-tween {
+  transition:
+    left var(--d-4) var(--e-move),
+    top var(--d-4) var(--e-move),
+    width var(--d-4) var(--e-move),
+    height var(--d-4) var(--e-move);
+}
+.chat-dock.is-leaving {
+  pointer-events: none;
 }
 .chat-dock.is-move,
 .chat-dock.is-resize {
@@ -91,10 +111,10 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  min-height: 40px;
-  padding: 0 6px 0 4px;
-  border-bottom: 1px solid var(--line);
-  background: var(--raised);
+  min-height: 48px;
+  padding: 0 10px 0 8px;
+  border-bottom: 0;
+  background: var(--sheet);
   cursor: grab;
   user-select: none;
   touch-action: none;
@@ -207,9 +227,21 @@ button.chat-icon-btn:hover:not(:disabled),
 .chat-messages-wrap .chat-messages {
   flex: 1 1 0;
   min-height: 0;
-  padding: 14px 14px 8px;
-  gap: 14px;
+  padding: 6px 20px 14px;
+  gap: 22px;
   overscroll-behavior: contain;
+}
+/* Wide (maximised): the conversation is a centred column like a full page of chat, not a line across the screen. */
+.chat-dock.is-max .chat-messages > * {
+  width: 100%;
+  max-width: 760px;
+  align-self: center;
+}
+.chat-dock.is-max .chat-composer-wrap {
+  width: 100%;
+  max-width: 800px;
+  align-self: center;
+  box-sizing: border-box;
 }
 .chat-jump {
   position: absolute;
@@ -230,31 +262,45 @@ button.chat-icon-btn:hover:not(:disabled),
   box-shadow: var(--shadow-lg);
   animation: chat-in var(--d-2) var(--e-out);
 }
+/* You: a soft tinted bubble on the right. The assistant: plain text on the page, no frame. */
 .chat-bubble {
-  max-width: 92%;
+  max-width: 88%;
+  font-size: var(--font-size-lg);
+  line-height: 1.6;
 }
 .chat-msg-user .chat-bubble {
-  background: var(--ink);
-  color: var(--sheet);
+  padding: 9px 14px;
+  border-radius: var(--chat-r-box);
+  background: color-mix(in srgb, var(--ink) 6%, var(--sheet));
+  color: var(--ink);
+  animation: chat-rise var(--d-3) var(--e-out);
 }
 .chat-msg-model .chat-bubble {
   background: transparent;
   padding: 0;
   max-width: 100%;
   color: var(--ink);
+  line-height: 1.65;
+}
+.chat-msg-model .chat-md > * + * {
+  margin-top: 10px;
+}
+.chat-msg-model .chat-md ul,
+.chat-msg-model .chat-md ol {
+  gap: 4px;
 }
 .chat-user-text {
   white-space: pre-wrap;
 }
 .chat-issue.is-on-strong {
-  background: transparent;
-  border-color: color-mix(in srgb, var(--sheet) 55%, transparent);
-  color: inherit;
+  background: var(--raised);
+  border-color: var(--line-strong);
+  color: var(--ink);
 }
 button.chat-issue.is-on-strong:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--sheet) 16%, transparent);
-  border-color: var(--sheet);
-  color: inherit;
+  background: var(--sunken);
+  border-color: var(--line-stronger);
+  color: var(--ink);
 }
 .chat-mention {
   padding: 0 5px;
@@ -367,35 +413,62 @@ button.chat-chip-x:hover:not(:disabled) {
 .chat-empty {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  align-items: flex-start;
+  gap: 20px;
   margin: auto 0;
+  padding: 0 0 6px;
 }
-.chat-empty p {
+.chat-hello {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   margin: 0;
-  font-size: var(--font-size-sm);
-  color: var(--ink-3);
+  font-size: var(--font-size-page);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  animation: chat-rise var(--d-4) var(--e-out) 120ms backwards;
+}
+/* The same mark as the rail: the one place son is allowed to be a logo. */
+.chat-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-lg);
+  background: var(--son);
+  color: var(--on-son);
+  font-size: var(--font-size-lead);
+  font-weight: 700;
+  letter-spacing: -0.02em;
 }
 .chat-suggestions {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
 }
 .chat-suggestion {
   justify-content: flex-start;
   width: 100%;
-  min-height: 34px;
-  padding: 6px 12px;
+  min-height: 38px;
+  padding: 8px 14px;
   border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  background: var(--raised);
+  border-radius: var(--chat-r-box);
+  background: transparent;
   box-shadow: none;
-  color: var(--ink);
+  color: var(--ink-2);
   font-size: var(--font-size-md);
   text-align: left;
+  animation: chat-rise var(--d-4) var(--e-out) calc(200ms + var(--i, 0) * 45ms) backwards;
 }
 button.chat-suggestion:hover:not(:disabled) {
   border-color: var(--line-stronger);
   background: var(--sunken);
+  color: var(--ink);
   box-shadow: none;
 }
 
@@ -603,7 +676,7 @@ button.chat-act:hover:not(:disabled) {
 
 /* ---- the box a message is written in ---- */
 .chat-composer-wrap {
-  padding: 6px 10px 10px;
+  padding: 4px 14px 14px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -632,8 +705,9 @@ button.chat-act:hover:not(:disabled) {
   display: flex;
   flex-direction: column;
   border: 1px solid var(--line-strong);
-  border-radius: var(--radius-lg);
+  border-radius: var(--chat-r-box);
   background: var(--raised);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 6%, transparent);
   transition: border-color var(--d-2) var(--e-out), box-shadow var(--d-2) var(--e-out);
 }
 .chat-composer:focus-within {
@@ -643,9 +717,9 @@ button.chat-act:hover:not(:disabled) {
 .chat-composer textarea {
   flex: none;
   width: 100%;
-  min-height: 38px;
+  min-height: 44px;
   max-height: 132px;
-  padding: 9px 12px 2px;
+  padding: 12px 14px 2px;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -653,8 +727,14 @@ button.chat-act:hover:not(:disabled) {
   outline: none;
   resize: none;
   font: inherit;
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-lg);
   line-height: 1.5;
+}
+/* The box around it already shows focus; the field's own ring would be a second frame inside the first. */
+.chat-composer textarea:focus,
+.chat-composer textarea:focus-visible {
+  box-shadow: none;
+  outline: none;
 }
 .chat-tray {
   display: flex;
@@ -668,7 +748,7 @@ button.chat-act:hover:not(:disabled) {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 2px 6px 6px;
+  padding: 2px 8px 8px;
 }
 .chat-composer-fill {
   flex: 1;
@@ -677,11 +757,11 @@ button.chat-act:hover:not(:disabled) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   padding: 0;
   border: 0;
-  border-radius: var(--radius-full);
+  border-radius: var(--radius-lg);
   background: var(--ink);
   color: var(--sheet);
   box-shadow: none;

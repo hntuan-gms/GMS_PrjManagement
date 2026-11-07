@@ -87,6 +87,17 @@ export function maximizedRect(vw: number, vh: number, railW: number): Rect {
   return clampRect({ x: railW + MARGIN, y: MARGIN, w: vw - railW - MARGIN * 2, h: vh - MARGIN * 2 }, vw, vh);
 }
 
+/**
+ * Where the window grows from (and shrinks back to) when it opens or closes: the centre of the button that
+ * opens it, as an offset inside the window (what `transform-origin` takes), and the scale at which the window
+ * is as wide as that button. With no button on screen it grows from its own bottom right corner.
+ */
+export function launchOrigin(r: Rect, anchor: Rect | null): { ox: number; oy: number; scale: number } {
+  if (!anchor || anchor.w <= 0) return { ox: r.w, oy: r.h, scale: 0.9 };
+  const scale = Math.min(0.3, Math.max(0.08, anchor.w / r.w));
+  return { ox: Math.round(anchor.x + anchor.w / 2 - r.x), oy: Math.round(anchor.y + anchor.h / 2 - r.y), scale };
+}
+
 export function parseRect(raw: string | null): Rect | null {
   if (!raw) return null;
   try {

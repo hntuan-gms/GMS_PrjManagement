@@ -11,7 +11,7 @@ import {
   suggestionsFor,
 } from "../src/chatCompose";
 import { dragKeysFor, readTaskDrag, TASK_MIME } from "../src/taskDrag";
-import { clampRect, defaultRect, maximizedRect, resizeRect, stepAsideOfPeek, MIN_H, MIN_W, parseRect } from "../src/windowGeometry";
+import { clampRect, defaultRect, launchOrigin, maximizedRect, resizeRect, stepAsideOfPeek, MIN_H, MIN_W, parseRect } from "../src/windowGeometry";
 import type { JiraUser } from "../src/types";
 import type { Mentions } from "../src/mentions";
 
@@ -132,6 +132,18 @@ describe("chat: drag payload and window geometry", () => {
     assert.ok(m.x >= 56 && m.x + m.w <= 1400);
     assert.equal(parseRect("{nope"), null);
     assert.deepEqual(parseRect('{"x":1,"y":2,"w":400,"h":500}'), { x: 1, y: 2, w: 400, h: 500 });
+  });
+
+  it("the window grows from the middle of the button that opens it, and from its own corner when there is none", () => {
+    const win = { x: 1000, y: 200, w: 420, h: 620 };
+    const button = { x: 5, y: 700, w: 46, h: 44 };
+    const o = launchOrigin(win, button);
+    // The button's centre (28, 722) as an offset inside the window.
+    assert.deepEqual([o.ox, o.oy], [28 - 1000, 722 - 200]);
+    assert.ok(o.scale >= 0.08 && o.scale <= 0.3, String(o.scale));
+    assert.ok(Math.abs(o.scale - 46 / 420) < 0.001);
+    const alone = launchOrigin(win, null);
+    assert.deepEqual([alone.ox, alone.oy], [420, 620]);
   });
 });
 
