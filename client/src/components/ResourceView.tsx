@@ -96,8 +96,8 @@ const LEGEND: Array<{ band: string; short: string; title: string }> = [
  * the same render rather than after a round trip. Only the two things Jira has
  * no field for — capacity and absence — are fetched.
  *
- * Two rows of chrome and then the table: the toolbar (view, search, filters, window, columns,
- * export) and the KPI pills, which are also the people filter. A person opens *inside* the
+ * One row of chrome and then the table: view, search, who is shown (the counts are the KPIs), filters |
+ * work nobody owns, columns, window, and a "⋯" with sort, legend and export. A person opens *inside* the
  * table (their tasks on the same date columns); what is edited about them — role, hours, leave,
  * skills — is a slide-over; work nobody owns is a floating card, closed until asked for.
  */
@@ -364,6 +364,7 @@ export default function ResourceView({
     setRange(rangeForPreset(id, span, today, tasks));
   }
   const activePreset = currentPreset(range, today, tasks);
+  const presetLabel = RANGE_PRESETS.find((p) => p.id === activePreset)?.label ?? "Tuỳ chọn";
 
   // Saves are applied to the cached pool rather than triggering a refetch: the
   // response is the authoritative row, and a round trip here would make the
@@ -416,10 +417,10 @@ export default function ResourceView({
     endDrag();
   }
 
-  const pills: Array<{ view: PeopleView; label: string; n: number; tone?: "danger" }> = [
+  const scopes: Array<{ view: PeopleView; label: string; n: number; tone?: "danger" }> = [
     { view: "all", label: "Tất cả", n: counts.all },
     { view: "busy", label: "Có việc", n: counts.busy },
-    { view: "over", label: "Đang quá tải", n: counts.over, tone: counts.over > 0 ? "danger" : undefined },
+    { view: "over", label: "Quá tải", n: counts.over, tone: counts.over > 0 ? "danger" : undefined },
   ];
 
   return (
@@ -450,6 +451,26 @@ export default function ResourceView({
                 />
               </div>
             )}
+            {/* Who is shown. The counts are the at-a-glance numbers (the overload one is red when it is not zero),
+                so this is one click and always visible, not a menu. */}
+            {mode === "load" && (
+              <div className="seg-group rv-scope" role="group" aria-label="Lọc thành viên">
+                {scopes.map((p) => (
+                  <button
+                    key={p.view}
+                    type="button"
+                    data-view={p.view}
+                    className={`${peopleView === p.view ? "active" : ""}${p.tone ? " has-over" : ""}`}
+                    aria-pressed={peopleView === p.view}
+                    title={p.view === "over" ? `Quá công suất trong ${SOON_LABEL}` : undefined}
+                    onClick={() => setPeopleView(p.view)}
+                  >
+                    {p.label}
+                    {p.n > 0 && <span className="rv-scope-n">{p.n}</span>}
+                  </button>
+                ))}
+              </div>
+            )}
             {/* Applies the whole shared filter, people included, so the Gantt shows
                 the same saved view when you switch back. */}
             {mode === "load" && <SavedFilterMenu filter={filter} onApply={onFilterChange} myAccountId={myAccountId} />}
@@ -458,6 +479,19 @@ export default function ResourceView({
         trailing={
           mode === "load" ? (
             <div className="rv-range">
+              {/* Work nobody owns. At the right: opened from the left its card floated over the columns around today. */}
+              <button
+                ref={unassignedBtn}
+                type="button"
+                className={`rv-pill rv-pill-warn rv-un-pill${unassignedOpen ? " is-on" : ""}${load.unassigned.length === 0 ? " is-empty" : ""}`}
+                aria-expanded={unassignedOpen}
+                aria-controls={unassignedId}
+                onClick={() => setUnassignedOpen((v) => !v)}
+                title="Việc chưa giao"
+              >
+                <Icon name="alert" size={13} />
+                {load.unassigned.length} chưa gán
+              </button>
               <div
                 className="seg-group rv-granularity"
                 role="group"
@@ -483,15 +517,22 @@ export default function ResourceView({
                 onClick={() => scrollEl && scrollToDate(scrollEl, today)}
                 title="Cuộn bảng tới ngày hôm nay"
               >
-                Về hôm nay
+                Hôm nay
               </button>
               <Popover
                 className="tf-btn rv-preset"
                 align="end"
                 menuLabel="Khoảng thời gian"
                 menuClassName="rv-range-menu"
-                title="Chọn nhanh một khoảng, hoặc nhập ngày chính xác"
-                label={`Khoảng: ${RANGE_PRESETS.find((p) => p.id === activePreset)?.label ?? "Tuỳ chọn"}`}
+                title={`Khoảng thời gian: ${presetLabel}`}
+                // The default ("Theo dự án") is just the icon: it is what everyone has until they narrow the axis,
+                // and the label is what the row had no room for at 1280px.
+                label={
+                  <>
+                    <Icon name="calendar" size={14} />
+                    {activePreset !== "project" && presetLabel}
+                  </>
+                }
               >
                 {({ close }) => (
                   <>
@@ -534,16 +575,66 @@ export default function ResourceView({
                   </>
                 )}
               </Popover>
-              <button
-                type="button"
-                className="tb-btn"
-                onClick={exportCsv}
-                aria-label="Xuất CSV"
-                title="Tải giờ phân bổ từng người theo ngày về file CSV"
+              <Popover
+                className="tb-btn rv-more"
+                role="menu"
+                align="end"
+                caret={false}
+                menuLabel="Tuỳ chọn"
+                menuClassName="rv-more-menu"
+                ariaLabel="Tuỳ chọn"
+                title="Sắp xếp, chú giải, xuất CSV"
+                label={<Icon name="more" size={16} />}
               >
-                <Icon name="download" />
-                <span className="tb-label">Xuất CSV</span>
-              </button>
+                {({ close }) => (
+                  <>
+                    <div className="menu-heading">Sắp xếp</div>
+                    {(Object.keys(PEOPLE_SORT_LABEL) as PeopleSort[]).map((k) => (
+                      <button
+                        key={k}
+                        type="button"
+                        role="menuitem"
+                        data-sort={k}
+                        aria-pressed={peopleSort === k}
+                        className="menu-item rv-sort-item"
+                        onClick={() => {
+                          close();
+                          setPeopleSort(k);
+                        }}
+                      >
+                        <span className="rv-menu-check">{peopleSort === k && <Icon name="check" size={14} />}</span>
+                        {PEOPLE_SORT_LABEL[k]}
+                      </button>
+                    ))}
+                    <div className="menu-sep" role="separator" />
+                    <div className="menu-heading">Chú giải</div>
+                    <div className="rv-legend" role="group" aria-label="Chú giải màu">
+                      {LEGEND.map((l) => (
+                        <span key={l.band} className="rv-legend-item" title={l.title}>
+                          <i className={`rv-swatch band-${l.band}`}>
+                            <span className="rv-sky" aria-hidden="true" />
+                          </i>
+                          {l.short}
+                        </span>
+                      ))}
+                    </div>
+                    <div className="menu-sep" role="separator" />
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="menu-item rv-export"
+                      title="Tải giờ phân bổ từng người theo ngày về file CSV"
+                      onClick={() => {
+                        close();
+                        exportCsv();
+                      }}
+                    >
+                      <Icon name="download" size={14} />
+                      Xuất CSV
+                    </button>
+                  </>
+                )}
+              </Popover>
             </div>
           ) : undefined
         }
@@ -557,58 +648,6 @@ export default function ResourceView({
       )}
       {mode === "load" && (
         <>
-          <div className="rv-kpis">
-            <div className="rv-pills" role="group" aria-label="Lọc thành viên">
-              {pills.map((p) => (
-                <button
-                  key={p.view}
-                  type="button"
-                  className={`rv-pill${peopleView === p.view ? " is-on" : ""}${p.tone ? ` rv-pill-${p.tone}` : ""}`}
-                  aria-pressed={peopleView === p.view}
-                  onClick={() => setPeopleView(p.view)}
-                >
-                  {p.label}
-                  {p.n > 0 ? ` (${p.n})` : ""}
-                </button>
-              ))}
-            </div>
-            <label className="rv-sort">
-              <span>Sắp xếp</span>
-              <select value={peopleSort} onChange={(e) => setPeopleSort(e.target.value as PeopleSort)} aria-label="Sắp xếp thành viên">
-                {(Object.keys(PEOPLE_SORT_LABEL) as PeopleSort[]).map((k) => (
-                  <option key={k} value={k}>
-                    {PEOPLE_SORT_LABEL[k]}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {/* At the right, with the legend: opened from the left it floated over the columns around today. */}
-            <button
-              ref={unassignedBtn}
-              type="button"
-              className={`rv-pill rv-pill-warn rv-un-pill${unassignedOpen ? " is-on" : ""}${load.unassigned.length === 0 ? " is-empty" : ""}`}
-              aria-expanded={unassignedOpen}
-              aria-controls={unassignedId}
-              onClick={() => setUnassignedOpen((v) => !v)}
-              title="Việc chưa giao"
-            >
-              <Icon name="alert" size={13} />
-              {load.unassigned.length} việc chưa gán
-              <Icon name="chevronDown" size={12} className="rv-pill-caret" />
-            </button>
-
-            <div className="rv-legend" role="group" aria-label="Chú giải màu">
-              {LEGEND.map((l) => (
-                <span key={l.band} className="rv-legend-item" title={l.title}>
-                  <i className={`rv-swatch band-${l.band}`}>
-                    <span className="rv-sky" aria-hidden="true" />
-                  </i>
-                  {l.short}
-                </span>
-              ))}
-            </div>
-          </div>
-
           {poolError && (
             <div className="rv-notice">
               Không tải được công suất và lịch nghỉ ({poolError}). Bản đồ nhiệt vẫn tính theo mặc định{" "}

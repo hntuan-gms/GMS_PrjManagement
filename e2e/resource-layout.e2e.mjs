@@ -1,5 +1,5 @@
-// The resource tab's layout contract, in a real browser against the stand-in API: two rows of chrome
-// (toolbar + KPI pills), work nobody owns as a floating card that is closed until asked for and fades
+// The resource tab's layout contract, in a real browser against the stand-in API: one row of chrome
+// (view, search, who is shown with its counts, filters | work nobody owns, columns, window, "⋯"), work nobody owns as a floating card that is closed until asked for and fades
 // while something is dragged, a person's tasks opened inline under their row on the heatmap's own date
 // columns, and the profile & leave slide-over. What reaches Jira for real is on the manual checklist.
 import assert from "node:assert/strict";
@@ -82,15 +82,17 @@ const setWindow = async (from, to) => {
 };
 const lenOf = (w) => (Date.parse(w.to) - Date.parse(w.from)) / 86400000 + 1;
 
-console.log("\n== Hai hàng: toolbar + KPI ==");
-await step("toolbar một hàng và hàng KPI một dòng ở 1500px và 1280px, trang không cuộn ngang", async () => {
+console.log("\n== Một hàng: toolbar ==");
+await step("toolbar một hàng, không còn hàng KPI, ở 1500px và 1280px, trang không cuộn ngang", async () => {
   for (const width of [1500, 1280]) {
     await page.setViewportSize({ width, height: 900 });
     await page.waitForTimeout(150);
     const bar = await rect(".resource-view > .tf-bar");
     assert.ok(bar.height <= 56, `toolbar ở ${width}px cao ${bar.height} — đã xuống dòng`);
-    const kpi = await rect(".rv-kpis");
-    assert.ok(kpi.height <= 44, `hàng KPI ở ${width}px cao ${kpi.height} — đã xuống dòng`);
+    assert.equal(await page.locator(".rv-kpis").count(), 0, "còn hàng KPI riêng");
+    // Nothing in the bar may be cut off at its right-hand end.
+    const last = await rect(".resource-view > .tf-bar .rv-more");
+    assert.ok(last.x + last.width <= width, `nút ⋯ tràn ra ngoài cửa sổ ở ${width}px`);
     const over = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     assert.ok(over <= 0, `trang cuộn ngang ${over}px ở ${width}px`);
   }
@@ -105,31 +107,47 @@ await step("không còn ô 'Chỉ hiện người đang có việc' và dòng ch
   for (const t of ["Mức tải", "Kỹ năng", "Bộ lọc"]) assert.ok(text.includes(t), t + " thiếu");
   assert.equal(await page.locator(".resource-view .tf-bar .sf-select").count(), 1, "thiếu menu bộ lọc đã lưu");
 });
-await step("pill KPI: Tất cả / Có việc / Đang quá tải kèm số, nút chưa gán (không còn 'Mức sử dụng')", async () => {
-  const pills = await page.locator(".rv-pills .rv-pill").allTextContents();
+await step("Tất cả / Có việc / Quá tải kèm số trong một nhóm nút ngay trên thanh; nút chưa gán; không còn 'Mức sử dụng'", async () => {
+  const pills = await page.locator(".rv-scope button").allTextContents();
   assert.equal(pills.length, 3);
-  assert.match(pills[0], /^Tất cả \(\d+\)$/);
-  assert.match(pills[1], /^Có việc \(\d+\)$/);
-  // A zero count is hidden (MASTER), the pill stays.
-  assert.match(pills[2], /^Đang quá tải( \(\d+\))?$/);
+  assert.match(pills[0], /^Tất cả\s*\d+$/);
+  assert.match(pills[1], /^Có việc\s*\d+$/);
+  // A zero count is hidden (MASTER), the button stays.
+  assert.match(pills[2], /^Quá tải\s*\d*$/);
   assert.equal(await page.locator(".rv-kpi-stat").count(), 0, "đã bỏ 'Mức sử dụng'");
-  assert.ok((await page.locator(".rv-sort").innerText()).includes("Sắp xếp"), "nhãn đầy đủ, không cụt thành 'Sắp'");
-  assert.match(await page.locator(".rv-pill-warn").innerText(), /^\s*\d+ việc chưa gán\s*$/);
+  assert.equal(await page.locator(".rv-sort").count(), 0, "sắp xếp nằm trong menu ⋯, không còn ô chọn riêng");
+  assert.match(await page.locator(".rv-pill-warn").innerText(), /^\s*\d+ chưa gán\s*$/);
+  assert.equal(await page.locator(".resource-view > .tf-bar .rv-pill-warn").count(), 1, "nút chưa gán phải nằm trên thanh");
 });
-await step("chú giải rút gọn: 4 mục, không có 'Trống', mô tả đầy đủ nằm trong tooltip", async () => {
+await step("menu ⋯: sắp xếp, chú giải rút gọn 4 mục (mô tả đầy đủ trong tooltip), Xuất CSV", async () => {
+  await page.locator(".rv-more").click();
+  const sorts = (await page.locator(".rv-sort-item").allTextContents()).map((t) => t.trim());
+  assert.deepEqual(sorts, ["Quá tải trước", "Ít rảnh nhất", "Rảnh nhất", "Tên"]);
+  assert.equal(await page.locator(".rv-sort-item[aria-pressed=true]").count(), 1);
   const items = await page.locator(".rv-legend-item").allTextContents();
   assert.deepEqual(items.map((t) => t.trim()), ["<50%", "50–100%", ">100%", "Ngày nghỉ"]);
   assert.ok((await page.locator(".rv-legend-item").first().getAttribute("title")).includes("Dưới 50%"));
+  assert.equal(await page.locator(".rv-export").count(), 1);
+  await page.keyboard.press("Escape");
 });
-await step("bấm pill 'Có việc' chỉ còn người có việc; 'Tất cả' trả lại đủ", async () => {
-  const n = async (label) => Number((await page.locator(".rv-pill", { hasText: label }).first().innerText()).match(/\((\d+)\)/)[1]);
+await step("chọn sắp xếp 'Tên' đổi thứ tự người; trả về 'Quá tải trước'", async () => {
+  const names = () => page.locator(".rv-row-person .rv-person-text b").allTextContents();
+  await page.locator(".rv-more").click();
+  await page.locator(".rv-sort-item", { hasText: "Tên" }).click();
+  const byName = (await names()).map((t) => t.trim());
+  assert.deepEqual(byName, [...byName].sort((a, b) => a.localeCompare(b, "vi")));
+  await page.locator(".rv-more").click();
+  await page.locator(".rv-sort-item", { hasText: "Quá tải trước" }).click();
+});
+await step("bấm 'Có việc' chỉ còn người có việc; 'Tất cả' trả lại đủ", async () => {
+  const n = async (label) => Number((await page.locator(".rv-scope button", { hasText: label }).first().innerText()).match(/(\d+)/)[1]);
   const all = await n("Tất cả");
   const busy = await n("Có việc");
   assert.ok(busy < all, "dữ liệu thử phải có người rảnh");
-  await page.locator(".rv-pill", { hasText: "Có việc" }).click();
+  await page.locator(".rv-scope button", { hasText: "Có việc" }).click();
   assert.equal(await page.locator(".rv-row-person").count(), busy);
-  assert.equal(await page.locator(".rv-pill", { hasText: "Có việc" }).getAttribute("aria-pressed"), "true");
-  await page.locator(".rv-pill", { hasText: "Tất cả" }).click();
+  assert.equal(await page.locator(".rv-scope button", { hasText: "Có việc" }).getAttribute("aria-pressed"), "true");
+  await page.locator(".rv-scope button", { hasText: "Tất cả" }).click();
   assert.equal(await page.locator(".rv-row-person").count(), all);
 });
 await step("menu 'Khoảng' gom 6 mốc; nhãn đổi theo mốc đã chọn", async () => {
@@ -137,11 +155,12 @@ await step("menu 'Khoảng' gom 6 mốc; nhãn đổi theo mốc đã chọn", a
   const items = (await page.locator(".rv-preset-item").allTextContents()).map((t) => t.trim());
   assert.deepEqual(items, ["Tháng này", "4 tuần", "8 tuần", "1 quý", "Toàn dự án", "Theo dự án"]);
   await page.locator(".rv-preset-item", { hasText: "8 tuần" }).click();
-  assert.ok((await page.locator(".rv-preset").innerText()).includes("Khoảng: 8 tuần"));
+  assert.ok((await page.locator(".rv-preset").getAttribute("title")).includes("8 tuần"));
   assert.equal(lenOf(await windowOf()), 56);
   await page.locator(".rv-preset").click();
   await page.locator(".rv-preset-item", { hasText: "Theo dự án" }).click();
-  assert.ok((await page.locator(".rv-preset").innerText()).includes("Khoảng: Theo dự án"));
+  assert.ok((await page.locator(".rv-preset").getAttribute("title")).includes("Theo dự án"));
+  assert.equal((await page.locator(".rv-preset").innerText()).trim(), "", "mặc định chỉ còn biểu tượng lịch");
   assert.equal(await page.locator(".rv-range .rv-granularity").count(), 1, "chọn cột phải nằm cạnh khoảng thời gian");
 });
 await step("ⓘ cạnh THÀNH VIÊN: rê chuột hiện nguồn danh sách rồi ẩn đi", async () => {

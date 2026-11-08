@@ -97,11 +97,12 @@
   border-color: var(--ink);
   color: var(--on-strong);
 }
-.rv-pill.rv-un-pill {
-  margin-left: auto;
-}
-.rv-un-pill + .rv-legend {
+.tf-bar button.rv-pill.rv-un-pill {
+  height: 28px;
   margin-left: 0;
+  padding: 0 10px;
+  gap: 5px;
+  white-space: nowrap;
 }
 .rv-pill.rv-pill-warn {
   background: var(--warn-wash);
@@ -303,18 +304,6 @@ button.ai-generate:hover:not(:disabled) {
   outline: 2px solid var(--focus, var(--info));
   outline-offset: 1px;
 }
-.rv-sort {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--font-size-sm);
-  color: var(--ink-3);
-}
-.rv-sort select {
-  height: 26px;
-  font-size: var(--font-size-md);
-}
-
 /* Report figures as bars, not rings (progressCharts.ProgressGauge / StatusDonut). */
 .progress-view {
   --pr-actual: var(--ink-2);
@@ -1239,4 +1228,58 @@ button.metric.is-button:hover .metric-label {
 /* The trend fills its card instead of a 560px strip in a 900px one. */
 .pr-trend-plot {
   max-width: 880px;
+}
+
+/* ---- Nhân lực: one row of chrome. Who is shown is a segmented control (its counts are the KPIs); sort, legend and
+   export live in "⋯". ---- */
+.rv-scope {
+  flex: none;
+}
+.rv-scope button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 9px;
+  white-space: nowrap;
+}
+.rv-scope-n {
+  color: var(--ink-3);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+.rv-scope button.active .rv-scope-n {
+  color: var(--ink-2);
+}
+.rv-scope button.has-over .rv-scope-n {
+  color: var(--risk-text);
+  font-weight: 600;
+}
+.rv-range .rv-preset {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.rv-more-menu {
+  min-width: 236px;
+}
+.rv-more-menu .menu-heading:not(:first-child) {
+  margin-top: 4px;
+}
+.rv-more-menu .rv-sort-item,
+.rv-more-menu .rv-export {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+.rv-more-menu .rv-legend {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 12px;
+  margin: 0;
+  padding: 2px 12px 8px;
+}
+.rv-more-menu .rv-legend-item {
+  height: 22px;
+  padding: 0;
 }

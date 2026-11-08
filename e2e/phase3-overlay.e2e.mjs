@@ -156,7 +156,7 @@ await step("lưu 'Của tôi' + chia sẻ → lưu dạng @me, nút ghi tên b�
 await step("xoá lọc rồi áp dụng lại từ menu → cùng kết quả", async () => {
   await page.locator(".tf-clear").click();
   await page.waitForFunction(() => !document.querySelector(".tf-count"));
-  assert.ok((await menuBtn().textContent()).includes("Bộ lọc đã lưu"));
+  assert.ok((await menuBtn().textContent()).includes("Đã lưu"));
   await menuBtn().click();
   await page.locator(".sf-apply", { hasText: "Phần việc riêng" }).click();
   await page.waitForFunction(() => document.querySelector(".tf-count")?.textContent.includes("1/9"));

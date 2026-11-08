@@ -1796,8 +1796,8 @@ kbd {
 }
 /* The row has to hold both groups at 1280px without wrapping: the search gives way first. */
 .tf-search.rv-member-search {
-  flex: 0 1 200px;
-  min-width: 112px;
+  flex: 0 1 132px;
+  min-width: 40px;
 }
 .rv-range {
   display: flex;
@@ -1849,17 +1849,7 @@ kbd {
   color: var(--color-primary);
 }
 
-/* --- row 2: KPI pills (also the people filter) and the legend --- */
-.rv-kpis {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 10px;
-}
-.rv-pills {
-  display: inline-flex;
-  gap: 6px;
-}
+/* --- "chưa gán" button (one row of chrome: the people filter is `.rv-scope`, see views.css) --- */
 button.rv-pill {
   height: 30px;
   padding: 0 12px;
@@ -1872,27 +1862,6 @@ button.rv-pill {
 button.rv-pill:hover:not(:disabled) {
   background: var(--color-ghost-hover);
   box-shadow: none;
-}
-button.rv-pill.is-on {
-  background: var(--color-primary-light);
-  border-color: var(--color-primary);
-  color: var(--color-primary);
-  font-weight: 600;
-}
-button.rv-pill-danger {
-  background: var(--color-danger-light);
-  border-color: var(--color-danger-border);
-  color: var(--color-danger);
-}
-button.rv-pill-danger:hover:not(:disabled) {
-  background: var(--color-danger-light);
-  border-color: var(--color-danger);
-  color: var(--color-danger);
-}
-button.rv-pill-danger.is-on {
-  border-color: var(--color-danger);
-  background: var(--color-danger-light);
-  color: var(--color-danger);
 }
 button.rv-pill-warn {
   background: var(--color-warning-light);
@@ -1914,14 +1883,6 @@ button.rv-pill-warn.is-empty:not(.is-on) {
   background: var(--color-surface);
   border-color: var(--color-border-hover);
   color: var(--color-text-muted);
-}
-.rv-pill-caret {
-  flex: none;
-  opacity: 0.7;
-  transition: transform var(--transition-fast);
-}
-.rv-pill.is-on > .rv-pill-caret {
-  transform: rotate(180deg);
 }
 
 .rv-legend {

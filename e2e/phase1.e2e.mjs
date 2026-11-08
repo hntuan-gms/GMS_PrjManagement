@@ -272,7 +272,10 @@ await step("chọn từng người: panel hiện đúng người (lỗi giữ d�
   assert.ok(true, String(names.length) + "/" + (await rowsLoc.count()));
 });
 await step("xuất CSV heatmap", async () => {
-  const [dl] = await Promise.all([page.waitForEvent("download"), page.locator(".resource-view button", { hasText: "Xuất CSV" }).click()]);
+  const [dl] = await Promise.all([page.waitForEvent("download"), (async () => {
+    await page.locator(".rv-more").click();
+    await page.locator(".rv-export").click();
+  })()]);
   const txt = fs.readFileSync(await dl.path(), "utf8");
   assert.ok(txt.includes("Thành viên,Vai trò,Giờ/ngày") && txt.includes("Nguyễn Anh"));
 });

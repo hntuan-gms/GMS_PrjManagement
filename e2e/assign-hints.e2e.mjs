@@ -26,8 +26,8 @@ const patches = async () => (await (await fetch(API + "/api/__log")).json()).log
 await fetch(API + "/api/__restore", { method: "POST" });
 await fetch(API + "/api/__reset", { method: "POST" });
 await page.goto(APP);
-await page.waitForSelector(".rv-kpis");
-await page.locator(".rv-kpis button[aria-expanded]").click();
+await page.waitForSelector(".rv-pill-warn");
+await page.locator(".rv-pill-warn").click();
 await page.waitForSelector(".rv-unassigned");
 
 await step("thẻ việc chưa gán ghi khoảng ngày của việc", async () => {
