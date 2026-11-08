@@ -238,7 +238,7 @@ export default function ResourceUnassigned({
                         from a keyboard or a touch screen, and it says who is free inside the dates. */}
                     <button
                       type="button"
-                      className="rv-assign-btn is-shown"
+                      className="rv-assign-btn"
                       aria-label={`Gán ${t.id} cho`}
                       onClick={(e) => setPicker({ task: t, rect: e.currentTarget.getBoundingClientRect() })}
                     >

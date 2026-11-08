@@ -47,6 +47,46 @@ export interface Overlap {
   to: string;
 }
 
+/** Tasks that collide with each other, as one group per knot of tasks rather than one entry per pair. */
+export interface OverlapGroup {
+  ids: string[];
+  /** The earliest start and latest end of any collision inside the group. */
+  from: string;
+  to: string;
+}
+
+/**
+ * Five tasks on the same days are ten pairs but one fact: "5 việc trùng lịch". Pairs that share a task
+ * join one group; the group's range is the widest of its pairs.
+ */
+export function groupOverlaps(overlaps: readonly Overlap[]): OverlapGroup[] {
+  const parent = new Map<string, string>();
+  const find = (x: string): string => {
+    let r = x;
+    while ((parent.get(r) ?? r) !== r) r = parent.get(r)!;
+    parent.set(x, r);
+    return r;
+  };
+  for (const o of overlaps) {
+    if (!parent.has(o.aId)) parent.set(o.aId, o.aId);
+    if (!parent.has(o.bId)) parent.set(o.bId, o.bId);
+    parent.set(find(o.aId), find(o.bId));
+  }
+  const groups = new Map<string, OverlapGroup>();
+  const seen = new Map<string, Set<string>>();
+  for (const o of overlaps) {
+    const root = find(o.aId);
+    const g = groups.get(root) ?? { ids: [], from: o.from, to: o.to };
+    const ids = seen.get(root) ?? new Set<string>();
+    for (const id of [o.aId, o.bId]) if (!ids.has(id)) { ids.add(id); g.ids.push(id); }
+    if (o.from < g.from) g.from = o.from;
+    if (o.to > g.to) g.to = o.to;
+    groups.set(root, g);
+    seen.set(root, ids);
+  }
+  return [...groups.values()].sort((a, b) => a.from.localeCompare(b.from) || b.ids.length - a.ids.length);
+}
+
 export interface PersonLoad {
   accountId: string;
   displayName: string;

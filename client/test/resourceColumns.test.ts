@@ -6,6 +6,9 @@ import {
   filterUnassigned,
   filterPeople,
   peopleCounts,
+  taskBarLabel,
+  parseCapacity,
+  MAX_CAPACITY_HOURS,
   placeBar,
   rangeForPreset,
   taskBarDates,
@@ -116,6 +119,13 @@ describe("resource tab people filter", () => {
     assert.deepEqual(filterPeople(people, "busy").map((p) => p.accountId), ["b", "c", "d"]);
     assert.deepEqual(filterPeople(people, "over").map((p) => p.accountId), ["c", "d"]);
   });
+
+  it("'quá tải' can be measured by another rule (the next two weeks) without changing the other pills", () => {
+    const onlyC = (p: PersonLoad) => p.accountId === "c";
+    assert.deepEqual(peopleCounts(people, onlyC), { all: 4, busy: 3, over: 1 });
+    assert.deepEqual(filterPeople(people, "over", onlyC).map((p) => p.accountId), ["c"]);
+    assert.deepEqual(filterPeople(people, "busy", onlyC).map((p) => p.accountId), ["b", "c", "d"]);
+  });
 });
 
 describe("resource tab unassigned search", () => {
@@ -130,5 +140,26 @@ describe("resource tab unassigned search", () => {
     assert.deepEqual(filterUnassigned(tasks, "gpm-1").map((t) => t.id), ["GPM-100"]);
     assert.deepEqual(filterUnassigned(tasks, "  ").map((t) => t.id), ["GPM-96", "GPM-97", "GPM-100"]);
     assert.deepEqual(filterUnassigned(tasks, "zzz"), []);
+  });
+});
+
+describe("taskBarLabel", () => {
+  it("shows Jira's estimate in hours, whoever holds the task", () => {
+    assert.deepEqual(taskBarLabel({ estimateHours: 12.34, durationDays: 3 }), { text: "12.3h", estimated: true });
+  });
+  it("without an estimate it shows the schedule's days, never days × someone's capacity", () => {
+    assert.deepEqual(taskBarLabel({ estimateHours: null, durationDays: 3 }), { text: "3 ngày", estimated: false });
+    assert.deepEqual(taskBarLabel({ estimateHours: null, durationDays: 1 }), { text: "1 ngày", estimated: false });
+  });
+});
+
+describe("parseCapacity", () => {
+  it("takes a number with a comma or a point", () => {
+    assert.deepEqual(parseCapacity("6,5"), { ok: true, hours: 6.5 });
+    assert.deepEqual(parseCapacity(" 8 "), { ok: true, hours: 8 });
+  });
+  it("refuses empty, zero, text and anything over the bound — 24h a day is a typo, not a person", () => {
+    for (const bad of ["", "0", "-2", "abc", String(MAX_CAPACITY_HOURS + 1), "24"]) assert.equal(parseCapacity(bad).ok, false, bad);
+    assert.equal(parseCapacity(String(MAX_CAPACITY_HOURS)).ok, true);
   });
 });

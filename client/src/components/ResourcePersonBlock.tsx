@@ -3,13 +3,14 @@ import { useMemo, useState } from "react";
 import {
   aggregateMonths,
   aggregateWeeks,
+  groupOverlaps,
   overloadedDaysIn,
   loadInRange,
   type Granularity,
   type PersonLoad,
   type ResourceLoad,
 } from "../resourceAllocation";
-import { pct, placeBar, shortDate, taskBarDates, type ColumnSpan } from "../resourceColumns";
+import { pct, placeBar, shortDate, SOON_LABEL, taskBarDates, taskBarLabel, type ColumnSpan } from "../resourceColumns";
 import { cellTooltip } from "../resourceTimeline";
 import type { JiraUser, Task } from "../types";
 import type { WorkCalendar } from "../workCalendar";
@@ -18,12 +19,6 @@ import TodayInCell from "./TodayInCell";
 import Avatar from "./Avatar";
 import PersonPicker from "./PersonPicker";
 import StatusGlyph from "./StatusGlyph";
-
-/** One unit on the bars: hours. No Jira estimate means days × the person's hours a day. */
-function taskBarHours(task: Task, capacityPerDay: number): number {
-  const h = task.estimateHours ?? task.durationDays * capacityPerDay;
-  return Math.round(h * 10) / 10;
-}
 
 interface Props {
   person: PersonLoad;
@@ -40,9 +35,8 @@ interface Props {
   load: Pick<ResourceLoad, "people">;
   calendar: WorkCalendar;
   onAssign: (taskId: string, accountId: string | null) => void;
-  /** The two weeks the red badge counts, and the window the opened summary is measured over. */
+  /** The one window of "now" (today + 13 days): the red badge, the pill's count and the opened summary all read it. */
   overloadWindow: { from: string; to: string };
-  summary: { from: string; to: string; label: string };
   /** The red badge: open this person and bring their first over-capacity day into view. */
   onJumpOverload: () => void;
   /** Dragging a task row out of here is how work is taken off this person. */
@@ -75,7 +69,6 @@ export default function PersonBlock({
   calendar,
   onAssign,
   overloadWindow,
-  summary,
   onJumpOverload,
   onDragTask,
   droppable,
@@ -83,8 +76,8 @@ export default function PersonBlock({
   onDragOverPerson,
   onDropOnPerson,
 }: Props) {
-  // The red number is what to act on now: over-capacity days in the next two weeks. An 85-day project-wide
-  // count made every busy person look the same; that figure stays in the tooltip.
+  // The red number is what to act on now: over-capacity days in the next two weeks, the same count the
+  // "Đang quá tải" pill uses. A person overloaded only later in the project has no badge until it is near.
   const soon = overloadedDaysIn(person.days, overloadWindow.from, overloadWindow.to);
   const cells =
     granularity !== "day"
@@ -150,18 +143,19 @@ export default function PersonBlock({
               </small>
             </span>
           </button>
-          {person.overloadedDays > 0 && (
+          {soon > 0 && (
             <button
               type="button"
-              className={`rv-badge-over${soon > 0 ? "" : " is-later"}`}
-              title={`${person.overloadedDays} ngày quá tải trong cả khoảng đang xem${soon > 0 ? `, ${soon} ngày trong 2 tuần tới` : ", chưa có ngày nào trong 2 tuần tới"}. Bấm để xem.`}
-              aria-label={`${person.displayName}: ${person.overloadedDays} ngày quá tải`}
+              className="rv-badge-over"
+              title={`${soon} ngày quá tải trong ${SOON_LABEL}${person.overloadedDays > soon ? `, ${person.overloadedDays} ngày trong cả khoảng đang xem` : ""}. Bấm để xem.`}
+              aria-label={`${person.displayName}: ${soon} ngày quá tải trong ${SOON_LABEL}`}
               onClick={(e) => {
                 e.stopPropagation();
                 onJumpOverload();
               }}
             >
-              {soon > 0 ? soon : person.overloadedDays} ngày
+              <Icon name="alert" size={12} />
+              {soon} ngày
             </button>
           )}
           <button
@@ -200,14 +194,12 @@ export default function PersonBlock({
           granularity={granularity}
           today={today}
           spans={spans}
-          onOpenProfile={onOpenProfile}
           onOpenEdit={onOpenEdit}
           people={people}
           load={load}
           calendar={calendar}
           onAssign={onAssign}
-          summary={summary}
-          overloaded={soon > 0}
+          window={overloadWindow}
           onDragTask={onDragTask}
         />
       )}
@@ -221,23 +213,22 @@ function PersonTasks({
   granularity,
   today,
   spans,
-  onOpenProfile,
   onOpenEdit,
   people,
   load,
   calendar,
   onAssign,
-  summary,
-  overloaded,
+  window: soonWindow,
   onDragTask,
-}: Pick<Props, "person" | "granularity" | "today" | "spans" | "onOpenProfile" | "onOpenEdit" | "people" | "load" | "calendar" | "onAssign" | "summary" | "onDragTask"> & {
+}: Pick<Props, "person" | "granularity" | "today" | "spans" | "onOpenEdit" | "people" | "load" | "calendar" | "onAssign" | "onDragTask"> & {
   id: string;
-  /** Overloaded in the next two weeks: "Chuyển…" is shown on every row, not only the hovered one. */
-  overloaded: boolean;
+  /** The same window as the badge and the pill. */
+  window: { from: string; to: string };
 }) {
   const [picker, setPicker] = useState<{ task: Task; rect: DOMRect } | null>(null);
-  const inSummary = useMemo(() => loadInRange(person.days, summary.from, summary.to), [person.days, summary.from, summary.to]);
+  const inSummary = useMemo(() => loadInRange(person.days, soonWindow.from, soonWindow.to), [person.days, soonWindow.from, soonWindow.to]);
   const conflictIds = useMemo(() => new Set(person.overlaps.flatMap((o) => [o.aId, o.bId])), [person.overlaps]);
+  const collisions = useMemo(() => groupOverlaps(person.overlaps), [person.overlaps]);
 
   // Consecutive days off become one shaded band rather than one element per day: a 120-day
   // window with weekends is ~35 bands instead of 120. Only drawn by day — a week or month
@@ -280,24 +271,17 @@ function PersonTasks({
     <div className="rv-expand" id={id}>
       <div className="rv-expand-head">
         <div className="rv-meta">
-          <span>
-            {summary.label}: {inSummary.allocatedHours}h / {inSummary.capacityHours}h · {pct(inSummary.utilisation)}
-          </span>
-          <button type="button" className="rv-profile-text" onClick={onOpenProfile}>
-            <Icon name="edit" size={13} />
-            Hồ sơ &amp; Kỳ nghỉ
-          </button>
+          {SOON_LABEL}: {inSummary.allocatedHours}h / {inSummary.capacityHours}h · {pct(inSummary.utilisation)}
         </div>
-        {person.overlaps.length > 0 && (
+        {collisions.length > 0 && (
+          // One plain line, not a card of chips: the red bars below are the signal, this only says how many and when.
           <div className="rv-banner" role="status">
-            <Icon name="alert" size={14} className="rv-banner-icon" />
-            <strong>{person.overlaps.length} cặp việc chồng lịch:</strong>
-            {person.overlaps.slice(0, 6).map((o, i) => (
-              <span key={i} className="rv-conflict-pair" title={`Trùng ${o.from} → ${o.to}`}>
-                {o.aId} ↔ {o.bId} ({shortDate(o.from)}–{shortDate(o.to)})
+            {collisions.map((g, i) => (
+              <span key={i} className="rv-collision" title={g.ids.join(", ")}>
+                {g.ids.length} việc trùng lịch {shortDate(g.from)}
+                {g.to !== g.from ? `–${shortDate(g.to)}` : ""}
               </span>
             ))}
-            {person.overlaps.length > 6 && <span>+{person.overlaps.length - 6} cặp nữa</span>}
           </div>
         )}
       </div>
@@ -317,23 +301,23 @@ function PersonTasks({
                 onDragTask(task);
               }}
               onClick={() => onOpenEdit(task)}
-              title={`${task.id} · ${task.summary} (${task.statusName})\nKéo sang người khác để chuyển, kéo xuống “bỏ gán” để bỏ gán`}
+              title={`${task.id} · ${task.summary} (${task.statusName})`}
             >
               <div className="rv-name rv-task-name">
-                {conflict && <Icon name="alert" size={13} className="rv-warn" />}
                 <StatusGlyph category={task.statusCategory} percent={task.percentComplete} name={task.statusName} size={13} title={task.statusName} />
                 <span className="rv-tl-key">{task.id}</span>
                 <span className="rv-tl-summary">{task.summary}</span>
                 <button
                   type="button"
-                  className={`rv-assign-btn${overloaded ? " is-shown" : ""}`}
+                  className="rv-assign-btn"
                   aria-label={`Chuyển ${task.id} cho người khác`}
+                  title="Chuyển cho người khác"
                   onClick={(e) => {
                     e.stopPropagation();
                     setPicker({ task, rect: e.currentTarget.getBoundingClientRect() });
                   }}
                 >
-                  Chuyển…
+                  <Icon name="users" size={14} />
                 </button>
               </div>
               <div className="rv-task-track">
@@ -361,9 +345,9 @@ function PersonTasks({
                     {task.percentComplete > 0 && <span className="rv-tl-progress" style={{ width: `${task.percentComplete}%` }} />}
                     <span
                       className="rv-tl-bar-label"
-                      title={task.estimateHours != null ? undefined : `ước tính: ${task.durationDays} ngày × ${person.capacityHoursPerDay}h/ngày`}
+                      title={taskBarLabel(task).estimated ? undefined : "Chưa có ước tính giờ trên Jira: ghi số ngày của lịch"}
                     >
-                      {taskBarHours(task, person.capacityHoursPerDay)}h
+                      {taskBarLabel(task).text}
                     </span>
                   </span>
                 ) : (

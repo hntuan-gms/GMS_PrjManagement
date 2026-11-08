@@ -1755,7 +1755,7 @@ kbd {
   /* One source of truth for the axis: the heatmap cell, the task track and
      the sticky name column all measure themselves from these. */
   --rv-cell: 22px;
-  --rv-name-w: 296px;
+  --rv-name-w: 320px;
   --rv-row-h: 34px;
   --rv-task-h: 28px;
 }
@@ -1922,15 +1922,6 @@ button.rv-pill-warn.is-empty:not(.is-on) {
 }
 .rv-pill.is-on > .rv-pill-caret {
   transform: rotate(180deg);
-}
-.rv-kpi-stat {
-  font-size: var(--font-size-md);
-  color: var(--color-text-secondary);
-  white-space: nowrap;
-}
-.rv-kpi-stat b {
-  font-size: var(--font-size-md);
-  color: var(--color-text-primary);
 }
 
 .rv-legend {
@@ -2314,41 +2305,13 @@ button.rv-profile-btn:hover:not(:disabled) {
   font-size: var(--font-size-sm);
   color: var(--color-text-muted);
 }
-button.rv-profile-text {
-  height: 24px;
-  padding: 0 8px;
-  border: 0;
-  background: transparent;
-  box-shadow: none;
-  color: var(--color-primary);
-  font-size: var(--font-size-sm);
-  font-weight: 600;
-}
-button.rv-profile-text:hover:not(:disabled) {
-  background: var(--color-primary-light);
-  box-shadow: none;
-  color: var(--color-primary);
-}
+/* Collisions are one plain line: the red bars under it are the signal, so no card, icon or chips. */
 .rv-banner {
   display: flex;
-  align-items: center;
   flex-wrap: wrap;
-  gap: 4px 8px;
-  padding: 4px 10px;
-  border: 1px solid var(--color-warning-border);
-  border-radius: var(--radius-md);
-  background: var(--color-warning-light);
-  color: var(--color-warning-text);
-  font-size: var(--font-size-sm);
-}
-.rv-banner-icon {
-  flex: none;
-  color: var(--color-warning);
-}
-.rv-conflict-pair {
-  padding: 1px 8px;
-  border-radius: var(--radius-full);
-  background: var(--color-surface);
+  gap: 2px 14px;
+  padding: 0;
+  color: var(--color-text-secondary);
   font-size: var(--font-size-sm);
   font-variant-numeric: tabular-nums;
 }
@@ -2368,14 +2331,6 @@ button.rv-profile-text:hover:not(:disabled) {
 .rv-task-row:hover .rv-name {
   background: var(--color-surface);
 }
-/* The two tasks that collide are the point of the banner above them: tint the whole row. */
-.rv-task-row.is-conflict .rv-name {
-  background: var(--color-warning-light);
-  box-shadow: inset 3px 0 0 var(--color-warning);
-}
-.rv-task-row.is-conflict {
-  background: var(--color-warning-light);
-}
 .rv-tl-key {
   flex: none;
   font-weight: 600;
@@ -2389,13 +2344,6 @@ button.rv-profile-text:hover:not(:disabled) {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.rv-warn {
-  flex: none;
-  color: var(--color-warning);
-  margin-left: -18px;
-  margin-right: -2px;
-}
-
 /* Status and the "Chuyển…" picker share one slot: the status at rest, the picker on hover or focus. */
 .rv-task-side {
   flex: none;
@@ -2446,7 +2394,7 @@ button.rv-profile-text:hover:not(:disabled) {
   top: 0;
   bottom: 0;
   pointer-events: none;
-  box-shadow: inset 1px 0 0 var(--color-primary), inset -1px 0 0 var(--color-primary);
+  box-shadow: inset 1px 0 0 var(--son);
 }
 
 .rv-tl-off {
@@ -2600,8 +2548,7 @@ button.rv-profile-text:hover:not(:disabled) {
   flex: none;
   color: var(--color-text-muted);
 }
-.rv-un-close,
-.rv-drawer-head .icon-btn {
+.rv-un-close {
   flex: none;
   width: 28px;
   height: 28px;
@@ -2611,8 +2558,7 @@ button.rv-profile-text:hover:not(:disabled) {
   box-shadow: none;
   color: var(--color-text-secondary);
 }
-.rv-un-close:hover:not(:disabled),
-.rv-drawer-head .icon-btn:hover:not(:disabled) {
+.rv-un-close:hover:not(:disabled) {
   background: var(--color-ghost-hover);
   box-shadow: none;
 }
@@ -2707,138 +2653,6 @@ button.rv-un-main:active {
   color: var(--color-primary);
 }
 
-/* --- profile & leave slide-over --- */
-.rv-drawer-scrim {
-  position: fixed;
-  inset: 0;
-  z-index: var(--z-modal);
-  background: var(--color-overlay);
-}
-.rv-drawer {
-  position: fixed;
-  z-index: var(--z-modal);
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: min(440px, 100vw);
-  display: flex;
-  flex-direction: column;
-  background: var(--color-surface);
-  box-shadow: var(--shadow-modal);
-  animation: rv-drawer-in var(--transition-normal);
-}
-@keyframes rv-drawer-in {
-  from {
-    transform: translateX(24px);
-    opacity: 0;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .rv-drawer {
-    animation: none;
-  }
-  .rv-person-caret,
-  .rv-pill-caret,
-  .rv-unassigned,
-  .rv-task-side .rv-assign-select,
-  .rv-task-side .rv-tl-status {
-    transition: none;
-  }
-}
-.rv-drawer-head {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--color-border);
-}
-.rv-drawer-title {
-  flex: 1 1 0;
-  min-width: 0;
-}
-.rv-drawer-title b {
-  display: block;
-  font-size: var(--font-size-lead);
-}
-.rv-drawer-title small {
-  font-size: var(--font-size-sm);
-  color: var(--color-text-muted);
-}
-.rv-drawer-body {
-  flex: 1 1 0;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding: 16px;
-}
-.rv-drawer-body .field {
-  flex: none;
-}
-.rv-drawer-leave {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin: 0;
-  padding: 10px 12px 12px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  min-width: 0;
-}
-.rv-drawer-leave legend {
-  padding: 0 6px;
-  font-size: var(--font-size-md);
-  font-weight: 600;
-  color: var(--color-text-secondary);
-}
-.rv-drawer-reset {
-  align-self: flex-start;
-}
-.rv-drawer-foot {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 12px 16px;
-  border-top: 1px solid var(--color-border);
-}
-
-.rv-absences {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.rv-abs-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 6px 3px 10px;
-  border-radius: var(--radius-full);
-  background: var(--color-ghost-hover);
-  border: 1px solid var(--color-border);
-  font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
-}
-.rv-abs-chip button {
-  display: inline-flex;
-  padding: 2px;
-  border: none;
-  background: none;
-  box-shadow: none;
-  color: var(--color-text-muted);
-  cursor: pointer;
-}
-.rv-abs-chip button:hover:not(:disabled) {
-  background: none;
-  box-shadow: none;
-  color: var(--color-danger);
-}
-.rv-abs-chip button[aria-label="Sửa kỳ nghỉ"]:hover:not(:disabled) {
-  color: var(--color-primary);
-}
-.rv-abs-chip.is-editing {
-  border-color: var(--color-primary);
-  background: var(--color-primary-light);
-}
 .rv-notes-field textarea {
   width: 100%;
   resize: vertical;

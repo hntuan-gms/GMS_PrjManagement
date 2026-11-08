@@ -105,9 +105,10 @@ resourcesRouter.put("/:accountId", requireProject, async (req, res, next) => {
   if (body?.capacityHoursPerDay !== undefined && body.capacityHoursPerDay !== null) {
     const hours = Number(body.capacityHoursPerDay);
     // The upper bound is a sanity check, not a labour rule: a typo of 80 instead
-    // of 8 would silently make an overloaded person look free for weeks.
-    if (!Number.isFinite(hours) || hours <= 0 || hours > 24) {
-      next(badRequest("Công suất phải nằm trong khoảng 0 đến 24 giờ mỗi ngày."));
+    // of 8 (or 24 for 8) would silently make an overloaded person look free for weeks.
+    // Mirrors MAX_CAPACITY_HOURS in client/src/resourceColumns.ts — change both.
+    if (!Number.isFinite(hours) || hours <= 0 || hours > 16) {
+      next(badRequest("Công suất phải nằm trong khoảng 0 đến 16 giờ mỗi ngày."));
       return;
     }
     capacityHoursPerDay = hours;

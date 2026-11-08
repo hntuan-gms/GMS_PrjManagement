@@ -1,4 +1,3 @@
-import { formatRange } from "./dateLabels";
 import {
   addDays,
   defaultWindow,
@@ -135,6 +134,32 @@ export function currentPreset(range: Window | null, today: string, tasks: Task[]
   return RANGE_PRESETS.find((p) => p.days === length)?.id ?? null;
 }
 
+/**
+ * What is written on a task's bar under a person. Hours only when Jira has an estimate: a task with none
+ * used to show days × the *assignee's* hours a day, so the same task read 184h on someone at 8h/day and
+ * 552h on someone at 24h/day. Without an estimate the honest figure is the schedule's own: its days.
+ */
+export function taskBarLabel(task: Pick<Task, "estimateHours" | "durationDays">): { text: string; estimated: boolean } {
+  if (task.estimateHours != null) return { text: `${Math.round(task.estimateHours * 10) / 10}h`, estimated: true };
+  return { text: `${task.durationDays} ngày`, estimated: false };
+}
+
+/**
+ * The most hours a day a person can be given in their profile. "24h/ngày" was typed by mistake on three
+ * people of one project and, because it is accepted as a fact, divided their load by three. The server
+ * enforces the same bound (routes/resources.ts); change both.
+ */
+export const MAX_CAPACITY_HOURS = 16;
+
+/** The profile's "giờ/ngày" box: a number (comma or point) above 0 and not over the bound, or the sentence to show. */
+export function parseCapacity(text: string): { ok: true; hours: number } | { ok: false; message: string } {
+  const hours = Number(text.trim().replace(",", "."));
+  if (text.trim() === "" || !Number.isFinite(hours) || hours <= 0 || hours > MAX_CAPACITY_HOURS) {
+    return { ok: false, message: `Công suất từ 0,5 đến ${MAX_CAPACITY_HOURS} giờ mỗi ngày.` };
+  }
+  return { ok: true, hours };
+}
+
 /* ----------------------------------------------------------- people view */
 
 export type PeopleView = "all" | "busy" | "over";
@@ -145,18 +170,22 @@ export interface PeopleCounts {
   over: number;
 }
 
-/** "Có việc" = holds at least one task touching the window; "quá tải" = at least one over-capacity day. */
-export function peopleCounts(people: PersonLoad[]): PeopleCounts {
+/** Whether a person counts as "quá tải": by default any over-capacity day in the whole window; the tab passes the next two weeks. */
+export type IsOver = (p: PersonLoad) => boolean;
+const overAnywhere: IsOver = (p) => p.overloadedDays > 0;
+
+/** "Có việc" = holds at least one task touching the window; "quá tải" = over capacity by `isOver`. */
+export function peopleCounts(people: PersonLoad[], isOver: IsOver = overAnywhere): PeopleCounts {
   return {
     all: people.length,
     busy: people.filter((p) => p.tasks.length > 0).length,
-    over: people.filter((p) => p.overloadedDays > 0).length,
+    over: people.filter(isOver).length,
   };
 }
 
-export function filterPeople(people: PersonLoad[], view: PeopleView): PersonLoad[] {
+export function filterPeople(people: PersonLoad[], view: PeopleView, isOver: IsOver = overAnywhere): PersonLoad[] {
   if (view === "busy") return people.filter((p) => p.tasks.length > 0);
-  if (view === "over") return people.filter((p) => p.overloadedDays > 0);
+  if (view === "over") return people.filter(isOver);
   return people;
 }
 
@@ -205,18 +234,15 @@ export function shortDate(iso: string): string {
   return `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
 }
 
-/* ---------------------------------------------------------- person summary */
+/* ---------------------------------------------------------- the one window of "now" */
 
 /**
- * What an opened person's one-line summary is measured over: the window the table shows when one was
- * picked, else the next four weeks from today. The whole project would almost always read as a few
- * percent, which says nothing about whether this person can take more now.
+ * Every figure about how loaded someone is *now* — the red "quá tải" pill and count, the number by
+ * a name, the opened person's summary and the profile's header — is measured over this one window:
+ * today and the 13 days after it. Four windows (whole project, four weeks, two weeks, whatever range
+ * was picked) gave one person four different percentages.
  */
-export function summaryWindow(range: Window | null, today: string): { from: string; to: string; label: string } {
-  if (range) return { from: range.from, to: range.to, label: formatRange(range.from, range.to) };
-  return { from: today, to: addDays(today, 27), label: "4 tuần tới" };
-}
-
+export const SOON_LABEL = "2 tuần tới";
 /** The window the overload badge by a name counts: today and the 13 days after it. */
 export function overloadWindow(today: string): { from: string; to: string } {
   return { from: today, to: addDays(today, 13) };

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import Spinner from "./Spinner";
 import { assignHints } from "../assignHints";
 import { monthLabels, shortRange, weekColumnLabel } from "../dateLabels";
-import { buildResourceLoad, firstOverloadedDate, todayIso, type Granularity } from "../resourceAllocation";
+import { buildResourceLoad, firstOverloadedDate, loadInRange, overloadedDaysIn, todayIso, type Granularity, type PersonLoad } from "../resourceAllocation";
 import {
   columnSpans,
   currentPreset,
@@ -16,7 +16,7 @@ import {
   placeBar,
   RANGE_PRESETS,
   rangeForPreset,
-  summaryWindow,
+  SOON_LABEL,
   taskBarDates,
   type ColumnSpan,
   type PeopleView,
@@ -37,7 +37,7 @@ import ResourceModes from "./ResourceModes";
 import type { ResourceMode } from "../lenses";
 import ResourcePersonBlock from "./ResourcePersonBlock";
 import TodayInCell from "./TodayInCell";
-import ResourceProfileDrawer from "./ResourceProfileDrawer";
+import ResourceProfileDialog from "./ResourceProfileDialog";
 import ResourceUnassigned, { type DragState } from "./ResourceUnassigned";
 import SavedFilterMenu from "./SavedFilterMenu";
 import SkillMatrixView from "./SkillMatrixView";
@@ -177,8 +177,15 @@ export default function ResourceView({
 
   const granularity: Granularity = scale.granularity;
   const spans = useMemo(() => columnSpans(load.dates, granularity), [load.dates, granularity]);
-  const counts = useMemo(() => peopleCounts(load.people), [load.people]);
-  const utilisation = load.people.length > 0 ? load.people.reduce((n, p) => n + p.utilisation, 0) / load.people.length : 0;
+  // One window of "now" for every figure about load: the pill, the badge by a name, the opened summary and the
+  // profile's header all count today and the 13 days after it (see SOON_LABEL).
+  const soonWindow = useMemo(() => overloadWindow(today), [today]);
+  const soonDays = useMemo(
+    () => new Map(load.people.map((p) => [p.accountId, overloadedDaysIn(p.days, soonWindow.from, soonWindow.to)])),
+    [load.people, soonWindow]
+  );
+  const isOver = useCallback((p: { accountId: string }) => (soonDays.get(p.accountId) ?? 0) > 0, [soonDays]);
+  const counts = useMemo(() => peopleCounts(load.people, isOver), [load.people, isOver]);
 
   const [peopleSort, setPeopleSortState] = useState<PeopleSort>(() => {
     try {
@@ -197,18 +204,18 @@ export default function ResourceView({
     }
   };
   const visiblePeople = useMemo(() => {
-    const base = sortPeople(filterPeople(load.people, peopleView), peopleSort);
+    let base = sortPeople(filterPeople(load.people, peopleView, isOver), peopleSort);
+    // "Quá tải trước" follows the same window as the badge: whoever is over in the next two weeks goes first.
+    if (peopleSort === "load") base = [...base].sort((a, b) => (soonDays.get(b.accountId) ?? 0) - (soonDays.get(a.accountId) ?? 0));
     const needle = query.trim().toLowerCase();
     if (!needle) return base;
     return base.filter(
       (p) => p.displayName.toLowerCase().includes(needle) || (p.role ?? "").toLowerCase().includes(needle)
     );
-  }, [load.people, peopleView, query, peopleSort]);
+  }, [load.people, peopleView, query, peopleSort, isOver, soonDays]);
 
   const profilePerson = load.people.find((p) => p.accountId === profileId) ?? null;
 
-  const soonWindow = useMemo(() => overloadWindow(today), [today]);
-  const summary = useMemo(() => summaryWindow(range, today), [range, today]);
   const hoverBand = useMemo(() => {
     const dates = hoverTask ? taskBarDates(hoverTask) : null;
     return dates ? placeBar(spans, dates.start, dates.end) : null;
@@ -566,7 +573,7 @@ export default function ResourceView({
               ))}
             </div>
             <label className="rv-sort">
-              <span>Sắp</span>
+              <span>Sắp xếp</span>
               <select value={peopleSort} onChange={(e) => setPeopleSort(e.target.value as PeopleSort)} aria-label="Sắp xếp thành viên">
                 {(Object.keys(PEOPLE_SORT_LABEL) as PeopleSort[]).map((k) => (
                   <option key={k} value={k}>
@@ -575,13 +582,11 @@ export default function ResourceView({
                 ))}
               </select>
             </label>
-            <span className="rv-kpi-stat" title="Giờ đã giao chia cho giờ khả dụng, trung bình trên mọi thành viên trong khoảng đang xem">
-              Mức sử dụng: <b>{pct(utilisation)}</b>
-            </span>
+            {/* At the right, with the legend: opened from the left it floated over the columns around today. */}
             <button
               ref={unassignedBtn}
               type="button"
-              className={`rv-pill rv-pill-warn${unassignedOpen ? " is-on" : ""}${load.unassigned.length === 0 ? " is-empty" : ""}`}
+              className={`rv-pill rv-pill-warn rv-un-pill${unassignedOpen ? " is-on" : ""}${load.unassigned.length === 0 ? " is-empty" : ""}`}
               aria-expanded={unassignedOpen}
               aria-controls={unassignedId}
               onClick={() => setUnassignedOpen((v) => !v)}
@@ -653,7 +658,6 @@ export default function ResourceView({
                     calendar={calendar}
                     onAssign={assign}
                     overloadWindow={soonWindow}
-                    summary={summary}
                     onJumpOverload={() => jumpToOverload(person.accountId)}
                     onDragTask={beginDrag}
                     droppable={canDropOn(person.accountId)}
@@ -688,11 +692,12 @@ export default function ResourceView({
           />
 
           {profilePerson && (
-            <ResourceProfileDrawer
+            <ResourceProfileDialog
               key={profilePerson.accountId}
               person={profilePerson}
               defaultCapacityHours={pool?.defaultCapacityHours ?? 8}
               skillSuggestions={skillSuggestions}
+              summary={profileSummary(profilePerson, soonWindow, soonDays.get(profilePerson.accountId) ?? 0)}
               onClose={() => setProfileId(null)}
               onProfileSaved={upsertProfile}
               onAbsenceAdded={addAbsence}
@@ -704,6 +709,12 @@ export default function ResourceView({
       )}
     </div>
   );
+}
+
+/** The profile's one line: the same window and the same overload count as the row it was opened from. */
+function profileSummary(person: PersonLoad, window: { from: string; to: string }, overDays: number): string {
+  const r = loadInRange(person.days, window.from, window.to);
+  return `${SOON_LABEL}: ${r.allocatedHours}h / ${r.capacityHours}h · ${pct(r.utilisation)}${overDays > 0 ? ` · quá tải ${overDays} ngày` : ""}`;
 }
 
 /**

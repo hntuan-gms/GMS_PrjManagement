@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { buildResourceLoad, firstOverloadedDate, loadInRange, overloadedDaysIn } from "../src/resourceAllocation";
-import { overloadWindow, summaryWindow } from "../src/resourceColumns";
+import { overloadWindow } from "../src/resourceColumns";
 import type { JiraUser } from "../src/types";
 import { task } from "./fixtures";
 
@@ -36,7 +36,7 @@ describe("overloadedDaysIn", () => {
   });
 });
 
-describe("loadInRange + summaryWindow", () => {
+describe("loadInRange", () => {
   it("sums hours given and available inside the window only", () => {
     // Mon 2 .. Fri 6: 5 working days = 40 h available, 32 h given on Wed and Thu.
     const r = loadInRange(days, "2026-11-02", "2026-11-08");
@@ -50,12 +50,6 @@ describe("loadInRange + summaryWindow", () => {
     assert.equal(r.capacityHours, 0);
     assert.equal(r.utilisation, 0);
   });
-
-  it("with no chosen window the summary is the next four weeks; with one it is that window", () => {
-    assert.deepEqual(summaryWindow(null, "2026-11-02"), { from: "2026-11-02", to: "2026-11-29", label: "4 tuần tới" });
-    const w = summaryWindow({ from: "2026-11-02", to: "2026-11-08" }, "2026-11-02");
-    assert.equal(w.label, "02/11 – 08/11/2026");
-  });
 });
 
 import { ratioBand } from "../src/resourceAllocation";
@@ -66,5 +60,34 @@ describe("ratioBand (shared by Mức tải and Giờ đã ghi)", () => {
     assert.equal(ratioBand(1), "healthy");
     assert.equal(ratioBand(1.0001), "healthy");
     assert.equal(ratioBand(1.02), "over");
+  });
+});
+
+import { groupOverlaps } from "../src/resourceAllocation";
+describe("groupOverlaps", () => {
+  it("five tasks on the same days are one group, not ten pairs", () => {
+    const ids = ["A", "B", "C", "D", "E"];
+    const pairs = ids.flatMap((a, i) => ids.slice(i + 1).map((b) => ({ aId: a, bId: b, from: "2026-10-01", to: "2026-10-03" })));
+    assert.equal(pairs.length, 10);
+    const g = groupOverlaps(pairs);
+    assert.equal(g.length, 1);
+    assert.deepEqual(g[0].ids.sort(), ids);
+    assert.deepEqual([g[0].from, g[0].to], ["2026-10-01", "2026-10-03"]);
+  });
+
+  it("separate knots stay separate, earliest first, and the range is the widest of the group's pairs", () => {
+    const g = groupOverlaps([
+      { aId: "X", bId: "Y", from: "2026-11-10", to: "2026-11-12" },
+      { aId: "A", bId: "B", from: "2026-11-02", to: "2026-11-03" },
+      { aId: "B", bId: "C", from: "2026-11-03", to: "2026-11-06" },
+    ]);
+    assert.equal(g.length, 2);
+    assert.deepEqual(g[0].ids, ["A", "B", "C"]);
+    assert.deepEqual([g[0].from, g[0].to], ["2026-11-02", "2026-11-06"]);
+    assert.deepEqual(g[1].ids, ["X", "Y"]);
+  });
+
+  it("no pairs, no groups", () => {
+    assert.deepEqual(groupOverlaps([]), []);
   });
 });

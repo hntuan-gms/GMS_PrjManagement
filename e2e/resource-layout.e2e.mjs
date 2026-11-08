@@ -105,14 +105,15 @@ await step("không còn ô 'Chỉ hiện người đang có việc' và dòng ch
   for (const t of ["Mức tải", "Kỹ năng", "Bộ lọc"]) assert.ok(text.includes(t), t + " thiếu");
   assert.equal(await page.locator(".resource-view .tf-bar .sf-select").count(), 1, "thiếu menu bộ lọc đã lưu");
 });
-await step("pill KPI: Tất cả / Có việc / Đang quá tải kèm số, Mức sử dụng, nút chưa gán", async () => {
+await step("pill KPI: Tất cả / Có việc / Đang quá tải kèm số, nút chưa gán (không còn 'Mức sử dụng')", async () => {
   const pills = await page.locator(".rv-pills .rv-pill").allTextContents();
   assert.equal(pills.length, 3);
   assert.match(pills[0], /^Tất cả \(\d+\)$/);
   assert.match(pills[1], /^Có việc \(\d+\)$/);
   // A zero count is hidden (MASTER), the pill stays.
   assert.match(pills[2], /^Đang quá tải( \(\d+\))?$/);
-  assert.match(await page.locator(".rv-kpi-stat").innerText(), /Mức sử dụng: \d+%/);
+  assert.equal(await page.locator(".rv-kpi-stat").count(), 0, "đã bỏ 'Mức sử dụng'");
+  assert.ok((await page.locator(".rv-sort").innerText()).includes("Sắp xếp"), "nhãn đầy đủ, không cụt thành 'Sắp'");
   assert.match(await page.locator(".rv-pill-warn").innerText(), /^\s*\d+ việc chưa gán\s*$/);
 });
 await step("chú giải rút gọn: 4 mục, không có 'Trống', mô tả đầy đủ nằm trong tooltip", async () => {
@@ -461,12 +462,13 @@ await step("kéo chính thẻ bằng thanh tiêu đề: mờ khi di chuyển, d�
   const before = await rect(".rv-unassigned");
   await page.mouse.move(head.x + 10, head.y + head.height / 2);
   await page.mouse.down();
-  await page.mouse.move(head.x + 210, head.y + 90, { steps: 6 });
+  // Leftwards: the card opens under the pill at the right edge, so it has no room to go further right.
+  await page.mouse.move(head.x - 190, head.y + 90, { steps: 6 });
   await page.waitForSelector(".rv-unassigned.is-ghost");
   await page.mouse.up();
   await page.waitForFunction(() => !document.querySelector(".rv-unassigned.is-ghost"));
   const after = await rect(".rv-unassigned");
-  assert.ok(Math.abs(after.x - before.x - 200) <= 2 && Math.abs(after.y - before.y - 80) <= 12, `${before.x},${before.y} → ${after.x},${after.y}`);
+  assert.ok(Math.abs(after.x - before.x + 200) <= 2 && Math.abs(after.y - before.y - 80) <= 12, `${before.x},${before.y} → ${after.x},${after.y}`);
 });
 await step("Esc trong thẻ đóng thẻ; mở lại thì giữ vị trí đã dời", async () => {
   const where = await rect(".rv-unassigned");
@@ -482,7 +484,7 @@ await step("Esc trong thẻ đóng thẻ; mở lại thì giữ vị trí đã d
 });
 
 console.log("\n== Mở rộng tại chỗ ==");
-await step("bấm hàng người: việc của họ hiện ngay dưới hàng đó, bảng không nhảy, cột tên 280–300px", async () => {
+await step("bấm hàng người: việc của họ hiện ngay dưới hàng đó, bảng không nhảy, cột tên 320px (đủ chỗ cho vai trò, giờ/ngày và số ngày quá tải)", async () => {
   const before = await rect(".rv-heatmap-scroll");
   await rowOf("Nguyễn Anh").click();
   await page.waitForSelector(".rv-expand");
@@ -495,7 +497,7 @@ await step("bấm hàng người: việc của họ hiện ngay dưới hàng đ
   assert.deepEqual(order.slice(0, 2), ["rv-row", "rv-expand"]);
   assert.ok(await page.locator(".rv-expand .rv-task-row").count() >= 2);
   const w = (await rect(".rv-row-head .rv-name")).width;
-  assert.ok(w >= 280 && w <= 300, "cột tên rộng " + w);
+  assert.ok(w >= 310 && w <= 330, "cột tên rộng " + w);
   assert.ok(await page.locator(".rv-row-head").isVisible(), "tiêu đề ngày phải còn");
 });
 await step("thanh việc thẳng hàng với cột ngày bên trên (mép trái trùng mép cột, độ dài tròn số cột)", async () => {
@@ -513,21 +515,28 @@ await step("thanh việc thẳng hàng với cột ngày bên trên (mép trái 
     assert.ok(Math.abs(r.cols - Math.round(r.cols)) < 0.06, "độ dài " + r.cols + " cột");
   }
 });
-await step("banner chồng lịch nằm ngay trên các hàng việc; hai việc trùng được tô nổi", async () => {
+await step("chồng lịch là MỘT dòng chữ ngay trên các hàng việc ('2 việc trùng lịch dd/mm–dd/mm'); hai việc trùng có thanh đỏ", async () => {
   const banner = page.locator(".rv-expand .rv-banner");
   const text = await banner.innerText();
-  assert.match(text, /1 cặp việc chồng lịch/);
-  assert.ok(text.includes("DEMO-5") && text.includes("DEMO-7"), text);
+  assert.match(text, /^2 việc trùng lịch \d\d\/\d\d(–\d\d\/\d\d)?$/);
+  assert.equal(await page.locator(".rv-expand .rv-conflict-pair").count(), 0, "không còn chip từng cặp");
+  assert.equal(await page.locator(".rv-expand .rv-warn").count(), 0, "không còn biểu tượng ⚠ trên hàng");
+  assert.equal(await page.locator(".rv-expand .rv-task-row.is-conflict .rv-tl-bar.is-conflict").count(), 2, "tín hiệu duy nhất là thanh đỏ");
   const b = await banner.boundingBox();
   const firstRow = await page.locator(".rv-expand .rv-task-row").first().boundingBox();
   assert.ok(b.y + b.height <= firstRow.y + 1, "banner phải nằm trên hàng việc đầu tiên");
   assert.equal(await page.locator(".rv-expand .rv-task-row.is-conflict").count(), 2);
 });
-await step("rê chuột vào hàng việc hiện 'Chuyển…'; chọn người khác → PATCH", async () => {
+await step("rê chuột vào hàng việc hiện biểu tượng chuyển ở cuối hàng (không đè lên tên); chọn người khác → PATCH", async () => {
   const row = page.locator(".rv-expand .rv-task-row", { hasText: "DEMO-7" });
   await row.hover();
   const btn = row.locator(".rv-assign-btn");
   await page.waitForFunction((el) => Number(getComputedStyle(el).opacity) > 0.9, await btn.elementHandle());
+  assert.equal((await btn.innerText()).trim(), "", "chỉ là biểu tượng, không chữ 'Chuyển…'");
+  const sumBox = await row.locator(".rv-tl-summary").boundingBox();
+  const btnBox = await btn.boundingBox();
+  assert.ok(sumBox.x + sumBox.width <= btnBox.x + 1, "nút nằm sau tên, không che tên");
+  assert.ok(!(await row.getAttribute("title")).includes("Kéo sang"), "tooltip không lặp lại câu hướng dẫn");
   await reset();
   await btn.click();
   await page.locator(".cell-picker-item", { hasText: "Lê Chi" }).click();
@@ -561,63 +570,69 @@ await step("bấm lại hàng thì thu gọn", async () => {
 });
 
 console.log("\n== Hồ sơ & Kỳ nghỉ ==");
-await step("nút ✎ trên hàng mở ngăn bên phải: đủ trường, không lớp phủ, một nút 'Lưu', không còn câu hướng dẫn cũ", async () => {
+await step("nút ✎ trên hàng mở cửa sổ Ở GIỮA màn: có lớp mờ, hai cột, không chân 'Lưu', không còn lối vào thứ hai", async () => {
   await rowOf("Lê Chi").hover();
   await rowOf("Lê Chi").locator(".rv-profile-btn").click();
-  await page.waitForSelector(".rv-drawer");
-  const text = await page.locator(".rv-drawer").innerText();
-  for (const t of ["Vai trò", "Công suất (giờ/ngày)", "Từ", "Đến", "Kỹ năng", "Ghi chú"]) assert.ok(text.includes(t), t + " thiếu");
-  assert.ok(!text.includes("Bấm “Lưu” ở trên"));
-  assert.equal(await page.locator(".rv-drawer-foot button").count(), 1, "chỉ một nút, không Huỷ");
-  assert.equal(await page.locator(".rv-drawer button", { hasText: "Lưu thay đổi" }).count(), 0);
-  assert.ok(!text.includes("Đang dùng mặc định"), "câu mặc định đã bỏ");
-  assert.equal(await page.locator(".rv-drawer-scrim").count(), 0, "không lớp phủ tối");
-  const box = await rect(".rv-drawer");
-  assert.ok(box.x + box.width >= 1499 && box.y >= 40 && box.height >= 840, "ngăn kéo sát mép phải, nằm dưới thanh đầu trang");
-  assert.equal(await page.locator(".rv-drawer .rv-avatar").first().innerText(), "CL", "chữ tắt theo Avatar chung (Lê Chi → CL)");
+  await page.waitForSelector(".rv-profile");
+  const text = await page.locator(".rv-profile").innerText();
+  for (const t of ["Vai trò", "Công suất (giờ/ngày)", "Kỳ nghỉ", "+ Thêm kỳ nghỉ", "Kỹ năng", "Ghi chú", "2 tuần tới"]) assert.ok(text.includes(t), t + " thiếu");
+  assert.equal(await page.locator(".rv-profile button.primary").count(), 0, "không còn nút Lưu: mỗi ô tự lưu");
+  assert.equal(await page.locator(".rv-profile-layer").count(), 1, "có lớp mờ");
+  assert.equal(await page.locator(".rv-drawer").count(), 0, "không còn ngăn kéo ở mép phải");
+  const vp = page.viewportSize();
+  const box = await rect(".rv-profile");
+  assert.ok(Math.abs(box.x + box.width / 2 - vp.width / 2) < 40, "lệch tâm ngang " + (box.x + box.width / 2 - vp.width / 2));
+  assert.ok(Math.abs(box.y + box.height / 2 - vp.height / 2) < 120, "lệch tâm dọc");
+  const cols = await page.locator(".rv-profile-col").count();
+  assert.equal(cols, 2);
+  assert.equal(await page.locator(".rv-profile .rv-avatar").first().innerText(), "CL", "chữ tắt theo Avatar chung (Lê Chi → CL)");
 });
-await step("sửa dở rồi Esc: LƯU rồi đóng, không hỏi (đóng là lưu)", async () => {
-  await page.locator(".rv-drawer input").first().fill("QA Lead");
-  assert.equal((await page.locator(".rv-drawer-foot button.primary").innerText()).startsWith("Lưu"), true);
+await step("sửa vai trò rồi rời ô: lưu ngay chỉ phần đã đổi, báo 'Đã lưu'", async () => {
+  await page.locator(".rv-profile input").first().fill("QA Lead");
   await reset();
-  await page.keyboard.press("Escape");
+  await page.keyboard.press("Tab");
   const put = await waitLog((l) => l.m === "PUT" && l.p.startsWith("/api/resources/"));
   assert.equal(put.b.role, "QA Lead");
-  await page.waitForSelector(".rv-drawer", { state: "detached" });
-  assert.equal(await page.locator(".dlg").count(), 0, "không còn hộp hỏi 'Bỏ thay đổi?'");
+  assert.deepEqual(Object.keys(put.b).sort(), ["displayName", "role"], "không gửi lại công suất/kỹ năng/ghi chú");
+  await page.waitForFunction(() => document.querySelector(".rv-profile-status")?.textContent?.includes("Đã lưu"));
+});
+await step("Esc trong ô đang gõ dở trả lại giá trị cũ và chưa đóng; Esc lần nữa đóng, vai trò hiện ở hàng", async () => {
+  await page.locator(".rv-profile input").first().fill("đang gõ dở");
+  await page.keyboard.press("Escape");
+  assert.equal(await page.locator(".rv-profile").count(), 1, "Esc đầu chỉ hoàn tác ô");
+  assert.equal(await page.locator(".rv-profile input").first().inputValue(), "QA Lead");
+  await page.keyboard.press("Escape");
+  await page.waitForSelector(".rv-profile", { state: "detached" });
+  assert.equal(await page.locator(".dlg").count(), 0, "không hỏi 'Bỏ thay đổi?'");
   assert.ok((await rowOf("Lê Chi").innerText()).includes("QA Lead"));
 });
-await step("nút 'Lưu' ghi hồ sơ rồi đóng ngăn; chưa sửa thì nút là 'Đã lưu' (tắt)", async () => {
+await step("công suất quá 16 giờ bị chặn ngay ở ô (không gửi), ô trả về số cũ; số hợp lệ lưu riêng", async () => {
   await rowOf("Lê Chi").locator(".rv-profile-btn").click();
-  await page.waitForSelector(".rv-drawer");
-  const btn = page.locator(".rv-drawer-foot button.primary");
-  assert.equal(await btn.isDisabled(), true);
-  assert.ok((await btn.innerText()).startsWith("Đã lưu"));
-  await page.locator(".rv-drawer input").first().fill("QA Senior");
+  await page.waitForSelector(".rv-profile");
   await reset();
-  await btn.click();
-  const put = await waitLog((l) => l.m === "PUT" && l.p.startsWith("/api/resources/"));
+  await page.locator(".rv-profile input[type=number]").fill("24");
+  await page.keyboard.press("Tab");
+  await page.waitForSelector(".rv-profile .rv-notice-error");
+  assert.ok((await page.locator(".rv-profile .rv-notice-error").innerText()).includes("16"));
+  assert.equal(await page.locator(".rv-profile input[type=number]").inputValue(), "8");
+  assert.equal(await page.locator(".rv-profile").count(), 1, "ở lại để sửa");
+  assert.equal((await log()).filter((l) => l.m === "PUT" && l.p.startsWith("/api/resources/") && l.b.capacityHoursPerDay !== undefined).length, 0, "24h không được gửi đi");
+  await page.locator(".rv-profile input[type=number]").fill("6");
+  await page.keyboard.press("Tab");
+  const put = await waitLog((l) => l.m === "PUT" && l.p.startsWith("/api/resources/") && l.b.capacityHoursPerDay !== undefined);
+  assert.equal(put.b.capacityHoursPerDay, 6);
+  assert.deepEqual(Object.keys(put.b).sort(), ["capacityHoursPerDay", "displayName"]);
+  await page.locator(".rv-profile input[type=number]").fill("8");
+  await page.keyboard.press("Tab");
+  await page.waitForFunction(() => document.querySelector(".rv-profile-status")?.textContent?.includes("Đã lưu"));
+});
+await step("bấm lên lớp mờ đóng cửa sổ và ghi nốt ô đang gõ", async () => {
+  await page.locator(".rv-profile input").first().fill("QA Senior");
+  await reset();
+  await page.locator(".rv-profile-layer").click({ position: { x: 4, y: 4 } });
+  const put = await waitLog((l) => l.m === "PUT" && l.p.startsWith("/api/resources/") && l.b.role !== undefined);
   assert.equal(put.b.role, "QA Senior");
-  await page.waitForSelector(".rv-drawer", { state: "detached" });
-});
-await step("lưu không được (công suất sai) thì ngăn ở lại và nói lý do; sửa lại rồi Esc thì đóng", async () => {
-  await rowOf("Lê Chi").locator(".rv-profile-btn").click();
-  await page.waitForSelector(".rv-drawer");
-  await page.locator(".rv-drawer input[type=number]").fill("30");
-  await page.keyboard.press("Escape");
-  await page.waitForSelector(".rv-drawer .rv-notice-error");
-  assert.equal(await page.locator(".rv-drawer").count(), 1, "phải ở lại khi không lưu được");
-  await page.locator(".rv-drawer input[type=number]").fill("8");
-  await page.keyboard.press("Escape");
-  await page.waitForSelector(".rv-drawer", { state: "detached" });
-});
-await step("ngăn không chặn Tab và không có lớp phủ: bấm ra ngoài không đóng", async () => {
-  await rowOf("Lê Chi").locator(".rv-profile-btn").click();
-  await page.waitForSelector(".rv-drawer");
-  await page.locator(".rv-kpis").click({ position: { x: 2, y: 2 } });
-  assert.equal(await page.locator(".rv-drawer").count(), 1);
-  await page.keyboard.press("Escape");
-  await page.waitForSelector(".rv-drawer", { state: "detached" });
+  await page.waitForSelector(".rv-profile", { state: "detached" });
 });
 
 console.log("\n== Tải lại trang (F5): các tab không phải chờ Jira lần nữa ==");

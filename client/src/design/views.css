@@ -57,9 +57,9 @@
 /* Legend swatches are little skylines too. */
 .rv-swatch {
   display: inline-block;
-  width: 12px;
-  height: 12px;
-  border-radius: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
   box-shadow: inset 0 0 0 1px var(--line);
   overflow: hidden;
 }
@@ -97,18 +97,16 @@
   border-color: var(--ink);
   color: var(--on-strong);
 }
+.rv-pill.rv-un-pill {
+  margin-left: auto;
+}
+.rv-un-pill + .rv-legend {
+  margin-left: 0;
+}
 .rv-pill.rv-pill-warn {
   background: var(--warn-wash);
   border-color: transparent;
   color: var(--warn-text);
-}
-.rv-kpi-stat {
-  color: var(--ink-3);
-}
-.rv-kpi-stat b {
-  font-family: var(--font-mono);
-  color: var(--ink);
-  font-weight: 500;
 }
 .rv-name strong,
 .rv-person-name {
@@ -605,6 +603,9 @@ button.bd-assignee {
 }
 /* F2: the red number by a name is a button that takes you to the first over-capacity day. */
 button.rv-badge-over {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   height: auto;
   border: 0;
   box-shadow: none;
@@ -617,11 +618,8 @@ button.rv-badge-over:hover:not(:disabled) {
   box-shadow: none;
   text-decoration: underline;
 }
-button.rv-badge-over.is-later {
-  color: var(--ink-3);
-  font-weight: 500;
-}
-/* F1/F4: a task row is status glyph, key, the whole name; "Chuyển…" floats over its right end on hover. */
+/* A task row is status glyph, key, the name, and a small icon at the end that shows on hover or focus.
+   It keeps its own 22px at the end of the row, so it never covers the name. */
 .rv-task-row .rv-name.rv-task-name {
   position: sticky;
 }
@@ -642,21 +640,23 @@ button.rv-assign-btn:hover:not(:disabled) {
   color: var(--ink);
 }
 .rv-task-name > button.rv-assign-btn {
-  position: absolute;
-  right: 6px;
-  top: 50%;
-  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink-3);
   opacity: 0;
 }
 .rv-task-row:hover .rv-task-name > button.rv-assign-btn,
-.rv-task-name > button.rv-assign-btn:focus-visible,
-.rv-task-name > button.rv-assign-btn.is-shown {
+.rv-task-name > button.rv-assign-btn:focus-visible {
   opacity: 1;
 }
-/* An overloaded person's rows always show it, and keep the room for it. */
-.rv-task-name > button.rv-assign-btn.is-shown {
-  position: static;
-  transform: none;
+.rv-task-name > button.rv-assign-btn:hover:not(:disabled) {
+  background: var(--sunken);
+  color: var(--ink);
 }
 @media (hover: none) {
   .rv-task-name > button.rv-assign-btn {
@@ -721,27 +721,188 @@ button.pr-print {
   display: block;
   margin-top: 2px;
 }
-/* F7: the profile drawer is a side sheet like the task panel: no dimmer, under the header, closing saves. */
-.rv-drawer {
-  z-index: var(--z-peek);
-  top: var(--header-h);
-  border-left: 1px solid var(--line);
+/* The profile: a window in the middle of the page like the task detail, two columns, no footer. */
+.rv-profile-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 48; /* with the task detail: over the assistant window (46), under menus and pickers (50) */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: var(--color-overlay);
+  animation: overlay-in var(--d-2) linear;
+}
+.rv-profile {
+  width: min(760px, 100%);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
   background: var(--raised);
+  box-shadow: var(--shadow-modal);
+  overflow: hidden;
 }
-.rv-drawer-foot .primary kbd {
-  background: transparent;
-  border-color: color-mix(in srgb, var(--on-strong) 30%, transparent);
-  color: color-mix(in srgb, var(--on-strong) 75%, transparent);
-  margin-left: 4px;
+.rv-profile-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px 12px 20px;
+  border-bottom: 1px solid var(--line);
 }
-.rv-drawer-foot .primary:disabled {
-  opacity: 1;
-  background: var(--sunken);
-  border-color: var(--line);
+.rv-profile-title {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.rv-profile-title b {
+  display: block;
+  font-size: var(--font-size-lead);
+  color: var(--ink);
+}
+.rv-profile-title small {
+  font-size: var(--font-size-sm);
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.rv-profile-status {
+  flex: none;
+  min-width: 56px;
+  text-align: right;
+  font-size: var(--font-size-sm);
   color: var(--ink-3);
 }
-.rv-drawer-foot .primary:disabled kbd {
-  display: none;
+.rv-profile-head .icon-btn {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink-2);
+}
+.rv-profile-head .icon-btn:hover:not(:disabled) {
+  background: var(--sunken);
+  box-shadow: none;
+}
+.rv-profile-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+.rv-profile-col {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  padding: 18px 20px 20px;
+}
+.rv-profile-col .field {
+  flex: none;
+}
+.rv-profile-leave {
+  border-left: 1px solid var(--line);
+  background: var(--paper);
+}
+.rv-profile-leave-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 24px;
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.rv-profile-empty {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: var(--font-size-md);
+}
+.rv-absences {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.rv-abs-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 4px 0 8px;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--font-size-md);
+}
+.rv-abs-row.is-editing {
+  background: var(--sunken);
+}
+.rv-abs-when {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.rv-abs-reason {
+  flex: 1 1 0;
+  min-width: 0;
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rv-abs-row .icon-btn {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink-3);
+}
+.rv-abs-row .icon-btn:hover:not(:disabled) {
+  background: var(--sunken);
+  box-shadow: none;
+  color: var(--ink);
+}
+.rv-leave-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--raised);
+}
+.rv-leave-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.rv-profile-error {
+  margin: 0;
+  border-radius: 0;
+  border-width: 1px 0 0;
+}
+@media (max-width: 720px) {
+  .rv-profile-layer {
+    padding: 0;
+  }
+  .rv-profile {
+    height: 100%;
+    border: 0;
+    border-radius: 0;
+  }
+  .rv-profile-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .rv-profile-leave {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
 }
 
 /* One bar per person: the done / doing / to-do pieces side by side on one line, filling the middle column.
