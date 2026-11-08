@@ -55,8 +55,9 @@
       #gms-splash.is-intro .sp-g { stroke-dasharray: 1; animation: sp-draw 420ms cubic-bezier(.65, 0, .35, 1) 120ms both; }
       #gms-splash.is-intro .sp-dot { animation: sp-pop 240ms cubic-bezier(.34, 1.56, .64, 1) 480ms both, sp-wait 1200ms ease-in-out 1100ms infinite; }
       #gms-splash.is-intro .sp-word { animation: sp-rise 260ms cubic-bezier(.23, 1, .32, 1) 340ms both; }
-      #gms-splash.is-quick { animation: sp-fade 160ms ease-out 140ms both; }
-      #gms-splash.is-quick .sp-dot { animation: sp-wait 1200ms ease-in-out 700ms infinite; }
+      /* Reload in a tab that has already seen it: no logo at all, only the paper colour so the page
+         does not flash white while the app loads. */
+      #gms-splash.is-quick .sp-lockup { display: none; }
       @keyframes sp-in { from { opacity: 0; transform: scale(.84); } }
       @keyframes sp-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
       @keyframes sp-pop { from { transform: scale(0); } }

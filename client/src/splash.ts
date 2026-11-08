@@ -1,11 +1,10 @@
 /**
  * Hands the splash drawn by index.html over to the app.
  *
- * The splash is there from the first byte (before scripts and fonts) and is never kept up for
- * show: it leaves as soon as the app has its first real screen. The one exception is the first
- * open in a tab, where it stays until the mark has finished drawing (INTRO_MS, well under a
- * second) so the drawing is not cut off halfway. When the workspace is what comes next, the mark
- * flies into the rail's mark, which it is drawn identically to, so the logo is never seen twice.
+ * The logo animation plays only on the first open in a tab: the splash stays until the mark has
+ * finished drawing (INTRO_MS, well under a second), then flies into the rail's mark, which it is
+ * drawn identically to, so the logo is never seen twice. Every later reload (F5) shows no logo
+ * at all, just the paper colour until the app has its first real screen, then it is removed.
  */
 const INTRO_MS = 720;
 const SEEN_KEY = "gms.splash";
@@ -29,7 +28,8 @@ export function dismissSplash(): void {
 
 function leave(el: HTMLElement) {
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  if (reduced || typeof el.animate !== "function") {
+  // A reload shows no logo (index.html hides it), so there is nothing to fly or fade.
+  if (reduced || typeof el.animate !== "function" || el.classList.contains("is-quick")) {
     el.remove();
     return;
   }
