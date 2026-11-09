@@ -167,6 +167,29 @@ await step("nhấn nút Tuần ↔ Tháng nhiều lần liên tiếp không làm
   assert.ok(Math.abs(after.left - before.left) <= 15, `thanh trôi từ ${before.left.toFixed(0)}px sang ${after.left.toFixed(0)}px`);
 });
 
+await step("chế độ Tháng: thu nhỏ đến mức cuối, tên các tháng không đè lên nhau", async () => {
+  await page.locator(".gantt-toolbar button", { hasText: "Tháng" }).first().click();
+  await page.waitForTimeout(500);
+  const y = (await page.locator(".gantt-body").boundingBox()).y + 200;
+  const seen = new Set();
+  // Mỗi bước thu nhỏ, đo lại: nhãn nào cũng phải nằm gọn trong cột của nó, không chạm nhãn bên cạnh.
+  for (let i = 0; i < 12; i++) {
+    await zoom(700, y, 2, 120);
+    const r = await page.evaluate(() => {
+      const labels = [...document.querySelectorAll("text._9w8d5")]
+        .map((el) => ({ text: el.textContent ?? "", box: el.getBoundingClientRect() }))
+        .filter((l) => l.text && l.box.width > 0 && l.box.right > 0 && l.box.left < innerWidth)
+        .sort((a, b) => a.box.left - b.box.left);
+      let worst = Infinity;
+      for (let k = 1; k < labels.length; k++) worst = Math.min(worst, labels[k].box.left - labels[k - 1].box.right);
+      return { n: labels.length, gap: worst, sample: labels[0]?.text, width: labels.length > 1 ? labels[1].box.left - labels[0].box.left : 0 };
+    });
+    seen.add(r.sample);
+    if (r.n > 1) assert.ok(r.gap >= 0, `cột ${r.width.toFixed(0)}px: "${r.sample}" đè lên nhãn bên cạnh (${r.gap.toFixed(1)}px)`);
+  }
+  assert.ok(seen.size > 1, `nhãn không đổi dài ngắn theo độ rộng cột: ${[...seen]}`);
+});
+
 console.log(failed ? `\n${failed} lỗi` : "\nđạt hết");
 await browser.close();
 process.exit(failed ? 1 : 0);

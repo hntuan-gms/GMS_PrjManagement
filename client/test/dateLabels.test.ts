@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { formatRange, fullDate, monthLabels, shortDay, shortRange, weekColumnLabel } from "../src/dateLabels";
+import { formatRange, fullDate, monthColumnLabel, monthLabels, shortDay, shortRange, weekColumnLabel } from "../src/dateLabels";
 
 describe("dateLabels", () => {
   it("writes a month in three lengths", () => {
@@ -47,5 +47,21 @@ describe("dateLabels", () => {
       assert.equal(shortDay("2026-01-01", "2026-06-01"), "1/1");
     }
     process.env.TZ = old;
+  });
+});
+
+describe("monthColumnLabel", () => {
+  it("cuts a month column's label to what the column holds", () => {
+    assert.equal(monthColumnLabel("Tháng 11", 110), "Tháng 11");
+    assert.equal(monthColumnLabel("Tháng 11", 64), "Tháng 11");
+    assert.equal(monthColumnLabel("Tháng 11", 63), "T11");
+    assert.equal(monthColumnLabel("Tháng 11", 36), "T11");
+    assert.equal(monthColumnLabel("Tháng 11", 35), "11");
+    assert.equal(monthColumnLabel("Tháng 1", 26), "1");
+  });
+
+  it("reads a label already shortened the same, so the pass can run again after a zoom", () => {
+    assert.equal(monthColumnLabel("T11", 110), "Tháng 11");
+    assert.equal(monthColumnLabel("11", 40), "T11");
   });
 });

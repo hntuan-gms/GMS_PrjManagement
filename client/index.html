@@ -31,18 +31,28 @@
         z-index: 1000;
         display: grid;
         place-items: center;
-        background: #f6f5f1;
         pointer-events: none;
       }
-      html[data-theme="dark"] #gms-splash { background: #121211; }
-      .sp-lockup { display: flex; flex-direction: column; align-items: center; gap: 14px; }
-      .sp-mark { display: block; width: 56px; height: 56px; overflow: visible; }
+      /* The paper colour is its own layer so that leaving is an opacity fade (compositor), not a
+         background-colour animation (repaints the whole window on the main thread, under a busy app). */
+      .sp-bg { position: absolute; inset: 0; background: #f6f5f1; }
+      html[data-theme="dark"] .sp-bg { background: #121211; }
+      .sp-lockup { position: relative; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+      .sp-mark { position: relative; width: 56px; height: 56px; }
+      .sp-svg { display: block; width: 100%; height: 100%; overflow: visible; }
       .sp-tile { fill: #1d1c1a; }
       .sp-g { fill: none; stroke: #f6f5f1; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
-      .sp-dot { fill: #e0531f; transform-box: fill-box; transform-origin: center; }
+      .sp-dot { fill: #e0531f; }
+      /* The intro reveals the G with a cover in the tile's own colour sliding off it. Everything that
+         moves here is transform or opacity on an HTML element, which the browser runs off the main
+         thread: the page's script (hundreds of ms of parsing and first render, right while this plays)
+         cannot stall it. Drawing the stroke (stroke-dashoffset) stalled for most of a second. */
+      .sp-clip { position: absolute; inset: 0; border-radius: 14px; overflow: hidden; }
+      .sp-cover { position: absolute; inset: 0; background: #1d1c1a; transform: scaleX(0); transform-origin: right center; }
       html[data-theme="dark"] .sp-tile { fill: #edebe6; }
       html[data-theme="dark"] .sp-g { stroke: #121211; }
       html[data-theme="dark"] .sp-dot { fill: #f26b38; }
+      html[data-theme="dark"] .sp-cover { background: #edebe6; }
       .sp-word {
         font: 600 11px/1 system-ui, -apple-system, "Segoe UI", sans-serif;
         letter-spacing: 0.28em;
@@ -52,18 +62,15 @@
       /* First open in this tab: the mark is drawn (≈0.6s). Later reloads: it is simply there, and only
          if loading takes longer than a blink. */
       #gms-splash.is-intro .sp-mark { animation: sp-in 420ms cubic-bezier(.23, 1, .32, 1) both; }
-      #gms-splash.is-intro .sp-g { stroke-dasharray: 1; animation: sp-draw 640ms cubic-bezier(.65, 0, .35, 1) 180ms both; }
-      #gms-splash.is-intro .sp-dot { animation: sp-pop 360ms cubic-bezier(.34, 1.56, .64, 1) 740ms both, sp-wait 1200ms ease-in-out 1650ms infinite; }
+      #gms-splash.is-intro .sp-cover { animation: sp-wipe 640ms cubic-bezier(.65, 0, .35, 1) 180ms backwards; }
       #gms-splash.is-intro .sp-word { animation: sp-rise 400ms cubic-bezier(.23, 1, .32, 1) 520ms both; }
       /* Reload in a tab that has already seen it: no logo at all, only the paper colour so the page
          does not flash white while the app loads. */
       #gms-splash.is-quick .sp-lockup { display: none; }
       @keyframes sp-in { from { opacity: 0; transform: scale(.84); } }
-      @keyframes sp-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
-      @keyframes sp-pop { from { transform: scale(0); } }
+      @keyframes sp-wipe { from { transform: scaleX(1); } }
       @keyframes sp-rise { from { opacity: 0; transform: translateY(4px); } }
       @keyframes sp-fade { from { opacity: 0; } }
-      @keyframes sp-wait { 50% { opacity: .35; } }
       @media (prefers-reduced-motion: reduce) {
         #gms-splash *, #gms-splash { animation: none !important; }
       }
@@ -71,12 +78,16 @@
   </head>
   <body>
     <div id="gms-splash" aria-hidden="true">
+      <div class="sp-bg"></div>
       <div class="sp-lockup">
-        <svg class="sp-mark" viewBox="0 0 32 32" focusable="false">
-          <rect class="sp-tile" width="32" height="32" rx="8" />
-          <path class="sp-g" pathLength="1" d="M22.4 10.2A8.5 8.5 0 1 0 24.5 16H17" />
-          <circle class="sp-dot" cx="13.4" cy="16" r="2.2" />
-        </svg>
+        <div class="sp-mark">
+          <svg class="sp-svg" viewBox="0 0 32 32" focusable="false">
+            <rect class="sp-tile" width="32" height="32" rx="8" />
+            <path class="sp-g" d="M22.4 10.2A8.5 8.5 0 1 0 24.5 16H17" />
+            <circle class="sp-dot" cx="13.4" cy="16" r="2.2" />
+          </svg>
+          <span class="sp-clip"><span class="sp-cover"></span></span>
+        </div>
         <div class="sp-word">GIMASYS</div>
       </div>
     </div>

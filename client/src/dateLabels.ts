@@ -25,6 +25,24 @@ export function monthLabels(iso: string): MonthLabels {
   return { full: `Tháng ${m}/${y}`, short: `T${m}/${y.slice(2)}`, tiny: `T${m}` };
 }
 
+/** A month column is this wide (px) or more before "Tháng 11" (about 50px at 11px type) fits in it. */
+export const MONTH_FULL_MIN_PX = 64;
+/** …before "T11" (about 22px) fits. Narrower than this, the number alone. */
+export const MONTH_SHORT_MIN_PX = 36;
+
+/**
+ * The label of one month column in the plan's header, by how wide the column is: "Tháng 11", "T11", "11".
+ * `raw` is what the chart library wrote ("Tháng 11"); only its trailing month number is read, so a label
+ * already shortened by an earlier pass reads the same. Anything without a number is returned unchanged.
+ */
+export function monthColumnLabel(raw: string, columnWidth: number): string {
+  const m = raw.match(/(\d{1,2})\s*$/);
+  if (!m) return raw;
+  if (columnWidth >= MONTH_FULL_MIN_PX) return `Tháng ${m[1]}`;
+  if (columnWidth >= MONTH_SHORT_MIN_PX) return `T${m[1]}`;
+  return m[1];
+}
+
 /** A week column is named by the date its week starts on: "02/11". */
 export function weekColumnLabel(weekStart: string): string {
   const { m, d } = part(weekStart);

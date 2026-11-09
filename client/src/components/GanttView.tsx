@@ -15,7 +15,7 @@ import { useAppearance } from "../useAppearance";
 import { ROW_HEIGHTS, getDensity } from "../theme";
 import { isAssignableType, type DependencyType, type JiraUser, type ProjectVersion, type ResourcePool, type Task, type TaskTransition, type TaskUpdateInput } from "../types";
 import { anchorDay, isMilestone, shiftDay, weekAxisStart } from "../timelineGeometry";
-import { weekColumnLabel } from "../dateLabels";
+import { monthColumnLabel, weekColumnLabel } from "../dateLabels";
 import { toast } from "../toast";
 import { changeSchedule, scheduleOf } from "../scheduleFields";
 import { formatPredecessors, parsePredecessors } from "../predecessorsText";
@@ -1659,6 +1659,25 @@ export default function GanttView({
     observer.observe(bodyEl, { subtree: true, childList: true, characterData: true });
     return () => observer.disconnect();
   }, [bodyEl, viewMode, weekOrigin, columnWidth]);
+
+  // Month view: the library writes "Tháng 11" in every column, about 50px, and a column can be as narrow as
+  // MIN_COLUMN_WIDTH — zoomed out, the names ran into each other. The label is cut to what the column holds.
+  useEffect(() => {
+    if (!bodyEl || viewMode !== ViewMode.Month) return;
+    function relabel() {
+      bodyEl!.querySelectorAll<SVGTextElement>("text._9w8d5").forEach((el) => {
+        const raw = el.dataset.fullLabel ?? el.textContent ?? "";
+        if (!/\d\s*$/.test(raw)) return;
+        if (!el.dataset.fullLabel) el.dataset.fullLabel = raw;
+        const next = monthColumnLabel(raw, columnWidth);
+        if (el.textContent !== next) el.textContent = next;
+      });
+    }
+    relabel();
+    const observer = new MutationObserver(relabel);
+    observer.observe(bodyEl, { subtree: true, childList: true, characterData: true });
+    return () => observer.disconnect();
+  }, [bodyEl, viewMode, columnWidth]);
 
   // A label drawn beside a short bar runs on until it meets whatever lies to its right. It is cut at
   // MAX_OUTSIDE_LABEL px with an ellipsis; the whole name stays in the tooltip and the table.
