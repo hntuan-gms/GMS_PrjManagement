@@ -26,6 +26,7 @@ import {
 } from "../auth/session.js";
 import { deleteRefreshToken, saveRefreshToken } from "../auth/refreshTokenStore.js";
 import { forgetTokens } from "../auth/tokens.js";
+import { loginLogLine } from "../auth/identity.js";
 import { badRequest } from "../errors.js";
 import type { SessionMeta } from "../types.js";
 
@@ -162,6 +163,7 @@ authRouter.get("/callback", async (req, res, next) => {
       staff,
     };
     commitSession(res, session);
+    console.log(loginLogLine(session, { staff, siteName: site.name }));
     commitAccess(res, {
       v: 1,
       accessToken: bundle.accessToken,

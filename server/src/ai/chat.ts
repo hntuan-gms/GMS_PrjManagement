@@ -7,6 +7,7 @@ import { TOOLS, labelFor, runTool, type ToolContext } from "./tools.js";
 import { choicesFor, type ChoicesEvent } from "./choices.js";
 import { buildReceipt, isReceiptTool, type ReceiptItem } from "./receipts.js";
 import { contextLine, type ChatContext } from "./chatContext.js";
+import { identityLine, type Identity } from "../auth/identity.js";
 import type { ViewFilterSpec } from "./viewFilter.js";
 
 /**
@@ -123,7 +124,31 @@ function teamRoster(team: JiraUser[], limit = 60): string {
   return [...lines, team.length > limit ? `(và ${team.length - limit} người nữa)` : ""].filter(Boolean).join("\n");
 }
 
-function systemPrompt(projectKey: string, tasks: Task[], today: string, team: JiraUser[], context?: ChatContext): string {
+/**
+ * Who is asking, so "việc của tôi", "giao cho tôi" and "chào tôi" mean someone.
+ * The account is not necessarily in the roster (someone who cannot be assigned work
+ * is not a member), so it is stated on its own rather than looked up there.
+ */
+function whoLines(me: Identity | undefined): string[] {
+  const line = identityLine(me);
+  if (!line) return [];
+  return [
+    "Người đang trò chuyện với bạn (tên — accountId):",
+    line,
+    "- 'tôi', 'mình', 'của tôi', 'giao cho tôi' đều là người này: dùng accountId trên làm assigneeAccountId / bộ lọc người, không hỏi lại là ai.",
+    "- Có thể gọi họ bằng tên khi chào hoặc xác nhận việc; không nhắc accountId trong câu trả lời.",
+    "",
+  ];
+}
+
+function systemPrompt(
+  projectKey: string,
+  tasks: Task[],
+  today: string,
+  team: JiraUser[],
+  context?: ChatContext,
+  me?: Identity
+): string {
   const where = contextLine(context);
   return [
     `Bạn là trợ lý quản lý dự án cho project Jira "${projectKey}". Trả lời bằng tiếng Việt, ngắn gọn, đi thẳng vào việc.`,
@@ -189,6 +214,7 @@ function systemPrompt(projectKey: string, tasks: Task[], today: string, team: Ji
     "- Nói rõ vì sao chọn người đó (số ngày trùng, giờ còn trống) để người dùng phản biện được.",
     "- Sau khi tạo hoặc gán xong, nhắc lại mã issue vừa tác động.",
     "",
+    ...whoLines(me),
     ...(where ? ["Ngữ cảnh màn hình hiện tại:", where, ""] : []),
     "Thành viên dự án (tên — accountId):",
     teamRoster(team),
@@ -235,6 +261,8 @@ export async function* streamChat(
     files?: Part[];
     /** The screen the question was asked on (chatContext.ts). A prompt line only, never stored. */
     context?: ChatContext;
+    /** The signed-in account, from the session — never from the request body. */
+    me?: Identity;
   } = {}
 ): AsyncGenerator<ChatEvent> {
   const { signal } = options;
@@ -255,7 +283,7 @@ export async function* streamChat(
   ];
 
   const config = {
-    systemInstruction: systemPrompt(projectKey, tasks, today, team, options.context),
+    systemInstruction: systemPrompt(projectKey, tasks, today, team, options.context, options.me),
     tools: [{ functionDeclarations: TOOLS }],
     thinkingConfig: { includeThoughts: true },
     temperature: 0.3,

@@ -306,7 +306,12 @@ aiRouter.post("/chat", requireProject, express.json({ limit: CHAT_BODY_LIMIT }),
           throw err;
         }
       },
-    }, { signal: abort.signal, files: files.parts, context: sanitizeContext(body?.context, session.projectKey!) });
+    }, {
+      signal: abort.signal,
+      files: files.parts,
+      context: sanitizeContext(body?.context, session.projectKey!),
+      me: { accountId: session.accountId, displayName: session.displayName },
+    });
 
     try {
       for await (const event of stream) {

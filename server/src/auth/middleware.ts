@@ -13,6 +13,7 @@ import { applyWriteToCache } from "../issueCacheStore.js";
 import { noteLimited, noteNearLimit, quotaView } from "../jiraQuota.js";
 import { TaskService } from "../taskService.js";
 import { clearAuthCookies } from "./cookies.js";
+import { accessLogLine } from "./identity.js";
 import { deleteRefreshToken } from "./refreshTokenStore.js";
 import { requestedProjectKey, resolveProject } from "./projectScope.js";
 import { commitAccess, readAccess, readSession, type SessionData } from "./session.js";
@@ -38,6 +39,21 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     next(authRequired());
     return;
   }
+
+  // Who did what, in our own log: Cloud Run's request line has an IP and nothing else. The project
+  // is read when the response ends, because requireProject only settles it further down the chain.
+  const started = Date.now();
+  res.on("finish", () => {
+    console.log(
+      accessLogLine(session, {
+        method: req.method,
+        path: req.originalUrl.split("?")[0].slice(0, 200),
+        status: res.statusCode,
+        ms: Date.now() - started,
+        projectKey: req.auth?.session.projectKey ?? null,
+      })
+    );
+  });
 
   try {
     // Refresh eagerly, here, before the route writes anything: res.cookie() after
