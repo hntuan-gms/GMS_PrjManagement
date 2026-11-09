@@ -136,26 +136,38 @@
   transition: transform var(--d-2) var(--e-move);
 }
 
-/* Status: the glyph carries it; the workflow's own name follows, quiet. */
+/* Status: a Jira lozenge, the whole name on its tone (statusTone.ts). The glyph shows only when the
+   table is too narrow for the name (.is-compact below). */
 .wbs-status {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   max-width: 100%;
-  padding: 0;
-  border-radius: 0;
-  background: none;
-  font-size: var(--font-size-md);
-  font-weight: 400;
-  color: var(--ink-2);
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--lz-grey-bg);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--lz-grey-text);
 }
-.wbs-status.is-indeterminate,
-.wbs-status.is-done {
-  background: none;
-  color: var(--ink-2);
+.wbs-status.tone-green {
+  background: var(--lz-green-bg);
+  color: var(--lz-green-text);
 }
-.wbs-status.is-done .wbs-status-name {
-  color: var(--ink-3);
+.wbs-status.tone-yellow {
+  background: var(--lz-yellow-bg);
+  color: var(--lz-yellow-text);
+}
+.wbs-status.tone-orange {
+  background: var(--lz-orange-bg);
+  color: var(--lz-orange-text);
+}
+.wbs-status > .status-glyph {
+  display: none;
 }
 .wbs-status-name {
   overflow: hidden;
@@ -698,6 +710,13 @@ body:has(.gantt-toolbar) .draft-text {
 .wbs-col-extra.is-compact .wbs-status-name,
 .wbs-col-extra.is-compact .wbs-person-name {
   display: none;
+}
+/* Compact: the lozenge shrinks to its glyph on the same tone. */
+.wbs-col-extra.is-compact .wbs-status {
+  padding: 2px;
+}
+.wbs-col-extra.is-compact .wbs-status > .status-glyph {
+  display: block;
 }
 .wbs-col-name {
   min-width: 0;
