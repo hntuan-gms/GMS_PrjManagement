@@ -73,6 +73,16 @@
   --ai-line: #cbc4e8;
   --ai-text: #4f4196;
 
+  /* Status lozenges in the WBS table, Jira's own tints (Atlassian accent "subtler" + accent text). */
+  --lz-green-bg: #baf3db;
+  --lz-green-text: #216e4e;
+  --lz-yellow-bg: #f8e6a0;
+  --lz-yellow-text: #7f5f01;
+  --lz-orange-bg: #fedec8;
+  --lz-orange-text: #a54800;
+  --lz-grey-bg: #dcdfe4;
+  --lz-grey-text: #44546f;
+
   /* Legacy primitive names, kept so the few rules that still name them follow the new palette. */
   --slate-50: var(--paper);
   --slate-100: var(--sunken);
@@ -316,6 +326,15 @@ html[data-density="comfortable"] {
   --ai-wash: #221f33;
   --ai-line: #423a6b;
   --ai-text: #c3b9f2;
+
+  --lz-green-bg: #164b35;
+  --lz-green-text: #7ee2b8;
+  --lz-yellow-bg: #533f04;
+  --lz-yellow-text: #f5cd47;
+  --lz-orange-bg: #702e00;
+  --lz-orange-text: #fec195;
+  --lz-grey-bg: #38414a;
+  --lz-grey-text: #b6c2cf;
 
   --type-issue: #ef9147;
 
