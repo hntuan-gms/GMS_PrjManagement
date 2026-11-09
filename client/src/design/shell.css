@@ -203,25 +203,25 @@ button.rail-avatar {
     padding: 0 8px;
   }
 }
-/* Create: green, top left. Solid fill from the success token, white text. */
+/* Create: Jira blue, right before "Khớp Jira". Solid fill from the info token, white text. */
 button.hd-create {
   height: 28px;
   padding: 0 12px 0 10px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin-right: 8px;
-  border: 1px solid var(--ok);
+  margin-right: 10px;
+  border: 1px solid var(--info);
   border-radius: var(--radius-md);
-  background: var(--ok);
+  background: var(--info);
   color: var(--on-strong);
   font-size: var(--font-size-sm);
   font-weight: 600;
   white-space: nowrap;
 }
 button.hd-create:hover:not(:disabled) {
-  background: var(--ok-text);
-  border-color: var(--ok-text);
+  background: var(--info-text);
+  border-color: var(--info-text);
   color: var(--on-strong);
 }
 button.hd-create:focus-visible {

@@ -89,7 +89,8 @@ function initialView(storageKey: string): { view: WorkspaceView } {
     // A view remembered from before a long break is not restored: the day starts on the plan.
     if (!isStale(readLastActive(), Date.now())) {
       const saved = parseView(localStorage.getItem(storageKey));
-      if (saved) return saved;
+      // Hôm nay is one click away but never where a project opens: a remembered "today" opens the plan.
+      if (saved && saved.view !== "today") return saved;
     }
   } catch {
     /* private mode */
@@ -1620,7 +1621,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
         onViewChange={setView}
         overloadedPeople={overloadedPeople}
         hideResource={resourceAccess === "denied"}
-        onAddTask={() => setCmdk("create")}
+        onAddTask={() => setCreating({})}
         onSync={handleSync}
         sync={syncState}
         onOpenCommand={() => setCmdk("command")}

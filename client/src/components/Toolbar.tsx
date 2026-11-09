@@ -159,17 +159,16 @@ export default function Toolbar({
         <button
           type="button"
           className="rail-mark"
-          aria-label="GMS · về Hôm nay"
-          data-tip="Hôm nay  G H"
+          aria-label="GMS · về Dự án"
+          data-tip="Dự án"
           onClick={() => {
             dismissForNavigation();
-            onViewChange("today");
+            onViewChange(lensView ?? lastLens ?? (phone ? "board" : "gantt"));
           }}
         >
           <BrandMark size={30} />
         </button>
         <span className="rail-sep" aria-hidden="true" />
-        <RailButton icon="sun" label="Hôm nay" keys="G H" view="today" active={view === "today"} onClick={() => onViewChange("today")} />
         <RailButton
           icon="plan"
           label="Dự án"
@@ -178,6 +177,7 @@ export default function Toolbar({
           active={inProject}
           onClick={() => onViewChange(lensView ?? lastLens ?? (phone ? "board" : "gantt"))}
         />
+        <RailButton icon="sun" label="Hôm nay" keys="G H" view="today" active={view === "today"} onClick={() => onViewChange("today")} />
         {/* A phone has no room for the hours grid (phoneView sends it to Hôm nay), so it is not offered there. */}
         {!phone && (
           <RailButton icon="clock" label="Clockwork" keys="G T" view="timesheet" active={view === "timesheet"} onClick={() => onViewChange("timesheet")} />
@@ -281,20 +281,6 @@ export default function Toolbar({
 
       <header className="toolbar">
         <div className="toolbar-left">
-          {/* Top left, green, like Jira's: the one solid button of the header. */}
-          <button
-            type="button"
-            className="hd-create"
-            aria-label="Create"
-            title="Create (C)"
-            onClick={() => {
-              dismissForNavigation();
-              onAddTask();
-            }}
-          >
-            <Icon name="plus" size={14} />
-            <span>Create</span>
-          </button>
           {project && (
             <Popover
               className="hd-btn project-switch"
@@ -368,6 +354,20 @@ export default function Toolbar({
         )}
 
         <div className="toolbar-right">
+          {/* Jira-blue, right before the sync indicator: opens the full create form. */}
+          <button
+            type="button"
+            className="hd-create"
+            aria-label="Create"
+            title="Create"
+            onClick={() => {
+              dismissForNavigation();
+              onAddTask();
+            }}
+          >
+            <Icon name="plus" size={14} />
+            <span>Create</span>
+          </button>
           <SyncIndicator sync={sync} onSync={onSync} />
           <button type="button" className="cmdk-trigger" onClick={onOpenCommand} aria-label="Mở ô lệnh (Ctrl K)">
             <Icon name="search" size={14} />
