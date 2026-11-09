@@ -1,0 +1,126 @@
+/* ==========================================================================
+   "Create": the same two panes as the task detail (detail.css) — what the work is on the left, where it
+   stands on the right, on paper — in a window over the page. Reuses .td-cols / .td-left / .td-right; the
+   rows are .field labels laid out as label | value, so tests and the quick-add words keep their hooks.
+   ========================================================================== */
+.modal-overlay.create-layer {
+  z-index: 48;
+  padding: 20px;
+}
+.modal.modal-create.create-panel {
+  width: min(1120px, 100%);
+  max-width: none;
+  height: min(88vh, 860px);
+  max-height: none;
+  padding: 0;
+  gap: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+}
+.create-panel > .cr-header {
+  flex: none;
+  min-height: 52px;
+  padding: 8px 12px 8px 24px;
+  border-bottom: 1px solid var(--line);
+}
+.cr-crumb {
+  margin-left: 8px;
+  color: var(--ink-3);
+  font-size: var(--font-size-md);
+  font-weight: 400;
+}
+.create-panel .cr-cols {
+  animation: none;
+}
+.cr-left {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 18px 32px 28px 24px;
+}
+.cr-desc textarea {
+  min-height: 140px;
+  resize: vertical;
+}
+.cr-right {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.cr-shared {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: var(--font-size-sm);
+}
+.cr-card {
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--raised);
+}
+.cr-h {
+  margin: 0 0 6px;
+  color: var(--ink-2);
+  font-size: var(--font-size-md);
+  font-weight: 600;
+}
+/* label | value on one row, like the detail's "Chi tiết" */
+.field.cr-prop {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  align-items: start;
+  gap: 0 8px;
+  min-height: 34px;
+  padding: 3px 0;
+}
+.cr-prop > .field-label-text {
+  padding-top: 6px;
+  color: var(--ink-3);
+  font-weight: 400;
+}
+.cr-prop select,
+.cr-prop input {
+  width: 100%;
+}
+.cr-value {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.create-panel > .modal-footer {
+  flex: none;
+}
+.create-panel > .mc-error {
+  flex: none;
+}
+
+@media (max-width: 900px) {
+  .modal-overlay.create-layer {
+    padding: 0;
+  }
+  .modal.modal-create.create-panel {
+    width: 100%;
+    height: 100%;
+    border: none;
+    border-radius: 0;
+  }
+  .create-panel .cr-cols {
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  .cr-left,
+  .cr-right {
+    overflow: visible;
+  }
+  .cr-right {
+    order: -1;
+    border-left: none;
+    border-bottom: 1px solid var(--line);
+  }
+  .cr-left {
+    padding: 12px 18px 28px;
+  }
+}

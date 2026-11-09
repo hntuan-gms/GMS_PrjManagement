@@ -135,6 +135,40 @@ await step("Tạo gửi ngày bắt đầu và thời lượng đã suy ra từ 
   assert.equal(post.b.durationDays, 9);
 });
 
+console.log("\n== Giao diện tạo việc và thanh trái ==");
+await step("form tạo việc là hai cột như khung chi tiết: bên trái việc + mô tả, bên phải thông tin trên nền giấy", async () => {
+  await page.locator(".toolbar-right button.hd-create").click();
+  await page.waitForSelector(".modal-create .td-cols");
+  const [l, r] = await Promise.all([
+    page.locator(".modal-create .td-left").boundingBox(),
+    page.locator(".modal-create .td-right").boundingBox(),
+  ]);
+  assert.ok(l.x < r.x && r.width >= 300, JSON.stringify({ l, r }));
+  for (const label of ["Người", "Ưu tiên", "Ngày bắt đầu", "Ngày kết thúc", "Thời lượng", "Loại", "Ước lượng", "Nhãn"])
+    assert.equal(await page.locator(".modal-create .td-right .field", { hasText: label }).count() > 0, true, label);
+  assert.equal(await page.locator(".modal-create .td-left .field", { hasText: "Mô tả" }).count(), 1);
+  const box = await page.locator(".modal-create").boundingBox();
+  assert.ok(box.width > 900, "cửa sổ phải rộng như khung chi tiết: " + box.width);
+  await page.locator(".modal-create .modal-close").click();
+});
+await step("nhãn 'Clockwork' trên thanh trái nằm gọn trong nút, không tràn", async () => {
+  const fits = await page.$eval(".rail-btn[data-view=timesheet]", (btn) => {
+    const label = btn.querySelector(".rail-label");
+    const b = btn.getBoundingClientRect();
+    const r = document.createRange();
+    r.selectNodeContents(label);
+    const t = r.getBoundingClientRect();
+    return { text: label.textContent, left: t.left - b.left, right: b.right - t.right };
+  });
+  assert.equal(fits.text, "Clockwork");
+  assert.ok(fits.left >= 0 && fits.right >= 0, JSON.stringify(fits));
+});
+await step("chỉ báo đồng bộ là biểu tượng đồng bộ và chữ 'Sync'", async () => {
+  const el = page.locator(".sync-indicator");
+  assert.equal((await el.textContent()).trim(), "Sync");
+  assert.equal(await el.locator("svg.sync-icon").count(), 1);
+});
+
 console.log(`\n${failed ? failed + " lỗi" : "đạt hết"}`);
 console.log("Hộp thoại/console:", problems.length ? problems.join("\n") : "không có");
 await browser.close();

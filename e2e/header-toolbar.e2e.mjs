@@ -27,7 +27,7 @@ await page.goto(process.env.E2E_APP ?? "http://localhost:5173/");
 await page.waitForSelector(".wbs-row");
 
 console.log("\n== Khung: thanh bên + header ==");
-await step("header 44px; 'Create' là nút xanh da trời duy nhất, bên phải, ngay trước 'Khớp Jira', mở form tạo việc đầy đủ", async () => {
+await step("header 44px; 'Create' là nút xanh da trời duy nhất, bên phải, ngay trước 'Sync', mở form tạo việc đầy đủ", async () => {
   assert.equal(Math.round((await box(".toolbar")).height), 44);
   assert.equal(await page.locator(".toolbar button.primary").count(), 0, "header không được có nút đặc nào khác");
   const create = page.locator(".toolbar-right button.hd-create");
@@ -55,9 +55,9 @@ await step("bốn lăng kính dạng chữ; lăng kính hiện tại có aria-cu
   assert.equal(idle, "rgba(0, 0, 0, 0)");
 });
 await step("chỉ báo đồng bộ thay nút 'Đồng bộ từ Jira'; bấm thì đọc lại", async () => {
-  await page.waitForFunction(() => document.querySelector(".sync-indicator")?.textContent.includes("Khớp Jira"));
+  await page.waitForFunction(() => document.querySelector(".sync-indicator")?.classList.contains("is-ok"));
   await page.locator(".sync-indicator").click();
-  await page.waitForFunction(() => document.querySelector(".sync-indicator")?.textContent.includes("Khớp Jira"));
+  await page.waitForFunction(() => document.querySelector(".sync-indicator")?.classList.contains("is-ok"));
 });
 await step("tên dự án là menu đổi dự án; Esc đóng và trả tiêu điểm", async () => {
   const trigger = page.locator(".project-switch");

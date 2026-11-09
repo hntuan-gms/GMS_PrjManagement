@@ -65,7 +65,7 @@ console.log("\n== Việc đổi thì hỏi lại ==");
 await step("sau khi đồng bộ, mở lại Bảng thì hỏi lại", async () => {
   await tab("List");
   await page.locator(".sync-indicator").click();
-  await page.waitForFunction(() => document.querySelector(".sync-indicator")?.textContent.includes("Khớp Jira"));
+  await page.waitForFunction(() => document.querySelector(".sync-indicator")?.classList.contains("is-ok"));
   const boardBefore = counts.board;
   await tab("Board");
   await page.waitForSelector(".bd-card");

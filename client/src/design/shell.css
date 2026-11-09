@@ -91,6 +91,14 @@ button.rail-btn {
   font-weight: 500;
   letter-spacing: 0;
 }
+/* "Clockwork" is nine letters in a 46px button: a hair smaller and tighter so it never spills over. */
+button.rail-btn[data-view="timesheet"] {
+  width: 50px;
+}
+button.rail-btn[data-view="timesheet"] .rail-label {
+  font-size: 9px;
+  letter-spacing: -0.02em;
+}
 button.rail-btn.rail-avatar {
   height: auto;
   padding: 2px 0;
@@ -203,7 +211,7 @@ button.rail-avatar {
     padding: 0 8px;
   }
 }
-/* Create: Jira blue, right before "Khớp Jira". Solid fill from the info token, white text. */
+/* Create: Jira blue, right before "Sync". Solid fill from the info token, white text. */
 button.hd-create {
   height: 28px;
   padding: 0 12px 0 10px;
@@ -310,27 +318,33 @@ button.sync-indicator:disabled {
   opacity: 1;
   cursor: progress;
 }
-.sync-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--ok);
+/* The icon says the state: green when Jira agrees, turning while it is being read, warm / red when not. */
+.sync-icon {
   flex: none;
+  color: var(--ok);
 }
-.sync-indicator.is-reading .sync-dot {
-  background: transparent;
-  box-shadow: inset 0 0 0 1.5px var(--info);
-  border-top-color: transparent;
-  animation: sync-pulse 1.2s linear infinite;
+.sync-indicator.is-reading .sync-icon {
+  color: var(--info);
+  animation: sync-turn 1s linear infinite;
 }
-.sync-indicator.is-limited .sync-dot {
-  background: var(--warn);
+.sync-indicator.is-limited .sync-icon {
+  color: var(--warn);
+}
+@keyframes sync-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sync-indicator.is-reading .sync-icon {
+    animation-duration: 3s;
+  }
 }
 .sync-indicator.is-limited {
   color: var(--warn-text);
 }
-.sync-indicator.is-error .sync-dot {
-  background: var(--risk);
+.sync-indicator.is-error .sync-icon {
+  color: var(--risk);
 }
 .sync-indicator.is-error {
   color: var(--risk-text);

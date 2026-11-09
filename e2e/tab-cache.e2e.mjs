@@ -32,7 +32,7 @@ await page.waitForSelector(".wbs-row");
  */
 async function makeStale() {
   await page.locator(".sync-indicator").click();
-  await page.waitForFunction(() => document.querySelector(".sync-indicator")?.textContent.includes("Khớp Jira"));
+  await page.waitForFunction(() => document.querySelector(".sync-indicator")?.classList.contains("is-ok"));
   await page.waitForTimeout(150);
 }
 
