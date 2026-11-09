@@ -14,6 +14,7 @@ import { prefetchProjectLists, prefetchTaskDetail } from "../taskDetailReads";
 import { optimisticTask, restoreFields, touchedFields } from "../taskPatch";
 import { warmBoardAndTimesheet, warmProgress } from "../warmViews";
 import { computeSla, slaIds } from "../sla";
+import { rememberIssueTypes } from "../issueTypeLook";
 import SavedFilterMenu from "./SavedFilterMenu";
 import { dayLabel, isWorkingDate, toWorkCalendar } from "../workCalendar";
 import type {
@@ -561,6 +562,9 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
     const id = window.setInterval(() => setNowMs(Date.now()), 60_000);
     return () => window.clearInterval(id);
   }, []);
+  // Types this file has no drawing for share a few spare shapes: handing them out in sorted
+  // order, before any row draws, keeps each project's icons the same from one load to the next.
+  useMemo(() => rememberIssueTypes(tasks.map((t) => t.issueType)), [tasks]);
   const slaById = useMemo(() => computeSla(tasks, sla?.settings ?? null, nowMs), [tasks, sla, nowMs]);
   // The project's working calendar lives in the same row as the SLA policy (and is read by everyone the same
   // way). Until it arrives, Monday–Friday: exactly what every view assumed before there was a calendar.
