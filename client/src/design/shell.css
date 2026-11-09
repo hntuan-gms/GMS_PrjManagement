@@ -783,7 +783,7 @@ button.toast-close:hover:not(:disabled) {
   color: var(--ink-3);
 }
 .issue-icon.is-epic {
-  color: var(--ink);
+  color: var(--type-epic);
 }
 .issue-icon.is-bug {
   color: var(--type-bug);

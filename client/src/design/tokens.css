@@ -268,6 +268,8 @@
   --type-bug: var(--risk);
   --type-issue: #d9701c;
   --type-task: var(--info);
+  /* Jira's own Epic purple; deliberately not --ai, which marks the assistant. */
+  --type-epic: #904ee2;
 
   /* The Gimasys logo (BrandMark.tsx): navy text here, a light-text copy in dark mode. */
   --brand-mark: url("/brand/gimasys-mark.png");
@@ -342,6 +344,7 @@ html[data-density="comfortable"] {
   --lz-grey-line: #4a4b4e;
 
   --type-issue: #ef9147;
+  --type-epic: #b48af0;
 
   --brand-mark: url("/brand/gimasys-mark-dark.png");
   --brand-logo: url("/brand/gimasys-logo-dark.png");
