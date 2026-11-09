@@ -48,15 +48,18 @@ button.rail-mark:focus-visible {
   outline: none;
   box-shadow: var(--control-ring);
 }
-/* Ink tile, paper G, son "now" dot; dark mode swaps ink and paper through the tokens. */
-.brand-tile {
-  fill: var(--ink);
+/* The Gimasys logo (BrandMark.tsx): which file is the token's choice, so dark mode gets the light copy. */
+.brand-mark,
+.brand-logo {
+  display: inline-block;
+  flex: none;
+  background: center / contain no-repeat;
 }
-.brand-g {
-  stroke: var(--paper);
+.brand-mark {
+  background-image: var(--brand-mark);
 }
-.brand-dot {
-  fill: var(--son);
+.brand-logo {
+  background-image: var(--brand-logo);
 }
 .rail-sep {
   width: 20px;

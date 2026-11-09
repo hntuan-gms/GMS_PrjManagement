@@ -255,6 +255,10 @@
   --type-bug: var(--risk);
   --type-issue: #d9701c;
   --type-task: var(--info);
+
+  /* The Gimasys logo (BrandMark.tsx): navy text here, a light-text copy in dark mode. */
+  --brand-mark: url("/brand/gimasys-mark.png");
+  --brand-logo: url("/brand/gimasys-logo.png");
 }
 
 html[data-density="compact"] {
@@ -314,6 +318,9 @@ html[data-density="comfortable"] {
   --ai-text: #c3b9f2;
 
   --type-issue: #ef9147;
+
+  --brand-mark: url("/brand/gimasys-mark-dark.png");
+  --brand-logo: url("/brand/gimasys-logo-dark.png");
 
   --color-overlay: rgb(0 0 0 / 0.5);
   --shadow-sm: 0 1px 0 rgb(0 0 0 / 0.3);

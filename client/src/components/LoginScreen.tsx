@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import BrandMark from "./BrandMark";
+import { BrandLogo } from "./BrandMark";
 
 interface Props {
   onLogin: () => void;
@@ -61,7 +61,7 @@ export default function LoginScreen({ onLogin, error }: Props) {
   return (
     <div className="auth-screen">
       <div className="modal auth-card">
-        <BrandMark size={44} className="auth-mark" />
+        <BrandLogo width={180} className="auth-mark" />
         <h1>GMS</h1>
 
         {error && error !== SESSION_EXPIRED_MESSAGE && <div className="modal-error">{error}</div>}
