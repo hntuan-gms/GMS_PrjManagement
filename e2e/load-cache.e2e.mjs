@@ -22,7 +22,7 @@ async function step(name, fn) {
 }
 const log = async () => (await (await fetch(API + "/api/__log")).json()).log;
 const setDelay = (ms) => fetch(API + "/api/__delay", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ms }) });
-// The header's sync indicator (it replaced the "Đồng bộ từ Jira" button): "Khớp Jira" or "Đang đọc Jira…".
+// The header's sync indicator ("Sync" and an icon): its state is the class (is-ok, is-reading) and the aria-label ("Khớp Jira" / "Đang đọc Jira…").
 const syncButton = () => page.locator(".sync-indicator");
 
 await fetch(API + "/api/__restore", { method: "POST" });
@@ -42,10 +42,10 @@ await step("mở lại khi máy chủ chậm 2,5 giây: bảng hiện ngay từ 
   await page.waitForSelector(".wbs-row", { timeout: 1500 });
   assert(Date.now() - started < 2000, "bảng hiện sau " + (Date.now() - started) + "ms, chưa nhanh hơn máy chủ");
   assert((await page.locator(".center-message").count()) === 0, "không được hiện 'Đang tải dữ liệu...'");
-  assert((await syncButton().textContent()).includes("Đang đọc"));
+  assert((await syncButton().getAttribute("aria-label")).includes("Đang đọc"));
 });
 await step("khi bản mới về thì nút trở lại bình thường", async () => {
-  await page.waitForFunction(() => document.querySelector(".sync-indicator")?.textContent.includes("Khớp Jira"), null, { timeout: 6000 });
+  await page.waitForFunction(() => document.querySelector(".sync-indicator")?.classList.contains("is-ok"), null, { timeout: 6000 });
   await setDelay(0);
 });
 await step("chưa có bản lưu và máy chủ chậm: vẫn thấy header, nút đồng bộ xoay, một vòng xoay thay cho trang trống", async () => {
@@ -55,7 +55,7 @@ await step("chưa có bản lưu và máy chủ chậm: vẫn thấy header, nú
   await page.waitForSelector(".spinner", { timeout: 3000 });
   await page.waitForSelector(".toolbar", { timeout: 1500 });
   assert((await page.locator(".wbs-row").count()) === 0, "chưa có dữ liệu mà đã có hàng");
-  assert((await syncButton().textContent()).includes("Đang đọc"), "chỉ báo không báo đang tải");
+  assert((await syncButton().getAttribute("aria-label")).includes("Đang đọc"), "chỉ báo không báo đang tải");
   assert((await page.locator(".sync-indicator.is-reading").count()) > 0, "chỉ báo đồng bộ không ở trạng thái đang đọc");
   await page.waitForSelector(".wbs-row", { timeout: 8000 });
   await setDelay(0);
@@ -116,9 +116,9 @@ await step("mở lại khi máy chủ chậm: bảng hiện ngay từ IndexedDB 
   await page.reload();
   await page.waitForSelector(".wbs-row", { timeout: 2000 });
   assert(Date.now() - started < 2300, "bảng hiện sau " + (Date.now() - started) + "ms, chưa nhanh hơn máy chủ");
-  assert((await syncButton().textContent()).includes("Đang đọc"), "chỉ báo không báo đang cập nhật");
+  assert((await syncButton().getAttribute("aria-label")).includes("Đang đọc"), "chỉ báo không báo đang cập nhật");
   assert((await page.locator(".sync-indicator.is-reading").count()) > 0, "chỉ báo đồng bộ không ở trạng thái đang đọc");
-  await page.waitForFunction(() => document.querySelector(".sync-indicator")?.textContent.includes("Khớp Jira"), null, { timeout: 6000 });
+  await page.waitForFunction(() => document.querySelector(".sync-indicator")?.classList.contains("is-ok"), null, { timeout: 6000 });
   await setDelay(0);
 });
 

@@ -100,8 +100,8 @@ function SyncIndicator({ sync, onSync }: { sync: SyncState; onSync: () => void }
       title={title}
       aria-label={`${text}. ${title}`}
     >
-      <span className="sync-dot" aria-hidden="true" />
-      <span className="sync-text">{text}</span>
+      <Icon name="sync" size={14} className="sync-icon" />
+      <span className="sync-text">Sync</span>
     </button>
   );
 }
