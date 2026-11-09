@@ -27,16 +27,20 @@ await page.goto(process.env.E2E_APP ?? "http://localhost:5173/");
 await page.waitForSelector(".wbs-row");
 
 console.log("\n== Khung: thanh bên + header ==");
-await step("header 44px; 'Create' là nút xanh lá duy nhất, góc trên bên trái", async () => {
+await step("header 44px; 'Create' là nút xanh da trời duy nhất, bên phải, ngay trước 'Khớp Jira', mở form tạo việc đầy đủ", async () => {
   assert.equal(Math.round((await box(".toolbar")).height), 44);
   assert.equal(await page.locator(".toolbar button.primary").count(), 0, "header không được có nút đặc nào khác");
-  const create = page.locator(".toolbar-left button.hd-create");
+  const create = page.locator(".toolbar-right button.hd-create");
   assert.equal(await create.count(), 1);
   assert.equal((await create.textContent()).trim(), "Create");
-  const first = await page.$eval(".toolbar-left", (el) => el.firstElementChild.className);
-  assert.ok(first.includes("hd-create"), "Create phải đứng đầu bên trái: " + first);
+  const next = await page.$eval(".toolbar-right button.hd-create", (el) => el.nextElementSibling.className);
+  assert.ok(next.includes("sync-indicator"), "Create phải đứng ngay trước chỉ báo đồng bộ: " + next);
   const [r, g, b] = (await create.evaluate((el) => getComputedStyle(el).backgroundColor)).match(/\d+/g).map(Number);
-  assert.ok(g > r && g > b, `nút phải xanh lá: rgb(${r}, ${g}, ${b})`);
+  assert.ok(b > r && b > g, `nút phải xanh da trời: rgb(${r}, ${g}, ${b})`);
+  await create.click();
+  await page.waitForSelector(".modal-create .task-input-field");
+  await page.locator(".modal-create .modal-close").click();
+  await page.waitForSelector(".modal-create", { state: "detached" });
   assert.equal(await page.locator(".app-rail button[aria-label='Tạo việc']").count(), 0);
   const labels = await page.$$eval(".toolbar button", (b) => b.map((x) => x.textContent.trim()));
   assert.ok(!labels.some((t) => t === "Đổi dự án" || t === "Đăng xuất" || t.includes("Đồng bộ từ Jira")), labels.join("|"));
