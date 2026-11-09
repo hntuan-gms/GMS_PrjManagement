@@ -6944,27 +6944,6 @@ button.att-remove:hover:not(:disabled) {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
-.wbs-status {
-  display: inline-block;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  vertical-align: middle;
-  padding: 1px 8px;
-  border-radius: var(--radius-full);
-  font-size: var(--font-size-sm);
-  font-weight: 600;
-  background: var(--color-border);
-  color: var(--color-text-secondary);
-}
-.wbs-status.is-indeterminate {
-  background: var(--info-soft);
-  color: var(--info-text);
-}
-.wbs-status.is-done {
-  background: var(--color-border);
-  color: var(--ok-text);
-}
 .wbs-over {
   color: var(--son-text);
   font-weight: 600;

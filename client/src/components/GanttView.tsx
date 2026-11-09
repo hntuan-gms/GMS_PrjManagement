@@ -40,6 +40,7 @@ import CellPicker, { type PickItem } from "./CellPicker";
 import { api } from "../api";
 import PriorityMark from "./PriorityMark";
 import StatusGlyph from "./StatusGlyph";
+import { statusTone } from "../statusTone";
 import Avatar from "./Avatar";
 import { priorityTone } from "../boardModel";
 import { Icon, type IconName } from "./Icons";
@@ -311,7 +312,7 @@ const COLUMNS: ColumnDef[] = [
     long: "Trạng thái",
     width: 112,
     cell: (t) => (
-      <span className={`wbs-status is-${t.statusCategory}`} title={t.statusName}>
+      <span className={`wbs-status is-${t.statusCategory} tone-${statusTone(t.statusCategory, t.statusName)}`} title={t.statusName}>
         <StatusGlyph category={t.statusCategory} percent={t.percentComplete} name={t.statusName} />
         <span className="wbs-status-name">{t.statusName}</span>
       </span>
