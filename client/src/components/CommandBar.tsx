@@ -226,7 +226,7 @@ export default function CommandBar({ tasks, commands, initialMode = "command", o
             placeholder={
               mode === "create"
                 ? "Tên việc… @người t6 3n !cao #nhãn"
-                : "Tìm việc, chạy lệnh, tạo việc (+…) hoặc hỏi trợ lý…"
+                : "Search"
             }
             spellCheck={false}
             aria-label={mode === "create" ? "Tạo việc nhanh" : "Ô lệnh"}

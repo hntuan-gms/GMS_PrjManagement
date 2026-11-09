@@ -34,7 +34,7 @@ export default function PersonPicker({
   currentAccountId,
   meAccountId,
   allowUnassign = true,
-  placeholder = "Tìm người",
+  placeholder = "Search people",
   onPick,
   onClose,
 }: {

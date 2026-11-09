@@ -2040,6 +2040,7 @@ export default function GanttView({
         matched={matchIds?.size}
         total={tasks.length}
         showSearch
+        searchPlaceholder="Search list"
         leading={<SavedFilterMenu filter={filter} onApply={onFilterChange} myAccountId={myAccountId} />}
         jql={jql}
         onClearExtras={() => setOnlyUnscheduled(false)}

@@ -631,7 +631,7 @@ function StoryPicker({
       <input
         value={query}
         disabled={disabled}
-        placeholder="Tìm Story theo mã (vd. 33) hoặc tên"
+        placeholder="Search Stories by key (e.g. 33) or name"
         aria-label="Tìm Story có sẵn"
         onChange={(e) => setQuery(e.target.value)}
       />

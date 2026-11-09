@@ -1136,7 +1136,7 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
         <TaskPicker
           anchor={picker.rect}
           tasks={parents}
-          placeholder="Tìm việc cha"
+          placeholder="Search for issues"
           onPick={(t) => {
             setPicker(null);
             if (t.id !== task.wbsParentId) void commit({ parentKey: t.id });
@@ -1149,7 +1149,7 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
           anchor={picker.rect}
           tasks={allTasks}
           exclude={takenPreds}
-          placeholder="Mã, tên, hoặc 5fs+2"
+          placeholder="Key, name, or 5fs+2"
           typed={predTyped}
           onPickTyped={(text) => {
             setPicker(null);

@@ -60,7 +60,7 @@ export default function SkillMatrixView({ users, profiles, onProfileSaved, onOpe
           type="search"
           className="rv-search"
           value={query}
-          placeholder="Tìm người hoặc kỹ năng…"
+          placeholder="Search people or skills"
           aria-label="Tìm người hoặc kỹ năng"
           onChange={(e) => setQuery(e.target.value)}
         />

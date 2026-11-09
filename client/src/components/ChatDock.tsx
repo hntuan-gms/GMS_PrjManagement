@@ -863,7 +863,7 @@ export default function ChatDock({
             <Icon name="plus" size={13} /> Cuộc trò chuyện mới
           </button>
           {sessions && sessions.length > 5 && (
-            <input className="chat-sessions-search" value={sessionQuery} onChange={(e) => setSessionQuery(e.target.value)} placeholder="Tìm" aria-label="Tìm cuộc trò chuyện" />
+            <input className="chat-sessions-search" value={sessionQuery} onChange={(e) => setSessionQuery(e.target.value)} placeholder="Search" aria-label="Tìm cuộc trò chuyện" />
           )}
           {shownSessions === undefined ? (
             <div className="chat-sessions-empty">

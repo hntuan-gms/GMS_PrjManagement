@@ -17,7 +17,7 @@ export default function TaskPicker({
   exclude,
   filter,
   limit,
-  placeholder = "Tìm việc theo mã hoặc tên",
+  placeholder = "Search for issues",
   typed,
   onPickTyped,
   onPick,

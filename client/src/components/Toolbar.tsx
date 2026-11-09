@@ -371,7 +371,7 @@ export default function Toolbar({
           <SyncIndicator sync={sync} onSync={onSync} />
           <button type="button" className="cmdk-trigger" onClick={onOpenCommand} aria-label="Mở ô lệnh (Ctrl K)">
             <Icon name="search" size={14} />
-            <span>Tìm, tạo, hỏi…</span>
+            <span>Search</span>
             <kbd>Ctrl K</kbd>
           </button>
         </div>

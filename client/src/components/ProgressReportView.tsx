@@ -828,7 +828,7 @@ function TaskDrawer({
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Tìm trong danh sách…"
+            placeholder="Search"
             aria-label="Tìm trong danh sách"
           />
           <select value={sort} onChange={(e) => setSort(e.target.value as typeof sort)} aria-label="Sắp xếp">
