@@ -5,6 +5,7 @@ import {
   CHUNK_ROWS,
   WINDOW_THRESHOLD,
   axisSentinels,
+  axisSpan,
   isSentinel,
   isWindowed,
   windowEnd,
@@ -78,5 +79,28 @@ describe("axis sentinels", () => {
   it("nothing to pin for an empty list, and real ids are never mistaken for sentinels", () => {
     assert.deepEqual(axisSentinels([], make), []);
     assert.equal(isSentinel("DEMO-1"), false);
+  });
+});
+
+describe("axis padding", () => {
+  const mk = (id: string, start: Date, end: Date) => ({ id, start, end });
+  const all = [
+    { id: "a", start: new Date(2026, 9, 5), end: new Date(2026, 9, 9) },
+    { id: "b", start: new Date(2026, 9, 7), end: new Date(2026, 10, 3) },
+  ];
+  it("axisSpan is one invisible task from the plan's start to its end, padded each side", () => {
+    const [span] = axisSpan(all, mk, 30);
+    assert.ok(isSentinel(span.id));
+    assert.equal(span.start.getTime(), new Date(2026, 8, 5).getTime());
+    assert.equal(span.end.getTime(), new Date(2026, 11, 3).getTime());
+  });
+  it("axisSentinels pads the pair the same way", () => {
+    const [first, last] = axisSentinels(all, mk, 30);
+    assert.equal(first.start.getTime(), new Date(2026, 8, 5).getTime());
+    assert.equal(last.end.getTime(), new Date(2026, 11, 3).getTime());
+  });
+  it("no padding is the old behaviour, and an empty plan has no sentinels", () => {
+    assert.equal(axisSentinels(all, mk)[0].start.getTime(), new Date(2026, 9, 5).getTime());
+    assert.deepEqual(axisSpan([], mk, 30), []);
   });
 });

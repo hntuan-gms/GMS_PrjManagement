@@ -61,6 +61,21 @@ export function dayToPx(mode: Granularity, origin: string, cellWidth: number, da
 }
 
 /**
+ * How much room the axis keeps on each side of the plan, in pixels at the current zoom (a little more
+ * than a wide screen). The library ends its axis a few columns after the last bar, so a short plan was
+ * a strip with blank page to its right, and — narrower than the pane — the browser pinned the scroll at
+ * 0, so nothing could hold a date still across a Day / Week / Month handoff. With this much on both
+ * sides the axis is always wider than the pane and the zoom can keep its date.
+ */
+export const AXIS_PAD_PX = 2000;
+
+/** Whole 30-day steps (so the axis is not re-seeded on every wheel notch) covering `AXIS_PAD_PX` at this zoom. */
+export function axisPadDays(pixelsPerDay: number): number {
+  if (!(pixelsPerDay > 0)) return 0;
+  return Math.ceil(AXIS_PAD_PX / pixelsPerDay / 30) * 30;
+}
+
+/**
  * The scroll position that keeps `day` at `pointerX` pixels from the left edge of the visible chart
  * once the axis is drawn as `mode`/`cellWidth` (never negative).
  */

@@ -127,16 +127,44 @@ await step("nút Ngày / Tuần / Tháng giữ ngày ở giữa khung nhìn", as
     const b = await probe(N);
     assert.ok(Math.abs(b.left - mid) <= 15, `${name}: thanh ở ${b.left.toFixed(0)}px, giữa khung là ${mid.toFixed(0)}px`);
   }
-  // Tháng: the axis of a short project is narrower than the pane, so it cannot be centred; the bar must
-  // still be on screen rather than thrown off the chart.
+  // Tháng too: the axis is padded to be wider than the pane, so the date can be held at the middle here as well
+  // (a short project used to leave the axis narrower than the pane, which pinned the scroll and threw the bar aside).
   await page.locator(".gantt-toolbar button", { hasText: "Tháng" }).first().click();
   await page.waitForTimeout(500);
   const m = await probe(N);
-  const box = await page.evaluate(() => {
-    const r = document.querySelector("._CZjuD").getBoundingClientRect();
-    return { left: r.left, right: r.right };
-  });
-  assert.ok(m && m.left >= box.left && m.left <= box.right, "ở chế độ Tháng thanh phải còn nằm trong khung biểu đồ");
+  assert.ok(m && Math.abs(m.left - mid) <= 15, `Tháng: thanh ở ${m?.left.toFixed(0)}px, giữa khung là ${mid.toFixed(0)}px`);
+});
+
+await step("trục thời gian luôn rộng hơn khung ở cả ba chế độ (không còn dải trống bên phải)", async () => {
+  for (const name of ["Ngày", "Tuần", "Tháng"]) {
+    await page.locator(".gantt-toolbar button", { hasText: name }).first().click();
+    await page.waitForTimeout(500);
+    const wide = await page.evaluate(() => {
+      const sc = document.querySelector("._CZjuD");
+      return { scroll: sc.scrollWidth, client: sc.clientWidth };
+    });
+    assert.ok(wide.scroll > wide.client * 1.5, `${name}: trục ${wide.scroll}px chỉ hơn khung ${wide.client}px chút ít`);
+  }
+});
+
+await step("nhấn nút Tuần ↔ Tháng nhiều lần liên tiếp không làm thanh nhảy khỏi chỗ cũ", async () => {
+  await page.locator(".gantt-toolbar button", { hasText: "Tuần" }).first().click();
+  await page.waitForTimeout(400);
+  await placeBar(N);
+  await page.evaluate((i) => {
+    const sc = document.querySelector("._CZjuD");
+    const bar = document.querySelectorAll("g.bar > g")[i]?.querySelector("rect")?.getBoundingClientRect();
+    const box = sc.getBoundingClientRect();
+    sc.scrollLeft += bar.left - (box.left + sc.clientWidth / 2);
+  }, N);
+  await page.waitForTimeout(300);
+  const before = await probe(N);
+  for (const name of ["Tháng", "Tuần", "Tháng", "Tuần"]) {
+    await page.locator(".gantt-toolbar button", { hasText: name }).first().click();
+    await page.waitForTimeout(450);
+  }
+  const after = await probe(N);
+  assert.ok(Math.abs(after.left - before.left) <= 15, `thanh trôi từ ${before.left.toFixed(0)}px sang ${after.left.toFixed(0)}px`);
 });
 
 console.log(failed ? `\n${failed} lỗi` : "\nđạt hết");

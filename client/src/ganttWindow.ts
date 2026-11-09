@@ -41,7 +41,8 @@ export const SENTINEL_PREFIX = "__gms-axis-";
 
 export function axisSentinels<T extends { start: Date; end: Date }>(
   all: T[],
-  make: (id: string, start: Date, end: Date) => T
+  make: (id: string, start: Date, end: Date) => T,
+  padDays = 0
 ): T[] {
   if (all.length === 0) return [];
   let min = all[0].start.getTime();
@@ -52,9 +53,34 @@ export function axisSentinels<T extends { start: Date; end: Date }>(
   }
   const DAY = 86_400_000;
   return [
-    make(`${SENTINEL_PREFIX}start`, new Date(min), new Date(min + DAY)),
-    make(`${SENTINEL_PREFIX}end`, new Date(max - DAY), new Date(max)),
+    make(`${SENTINEL_PREFIX}start`, shiftDays(new Date(min), -padDays), shiftDays(new Date(min + DAY), -padDays)),
+    make(`${SENTINEL_PREFIX}end`, shiftDays(new Date(max - DAY), padDays), shiftDays(new Date(max), padDays)),
   ];
+}
+
+/**
+ * One invisible task covering the whole plan plus `padDays` either side: the same axis as the pair
+ * above for a chart that is not windowed, at the price of one empty row instead of two.
+ */
+export function axisSpan<T extends { start: Date; end: Date }>(
+  all: T[],
+  make: (id: string, start: Date, end: Date) => T,
+  padDays: number
+): T[] {
+  if (all.length === 0) return [];
+  let min = all[0].start;
+  let max = all[0].end;
+  for (const t of all) {
+    if (t.start < min) min = t.start;
+    if (t.end > max) max = t.end;
+  }
+  return [make(`${SENTINEL_PREFIX}span`, shiftDays(min, -padDays), shiftDays(max, padDays))];
+}
+
+function shiftDays(d: Date, n: number): Date {
+  const out = new Date(d);
+  out.setDate(out.getDate() + n);
+  return out;
 }
 
 export const isSentinel = (id: string): boolean => id.startsWith(SENTINEL_PREFIX);

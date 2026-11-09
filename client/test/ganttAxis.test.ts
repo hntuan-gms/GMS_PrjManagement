@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { axisOrigin, dayNumber, dayToPx, pxToDay, scrollKeeping } from "../src/ganttAxis";
+import { AXIS_PAD_PX, axisOrigin, axisPadDays, dayNumber, dayToPx, pxToDay, scrollKeeping } from "../src/ganttAxis";
 
 describe("axisOrigin", () => {
   it("is one step before the earliest bar, as the library seeds it", () => {
@@ -58,5 +58,20 @@ describe("scrollKeeping", () => {
   it("never asks for a negative scroll", () => {
     const origin = axisOrigin("day", "2026-06-01");
     assert.equal(scrollKeeping("day", origin, 30, dayNumber("2026-06-01"), 500), 0);
+  });
+});
+
+describe("axisPadDays", () => {
+  it("covers the padding in whole 30-day steps at any zoom", () => {
+    for (const ppd of [0.9, 3.64, 8.7, 60, 260]) {
+      const days = axisPadDays(ppd);
+      assert.equal(days % 30, 0);
+      assert.ok(days * ppd >= AXIS_PAD_PX, `${ppd}: ${days} days is only ${days * ppd}px`);
+      assert.ok(days * ppd < AXIS_PAD_PX + 30 * ppd + 1e-6);
+    }
+  });
+  it("is nothing for a zoom that is not a number", () => {
+    assert.equal(axisPadDays(0), 0);
+    assert.equal(axisPadDays(Number.NaN), 0);
   });
 });

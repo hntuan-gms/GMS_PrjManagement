@@ -5,7 +5,7 @@ import { dragKeysFor, startTaskDrag } from "../taskDrag";
 import { Gantt, ViewMode, type Task as GanttTaskT } from "gantt-task-react";
 import "gantt-task-react/dist/index.css";
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
-import { axisSentinels, isWindowed, windowEnd, windowRows, windowStartFor } from "../ganttWindow";
+import { axisSentinels, axisSpan, isSentinel, isWindowed, windowEnd, windowRows, windowStartFor } from "../ganttWindow";
 import { csvName, downloadCsv, type CsvCell } from "../csv";
 import { computeCriticalPath } from "../criticalPath";
 import { resolveBaselines } from "../baselineGeometry";
@@ -29,7 +29,7 @@ import PersonPicker from "./PersonPicker";
 import UnscheduledLayer from "./UnscheduledLayer";
 import WbsCellEditor, { type EditValue, type Move } from "./WbsCellEditor";
 import { zoomByWheel } from "../timeZoom";
-import { axisOrigin, pxToDay, scrollKeeping } from "../ganttAxis";
+import { axisOrigin, axisPadDays, pxToDay, scrollKeeping } from "../ganttAxis";
 import type { Granularity } from "../resourceAllocation";
 import { SLA_STATE_LABEL, slaIds, slaSentence, slaShortText, type SlaView } from "../sla";
 import { overlayCsvCells, overlayCsvHeader } from "../wbsExport";
@@ -1060,6 +1060,7 @@ export default function GanttView({
   const TooltipContent = useMemo(
     () =>
       function GanttTooltip({ task }: { task: GanttTaskT; fontSize: string; fontFamily: string }) {
+        if (isSentinel(task.id)) return null;
         const full = byId.get(task.id);
         if (full && !ranges.has(full.id)) {
           return (
@@ -1172,27 +1173,10 @@ export default function GanttView({
   // which made the scale jump by several times where Week hands over to Month, and made zooming in
   // Month do nothing until the zoom caught up with the stretch. The Tháng button fills the pane instead.)
   const columnWidth = scale.columnWidth;
-  // Where the Tháng button puts the zoom: the columns of a short project fill the chart pane (the library
-  // ends the Month axis at the start of the year after the last task, so a project inside one year would
-  // otherwise leave the rest of the window blank), kept inside the Month band so the button still says Tháng.
-  function monthFillPxPerDay(): number {
-    const preset = DEFAULT_PIXELS_PER_DAY[ViewMode.Month];
-    if (allGanttTasks.length === 0) return preset;
-    let min = allGanttTasks[0].start;
-    let max = allGanttTasks[0].end;
-    for (const t of allGanttTasks) {
-      if (t.start < min) min = t.start;
-      if (t.end > max) max = t.end;
-    }
-    const first = min.getFullYear() * 12 + min.getMonth() - 1;
-    const columns = (max.getFullYear() + 1) * 12 - first + 1;
-    // Room for the page's vertical scrollbar beside the chart.
-    const available = bodySize.width - listWidth - 24;
-    const fill = Math.floor(available / columns) / DAYS_PER_COLUMN[ViewMode.Month];
-    // Week columns stop fitting below MIN_COLUMN_WIDTH, which is where Month begins.
-    const monthCeiling = (MIN_COLUMN_WIDTH - 0.5) / DAYS_PER_COLUMN[ViewMode.Week];
-    return Math.min(monthCeiling, Math.max(preset, fill));
-  }
+  // Where the Tháng button puts the zoom: the widest month that is still Month. Week columns stop fitting
+  // below MIN_COLUMN_WIDTH, which is where Month begins. The axis is padded to be wider than the pane
+  // (axisPadDays), so a short plan no longer needs its months stretched to fill the window.
+  const monthButtonPxPerDay = (MIN_COLUMN_WIDTH - 0.5) / DAYS_PER_COLUMN[ViewMode.Week];
 
   /* ---- in-place cell editing (plan C4) ---- */
   // Status and assignee open a list; name, dates, duration, % and predecessors open a small box over the cell.
@@ -1565,10 +1549,11 @@ export default function GanttView({
     const s = windowStartFor(sc.scrollTop, ROW_HEIGHT, rows.length, viewportRows);
     setWantedStart((prev) => (prev === s ? prev : s));
   };
+  // Room kept on each side of the plan (ganttAxis.axisPadDays): the axis is always wider than the pane, so
+  // the chart has no blank page to its right and the zoom can hold a date across Day / Week / Month.
+  const padDays = axisPadDays(pxPerDay);
   const ganttTasks = useMemo(() => {
-    if (!windowed) return allGanttTasks;
-    // Two invisible bars hold the date axis where the whole list puts it (ganttWindow.axisSentinels).
-    const sentinels = axisSentinels(allGanttTasks, (id, s, e): GanttTaskT => ({
+    const make = (id: string, s: Date, e: Date): GanttTaskT => ({
       id,
       name: "",
       start: s,
@@ -1578,9 +1563,12 @@ export default function GanttView({
       dependencies: [],
       isDisabled: true,
       styles: { backgroundColor: "transparent", progressColor: "transparent", backgroundSelectedColor: "transparent" },
-    }));
-    return [...allGanttTasks.slice(start, end), ...sentinels];
-  }, [windowed, allGanttTasks, start, end]);
+    });
+    // Invisible bars hold the date axis where the whole list puts it (ganttWindow.axisSentinels): two while
+    // windowed (the window slides), one empty row at the end otherwise.
+    if (!windowed) return [...allGanttTasks, ...axisSpan(allGanttTasks, make, padDays)];
+    return [...allGanttTasks.slice(start, end), ...axisSentinels(allGanttTasks, make, padDays)];
+  }, [windowed, allGanttTasks, start, end, padDays]);
   // The bars the DOM has, for the overlays that measure them.
   const drawnGanttTasks = useMemo(
     () => (windowed ? allGanttTasks.slice(drawn.start, drawn.start + drawn.count) : allGanttTasks),
@@ -2010,7 +1998,7 @@ export default function GanttView({
                   aria-pressed={viewMode === vm}
                   onClick={() => {
                     beginZoomAnchorRef.current(null);
-                    setPixelsPerDay(vm === ViewMode.Month ? monthFillPxPerDay() : DEFAULT_PIXELS_PER_DAY[vm]);
+                    setPixelsPerDay(vm === ViewMode.Month ? monthButtonPxPerDay : DEFAULT_PIXELS_PER_DAY[vm]);
                   }}
                 >
                   {VIEW_MODE_LABEL[vm]}
@@ -2261,9 +2249,10 @@ export default function GanttView({
                 timeStep={DAY_MS}
                 TaskListHeader={WbsListHeader}
                 TaskListTable={WbsListTable}
-                onSelect={(t: GanttTaskT) =>
-                  onSelect(t.id, { toggle: false, range: false }, rows.map((r) => r.task.id))
-                }
+                onSelect={(t: GanttTaskT) => {
+                  if (isSentinel(t.id)) return;
+                  onSelect(t.id, { toggle: false, range: false }, rows.map((r) => r.task.id));
+                }}
                 onDoubleClick={(t: GanttTaskT) => {
                   const full = byId.get(t.id);
                   if (full) onOpenEdit(full);
