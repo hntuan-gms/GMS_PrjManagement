@@ -154,9 +154,14 @@
   white-space: nowrap;
   color: var(--lz-grey-text);
 }
+/* The 1px edge is an inset shadow so the green and grey lozenges stay the same size as the others. */
+.wbs-status.tone-grey {
+  box-shadow: inset 0 0 0 1px var(--lz-grey-line);
+}
 .wbs-status.tone-green {
   background: var(--lz-green-bg);
   color: var(--lz-green-text);
+  box-shadow: inset 0 0 0 1px var(--lz-green-line);
 }
 .wbs-status.tone-yellow {
   background: var(--lz-yellow-bg);

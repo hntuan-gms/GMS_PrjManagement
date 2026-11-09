@@ -73,15 +73,18 @@
   --ai-line: #cbc4e8;
   --ai-text: #4f4196;
 
-  /* Status lozenges in the WBS table, Jira's own tints (Atlassian accent "subtler" + accent text). */
-  --lz-green-bg: #baf3db;
-  --lz-green-text: #216e4e;
+  /* Status lozenges in the WBS table. Green and grey follow the team's reference (color_status.jpg:
+     a lime / light-grey fill with a 1px edge); yellow and orange are Jira's accent tints. */
+  --lz-green-bg: #d8f7a7;
+  --lz-green-text: #314a08;
+  --lz-green-line: #b9d48c;
   --lz-yellow-bg: #f8e6a0;
   --lz-yellow-text: #7f5f01;
   --lz-orange-bg: #fedec8;
   --lz-orange-text: #a54800;
-  --lz-grey-bg: #dcdfe4;
-  --lz-grey-text: #44546f;
+  --lz-grey-bg: #f2f2f2;
+  --lz-grey-text: #2c2c2c;
+  --lz-grey-line: #d1d1d1;
 
   /* Legacy primitive names, kept so the few rules that still name them follow the new palette. */
   --slate-50: var(--paper);
@@ -327,14 +330,16 @@ html[data-density="comfortable"] {
   --ai-line: #423a6b;
   --ai-text: #c3b9f2;
 
-  --lz-green-bg: #164b35;
-  --lz-green-text: #7ee2b8;
+  --lz-green-bg: #2f4210;
+  --lz-green-text: #c8ef8a;
+  --lz-green-line: #4f6a22;
   --lz-yellow-bg: #533f04;
   --lz-yellow-text: #f5cd47;
   --lz-orange-bg: #702e00;
   --lz-orange-text: #fec195;
-  --lz-grey-bg: #38414a;
-  --lz-grey-text: #b6c2cf;
+  --lz-grey-bg: #2e2f31;
+  --lz-grey-text: #e2e2e2;
+  --lz-grey-line: #4a4b4e;
 
   --type-issue: #ef9147;
 
