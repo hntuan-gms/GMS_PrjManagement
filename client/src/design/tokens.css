@@ -250,6 +250,11 @@
   --dialog-radius: var(--radius-xl);
   --dialog-shadow: var(--shadow-modal);
   --dialog-padding: 20px;
+
+  /* Issue type glyph tints (IssueTypeIcon, issueTypeLook.ts): bugs, "Issue", Task/Sub-task. */
+  --type-bug: var(--risk);
+  --type-issue: #d9701c;
+  --type-task: var(--info);
 }
 
 html[data-density="compact"] {
@@ -307,6 +312,8 @@ html[data-density="comfortable"] {
   --ai-wash: #221f33;
   --ai-line: #423a6b;
   --ai-text: #c3b9f2;
+
+  --type-issue: #ef9147;
 
   --color-overlay: rgb(0 0 0 / 0.5);
   --shadow-sm: 0 1px 0 rgb(0 0 0 / 0.3);

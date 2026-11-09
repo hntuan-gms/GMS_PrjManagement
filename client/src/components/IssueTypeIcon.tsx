@@ -1,12 +1,11 @@
 import type { IssueTypeName } from "../types";
+import { issueTypeLook } from "../issueTypeLook";
 
 /**
- * Issue type glyphs: one stroke set, one ink colour. The old Jira-style coloured squares
- * (purple Epic, green Story, red Bug) put five saturated colours in front of every row, and
- * colour here is reserved for signals — status, risk, "now". The type is the shape; the real
- * Jira name is the <title>. An Epic gets the darker ink because it is a container the eye
- * should find while scanning; a Bug keeps the ordinary tone (red would read as "something is
- * wrong with this task", which is what the risk colour says).
+ * Issue type glyphs: one stroke set. The type is the shape; the real Jira name is the <title>.
+ * Three kinds are tinted so they can be told apart while scanning (`issueTypeLook`): bugs red,
+ * "Issue" orange, Task and Sub-task blue (`--type-*` tokens). An Epic gets the darker ink
+ * because it is a container the eye should find; Story and unknown types stay in quiet ink.
  *
  * Drawn on a 16px grid, 1.5px strokes, round caps — the same rules as Icons.tsx.
  */
@@ -34,11 +33,12 @@ const PATHS: Record<IssueTypeName, string> = {
 const UNKNOWN = "M3 3h10v10H3z M5.5 6.2h5 M5.5 8.4h5 M5.5 10.6h3";
 
 export default function IssueTypeIcon({ type, label, size = 16 }: { type: string; label?: string; size?: number }) {
-  const path = PATHS[type as IssueTypeName] ?? UNKNOWN;
+  const { glyph, tone } = issueTypeLook(type, label);
+  const path = glyph ? PATHS[glyph] : UNKNOWN;
   const epic = type === "Epic";
   return (
     <svg
-      className={`issue-icon${epic ? " is-epic" : ""}`}
+      className={`issue-icon${epic ? " is-epic" : ""}${tone ? ` is-${tone}` : ""}`}
       width={size}
       height={size}
       viewBox="0 0 16 16"

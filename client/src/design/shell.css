@@ -768,6 +768,15 @@ button.toast-close:hover:not(:disabled) {
 .issue-icon.is-epic {
   color: var(--ink);
 }
+.issue-icon.is-bug {
+  color: var(--type-bug);
+}
+.issue-icon.is-issue {
+  color: var(--type-issue);
+}
+.issue-icon.is-task {
+  color: var(--type-task);
+}
 button.icon-btn {
   width: 28px;
   height: 28px;
