@@ -29,6 +29,8 @@ import PersonPicker from "./PersonPicker";
 import UnscheduledLayer from "./UnscheduledLayer";
 import WbsCellEditor, { type EditValue, type Move } from "./WbsCellEditor";
 import { zoomByWheel } from "../timeZoom";
+import { axisOrigin, pxToDay, scrollKeeping } from "../ganttAxis";
+import type { Granularity } from "../resourceAllocation";
 import { SLA_STATE_LABEL, slaIds, slaSentence, slaShortText, type SlaView } from "../sla";
 import { overlayCsvCells, overlayCsvHeader } from "../wbsExport";
 import BaselineOverlay from "./BaselineOverlay";
@@ -712,6 +714,16 @@ export default function GanttView({
   const [pixelsPerDay, setPixelsPerDay] = useState(DEFAULT_PIXELS_PER_DAY[ViewMode.Week]);
   const scale = pickScale(pixelsPerDay);
   const { viewMode } = scale;
+  // Zoom keeps one date where it was. The library remembers its scroll in pixels, so without this the
+  // pixel at the left edge stands for another date after every zoom step, and most of all when the
+  // columns change kind (day → week → month): the chart jumped at each threshold.
+  const zoomAnchor = useRef<{ day: number; x: number; at: number } | null>(null);
+  const axisGeom = useRef<{ mode: Granularity; cellWidth: number; earliest: string | null }>({
+    mode: "week",
+    cellWidth: 0,
+    earliest: null,
+  });
+  const beginZoomAnchorRef = useRef<(clientX: number | null) => void>(() => {});
   const [showCriticalPath, setShowCriticalPath] = useState(false);
   const [showDependencies, setShowDependencies] = useState(true);
   const [showBaseline, setShowBaseline] = useState(loadShowBaseline);
@@ -833,6 +845,7 @@ export default function GanttView({
       if (!e.ctrlKey) return;
       e.preventDefault();
       e.stopPropagation();
+      beginZoomAnchorRef.current(e.clientX);
       setPixelsPerDay((prev) => zoomByWheel(prev, e.deltaY, MIN_PIXELS_PER_DAY, MAX_PIXELS_PER_DAY));
     }
     el.addEventListener("wheel", onWheel, { passive: false, capture: true });
@@ -1154,12 +1167,17 @@ export default function GanttView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, ranges, showCriticalPath, criticalIds, colorBy, today, appearance.theme, placeholderDay]);
 
-  // Month view's axis is short: gantt-task-react ends it at the start of the year after the
-  // last task's end, so a project inside one year draws a handful of columns and leaves the
-  // rest of the window blank. Those few columns are widened to fill the chart pane instead
-  // (the same count the library makes — seedDates, with its default of one step before).
-  const columnWidth = useMemo(() => {
-    if (viewMode !== ViewMode.Month || allGanttTasks.length === 0) return scale.columnWidth;
+  // The column width is the zoom's, in every mode: the same px/day on both sides of a threshold, so
+  // crossing one only changes what a column means. (Month used to be stretched here to fill the pane,
+  // which made the scale jump by several times where Week hands over to Month, and made zooming in
+  // Month do nothing until the zoom caught up with the stretch. The Tháng button fills the pane instead.)
+  const columnWidth = scale.columnWidth;
+  // Where the Tháng button puts the zoom: the columns of a short project fill the chart pane (the library
+  // ends the Month axis at the start of the year after the last task, so a project inside one year would
+  // otherwise leave the rest of the window blank), kept inside the Month band so the button still says Tháng.
+  function monthFillPxPerDay(): number {
+    const preset = DEFAULT_PIXELS_PER_DAY[ViewMode.Month];
+    if (allGanttTasks.length === 0) return preset;
     let min = allGanttTasks[0].start;
     let max = allGanttTasks[0].end;
     for (const t of allGanttTasks) {
@@ -1170,8 +1188,11 @@ export default function GanttView({
     const columns = (max.getFullYear() + 1) * 12 - first + 1;
     // Room for the page's vertical scrollbar beside the chart.
     const available = bodySize.width - listWidth - 24;
-    return Math.max(scale.columnWidth, Math.floor(available / columns));
-  }, [viewMode, allGanttTasks, scale.columnWidth, bodySize.width, listWidth]);
+    const fill = Math.floor(available / columns) / DAYS_PER_COLUMN[ViewMode.Month];
+    // Week columns stop fitting below MIN_COLUMN_WIDTH, which is where Month begins.
+    const monthCeiling = (MIN_COLUMN_WIDTH - 0.5) / DAYS_PER_COLUMN[ViewMode.Week];
+    return Math.min(monthCeiling, Math.max(preset, fill));
+  }
 
   /* ---- in-place cell editing (plan C4) ---- */
   // Status and assignee open a list; name, dates, duration, % and predecessors open a small box over the cell.
@@ -1489,12 +1510,23 @@ export default function GanttView({
     };
   }, []);
   // The first time the plan is on screen it opens at today (a third of the way in), not at the oldest bar.
+  // The chart is drawn from its left edge first and only then scrolled to today (the library scrolls in an
+  // effect after its own first paint), so the chart stays hidden until that is done: otherwise every
+  // switch back to this lens showed the plan jump sideways.
   const openedAtToday = useRef(false);
+  const [settled, setSettled] = useState(false);
   useEffect(() => {
     if (openedAtToday.current || bodySize.width <= 0 || rows.length === 0) return;
     openedAtToday.current = true;
     goToTodayRef.current(true);
+    // No cleanup on purpose: a later change of the deps returns early above and must not cancel this.
+    requestAnimationFrame(() => requestAnimationFrame(() => setSettled(true)));
   }, [bodySize.width, rows.length]);
+  // Never leave the chart hidden if the scroll above does not run.
+  useEffect(() => {
+    const t = window.setTimeout(() => setSettled(true), 800);
+    return () => window.clearTimeout(t);
+  }, []);
 
   /* ---- a big list is drawn a window at a time (ganttWindow.ts) ---- */
   const windowed = isWindowed(rows.length);
@@ -1558,11 +1590,69 @@ export default function GanttView({
   // Week view's axis says "W44", an ISO week number in English. Each column is named by the date its week
   // starts on instead ("02/11"), the same as the resource tab's week columns. The library numbers a column by
   // its position, and its first column is a fixed distance before the earliest bar (weekAxisStart).
-  const weekOrigin = useMemo(() => {
+  const earliestStart = useMemo(() => {
     let min: Date | null = null;
     for (const t of ganttTasks) if (!min || t.start < min) min = t.start;
-    return min ? weekAxisStart(toIso(min)) : null;
+    return min ? toIso(min) : null;
   }, [ganttTasks]);
+  const weekOrigin = useMemo(() => (earliestStart ? weekAxisStart(earliestStart) : null), [earliestStart]);
+
+  /* ---- zoom keeps its date (see zoomAnchor) ---- */
+  const granularityOf = (m: ViewMode): Granularity => (m === ViewMode.Day ? "day" : m === ViewMode.Month ? "month" : "week");
+  axisGeom.current = { mode: granularityOf(viewMode), cellWidth: columnWidth, earliest: earliestStart };
+  // The library's horizontal scroller (the box holding the calendar header and the bars).
+  const chartScroller = () => bodyRef.current?.querySelector<HTMLElement>("._CZjuD") ?? null;
+  beginZoomAnchorRef.current = (clientX: number | null) => {
+    const sc = chartScroller();
+    const g = axisGeom.current;
+    if (!sc || !g.earliest || g.cellWidth <= 0) {
+      zoomAnchor.current = null;
+      return;
+    }
+    const now = performance.now();
+    const prev = zoomAnchor.current;
+    // One gesture is many wheel events: keep the date it started on, or each notch would re-read a
+    // scroll position the previous one has not finished setting.
+    if (clientX !== null && prev && now - prev.at < 250) {
+      prev.at = now;
+      return;
+    }
+    const box = sc.getBoundingClientRect();
+    const x = clientX === null ? sc.clientWidth / 2 : Math.min(Math.max(clientX - box.left, 0), sc.clientWidth);
+    zoomAnchor.current = {
+      day: pxToDay(g.mode, axisOrigin(g.mode, g.earliest), g.cellWidth, sc.scrollLeft + x),
+      x,
+      at: now,
+    };
+  };
+  // After the zoom has drawn, put the anchored date back under the pointer. The library lays out new columns
+  // in the commit after it is asked (its dates are state), so the first try can be clamped to the old width:
+  // try again for a few frames until the position holds.
+  useLayoutEffect(() => {
+    const anchor = zoomAnchor.current;
+    if (!anchor || performance.now() - anchor.at > 1000) return;
+    let frames = 0;
+    let held = 0;
+    let raf = 0;
+    const step = () => {
+      const sc = chartScroller();
+      const g = axisGeom.current;
+      if (sc && g.earliest) {
+        const target = scrollKeeping(g.mode, axisOrigin(g.mode, g.earliest), g.cellWidth, anchor.day, anchor.x);
+        if (Math.abs(sc.scrollLeft - target) > 0.5) {
+          sc.scrollLeft = target;
+          held = 0;
+        } else {
+          held++;
+        }
+      }
+      frames++;
+      if (frames < 12 && held < 3) raf = requestAnimationFrame(step);
+    };
+    step();
+    return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode, columnWidth]);
   useEffect(() => {
     if (!bodyEl || viewMode !== ViewMode.Week || !weekOrigin) return;
     const skipEvery = columnWidth < 46 ? 2 : 1;
@@ -1918,7 +2008,10 @@ export default function GanttView({
                   type="button"
                   className={viewMode === vm ? "active" : ""}
                   aria-pressed={viewMode === vm}
-                  onClick={() => setPixelsPerDay(DEFAULT_PIXELS_PER_DAY[vm])}
+                  onClick={() => {
+                    beginZoomAnchorRef.current(null);
+                    setPixelsPerDay(vm === ViewMode.Month ? monthFillPxPerDay() : DEFAULT_PIXELS_PER_DAY[vm]);
+                  }}
                 >
                   {VIEW_MODE_LABEL[vm]}
                 </button>
@@ -2126,7 +2219,7 @@ export default function GanttView({
           ResizeObserver attaches to bodyRef once on mount, so unmounting this node
           when a query matches nothing would leave the observer bound to a detached
           element and freeze bodySize once the query was cleared again. */}
-      <div className="gantt-body" ref={bodyRef} style={{ "--wbs-key-w": `${keyColWidth}px` } as React.CSSProperties}>
+      <div className={`gantt-body${settled || rows.length === 0 ? "" : " is-settling"}`} ref={bodyRef} style={{ "--wbs-key-w": `${keyColWidth}px` } as React.CSSProperties}>
         {rows.length === 0 ? (
           <div className="empty-state">
             {matchIds?.size === 0 ? "Không có việc nào khớp bộ lọc." : "Chưa có việc nào trong dự án."}

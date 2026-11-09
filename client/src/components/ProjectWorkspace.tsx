@@ -53,6 +53,7 @@ import { TransitionFieldsDialog } from "./TransitionFields";
 import { neededFieldsFrom } from "../transitionFields";
 import Toolbar from "./Toolbar";
 import { LENSES, parseView, withViewParam, type ResourceMode, type SyncState, type WorkspaceView } from "../lenses";
+import { isStale, readLastActive, touchLastActive } from "../startView";
 import ResourceModes from "./ResourceModes";
 import TimesheetView from "./TimesheetView";
 import TodayView from "./TodayView";
@@ -86,8 +87,11 @@ function initialView(storageKey: string): { view: WorkspaceView; resourceMode?: 
   try {
     const fromUrl = parseView(new URLSearchParams(window.location.search).get("view"));
     if (fromUrl) return fromUrl;
-    const saved = parseView(localStorage.getItem(storageKey));
-    if (saved) return saved;
+    // A view remembered from before a long break is not restored: the day starts on Hôm nay.
+    if (!isStale(readLastActive(), Date.now())) {
+      const saved = parseView(localStorage.getItem(storageKey));
+      if (saved) return saved;
+    }
   } catch {
     /* private mode */
   }
@@ -172,6 +176,22 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
   const viewKey = `gms.view.${session.site.cloudId}.${session.project?.key ?? ""}`;
   const resourceModeKey = `gms.resmode.${session.site.cloudId}.${session.project?.key ?? ""}`;
   const [start] = useState(() => initialView(viewKey));
+  // Stamp when the page was last in use, so a view remembered before a long break is not restored
+  // (startView.ts). Written on entering, on every change of view, and whenever the page is hidden or
+  // left, which covers F5, closing the tab and switching away.
+  useEffect(() => {
+    touchLastActive();
+    const onHide = () => {
+      if (document.visibilityState === "hidden") touchLastActive();
+    };
+    const onLeave = () => touchLastActive();
+    document.addEventListener("visibilitychange", onHide);
+    window.addEventListener("pagehide", onLeave);
+    return () => {
+      document.removeEventListener("visibilitychange", onHide);
+      window.removeEventListener("pagehide", onLeave);
+    };
+  }, []);
   const [viewChosen, setViewState] = useState<WorkspaceView>(() => (initialReportId ? "report" : start.view));
   // A phone shows Hôm nay and the board; what was chosen is kept, so a rotated or resized window gets it back.
   const phone = usePhone();
@@ -216,6 +236,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
     (v: WorkspaceView) => {
       // Settings is a page you go to and come back from, not somewhere a project should reopen on.
       if (v === "settings") return;
+      touchLastActive();
       try {
         localStorage.setItem(viewKey, v);
       } catch {

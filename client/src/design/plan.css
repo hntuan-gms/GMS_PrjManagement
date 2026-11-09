@@ -740,3 +740,6 @@ g.bar > g[data-selected] rect {
   fill: var(--sheet);
   opacity: 0.92;
 }
+
+/* Hidden (not removed: it must keep its size) until the first scroll to today is done, see GanttView. */
+.gantt-body.is-settling > * { visibility: hidden; }

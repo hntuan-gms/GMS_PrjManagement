@@ -51,10 +51,10 @@
       }
       /* First open in this tab: the mark is drawn (≈0.6s). Later reloads: it is simply there, and only
          if loading takes longer than a blink. */
-      #gms-splash.is-intro .sp-mark { animation: sp-in 280ms cubic-bezier(.23, 1, .32, 1) both; }
-      #gms-splash.is-intro .sp-g { stroke-dasharray: 1; animation: sp-draw 420ms cubic-bezier(.65, 0, .35, 1) 120ms both; }
-      #gms-splash.is-intro .sp-dot { animation: sp-pop 240ms cubic-bezier(.34, 1.56, .64, 1) 480ms both, sp-wait 1200ms ease-in-out 1100ms infinite; }
-      #gms-splash.is-intro .sp-word { animation: sp-rise 260ms cubic-bezier(.23, 1, .32, 1) 340ms both; }
+      #gms-splash.is-intro .sp-mark { animation: sp-in 420ms cubic-bezier(.23, 1, .32, 1) both; }
+      #gms-splash.is-intro .sp-g { stroke-dasharray: 1; animation: sp-draw 640ms cubic-bezier(.65, 0, .35, 1) 180ms both; }
+      #gms-splash.is-intro .sp-dot { animation: sp-pop 360ms cubic-bezier(.34, 1.56, .64, 1) 740ms both, sp-wait 1200ms ease-in-out 1650ms infinite; }
+      #gms-splash.is-intro .sp-word { animation: sp-rise 400ms cubic-bezier(.23, 1, .32, 1) 520ms both; }
       /* Reload in a tab that has already seen it: no logo at all, only the paper colour so the page
          does not flash white while the app loads. */
       #gms-splash.is-quick .sp-lockup { display: none; }

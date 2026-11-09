@@ -2,11 +2,12 @@
  * Hands the splash drawn by index.html over to the app.
  *
  * The logo animation plays only on the first open in a tab: the splash stays until the mark has
- * finished drawing (INTRO_MS, well under a second), then flies into the rail's mark, which it is
- * drawn identically to, so the logo is never seen twice. Every later reload (F5) shows no logo
- * at all, just the paper colour until the app has its first real screen, then it is removed.
+ * finished drawing (INTRO_MS, about a second; keep it in step with the animation delays in
+ * index.html), then flies into the rail's mark, which it is drawn identically to, so the logo is
+ * never seen twice. Every later reload (F5) shows no logo at all, just the paper colour until the
+ * app has its first real screen, then it is removed.
  */
-const INTRO_MS = 720;
+const INTRO_MS = 1100;
 const SEEN_KEY = "gms.splash";
 
 let done = false;
@@ -60,7 +61,7 @@ function leave(el: HTMLElement) {
     });
     mark
       .animate([{ transform: "none" }, { transform: `translate(${dx}px, ${dy}px) scale(${s})` }], {
-        duration: 380,
+        duration: 520,
         fill: "forwards",
         easing: "cubic-bezier(.2, 0, 0, 1)",
       })
