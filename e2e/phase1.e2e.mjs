@@ -3,7 +3,7 @@ import fs from "node:fs";
 import assert from "node:assert/strict";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { ioAction, openFilterPanel, openMore, openTimesheet, pickFacet, quickFilter } from "./toolbar.mjs";
+import { ioAction, openFilterPanel, openMore, openTimesheet, pickFacet, quickFilter, openLens } from "./toolbar.mjs";
 
 const OUT = path.join(path.dirname(fileURLToPath(import.meta.url)), "shots");
 fs.mkdirSync(OUT, { recursive: true });
@@ -29,7 +29,7 @@ const mock = async (p) => (await fetch(API + p)).json();
 const patches = async () => (await mock("/api/__log")).log.filter((l) => l.m === "PATCH");
 const reset = () => fetch(API + "/api/__reset", { method: "POST" });
 const rows = () => page.$$eval(".wbs-row", (r) => r.map((x) => x.textContent));
-const tab = (name) => page.locator(".toolbar-tabs button", { hasText: name }).click();
+const tab = (name) => openLens(page, name);
 const has = (rs, key) => rs.some((t) => t.includes(key));
 const pickMulti = (label, value) => pickFacet(page, label, value);
 async function clearFilter() { const b = page.locator(".tf-clear"); if (await b.count()) await b.click(); }
@@ -240,7 +240,7 @@ console.log("\n== Nguồn lực ==");
 await fetch(API + "/api/tasks/DEMO-7", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ assigneeAccountId: null }) });
 await page.reload(); await page.waitForSelector(".wbs-row");
 await step("tab Nguồn lực: có bộ lọc, KHÔNG có ô người phụ trách", async () => {
-  await tab("Nhân lực");
+  await tab("Resource");
   await page.waitForSelector(".resource-view .tf-bar");
   await openFilterPanel(page);
   const facets = await page.$$eval(".resource-view .tf-facet-head", (b) => b.map((x) => x.textContent));
@@ -282,7 +282,7 @@ await step("xuất CSV heatmap", async () => {
 
 console.log("\n== Bảng ==");
 await step("tab Bảng hiển thị thẻ", async () => {
-  await tab("Bảng"); await page.waitForSelector(".bd-card");
+  await tab("Board"); await page.waitForSelector(".bd-card");
   assert.ok(await page.locator(".bd-card").count() >= 3);
 });
 await step("đổi người ngay trên thẻ → PATCH", async () => {
@@ -323,7 +323,7 @@ await step("tạo nhanh có chọn loại + người", async () => {
 
 console.log("\n== Báo cáo ==");
 await step("Phạm vi → một người: số việc khớp đúng máy chủ, nút Phạm vi nói đang xem ai", async () => {
-  await tab("Nhịp dự án"); await page.waitForSelector(".np-scope");
+  await tab("Report"); await page.waitForSelector(".np-scope");
   const all = (await mock("/api/progress?asOf=" + localToday())).metrics.counts.total;
   await page.locator(".np-scope").click();
   await page.locator(".np-scope-menu .np-opt", { hasText: "Nguyễn Anh" }).click();
@@ -381,7 +381,7 @@ await step("xuất CSV chấm công", async () => {
 
 console.log("\n== Trợ lý AI ==");
 await step("Dừng: giữ phần trả lời dở và báo cho máy chủ ngắt", async () => {
-  await tab("Kế hoạch");
+  await tab("List");
   await reset();
   await page.locator(".app-rail button[aria-label='Trợ lý']").click();
   await page.fill(".chat-composer textarea", "cho tôi một câu trả lời dài");
@@ -403,7 +403,7 @@ await step("có nút Sao chép trên câu trả lời", async () => {
 console.log("\n== Tạo việc ==");
 await step("form tạo việc gửi kèm Ưu tiên, Nhãn và Ước lượng (kể cả khi chỉ tạo 1 task)", async () => {
   await page.keyboard.press("Escape");
-  await tab("Kế hoạch");
+  await tab("List");
   await reset();
   // "C" is the sentence box now; the full form is a command in Ctrl K.
   await page.keyboard.press("Control+k");

@@ -7,6 +7,7 @@ import { chromium } from "playwright-core";
 const API = process.env.E2E_API ?? "http://localhost:4000";
 const APP = process.env.E2E_APP ?? "http://localhost:5173/?view=gantt";
 const HOME = APP.replace(/\?view=[a-z]+/, "");
+const TODAY = HOME.replace(/\/?$/, "/") + "?view=today";
 const browser = await chromium.launch({ channel: "chrome", headless: true });
 const ctx = await browser.newContext({ viewport: { width: 1500, height: 900 } });
 const page = await ctx.newPage();
@@ -31,8 +32,14 @@ const writes = async () => (await log()).filter((l) => l.m === "PATCH" || l.m ==
 await fetch(API + "/api/__restore", { method: "POST" });
 
 console.log("\n== Hôm nay ==");
-await step("lần đầu mở app là trang Hôm nay: lời chào do code dựng, các mục, dải ghi giờ", async () => {
+await step("lần đầu mở app là List (Dự án), không phải Hôm nay", async () => {
   await page.goto(HOME);
+  await page.waitForSelector(".wbs-row");
+  assert.equal(await page.locator(".today-view").count(), 0);
+  assert.equal(await page.locator("[data-view=plan][aria-current=page]").count(), 1);
+});
+await step("trang Hôm nay: lời chào do code dựng, các mục, dải ghi giờ", async () => {
+  await page.goto(TODAY);
   await page.waitForSelector(".today-view");
   assert.match(await page.textContent(".today-greeting"), /^Chào /);
   assert.equal(await page.locator("[data-view=today][aria-current=page]").count(), 1);

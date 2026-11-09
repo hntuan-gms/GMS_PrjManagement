@@ -216,12 +216,12 @@ await step("mã việc nằm trong câu trả lời của trợ lý cũng bấm 
   await page.waitForSelector(".modal-detail", { state: "detached" });
 });
 await step("kéo thẻ từ tab Bảng vào cửa sổ", async () => {
-  await page.locator(".toolbar-tabs button", { hasText: "Bảng" }).click();
+  await page.locator(".toolbar-tabs button", { hasText: "Board" }).click();
   await page.waitForSelector(".bd-card");
   await page.locator(".bd-card[data-card-key='DEMO-5']").dragTo(page.locator(".chat-dock .chat-messages-wrap"));
   await page.waitForSelector(".chat-tray .chat-chip[data-chip-key='DEMO-5']");
   await clearTray();
-  await page.locator(".toolbar-tabs button", { hasText: "Kế hoạch" }).click();
+  await page.locator(".toolbar-tabs button", { hasText: "List" }).click();
   await page.waitForSelector(".wbs-row");
 });
 await step("cửa sổ đóng: kéo một dòng thì hiện vùng thả, thả vào là mở và đính kèm", async () => {

@@ -2,16 +2,11 @@ import type { ResourceMode } from "../lenses";
 
 const MODES: Array<{ id: ResourceMode; label: string }> = [
   { id: "load", label: "Mức tải" },
-  { id: "ts", label: "Giờ đã ghi" },
   { id: "skills", label: "Kỹ năng" },
 ];
 
-/**
- * Three ways to look at the same people: planned load, hours logged, skills. Someone who may not see the
- * member list has one mode only, so there is nothing to switch and nothing is drawn.
- */
-export default function ResourceModes({ mode, onChange, canPlan }: { mode: ResourceMode; onChange: (m: ResourceMode) => void; canPlan: boolean }) {
-  if (!canPlan) return null;
+/** Two ways to look at the same people: planned load and skills (the hours logged are Clockwork, on the rail). */
+export default function ResourceModes({ mode, onChange }: { mode: ResourceMode; onChange: (m: ResourceMode) => void }) {
   return (
     <div className="segmented-control rv-modes" role="tablist" aria-label="Kiểu xem nguồn lực">
       {MODES.map((m) => (

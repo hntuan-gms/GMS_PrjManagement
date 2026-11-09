@@ -1,5 +1,5 @@
 // L1: the address follows the lens. Changing lens writes ?view=, F5 stays where it was, Back goes to the
-// lens before, a link opens the place it names, and ?view=timesheet is still Nhân lực · Giờ đã ghi.
+// lens before, a link opens the place it names, and ?view=timesheet is Clockwork, a place of its own on the rail.
 import assert from "node:assert/strict";
 import { chromium } from "playwright-core";
 
@@ -30,14 +30,14 @@ await page.waitForSelector(".lens-tabs");
 
 console.log("\n== Địa chỉ theo lăng kính ==");
 await step("mở ?view=today, bấm Bảng thì địa chỉ thành ?view=board", async () => {
-  await page.locator(".lens-tabs button", { hasText: "Bảng" }).click();
+  await page.locator(".lens-tabs button", { hasText: "Board" }).click();
   await page.waitForSelector(".bd-switcher");
   assert.equal(view(), "board");
 });
 await step("F5 giữ nguyên Bảng", async () => {
   await page.reload();
   await page.waitForSelector(".bd-switcher");
-  assert.equal(await current(), "Bảng");
+  assert.equal(await current(), "Board");
 });
 await step("1 rồi 2 rồi Back về Kế hoạch (không thoát khỏi app)", async () => {
   await page.goto(APP + "?view=today");
@@ -49,7 +49,7 @@ await step("1 rồi 2 rồi Back về Kế hoạch (không thoát khỏi app)", 
   await page.goBack();
   await page.waitForSelector(".wbs-row");
   assert.equal(view(), "gantt");
-  assert.equal(await current(), "Kế hoạch");
+  assert.equal(await current(), "List");
   await page.goForward();
   await page.waitForSelector(".bd-switcher");
   assert.equal(view(), "board");
@@ -57,15 +57,20 @@ await step("1 rồi 2 rồi Back về Kế hoạch (không thoát khỏi app)", 
 await step("liên kết ?view=report mở Nhịp dự án", async () => {
   await page.goto(APP + "?view=report");
   await page.waitForSelector(".progress-view");
-  assert.equal(await current(), "Nhịp dự án");
+  assert.equal(await current(), "Report");
 });
-await step("?view=timesheet mở Nhân lực ở chế độ Giờ đã ghi, đổi chế độ thì địa chỉ đổi theo", async () => {
+await step("?view=timesheet mở Clockwork: một mục riêng trên thanh bên, không có lăng kính nào sáng", async () => {
   await page.goto(APP + "?view=timesheet");
   await page.waitForSelector(".ts-legend");
-  assert.equal(await current(), "Nhân lực");
   assert.equal(view(), "timesheet");
-  await page.locator("button, [role=tab]", { hasText: /^Mức tải$/ }).first().click();
+  assert.equal(await page.locator(".rail-btn[data-view=timesheet][aria-current=page]").count(), 1);
+  assert.equal(await page.locator(".rail-btn[data-view=plan][aria-current=page]").count(), 0);
+  assert.equal(await page.locator(".lens-tabs").count(), 0);
+  // Resource no longer carries a "Giờ đã ghi" mode.
+  await page.locator(".rail-btn[data-view=plan]").click();
+  await page.locator(".lens-tabs button", { hasText: "Resource" }).click();
   await page.waitForFunction(() => new URL(location.href).searchParams.get("view") === "resource");
+  assert.equal(await page.locator("[data-mode=ts]").count(), 0);
 });
 await step("Cài đặt: '← Về …' quay lại bằng Back, không thêm mục lịch sử", async () => {
   await page.goto(APP + "?view=board");

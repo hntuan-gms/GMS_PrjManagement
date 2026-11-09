@@ -11,7 +11,7 @@ export default function BoardCardSettings({ projectKey }: { projectKey: string }
   const scope = picked ?? readLastCardScope(projectKey);
   const boards = readRememberedBoards(projectKey);
   const [options, setOptions] = useState<CardOptions>(() => readCardOptions(scope ?? ""));
-  if (scope === null) return <p className="sla-muted">Chưa mở tab Bảng.</p>;
+  if (scope === null) return <p className="sla-muted">Chưa mở tab Board.</p>;
   const current = boards.find((b) => b.scope === scope);
   const KIND = { scrum: "Scrum", kanban: "Kanban", status: "Theo trạng thái" } as const;
   return (

@@ -30,7 +30,7 @@ await page.waitForSelector(".wbs-row");
 
 console.log("\n== Đổi board ==");
 await step("từ Backlog của board Scrum đổi sang Kanban: bảng hiện ra, không trắng trơn", async () => {
-  await tab("Bảng");
+  await tab("Board");
   await page.waitForSelector(".bd-card");
   await page.locator(".bd-seg button", { hasText: "Backlog" }).click();
   await page.waitForSelector(".bl-row");

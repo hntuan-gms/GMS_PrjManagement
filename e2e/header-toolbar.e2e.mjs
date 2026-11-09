@@ -27,18 +27,25 @@ await page.goto(process.env.E2E_APP ?? "http://localhost:5173/");
 await page.waitForSelector(".wbs-row");
 
 console.log("\n== Khung: thanh bên + header ==");
-await step("header 44px, không có nút đặc nào; 'Tạo việc' nằm trên thanh bên", async () => {
+await step("header 44px; 'Create' là nút xanh lá duy nhất, góc trên bên trái", async () => {
   assert.equal(Math.round((await box(".toolbar")).height), 44);
-  assert.equal(await page.locator(".toolbar button.primary").count(), 0, "header không được có nút đặc");
-  assert.equal(await page.locator(".app-rail button[aria-label='Tạo việc']").count(), 1);
+  assert.equal(await page.locator(".toolbar button.primary").count(), 0, "header không được có nút đặc nào khác");
+  const create = page.locator(".toolbar-left button.hd-create");
+  assert.equal(await create.count(), 1);
+  assert.equal((await create.textContent()).trim(), "Create");
+  const first = await page.$eval(".toolbar-left", (el) => el.firstElementChild.className);
+  assert.ok(first.includes("hd-create"), "Create phải đứng đầu bên trái: " + first);
+  const [r, g, b] = (await create.evaluate((el) => getComputedStyle(el).backgroundColor)).match(/\d+/g).map(Number);
+  assert.ok(g > r && g > b, `nút phải xanh lá: rgb(${r}, ${g}, ${b})`);
+  assert.equal(await page.locator(".app-rail button[aria-label='Tạo việc']").count(), 0);
   const labels = await page.$$eval(".toolbar button", (b) => b.map((x) => x.textContent.trim()));
   assert.ok(!labels.some((t) => t === "Đổi dự án" || t === "Đăng xuất" || t.includes("Đồng bộ từ Jira")), labels.join("|"));
 });
 await step("bốn lăng kính dạng chữ; lăng kính hiện tại có aria-current và gạch mực", async () => {
   const labels = (await page.locator(".lens-tabs button").allTextContents()).map((t) => t.replace(/\d+.*$/, "").trim());
-  assert.deepEqual(labels, ["Kế hoạch", "Bảng", "Nhân lực", "Nhịp dự án"]);
+  assert.deepEqual(labels, ["List", "Board", "Resource", "Report"]);
   const current = page.locator(".lens-tabs button[aria-current=page]");
-  assert.equal((await current.textContent()).trim(), "Kế hoạch");
+  assert.equal((await current.textContent()).trim(), "List");
   assert.notEqual(await current.evaluate((el) => getComputedStyle(el).borderBottomColor), "rgba(0, 0, 0, 0)");
   const idle = await page.locator(".lens-tabs button:not(.active)").first().evaluate((el) => getComputedStyle(el).borderBottomColor);
   assert.equal(idle, "rgba(0, 0, 0, 0)");
@@ -93,7 +100,7 @@ await step("C mở ô tạo việc và tô các phần nhận ra được (@ngư
 });
 await step("phím 2 sang Bảng, 1 về Kế hoạch; ? mở bảng phím tắt", async () => {
   await page.keyboard.press("2");
-  await page.waitForFunction(() => document.querySelector(".lens-tabs button[aria-current=page]")?.textContent.includes("Bảng"));
+  await page.waitForFunction(() => document.querySelector(".lens-tabs button[aria-current=page]")?.textContent.includes("Board"));
   await page.keyboard.press("1");
   await page.waitForSelector(".wbs-row");
   await page.keyboard.press("?");

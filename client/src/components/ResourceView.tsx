@@ -60,7 +60,7 @@ interface Props {
   myAccountId: string;
   /** Issue keys Jira returned for the filter's JQL (null until they arrive). */
   jqlKeys?: Set<string> | null;
-  /** Which of the lens's modes is showing; "Giờ đã ghi" is drawn by the workspace, not here. */
+  /** Which of the lens's modes is showing. */
   mode: "load" | "skills";
   onModeChange: (m: ResourceMode) => void;
   /** Open this person and bring their first overloaded day into view (the report's "Xem lịch …"); a new nonce asks again. */
@@ -436,7 +436,7 @@ export default function ResourceView({
         total={tasks.length}
         leading={
           <>
-            <ResourceModes mode={mode} onChange={onModeChange} canPlan />
+            <ResourceModes mode={mode} onChange={onModeChange} />
             {mode === "load" && (
               <div className="tf-search rv-member-search">
                 <Icon name="search" size={14} className="tf-search-icon" />

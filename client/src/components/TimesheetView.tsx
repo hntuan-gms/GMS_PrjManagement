@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { csvName, downloadCsv } from "../csv";
 import { localToday, roundHours } from "../taskForm";
 import type { Session, Task } from "../types";
@@ -40,14 +40,11 @@ export default function TimesheetView({
   tasks,
   onOpenEdit,
   onTasksChanged,
-  modeSwitch,
 }: {
   session: Session;
   tasks: Task[];
   onOpenEdit: (task: Task) => void;
   onTasksChanged: () => void;
-  /** The lens's mode switch (Mức tải · Giờ đã ghi · Kỹ năng), drawn first in the toolbar. */
-  modeSwitch?: ReactNode;
 }) {
   const today = localToday();
   const calendar = useWorkCalendar();
@@ -110,7 +107,6 @@ export default function TimesheetView({
   return (
     <div className="ts-wrap">
       <div className="tf-bar ts-toolbar">
-        {modeSwitch}
         <div className="seg-group" role="tablist" aria-label="Phạm vi">
           <button role="tab" data-scope="mine" aria-selected={scope === "mine"} className={scope === "mine" ? "active" : ""} onClick={() => setScope("mine")}>
             Của tôi

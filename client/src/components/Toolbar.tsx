@@ -18,6 +18,8 @@ interface Props {
   onViewChange: (v: WorkspaceView) => void;
   /** People overloaded in the near-term window — badged on the Nhân lực lens. */
   overloadedPeople: number;
+  /** The signed-in person may not see the member list: the Resource lens is not offered. */
+  hideResource?: boolean;
   onAddTask: () => void;
   onSync: () => void;
   sync: SyncState;
@@ -112,6 +114,7 @@ export default function Toolbar({
   view,
   onViewChange,
   overloadedPeople,
+  hideResource,
   onAddTask,
   onSync,
   sync,
@@ -148,7 +151,7 @@ export default function Toolbar({
 
   // A phone has the board and Hôm nay (the rail); the other lenses need room they do not have.
   const phone = usePhone();
-  const lenses = phone ? LENSES.filter((l) => l.id === "board") : LENSES;
+  const lenses = phone ? LENSES.filter((l) => l.id === "board") : LENSES.filter((l) => !(hideResource && l.id === "resource"));
 
   return (
     <>
@@ -165,7 +168,6 @@ export default function Toolbar({
         >
           <BrandMark size={30} />
         </button>
-        <RailButton icon="plus" label="Tạo việc" keys="C" onClick={onAddTask} />
         <span className="rail-sep" aria-hidden="true" />
         <RailButton icon="sun" label="Hôm nay" keys="G H" view="today" active={view === "today"} onClick={() => onViewChange("today")} />
         <RailButton
@@ -176,6 +178,10 @@ export default function Toolbar({
           active={inProject}
           onClick={() => onViewChange(lensView ?? lastLens ?? (phone ? "board" : "gantt"))}
         />
+        {/* A phone has no room for the hours grid (phoneView sends it to Hôm nay), so it is not offered there. */}
+        {!phone && (
+          <RailButton icon="clock" label="Clockwork" keys="G T" view="timesheet" active={view === "timesheet"} onClick={() => onViewChange("timesheet")} />
+        )}
         {/* Further places (integrations) go here, one button each; the header's lenses belong to Dự án only. */}
         <span className="rail-fill" />
         {onOpenAssistant && (
@@ -275,6 +281,20 @@ export default function Toolbar({
 
       <header className="toolbar">
         <div className="toolbar-left">
+          {/* Top left, green, like Jira's: the one solid button of the header. */}
+          <button
+            type="button"
+            className="hd-create"
+            aria-label="Create"
+            title="Create (C)"
+            onClick={() => {
+              dismissForNavigation();
+              onAddTask();
+            }}
+          >
+            <Icon name="plus" size={14} />
+            <span>Create</span>
+          </button>
           {project && (
             <Popover
               className="hd-btn project-switch"

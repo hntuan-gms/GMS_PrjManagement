@@ -60,7 +60,7 @@ await step("menu trái có đúng bốn mục", async () => {
 
 await step("'← Về Kế hoạch' ở trên cùng, bấm thì về kế hoạch", async () => {
   const back = page.locator(".settings-back");
-  assert.match(await back.textContent(), /Về Kế hoạch/);
+  assert.match(await back.textContent(), /Về List/);
   await back.click();
   await page.waitForSelector(".wbs-row");
   assert.equal(await page.locator(".settings-page").count(), 0);
@@ -139,8 +139,8 @@ await step("Nhập KBKT: cấu hình dùng chung, Lưu chỉ bật khi đổi", 
 await step("Thẻ trên board: đổi ở đây thì nút Thẻ của Bảng thấy ngay", async () => {
   await page.locator(".settings-nav-item", { hasText: "Thẻ trên board" }).click();
   // Before the Bảng tab has been drawn there is no board to edit.
-  await page.locator(".settings-body .sla-muted", { hasText: "Chưa mở tab Bảng" }).waitFor();
-  await openLens(page, "Bảng");
+  await page.locator(".settings-body .sla-muted", { hasText: "Chưa mở tab Board" }).waitFor();
+  await openLens(page, "Board");
   await page.waitForSelector(".bd-card");
   await openSettings(page, "Thẻ trên board");
   const box = page.locator(".board-card-settings");
@@ -148,7 +148,7 @@ await step("Thẻ trên board: đổi ở đây thì nút Thẻ của Bảng th�
   const key = box.locator("label.bd-card-opt", { hasText: /^Mã$/ }).locator("input");
   assert.equal(await key.isChecked(), true);
   await key.uncheck();
-  await openLens(page, "Bảng");
+  await openLens(page, "Board");
   await page.waitForSelector(".bd-card");
   await page.locator(".bd-cardbtn").click();
   const same = page.locator(".bd-card-menu label.bd-card-opt", { hasText: /^Mã$/ }).locator("input");

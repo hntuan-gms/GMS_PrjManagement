@@ -11,7 +11,7 @@ export interface Shortcut {
   /** Display form, e.g. "G H", "Ctrl K", "Shift D". */
   keys: string;
   label: string;
-  group: "Chung" | "Đi tới" | "Danh sách" | "Việc đang chọn" | "Kế hoạch" | "Lọc";
+  group: "Chung" | "Đi tới" | "Danh sách" | "Việc đang chọn" | "List" | "Lọc";
 }
 
 export const SHORTCUTS: Shortcut[] = [
@@ -25,11 +25,11 @@ export const SHORTCUTS: Shortcut[] = [
   { id: "undo", keys: "Ctrl Z", label: "Hoàn tác thao tác kéo thả", group: "Chung" },
   { id: "escape", keys: "Esc", label: "Đóng lớp trên cùng, rồi bỏ chọn", group: "Chung" },
   { id: "go-today", keys: "G H", label: "Hôm nay", group: "Đi tới" },
-  { id: "go-time", keys: "G T", label: "Giờ đã ghi", group: "Đi tới" },
-  { id: "lens-1", keys: "1", label: "Kế hoạch", group: "Đi tới" },
-  { id: "lens-2", keys: "2", label: "Bảng", group: "Đi tới" },
-  { id: "lens-3", keys: "3", label: "Nhân lực", group: "Đi tới" },
-  { id: "lens-4", keys: "4", label: "Nhịp dự án", group: "Đi tới" },
+  { id: "go-time", keys: "G T", label: "Clockwork (giờ đã ghi)", group: "Đi tới" },
+  { id: "lens-1", keys: "1", label: "List", group: "Đi tới" },
+  { id: "lens-2", keys: "2", label: "Board", group: "Đi tới" },
+  { id: "lens-3", keys: "3", label: "Resource", group: "Đi tới" },
+  { id: "lens-4", keys: "4", label: "Report", group: "Đi tới" },
   { id: "go-settings", keys: "G S", label: "Cài đặt dự án", group: "Đi tới" },
   { id: "next", keys: "J  ↓", label: "Dòng sau", group: "Danh sách" },
   { id: "prev", keys: "K  ↑", label: "Dòng trước", group: "Danh sách" },
@@ -40,11 +40,11 @@ export const SHORTCUTS: Shortcut[] = [
   { id: "assign-me", keys: "I", label: "Giao cho tôi", group: "Việc đang chọn" },
   { id: "shift-back", keys: "Alt ←", label: "Dời lùi 1 ngày", group: "Việc đang chọn" },
   { id: "shift-fwd", keys: "Alt →", label: "Dời tới 1 ngày", group: "Việc đang chọn" },
-  { id: "card-column", keys: "Shift H  Shift L", label: "Bảng: chuyển thẻ sang cột trái, phải", group: "Việc đang chọn" },
+  { id: "card-column", keys: "Shift H  Shift L", label: "Board: chuyển thẻ sang cột trái, phải", group: "Việc đang chọn" },
   { id: "copy-key", keys: "Ctrl .", label: "Sao chép mã", group: "Việc đang chọn" },
   { id: "delete", keys: "Delete", label: "Xoá (có hỏi lại)", group: "Việc đang chọn" },
-  { id: "today", keys: "T", label: "Cuộn tới hôm nay", group: "Kế hoạch" },
-  { id: "draft", keys: "Shift D", label: "Bật / tắt bản nháp kế hoạch", group: "Kế hoạch" },
+  { id: "today", keys: "T", label: "Cuộn tới hôm nay", group: "List" },
+  { id: "draft", keys: "Shift D", label: "Bật / tắt bản nháp kế hoạch", group: "List" },
   { id: "log-time", keys: "L", label: "Hôm nay: ghi giờ", group: "Chung" },
   { id: "mine", keys: "M", label: "Lọc: của tôi", group: "Lọc" },
   { id: "overdue", keys: "O", label: "Lọc: quá hạn", group: "Lọc" },

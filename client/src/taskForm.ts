@@ -17,6 +17,18 @@ export function localToday(): string {
  * due = start + ceil(duration) − 1, the server's rule, computed in UTC like it is.
  * Null when the start isn't a date, so a half-typed field shows no hint.
  */
+/**
+ * Whole days a task takes from `start` to `end`, both included — what typing an end date means. An end before
+ * the start (or something unreadable) is one day: the task cannot end before it begins.
+ */
+export function durationBetween(start: string, end: string): number | null {
+  const a = /^(\d{4})-(\d{2})-(\d{2})$/.exec(start);
+  const b = /^(\d{4})-(\d{2})-(\d{2})$/.exec(end);
+  if (!a || !b) return null;
+  const days = Math.round((Date.UTC(+b[1], +b[2] - 1, +b[3]) - Date.UTC(+a[1], +a[2] - 1, +a[3])) / 86_400_000) + 1;
+  return Math.max(1, days);
+}
+
 export function endDateOf(start: string, durationDays: number): string | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(start);
   if (!m || !Number.isFinite(durationDays)) return null;

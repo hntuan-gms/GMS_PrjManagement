@@ -186,7 +186,7 @@ export default function BoardView({
       snapshot
         ? snapshot.boards.length > 0
           ? snapshot.boards.map((b) => ({ scope: String(b.id), name: b.name, kind: b.type === "scrum" ? ("scrum" as const) : ("kanban" as const) }))
-          : [{ scope: "status", name: `Bảng ${projectKey}`, kind: "status" as const }]
+          : [{ scope: "status", name: `Board ${projectKey}`, kind: "status" as const }]
         : [],
     [snapshot, projectKey]
   );
@@ -808,7 +808,7 @@ export default function BoardView({
               label={
                 <>
                   <Icon name="columns" size={14} />
-                  <span className="bd-switcher-name">{snapshot.board?.name ?? `Bảng ${projectKey}`}</span>
+                  <span className="bd-switcher-name">{snapshot.board?.name ?? `Board ${projectKey}`}</span>
                 </>
               }
             >
@@ -852,7 +852,7 @@ export default function BoardView({
               )}
             </Popover>
           ) : (
-            <b className="bd-boardname">{snapshot.board?.name ?? `Bảng ${projectKey}`}</b>
+            <b className="bd-boardname">{snapshot.board?.name ?? `Board ${projectKey}`}</b>
           )}
           <span className={`bd-kind bd-kind-${scrum ? "scrum" : "kanban"}`}>{scrum ? "Scrum" : agile ? "Kanban" : "Theo trạng thái"}</span>
           {/* Kanban-only project: sprints need a Scrum board, and saying so beats leaving the
@@ -897,7 +897,7 @@ export default function BoardView({
           )}
           {!agile && snapshot.fallback?.reason === "no_board" ? (
             <button className="bl-icon" onClick={() => setModal({ kind: "createBoard", type: "scrum" })} title="Tạo board mới">
-              + Bảng
+              + Board
             </button>
           ) : null}
           {activeSprints.length > 1 && view === "board" && (
