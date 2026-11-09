@@ -4,7 +4,7 @@
 // columns, and the profile & leave slide-over. What reaches Jira for real is on the manual checklist.
 import assert from "node:assert/strict";
 import { chromium } from "playwright-core";
-import { fillDate, openTimesheet, setGranularity, granularityOf } from "./toolbar.mjs";
+import { fillDate, openTimesheet, setGranularity, granularityOf, openLens } from "./toolbar.mjs";
 
 const API = process.env.E2E_API ?? "http://localhost:4000";
 const browser = await chromium.launch({ channel: "chrome", headless: true });
@@ -59,7 +59,7 @@ await reset();
 
 await page.goto(process.env.E2E_APP ?? "http://localhost:5173/");
 await page.waitForSelector(".wbs-row");
-await page.locator(".toolbar-tabs button", { hasText: "Nhân lực" }).click();
+await page.locator(".toolbar-tabs button", { hasText: "Resource" }).click();
 await page.waitForSelector(".resource-view .rv-row-person");
 
 const rect = (sel) => page.locator(sel).first().boundingBox();
@@ -662,24 +662,24 @@ await step("nhãn 'Nhân lực' và số quá tải hiện ngay sau F5, không �
   await slow(/\/api\/resources(\?|$)/);
   await page.reload();
   await page.waitForSelector(".toolbar-tabs");
-  await page.locator(".toolbar-tabs button", { hasText: "Nhân lực" }).waitFor({ timeout: 1200 });
+  await page.locator(".toolbar-tabs button", { hasText: "Resource" }).waitFor({ timeout: 1200 });
   const labels = (await page.locator(".toolbar-tabs button").allTextContents()).map((t) => t.replace(/\d+\s*(thành viên|người quá tải).*$/, "").replace(/\d+$/, "").trim());
-  assert.deepEqual(labels, ["Kế hoạch", "Bảng", "Nhân lực", "Nhịp dự án"]);
+  assert.deepEqual(labels, ["List", "Board", "Resource", "Report"]);
   await page.unroute(/\/api\/resources(\?|$)/);
 });
 await step("Nhịp dự án, Bảng, Giờ làm đã xem trước đó hiện ngay sau F5 từ bản lưu của tab", async () => {
   // Visit each once so the tab has something to remember, then reload with Jira slowed down.
   // Nhịp dự án and Bảng are lenses in the header; Giờ làm (the old Chấm công) is a mode of Nhân lực ("Giờ đã ghi").
   const open = (name) =>
-    name === "Giờ làm" ? openTimesheet(page, { wait: false }) : page.locator(".toolbar-tabs button", { hasText: name }).click();
-  for (const name of ["Nhịp dự án", "Bảng", "Giờ làm"]) {
+    name === "Giờ làm" ? openTimesheet(page, { wait: false }) : openLens(page, name);
+  for (const name of ["Report", "Board", "Giờ làm"]) {
     await open(name);
-    await page.waitForSelector({ "Nhịp dự án": ".pr-tile", "Bảng": ".bd-card", "Giờ làm": ".ts-grid" }[name]);
+    await page.waitForSelector({ "Report": ".pr-tile", "Board": ".bd-card", "Giờ làm": ".ts-grid" }[name]);
   }
   await slow(/\/api\/(progress|board|timesheet)/);
   await page.reload();
   await page.waitForSelector(".toolbar-tabs");
-  for (const [name, sel] of [["Nhịp dự án", ".pr-tile"], ["Bảng", ".bd-card"], ["Giờ làm", ".ts-grid"]]) {
+  for (const [name, sel] of [["Report", ".pr-tile"], ["Board", ".bd-card"], ["Giờ làm", ".ts-grid"]]) {
     await open(name);
     await page.waitForSelector(sel, { timeout: 1500 });
   }

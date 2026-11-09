@@ -1,6 +1,6 @@
 /**
  * Which screen a project opens on. The last view used is remembered per project, but only for a
- * while: come back after a break and the workspace starts on Hôm nay again, like a fresh day, while
+ * while: come back after a break and the workspace starts on the plan (List) again, like a fresh day, while
  * an F5 in the middle of work (or a quick return) still lands where you were.
  */
 export const LAST_ACTIVE_KEY = "gms.lastActive";

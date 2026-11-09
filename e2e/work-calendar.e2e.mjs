@@ -95,7 +95,7 @@ await step("lưu: nút Lưu tắt lại, máy chủ giữ 13 ngày lễ và 1 ng
 
 console.log("\n== Các màn hình đọc lịch ==");
 await step("Nguồn lực: ngày lễ ghi 'Ngày lễ: …', Thứ 7 làm bù có công suất 8h", async () => {
-  await openLens(page, "Nhân lực");
+  await openLens(page, "Resource");
   await page.waitForSelector(".resource-view .rv-row-person");
   await setGranularity(page, "day");
   const titles = await page.locator(".rv-row-person").first().locator(".rv-cell").evaluateAll((els) => els.map((e) => e.title));

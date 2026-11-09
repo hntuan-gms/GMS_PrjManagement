@@ -21,6 +21,7 @@ import { changeSchedule, scheduleOf } from "../scheduleFields";
 import { formatPredecessors, parsePredecessors } from "../predecessorsText";
 import { predecessorProblem } from "../predecessorCheck";
 import { fitColumns, MIN_NAME_PX } from "../wbsFit";
+import SubtaskQuickAdd from "./SubtaskQuickAdd";
 import { KIND_OF_COLUMN, editableKinds, neighbourStop, nextRowFor, stopsFor, type CellKind } from "../wbsCells";
 import { buildResourceLoad } from "../resourceAllocation";
 import { isTypingTarget, overlayOpen } from "../shortcuts";
@@ -489,6 +490,8 @@ const DEFAULT_COLUMNS: ColumnId[] = ["status", "assignee", "pct"];
 
 const COLUMNS_KEY = "gms.gantt.columns";
 const KEY_COL_WIDTH = 64;
+/** The tick box before "Mã" (the select column); `--wbs-check-w` in plan.css says the same. */
+const CHECK_COL_WIDTH = 30;
 const MIN_NAME_WIDTH = 180;
 const MIN_NAME_FLOOR = MIN_NAME_PX;
 
@@ -807,12 +810,13 @@ export default function GanttView({
     for (const t of tasks) longest = Math.max(longest, t.id.length);
     return Math.max(KEY_COL_WIDTH, Math.ceil(longest * 7.3) + 18);
   }, [tasks]);
-  const neededListWidth = keyColWidth + MIN_NAME_WIDTH + columnsWidth;
+  const leadWidth = keyColWidth + CHECK_COL_WIDTH;
+  const neededListWidth = leadWidth + MIN_NAME_WIDTH + columnsWidth;
   // What the chosen columns and a readable name need, but never more than 45% of the window, so on a
   // narrow screen the time axis still gets most of it. The name keeps a floor of 120px.
   const defaultListWidth = Math.min(
     neededListWidth + 60,
-    Math.max(Math.floor(bodySize.width * 0.45), keyColWidth + MIN_NAME_FLOOR + columnsWidth)
+    Math.max(Math.floor(bodySize.width * 0.45), leadWidth + MIN_NAME_FLOOR + columnsWidth)
   );
   // A dragged divider is respected, but not past 60% of the window.
   const maxListWidth = Math.min(Math.max(MIN_LIST_WIDTH, bodySize.width - MIN_CHART_WIDTH), Math.floor(bodySize.width * 0.6));
@@ -820,7 +824,7 @@ export default function GanttView({
   const ganttHeight = Math.max(ROW_HEIGHT, bodySize.height - HEADER_HEIGHT - SCROLLBAR_RESERVE);
   // Narrow table (the detail panel or the assistant is open, or the divider was dragged in): the name keeps
   // MIN_NAME_PX and the columns give way (wbsFit.ts) instead of every one staying put while the name shrinks.
-  const fitted = useMemo(() => fitColumns(columns, listWidth - keyColWidth - MIN_NAME_PX), [columns, listWidth, keyColWidth]);
+  const fitted = useMemo(() => fitColumns(columns, listWidth - leadWidth - MIN_NAME_PX), [columns, listWidth, leadWidth]);
   const shownColumns = fitted.columns;
 
   // Trackpad pinch (and Ctrl+wheel) only — a plain two-finger scroll must keep
@@ -1183,6 +1187,8 @@ export default function GanttView({
   const [cellEdit, setCellEdit] = useState<{ task: Task; kind: "assignee" | "status"; rect: DOMRect } | null>(null);
   const [cellTransitions, setCellTransitions] = useState<TaskTransition[] | null>(null);
   const [boxEdit, setBoxEdit] = useState<{ id: string; kind: Exclude<CellKind, "assignee">; rect: DOMRect } | null>(null);
+  // The "+" on a row: which row's child box is open, and where its button is.
+  const [subAdd, setSubAdd] = useState<{ id: string; left: number; top: number; bottom: number } | null>(null);
   // The cell Enter edits next: where an edit last ended, for the row that is still selected.
   const [cursor, setCursor] = useState<{ id: string; kind: CellKind } | null>(null);
   const pendingEdit = useRef<number | undefined>(undefined);
@@ -1809,9 +1815,29 @@ export default function GanttView({
   // roots stay at their shrink-to-fit content width, so dragging the divider moves
   // only the handle (which follows `listWidth` directly) while the WBS pane itself
   // never actually resizes.
+  const tickedCount = rows.reduce((n, r) => n + (selectedIds.has(r.task.id) ? 1 : 0), 0);
+  const allTicked = rows.length > 0 && tickedCount === rows.length;
+  const someTicked = tickedCount > 0;
   const header = useMemo(
     () => (
     <div className="wbs-header" style={{ height: HEADER_HEIGHT, width: listWidth }}>
+      <div className="wbs-col wbs-col-check">
+        <input
+          type="checkbox"
+          className="wbs-check"
+          aria-label="Chọn tất cả"
+          title="Chọn tất cả"
+          checked={allTicked}
+          ref={(el) => {
+            if (el) el.indeterminate = someTicked && !allTicked;
+          }}
+          onChange={() => {
+            if (allTicked) onSelectMany?.([]);
+            else onSelectMany?.(rows.map((r) => r.task.id));
+          }}
+          onClick={(e) => e.stopPropagation()}
+        />
+      </div>
       <div className="wbs-col wbs-col-key">Mã</div>
       <div className="wbs-col wbs-col-name">Tên việc</div>
       {shownColumns.map((c) => (
@@ -1826,7 +1852,8 @@ export default function GanttView({
       ))}
     </div>
     ),
-    [shownColumns, listWidth]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [shownColumns, listWidth, allTicked, someTicked, rows, onSelectMany]
   );
 
   const buildTable = useCallback(
@@ -1878,6 +1905,25 @@ export default function GanttView({
             onOpenEdit(task);
           }}
         >
+          <div className="wbs-col wbs-col-check">
+            <input
+              type="checkbox"
+              className="wbs-check"
+              aria-label={`Chọn ${task.id}`}
+              checked={selectedIds.has(task.id)}
+              onChange={() =>
+                onSelect(
+                  task.id,
+                  { toggle: true, range: false },
+                  rows.map((r) => r.task.id)
+                )
+              }
+              // The row's own click selects it alone and its double-click opens it; a tick is neither.
+              onClick={(e) => e.stopPropagation()}
+              onDoubleClick={(e) => e.stopPropagation()}
+              draggable={false}
+            />
+          </div>
           <div className="wbs-col wbs-col-key">
             <a href={task.jiraUrl} target="_blank" rel="noreferrer" draggable={false} onClick={(e) => e.stopPropagation()}>
               {task.id}
@@ -1914,6 +1960,23 @@ export default function GanttView({
               )}
               {task.summary}
             </span>
+            {onQuickCreate && task.issueType !== "Sub-task" && (
+              <button
+                type="button"
+                className={`wbs-add-child${subAdd?.id === task.id ? " is-open" : ""}`}
+                aria-label={`Thêm việc con cho ${task.id}`}
+                title="Thêm việc con"
+                draggable={false}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const r = e.currentTarget.getBoundingClientRect();
+                  setSubAdd((cur) => (cur?.id === task.id ? null : { id: task.id, left: r.left, top: r.top, bottom: r.bottom }));
+                }}
+                onDoubleClick={(e) => e.stopPropagation()}
+              >
+                <Icon name="plus" size={12} />
+              </button>
+            )}
           </div>
           {shownColumns.map((c) => {
             const editable = (c.id === "assignee" && onAssign && isAssignableType(task.issueType)) || (c.id === "status" && onTransition);
@@ -1953,7 +2016,7 @@ export default function GanttView({
     ),
     // openCellEditor and the edit helpers only set state; onAssign/onTransition/onUpdate decide what is editable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [rows, matchIds, selectedIds, selectedId, showCriticalPath, criticalIds, listWidth, shownColumns, collapsed, ranges, today, sla, onSelect, onOpenEdit, onToggleCollapse, onAssign, onTransition, onUpdate, unscheduledIds, cursor, boxEdit]
+    [rows, matchIds, selectedIds, selectedId, showCriticalPath, criticalIds, listWidth, shownColumns, collapsed, ranges, today, sla, onSelect, onOpenEdit, onToggleCollapse, onAssign, onTransition, onUpdate, unscheduledIds, cursor, boxEdit, subAdd?.id, onQuickCreate]
   );
   const table = useMemo(() => (windowed ? null : buildTable(rows)), [windowed, buildTable, rows]);
   const rowIndex = useMemo(() => (windowed ? new Map(rows.map((r, i) => [r.task.id, i])) : null), [windowed, rows]);
@@ -2300,6 +2363,18 @@ export default function GanttView({
               />
               {cellEditor}
               {boxEditor}
+              {onQuickCreate && subAdd && byId.get(subAdd.id) && (
+                <SubtaskQuickAdd
+                  parent={byId.get(subAdd.id)!}
+                  anchor={subAdd}
+                  onClose={() => setSubAdd(null)}
+                  onCreate={async (text) => {
+                    // A collapsed parent opens so the new child is where the eye is.
+                    if (collapsed.has(subAdd.id)) onToggleCollapse(subAdd.id);
+                    await onQuickCreate(text);
+                  }}
+                />
+              )}
               {onQuickCreate && !windowed && HEADER_HEIGHT + (rows.length + 1) * ROW_HEIGHT < bodySize.height && (
                 <AddRow
                   top={HEADER_HEIGHT + rows.length * ROW_HEIGHT}

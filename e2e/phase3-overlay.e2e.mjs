@@ -175,7 +175,7 @@ await step("bộ lọc của người khác chỉ áp dụng được — không
   await page.keyboard.press("Escape");
 });
 await step("tab Nguồn lực có cùng menu và thấy bộ lọc đã lưu", async () => {
-  await page.locator(".toolbar-tabs button", { hasText: "Nhân lực" }).click();
+  await page.locator(".toolbar-tabs button", { hasText: "Resource" }).click();
   await page.waitForSelector(".resource-view .sf-select");
   await page.locator(".resource-view .sf-select > .tf-btn").click();
   const names = await page.$$eval(".sf-apply", (r) => r.map((x) => x.textContent));
@@ -183,7 +183,7 @@ await step("tab Nguồn lực có cùng menu và thấy bộ lọc đã lưu", a
   await page.keyboard.press("Escape");
 });
 await step("đổi sang riêng tư rồi xoá bộ lọc của mình", async () => {
-  await page.locator(".toolbar-tabs button", { hasText: "Kế hoạch" }).click();
+  await page.locator(".toolbar-tabs button", { hasText: "List" }).click();
   await page.waitForSelector(".gantt-wrap .sf-select");
   await menuBtn().click();
   const mine = page.locator(".sf-item", { hasText: "Phần việc riêng" });

@@ -1013,7 +1013,7 @@ function Summary({
   const counts = attention.filter((a) => a.value > 0);
 
   return (
-    <section className="pulse np-summary" aria-label="Nhịp dự án">
+    <section className="pulse np-summary" aria-label="Report">
       <p className="pulse-lead">
         <span className={`np-verdict ${verdictClass}`}>{head.lead}</span>
         {head.forecast && <span className="np-forecast">{head.forecast}</span>}

@@ -53,6 +53,6 @@ export function scopeFromTaskFilter(filter: Source | undefined | null): ReportSc
     assignee: filter.people.size === 1 ? [...filter.people][0] : "",
     epic: filter.epics.size === 1 ? [...filter.epics][0] : "",
     types: [...filter.types],
-    note: lost.length > 0 ? `Kế hoạch đang lọc thêm theo ${lost.join(", ")}. Nhịp dự án không áp dụng.` : null,
+    note: lost.length > 0 ? `List đang lọc thêm theo ${lost.join(", ")}. Report không áp dụng.` : null,
   };
 }

@@ -6,7 +6,7 @@ import { analyzeLine, mergeFormFields, type FormFields } from "../createForm";
 import type { QuickAddContext } from "../quickAdd";
 import type { BulkTaskCreateInput, BulkTaskCreateResult, IssueTypeName, JiraUser, Task } from "../types";
 import { filesFromClipboard, hasPending, NO_ATTACHMENTS, uploadPending, type PendingAttachments } from "../attachments";
-import { endDateOf, HOURS_PER_DAY, localToday, roundHours, shortDate } from "../taskForm";
+import { durationBetween, endDateOf, HOURS_PER_DAY, localToday, roundHours } from "../taskForm";
 import AttachmentPicker from "./AttachmentPicker";
 import { Icon } from "./Icons";
 import DurationHint from "./DurationHint";
@@ -451,6 +451,21 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate, initi
             <DateField value={startDate} onChange={setStartDate} ariaLabel="Ngày bắt đầu" />
           </label>
           <label className="field">
+            <span className="field-label-text">Ngày kết thúc</span>
+            <DateField
+              value={endDate ?? startDate}
+              base={startDate}
+              onChange={(v) => {
+                // Typing the end sets the duration (both days count); the start stays where it is.
+                const days = durationBetween(startDate, v);
+                if (days === null) return;
+                setDurationDays(days);
+                if (!estimateTouched && !Number.isInteger(days)) setEstimate(roundHours(days * HOURS_PER_DAY));
+              }}
+              ariaLabel="Ngày kết thúc"
+            />
+          </label>
+          <label className="field">
             <span className="field-label-text">Thời lượng (ngày)</span>
             <NumberInput
               value={durationDays}
@@ -462,11 +477,6 @@ export default function CreateTaskModal({ tasks, users, onClose, onCreate, initi
                 if (!estimateTouched && !Number.isInteger(n)) setEstimate(roundHours(n * HOURS_PER_DAY));
               }}
             />
-            {endDate && (
-              <small className="field-hint end-date-hint" title={`Kết thúc ngày ${shortDate(endDate)}`}>
-                → Kết thúc: <b>{shortDate(endDate, startDate)}</b>
-              </small>
-            )}
             <DurationHint days={durationDays} />
           </label>
           <label className="field">

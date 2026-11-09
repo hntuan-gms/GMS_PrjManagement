@@ -34,7 +34,7 @@ await fetch(API + "/api/__restore", { method: "POST" });
 
 console.log("\n== Hôm nay ==");
 await step("đầu trang: lời chào, ngày, số đếm; không có số 0 hiện ra", async () => {
-  await page.goto(HOME);
+  await page.goto(HOME + "?view=today");
   await page.waitForSelector(".today-view");
   assert.match(await page.textContent(".today-greeting"), /^Chào /);
   assert.ok((await page.textContent(".today-date")).trim().length > 0);
@@ -92,7 +92,7 @@ await step("Hôm nay không có lăng kính; bấm Dự án khi tờ Ghi giờ �
 
 console.log("\n== Nhịp dự án ==");
 await step("một câu do code dựng; không có huy hiệu sức khoẻ riêng", async () => {
-  await page.locator(".toolbar-tabs button", { hasText: "Nhịp dự án" }).click();
+  await page.locator(".toolbar-tabs button", { hasText: "Report" }).click();
   await page.waitForSelector(".pulse-lead");
   assert.ok((await page.textContent(".pulse-lead")).trim().length > 10);
   assert.equal(await page.locator(".pr-header .pr-health, .pr-header .health-badge, .pr-header [class*=badge]").count(), 0);

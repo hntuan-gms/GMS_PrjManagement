@@ -27,6 +27,6 @@ describe("scopeFromTaskFilter", () => {
   it("what the report has no control for is named, the rest still applies", () => {
     const r = scopeFromTaskFilter(f({ people: new Set(["anh"]), statuses: new Set(["Done"]), jql: " assignee = x ", onlyOverdue: true }));
     assert.equal(r.assignee, "anh");
-    assert.equal(r.note, "Kế hoạch đang lọc thêm theo trạng thái, quá hạn, JQL. Nhịp dự án không áp dụng.");
+    assert.equal(r.note, "List đang lọc thêm theo trạng thái, quá hạn, JQL. Report không áp dụng.");
   });
 });

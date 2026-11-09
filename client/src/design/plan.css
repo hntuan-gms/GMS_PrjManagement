@@ -271,7 +271,7 @@
   align-items: center;
   gap: 8px;
   height: var(--row-h);
-  padding: 0 10px 0 calc(var(--wbs-key-w, 64px) + 8px);
+  padding: 0 10px 0 calc(var(--wbs-key-w, 64px) + var(--wbs-check-w, 30px) + 8px);
   color: var(--ink-4);
   border-right: 1px solid var(--line);
   background: var(--sheet);
@@ -743,3 +743,81 @@ g.bar > g[data-selected] rect {
 
 /* Hidden (not removed: it must keep its size) until the first scroll to today is done, see GanttView. */
 .gantt-body.is-settling > * { visibility: hidden; }
+
+/* ---- Checkbox before "Mã": blue when ticked, like Jira's ---- */
+.wbs-col.wbs-col-check {
+  width: var(--wbs-check-w, 30px);
+  flex: none;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: visible;
+}
+.wbs-check {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--info);
+}
+.wbs-header .wbs-check {
+  opacity: 0.85;
+}
+/* ---- "+" on a row: a child under it, typed in a small box ---- */
+.wbs-col-name {
+  position: relative;
+}
+button.wbs-add-child {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--sheet);
+  color: var(--ink-3);
+  opacity: 0;
+  cursor: pointer;
+}
+.wbs-row:hover button.wbs-add-child,
+.wbs-row-selected button.wbs-add-child,
+button.wbs-add-child:focus-visible,
+button.wbs-add-child.is-open {
+  opacity: 1;
+}
+button.wbs-add-child:hover:not(:disabled) {
+  background: var(--sunken);
+  color: var(--ink);
+  border-color: var(--line);
+}
+@media (hover: none) {
+  button.wbs-add-child {
+    opacity: 1;
+  }
+}
+.subtask-add {
+  position: fixed;
+  z-index: 47;
+  width: 300px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--raised);
+  box-shadow: var(--shadow-float);
+}
+.subtask-add-parent {
+  font-size: var(--font-size-sm);
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

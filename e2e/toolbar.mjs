@@ -71,10 +71,9 @@ export async function openLens(page, label) {
   await lens.click();
 }
 
-/** Nhân lực in its "Giờ đã ghi" mode (what the rail's "Giờ làm" used to open): lens, then the mode switch. */
+/** Clockwork (the hours logged): a place of its own on the rail. */
 export async function openTimesheet(page, { wait = true } = {}) {
-  if (!(await page.locator("[data-lens=resource][aria-current=page]").count())) await openLens(page, "Nhân lực");
-  await page.locator("[data-mode=ts]").click();
+  await page.locator(".rail-btn[data-view=timesheet]").click();
   if (wait) await page.waitForSelector(".ts-grid");
 }
 

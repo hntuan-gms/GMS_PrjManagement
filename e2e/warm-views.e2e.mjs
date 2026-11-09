@@ -3,7 +3,7 @@
 // an edit) makes the tab ask afresh.
 import assert from "node:assert/strict";
 import { chromium } from "playwright-core";
-import { openTimesheet } from "./toolbar.mjs";
+import { openTimesheet, openLens } from "./toolbar.mjs";
 
 const browser = await chromium.launch({ channel: "chrome", headless: true });
 const page = await browser.newPage({ viewport: { width: 1500, height: 900 } });
@@ -20,7 +20,7 @@ async function step(name, fn) {
     console.log("  FAIL", name, "\n       ", String(e.message).split("\n")[0]);
   }
 }
-const tab = (name) => page.locator(".toolbar-tabs button", { hasText: name }).click();
+const tab = (name) => openLens(page, name);
 const counts = { tasks: 0, board: 0, timesheet: 0, progress: 0 };
 page.on("request", (r) => {
   const m = r.url().match(/\/api\/(tasks|board|timesheet|progress)(\?|$)/);
@@ -45,7 +45,7 @@ await step("mỗi tab được hỏi đúng một lần, trước khi bấm vào
 console.log("\n== Mở tab: không hỏi lại ==");
 const before = snapshot();
 await step("Bảng hiện thẻ ngay, không có request mới", async () => {
-  await tab("Bảng");
+  await tab("Board");
   await page.waitForSelector(".bd-card", { timeout: 1000 });
 });
 await step("Chấm công hiện bảng ngay, không có request mới", async () => {
@@ -53,7 +53,7 @@ await step("Chấm công hiện bảng ngay, không có request mới", async ()
   await page.waitForSelector(".ts-wrap .ts-grid tbody tr", { timeout: 1000 });
 });
 await step("Báo cáo hiện số liệu ngay, không có request mới", async () => {
-  await tab("Nhịp dự án");
+  await tab("Report");
   await page.waitForSelector(".pr-loading", { state: "detached", timeout: 1000 });
 });
 await step("cả ba tab không gọi thêm API nào", async () => {
@@ -63,11 +63,11 @@ await step("cả ba tab không gọi thêm API nào", async () => {
 
 console.log("\n== Việc đổi thì hỏi lại ==");
 await step("sau khi đồng bộ, mở lại Bảng thì hỏi lại", async () => {
-  await tab("Kế hoạch");
+  await tab("List");
   await page.locator(".sync-indicator").click();
   await page.waitForFunction(() => document.querySelector(".sync-indicator")?.textContent.includes("Khớp Jira"));
   const boardBefore = counts.board;
-  await tab("Bảng");
+  await tab("Board");
   await page.waitForSelector(".bd-card");
   await page.waitForTimeout(500);
   assert.ok(counts.board > boardBefore, "Bảng không hỏi lại dù việc đã đổi");
@@ -89,7 +89,7 @@ await step("bấm Bảng lúc yêu cầu tải sẵn còn đang chạy: chờ n�
   await slow.waitForSelector(".wbs-row");
   await slow.waitForTimeout(800);
   assert.equal(boards, 1, "yêu cầu tải sẵn chưa được gửi: " + boards);
-  await slow.locator(".toolbar-tabs button", { hasText: "Bảng" }).click();
+  await slow.locator(".toolbar-tabs button", { hasText: "Board" }).click();
   await slow.waitForSelector(".bd-card", { timeout: 10000 });
   assert.equal(boards, 1, `Bảng gửi thêm ${boards - 1} yêu cầu dù tải sẵn đã có`);
   await slow.close();

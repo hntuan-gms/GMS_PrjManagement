@@ -54,7 +54,6 @@ import { neededFieldsFrom } from "../transitionFields";
 import Toolbar from "./Toolbar";
 import { LENSES, parseView, withViewParam, type ResourceMode, type SyncState, type WorkspaceView } from "../lenses";
 import { isStale, readLastActive, touchLastActive } from "../startView";
-import ResourceModes from "./ResourceModes";
 import TimesheetView from "./TimesheetView";
 import TodayView from "./TodayView";
 import DraftBar from "./DraftBar";
@@ -80,14 +79,13 @@ interface Props {
 
 /**
  * Where a project opens: `?view=` in the address (links, e2e), else the lens this person last used
- * in this project, else "Hôm nay" — the home page (plan §6.5). "timesheet" still works in both places and
- * means Nhân lực in its "Giờ đã ghi" mode (lenses.parseView).
+ * in this project, else the plan ("List") — Dự án, not Hôm nay.
  */
-function initialView(storageKey: string): { view: WorkspaceView; resourceMode?: ResourceMode } {
+function initialView(storageKey: string): { view: WorkspaceView } {
   try {
     const fromUrl = parseView(new URLSearchParams(window.location.search).get("view"));
     if (fromUrl) return fromUrl;
-    // A view remembered from before a long break is not restored: the day starts on Hôm nay.
+    // A view remembered from before a long break is not restored: the day starts on the plan.
     if (!isStale(readLastActive(), Date.now())) {
       const saved = parseView(localStorage.getItem(storageKey));
       if (saved) return saved;
@@ -95,13 +93,13 @@ function initialView(storageKey: string): { view: WorkspaceView; resourceMode?: 
   } catch {
     /* private mode */
   }
-  return { view: "today" };
+  return { view: "gantt" };
 }
 
 function savedResourceMode(storageKey: string): ResourceMode {
   try {
     const v = localStorage.getItem(storageKey);
-    if (v === "load" || v === "ts" || v === "skills") return v;
+    if (v === "load" || v === "skills") return v;
   } catch {
     /* private mode */
   }
@@ -196,10 +194,9 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
   // A phone shows Hôm nay and the board; what was chosen is kept, so a rotated or resized window gets it back.
   const phone = usePhone();
   const view = phoneView(viewChosen, phone);
-  // Nhân lực has three modes. Someone who may not see the member list (resourceAccess "denied") only has
-  // "Giờ đã ghi": the mode in use is derived, never stored as something they cannot have.
-  const [resourceModeState, setResourceModeState] = useState<ResourceMode>(() => start.resourceMode ?? savedResourceMode(resourceModeKey));
-  const resourceMode: ResourceMode = resourceAccess === "denied" ? "ts" : resourceModeState;
+  // Resource has two modes (Mức tải, Kỹ năng); the hours logged are Clockwork, a place of their own.
+  const [resourceModeState, setResourceModeState] = useState<ResourceMode>(() => savedResourceMode(resourceModeKey));
+  const resourceMode: ResourceMode = resourceModeState;
   const viewRef = useRef(view);
   viewRef.current = view;
   const resourceModeRef = useRef(resourceMode);
@@ -209,9 +206,9 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
   // True while the settings page sits on a history entry of its own that "← Quay lại" can simply go back from.
   const settingsPushed = useRef(false);
   /** The address follows the place: `?view=` is written on every change, so a link, F5 and Back all agree. */
-  const writeUrl = useCallback((v: WorkspaceView, mode: ResourceMode, push: boolean) => {
+  const writeUrl = useCallback((v: WorkspaceView, push: boolean) => {
     try {
-      const url = window.location.pathname + withViewParam(window.location.search, v, mode) + window.location.hash;
+      const url = window.location.pathname + withViewParam(window.location.search, v) + window.location.hash;
       if (url === window.location.pathname + window.location.search + window.location.hash) return;
       if (push) window.history.pushState({ gms: true }, "", url);
       else window.history.replaceState({ gms: true }, "", url);
@@ -223,14 +220,13 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
     (m: ResourceMode) => {
       setResourceModeState(m);
       resourceModeRef.current = m;
-      if (viewRef.current === "resource") writeUrl("resource", m, false);
       try {
         localStorage.setItem(resourceModeKey, m);
       } catch {
         /* private mode */
       }
     },
-    [resourceModeKey, writeUrl]
+    [resourceModeKey]
   );
   const rememberView = useCallback(
     (v: WorkspaceView) => {
@@ -256,31 +252,26 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
       }
       setViewState(v);
       rememberView(v);
-      writeUrl(v, resourceModeRef.current, v !== from);
+      writeUrl(v, v !== from);
     },
     [rememberView, writeUrl]
   );
   // First render: put the place in the address (replace, not push) so the entry Back returns to names its lens.
   useEffect(() => {
-    writeUrl(viewRef.current, resourceModeRef.current, false);
+    writeUrl(viewRef.current, false);
   }, [writeUrl]);
   // Back / Forward change the lens instead of leaving the app.
   useEffect(() => {
     function onPop() {
       const parsed = parseView(new URLSearchParams(window.location.search).get("view"));
       if (!parsed) return;
-      if (parsed.resourceMode) setResourceModeState(parsed.resourceMode);
-      else if (parsed.view === "resource" && resourceModeRef.current === "ts") {
-        const saved = savedResourceMode(resourceModeKey);
-        setResourceModeState(saved === "ts" ? "load" : saved);
-      }
       if (parsed.view === "settings" && viewRef.current !== "settings") settingsFrom.current = viewRef.current;
       setViewState(parsed.view);
       rememberView(parsed.view);
     }
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
-  }, [rememberView, resourceModeKey]);
+  }, [rememberView]);
   // The layers this shell adds on top of the views: Ctrl K, "?", and a request to open the assistant.
   const [cmdk, setCmdk] = useState<null | "command" | "create">(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -1309,6 +1300,10 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
     }
   }
 
+  // Someone who may not see the member list has no Resource lens: leave it if it is where they were.
+  useEffect(() => {
+    if (resourceAccess === "denied" && viewRef.current === "resource") setView("gantt");
+  }, [resourceAccess, setView]);
   const [focusPerson, setFocusPerson] = useState<{ accountId: string; nonce: number } | null>(null);
   const go = (v: WorkspaceView) => setView(v);
   /** Cài đặt dự án, on a section when one is named (the Ctrl K commands, SLA's link to the calendar). */
@@ -1339,7 +1334,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
     setSla(r);
     writeViewCache(viewScope, "sla", "", r);
   };
-  /** Nhân lực in a given mode (G T = "Giờ đã ghi"). */
+  /** Resource in a given mode. */
   const goResource = (m: ResourceMode) => {
     setResourceMode(m);
     setView("resource");
@@ -1372,7 +1367,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
       aliases: l.id === "gantt" ? "gantt wbs" : l.id === "report" ? "bao cao" : l.id === "resource" ? "nguon luc" : "kanban sprint",
       run: () => go(l.id),
     })),
-    { id: "go-time", label: "Nhân lực: giờ đã ghi", group: "Đi tới", icon: "clock", keys: "G T", aliases: "gio lam cham cong timesheet", run: () => goResource("ts") },
+    { id: "go-time", label: "Clockwork: giờ đã ghi", group: "Đi tới", icon: "clock", keys: "G T", aliases: "gio lam cham cong timesheet", run: () => go("timesheet") },
     ...(selectedIds.size > 0
       ? [
           {
@@ -1398,14 +1393,14 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
     {
       id: "draft",
       label: draft ? "Bỏ bản nháp kế hoạch" : "Bật bản nháp kế hoạch (thử lịch, chưa ghi Jira)",
-      group: "Kế hoạch",
+      group: "List",
       icon: "layers",
       keys: "Shift D",
       aliases: "nhap thu draft what if",
       run: () => void toggleDraft(),
     },
     ...(draft && draft.edits.length > 0
-      ? [{ id: "draft-apply", label: "Áp dụng bản nháp lên Jira", group: "Kế hoạch", icon: "check", run: () => void applyDraft() } as Command]
+      ? [{ id: "draft-apply", label: "Áp dụng bản nháp lên Jira", group: "List", icon: "check", run: () => void applyDraft() } as Command]
       : []),
     { id: "mine", label: "Lọc: việc của tôi", group: "Lọc", icon: "user", keys: "M", run: () => toggleMine() },
     { id: "overdue", label: "Lọc: quá hạn", group: "Lọc", icon: "alert", keys: "O", run: () => setTaskFilter({ ...taskFilter, onlyOverdue: !taskFilter.onlyOverdue }) },
@@ -1475,7 +1470,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
           ks.go("today");
           return true;
         case "go-time":
-          ks.goResource("ts");
+          ks.go("timesheet");
           return true;
         case "go-settings":
           ks.openSettings();
@@ -1620,6 +1615,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
         view={view}
         onViewChange={setView}
         overloadedPeople={overloadedPeople}
+        hideResource={resourceAccess === "denied"}
         onAddTask={() => setCmdk("create")}
         onSync={handleSync}
         sync={syncState}
@@ -1873,14 +1869,8 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
               resourceData={pool ? { profiles: pool.profiles, absences: pool.absences } : undefined}
               refreshing={showingCache}
             />
-          ) : view === "resource" && resourceMode === "ts" ? (
-            <TimesheetView
-              session={session}
-              tasks={tasks}
-              onOpenEdit={openTask}
-              onTasksChanged={refreshTasks}
-              modeSwitch={<ResourceModes mode="ts" onChange={setResourceMode} canPlan={resourceAccess === "allowed"} />}
-            />
+          ) : view === "timesheet" ? (
+            <TimesheetView session={session} tasks={tasks} onOpenEdit={openTask} onTasksChanged={refreshTasks} />
           ) : view === "resource" ? (
             <ResourceView
               focusPerson={focusPerson}
@@ -1907,8 +1897,8 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
               onSlaSaved={handleSlaSaved}
               onCalendarSaved={handleCalendarSaved}
               backLabel={
-                settingsFrom.current === "today"
-                  ? "Hôm nay"
+                settingsFrom.current === "timesheet"
+                  ? "Clockwork"
                   : (LENSES.find((l) => l.id === settingsFrom.current)?.label ?? "Hôm nay")
               }
               onBack={() => {
@@ -2003,7 +1993,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
             users={users}
             meId={session.user.accountId}
             tasks={tasks}
-            view={view === "gantt" || view === "board" || view === "resource" || view === "report" || view === "settings" || view === "today" ? view : "gantt"}
+            view={view === "timesheet" ? "gantt" : view}
             selectedKeys={chatSelectedKeys}
             onOpenChange={setAssistantOpen}
             onUnreadChange={setAssistantUnread}

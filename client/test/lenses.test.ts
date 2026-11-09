@@ -9,7 +9,7 @@ describe("parseView", () => {
   });
   it("keeps the old names working", () => {
     assert.deepEqual(parseView("plan"), { view: "gantt" });
-    assert.deepEqual(parseView("timesheet"), { view: "resource", resourceMode: "ts" });
+    assert.deepEqual(parseView("timesheet"), { view: "timesheet" });
   });
   it("refuses anything else", () => {
     assert.equal(parseView("nope"), null);
@@ -23,10 +23,8 @@ describe("view in the address", () => {
     assert.equal(withViewParam("", "board"), "?view=board");
     assert.equal(withViewParam("?view=today&x=1", "report"), "?view=report&x=1");
   });
-  it("Nhân lực in Giờ đã ghi is written timesheet, and reads back to the same place", () => {
-    assert.equal(viewParam("resource", "ts"), "timesheet");
-    assert.equal(viewParam("resource", "load"), "resource");
-    assert.deepEqual(parseView(viewParam("resource", "ts")), { view: "resource", resourceMode: "ts" });
-    for (const v of ["today", "gantt", "board", "resource", "report", "settings"] as const) assert.deepEqual(parseView(viewParam(v)), { view: v });
+  it("every place is written as its own name and reads back to the same place", () => {
+    assert.equal(viewParam("timesheet"), "timesheet");
+    for (const v of ["today", "gantt", "board", "resource", "report", "timesheet", "settings"] as const) assert.deepEqual(parseView(viewParam(v)), { view: v });
   });
 });

@@ -243,8 +243,8 @@ await step("bấm ô của chính mình: về 'Của tôi' và con trỏ vào đ
 await step("phạm vi đã chọn được nhớ qua lần tải lại", async () => {
   await page.locator("[data-scope=team]").click();
   await page.reload();
-  await page.waitForSelector(".toolbar-tabs");
-  await openTimesheet(page, { wait: false });
+  // The address says ?view=timesheet, so the reload lands on Clockwork itself.
+  await page.waitForSelector(".app-rail");
   await page.waitForSelector(".ts-team");
   await page.locator("[data-scope=mine]").click();
 });

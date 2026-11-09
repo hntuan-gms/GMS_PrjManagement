@@ -3,7 +3,7 @@
 // back on the second visit, so anything on screen before it answers came from the cache.
 import assert from "node:assert/strict";
 import { chromium } from "playwright-core";
-import { openTimesheet } from "./toolbar.mjs";
+import { openTimesheet, openLens } from "./toolbar.mjs";
 
 const browser = await chromium.launch({ channel: "chrome", headless: true });
 const page = await browser.newPage({ viewport: { width: 1500, height: 900 } });
@@ -21,7 +21,7 @@ async function step(name, fn) {
     console.log("  FAIL", name, "\n       ", String(e.message).split("\n")[0]);
   }
 }
-const tab = (name) => page.locator(".toolbar-tabs button", { hasText: name }).click();
+const tab = (name) => openLens(page, name);
 
 await page.goto(process.env.E2E_APP ?? "http://localhost:5173/");
 await page.waitForSelector(".wbs-row");
@@ -51,13 +51,13 @@ async function hold(pattern) {
 
 console.log("\n== Mở lại tab ==");
 await step("Bảng: lần đầu đợi API, lần sau hiện thẻ ngay khi API còn chưa trả lời", async () => {
-  await tab("Bảng");
+  await tab("Board");
   await page.waitForSelector(".bd-card");
-  await tab("Kế hoạch");
+  await tab("List");
   await page.waitForSelector(".wbs-row");
   await makeStale();
   const held = await hold("**/api/board*");
-  await tab("Bảng");
+  await tab("Board");
   await page.waitForSelector(".bd-card", { timeout: 1500 });
   assert.ok(held.requests.length >= 1, "vẫn phải hỏi lại để cập nhật");
   held.release();
@@ -68,7 +68,7 @@ await step("Chấm công: hiện lại bảng giờ công cũ trong lúc tải",
   await page.waitForSelector(".ts-wrap");
   await page.waitForFunction(() => !document.body.textContent.includes("Đang tải từ Jira"));
   const before = await page.locator(".ts-grid tbody tr").count();
-  await tab("Kế hoạch");
+  await tab("List");
   await makeStale();
   const held = await hold("**/api/timesheet*");
   await openTimesheet(page, { wait: false });
@@ -79,12 +79,12 @@ await step("Chấm công: hiện lại bảng giờ công cũ trong lúc tải",
   await held.stop();
 });
 await step("Báo cáo: hiện số liệu cũ ngay, không có màn 'đang tải'", async () => {
-  await tab("Nhịp dự án");
+  await tab("Report");
   await page.waitForFunction(() => !document.querySelector(".pr-loading"));
-  await tab("Kế hoạch");
+  await tab("List");
   await makeStale();
   const held = await hold("**/api/progress?*");
-  await tab("Nhịp dự án");
+  await tab("Report");
   await page.waitForTimeout(300);
   assert.equal(await page.locator(".pr-loading").count(), 0, "đang hiện màn tải thay vì số liệu cũ");
   assert.ok(await page.locator(".np-summary .np-total").count(), "số liệu cũ phải còn hiện");

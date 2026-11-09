@@ -4,7 +4,7 @@
 // trend, Agile charts). What reaches Jira for real is on the manual checklist (section E).
 import assert from "node:assert/strict";
 import { chromium } from "playwright-core";
-import { fillDate, openFilterPanel, openTimesheet, setGranularity } from "./toolbar.mjs";
+import { fillDate, openFilterPanel, openTimesheet, setGranularity, openLens } from "./toolbar.mjs";
 
 const API = process.env.E2E_API ?? "http://localhost:4000";
 const browser = await chromium.launch({ channel: "chrome", headless: true });
@@ -23,7 +23,7 @@ async function step(name, fn) {
     console.log("  FAIL", name, "\n       ", String(e.message).split("\n")[0]);
   }
 }
-const tab = (name) => page.locator(".toolbar-tabs button", { hasText: name }).click();
+const tab = (name) => openLens(page, name);
 const log = async () => (await (await fetch(API + "/api/__log")).json()).log;
 const reset = () => fetch(API + "/api/__reset", { method: "POST" });
 /** Polls the stand-in API's request log until `pred` finds a request. */
@@ -44,7 +44,7 @@ await page.waitForSelector(".wbs-row");
 
 console.log("\n== Nguồn lực: kỹ năng, nghỉ phép, kỳ ==");
 await step("ma trận kỹ năng: thêm cột, bấm ô → lưu vào hồ sơ người đó", async () => {
-  await tab("Nhân lực");
+  await tab("Resource");
   await page.waitForSelector(".resource-view .rv-modes");
   await page.locator(".rv-modes button", { hasText: "Kỹ năng" }).click();
   await page.waitForSelector(".sm-view");
@@ -138,7 +138,7 @@ await step("sửa giờ của mình: chỉ gửi phần đã đổi", async () =
 
 console.log("\n== Bảng: thẻ, lọc, sub-task, cờ ==");
 await step("bộ lọc nhanh của board hiện thành nút; bật 'Chỉ lỗi' hỏi Jira rồi lọc", async () => {
-  await tab("Bảng");
+  await tab("Board");
   await page.waitForSelector(".bd-card");
   const before = await page.locator(".bd-card").count();
   // The board's quick filters sit in the "Bộ lọc" panel, under "Của board".
@@ -178,7 +178,7 @@ await step("chọn trường hiện trên thẻ + màu thẻ theo ưu tiên", as
   assert.ok((await page.locator(".bd-card.has-accent").count()) > 0, "thẻ phải có viền màu");
   // Remembered per board: a reload keeps it.
   await page.reload();
-  await tab("Bảng");
+  await tab("Board");
   await page.waitForSelector(".bd-card");
   assert.ok((await page.locator(".bd-card.has-accent").count()) > 0);
 });
@@ -241,7 +241,7 @@ await step("xoá sprint chưa chạy: hỏi trong app rồi DELETE", async () =>
 
 console.log("\n== Báo cáo: xu hướng theo ngày, Agile ==");
 await step("xu hướng theo ngày vẽ được từ số đo đã lưu, không cần báo cáo AI", async () => {
-  await tab("Nhịp dự án");
+  await tab("Report");
   await page.waitForSelector(".progress-view .pr-trend");
   assert.ok((await page.textContent(".progress-view")).includes("Xu hướng theo ngày"));
   assert.ok((await page.locator(".pr-trend svg").first().getAttribute("aria-label")).includes("3 ngày"));

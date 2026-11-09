@@ -41,7 +41,7 @@ await step("trang không cuộn ngang ở Hôm nay và ở Bảng", async () => 
   // On a phone "Dự án" on the bottom bar opens the board, the one lens there is room for.
   await page.locator(".rail-btn[data-view=plan]").click();
   await page.waitForSelector(".bd-card");
-  assert.deepEqual(await page.locator(".lens-tabs button").allTextContents().then((t) => t.map((x) => x.trim())), ["Bảng"]);
+  assert.deepEqual(await page.locator(".lens-tabs button").allTextContents().then((t) => t.map((x) => x.trim())), ["Board"]);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth), 0);
 });
 await step("cột của Bảng xếp dọc, mỗi cột có tên phía trên thẻ", async () => {

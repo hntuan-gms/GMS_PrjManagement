@@ -108,7 +108,7 @@ await step("bộ lọc do trợ lý đặt gỡ được bằng nút Xoá lọc 
 await step("bộ lọc cũng sang tab Bảng", async () => {
   await ask("lọc nhanh việc của Anh trên bảng");
   await page.waitForFunction(() => document.querySelector(".tf-count")?.textContent.includes("2/9"));
-  await page.locator(".toolbar-tabs button", { hasText: "Bảng" }).click();
+  await page.locator(".toolbar-tabs button", { hasText: "Board" }).click();
   await page.waitForSelector(".bd-card");
   // The board's own filter is on ("Xoá lọc" only shows while something is filtered) and only Anh's cards remain.
   await page.waitForFunction(() => (document.querySelector(".bd-filters")?.textContent ?? "").includes("Xoá lọc"));
