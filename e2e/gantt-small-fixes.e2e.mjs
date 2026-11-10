@@ -40,7 +40,7 @@ await step("hôm nay nằm ngoài vùng biểu đồ → báo rõ thay vì im l�
   // Only the "Giai đoạn 2" Epic, which starts two days from now.
   await page.fill(".tf-search input", "Giai đoạn 2");
   await page.waitForFunction(() => document.querySelector(".tf-count")?.textContent.includes("1/9"));
-  await page.locator(".gantt-toolbar button", { hasText: "Hôm nay" }).click();
+  await page.locator(".gantt-toolbar button", { hasText: "Today" }).click();
   await page.waitForSelector(".gantt-today-note");
   const note = await page.textContent(".gantt-today-note");
   if (!note.includes("Hôm nay nằm trước")) throw new Error(note);
@@ -48,7 +48,7 @@ await step("hôm nay nằm ngoài vùng biểu đồ → báo rõ thay vì im l�
 await step("hôm nay nằm trong biểu đồ → không có ghi chú", async () => {
   await page.locator(".tf-clear").click();
   await page.waitForFunction(() => document.querySelectorAll(".wbs-row").length >= 8);
-  await page.locator(".gantt-toolbar button", { hasText: "Hôm nay" }).click();
+  await page.locator(".gantt-toolbar button", { hasText: "Today" }).click();
   await page.waitForTimeout(300);
   if (await page.locator(".gantt-today-note").count()) throw new Error("không nên có ghi chú");
 });

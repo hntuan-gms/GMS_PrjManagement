@@ -110,7 +110,7 @@ await step("CSV luôn có % hoàn thành, phụ thuộc, baseline và độ lệ
   const [dl] = await Promise.all([page.waitForEvent("download"), ioAction(page, "Xuất CSV")]);
   const lines = fs.readFileSync(await dl.path(), "utf8").replace(/^﻿/, "").split(/\r?\n/).filter(Boolean);
   const header = lines[0].split(",");
-  assert.deepEqual(header.slice(0, 2), ["Mã", "Tên việc"]);
+  assert.deepEqual(header.slice(0, 2), ["Key", "Summary"]);
   for (const h of ["Phụ thuộc (việc trước)", "Baseline bắt đầu", "Baseline kết thúc", "Lệch baseline (ngày)"]) {
     assert.ok(header.includes(h), "thiếu cột " + h);
   }
@@ -145,7 +145,7 @@ await step("lưu 'Của tôi' + chia sẻ → lưu dạng @me, nút ghi tên b�
   await page.fill('.sf-form input[type="text"]', "Phần việc riêng");
   await page.check(".sf-share input");
   await page.locator(".sf-form .text-btn", { hasText: "Lưu bộ lọc hiện tại" }).click();
-  await page.waitForFunction(() => document.querySelector(".gantt-wrap .sf-select > .tf-btn")?.textContent.includes("Bộ lọc: Phần việc riêng"));
+  await page.waitForFunction(() => document.querySelector(".gantt-wrap .sf-select > .tf-btn")?.textContent.includes("Filter: Phần việc riêng"));
   const { log } = await (await fetch(API + "/api/__log")).json();
   const post = log.filter((l) => l.m === "POST" && l.p === "/api/filters").at(-1).b;
   assert.deepEqual(post.spec.people, ["@me"]);
@@ -156,7 +156,7 @@ await step("lưu 'Của tôi' + chia sẻ → lưu dạng @me, nút ghi tên b�
 await step("xoá lọc rồi áp dụng lại từ menu → cùng kết quả", async () => {
   await page.locator(".tf-clear").click();
   await page.waitForFunction(() => !document.querySelector(".tf-count"));
-  assert.ok((await menuBtn().textContent()).includes("Đã lưu"));
+  assert.ok((await menuBtn().textContent()).includes("Saved filters"));
   await menuBtn().click();
   await page.locator(".sf-apply", { hasText: "Phần việc riêng" }).click();
   await page.waitForFunction(() => document.querySelector(".tf-count")?.textContent.includes("1/9"));

@@ -474,13 +474,13 @@ export default function FilterBar({
               className="tf-btn tf-add"
               caret={false}
               active={activeCount > 0}
-              menuLabel="Bộ lọc"
+              menuLabel="Filter"
               menuClassName="tf-menu tf-filter-menu"
-              title="Bộ lọc"
+              title="Filter"
               label={
                 <>
                   <Icon name="plus" size={14} />
-                  <span className="fb-label">Bộ lọc</span>
+                  <span className="fb-label">Filter</span>
                   {activeCount > 0 && <span className="tf-badge">{activeCount}</span>}
                 </>
               }

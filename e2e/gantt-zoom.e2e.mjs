@@ -70,8 +70,8 @@ const N = await page.evaluate(() => {
 // While the axis is wider than the chart pane, the date under the pointer cannot move; once it is
 // narrower the browser pins the scroll at 0 and nothing can hold it, so each run stops there.
 for (const [label, from, ticks, delta] of [
-  ["phóng to qua ngưỡng tuần → ngày", "Tuần", 14, -120],
-  ["thu nhỏ qua ngưỡng ngày → tuần", "Ngày", 12, 120],
+  ["phóng to qua ngưỡng tuần → ngày", "Weeks", 14, -120],
+  ["thu nhỏ qua ngưỡng ngày → tuần", "Days", 12, 120],
 ]) {
   await step(label, async () => {
     await page.locator(".gantt-toolbar button", { hasText: from }).first().click();
@@ -105,7 +105,7 @@ for (const [label, from, ticks, delta] of [
 }
 
 await step("nút Ngày / Tuần / Tháng giữ ngày ở giữa khung nhìn", async () => {
-  await page.locator(".gantt-toolbar button", { hasText: "Tuần" }).first().click();
+  await page.locator(".gantt-toolbar button", { hasText: "Weeks" }).first().click();
   await page.waitForTimeout(400);
   await placeBar(N);
   // Bring the bar's start to the middle of the chart pane, which is what the buttons keep.
@@ -121,7 +121,7 @@ await step("nút Ngày / Tuần / Tháng giữ ngày ở giữa khung nhìn", as
     const b = sc.getBoundingClientRect();
     return b.left + sc.clientWidth / 2;
   });
-  for (const name of ["Ngày", "Tuần"]) {
+  for (const name of ["Days", "Weeks"]) {
     await page.locator(".gantt-toolbar button", { hasText: name }).first().click();
     await page.waitForTimeout(500);
     const b = await probe(N);
@@ -129,14 +129,14 @@ await step("nút Ngày / Tuần / Tháng giữ ngày ở giữa khung nhìn", as
   }
   // Tháng too: the axis is padded to be wider than the pane, so the date can be held at the middle here as well
   // (a short project used to leave the axis narrower than the pane, which pinned the scroll and threw the bar aside).
-  await page.locator(".gantt-toolbar button", { hasText: "Tháng" }).first().click();
+  await page.locator(".gantt-toolbar button", { hasText: "Months" }).first().click();
   await page.waitForTimeout(500);
   const m = await probe(N);
   assert.ok(m && Math.abs(m.left - mid) <= 15, `Tháng: thanh ở ${m?.left.toFixed(0)}px, giữa khung là ${mid.toFixed(0)}px`);
 });
 
 await step("trục thời gian luôn rộng hơn khung ở cả ba chế độ (không còn dải trống bên phải)", async () => {
-  for (const name of ["Ngày", "Tuần", "Tháng"]) {
+  for (const name of ["Days", "Weeks", "Months"]) {
     await page.locator(".gantt-toolbar button", { hasText: name }).first().click();
     await page.waitForTimeout(500);
     const wide = await page.evaluate(() => {
@@ -148,7 +148,7 @@ await step("trục thời gian luôn rộng hơn khung ở cả ba chế độ (
 });
 
 await step("nhấn nút Tuần ↔ Tháng nhiều lần liên tiếp không làm thanh nhảy khỏi chỗ cũ", async () => {
-  await page.locator(".gantt-toolbar button", { hasText: "Tuần" }).first().click();
+  await page.locator(".gantt-toolbar button", { hasText: "Weeks" }).first().click();
   await page.waitForTimeout(400);
   await placeBar(N);
   await page.evaluate((i) => {
@@ -159,7 +159,7 @@ await step("nhấn nút Tuần ↔ Tháng nhiều lần liên tiếp không làm
   }, N);
   await page.waitForTimeout(300);
   const before = await probe(N);
-  for (const name of ["Tháng", "Tuần", "Tháng", "Tuần"]) {
+  for (const name of ["Months", "Weeks", "Months", "Weeks"]) {
     await page.locator(".gantt-toolbar button", { hasText: name }).first().click();
     await page.waitForTimeout(450);
   }
@@ -168,7 +168,7 @@ await step("nhấn nút Tuần ↔ Tháng nhiều lần liên tiếp không làm
 });
 
 await step("chế độ Tháng: thu nhỏ đến mức cuối, tên các tháng không đè lên nhau", async () => {
-  await page.locator(".gantt-toolbar button", { hasText: "Tháng" }).first().click();
+  await page.locator(".gantt-toolbar button", { hasText: "Months" }).first().click();
   await page.waitForTimeout(500);
   const y = (await page.locator(".gantt-body").boundingBox()).y + 200;
   const seen = new Set();

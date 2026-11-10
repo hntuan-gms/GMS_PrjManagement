@@ -15,7 +15,7 @@ import { useAppearance } from "../useAppearance";
 import { ROW_HEIGHTS, getDensity } from "../theme";
 import { isAssignableType, type DependencyType, type JiraUser, type ProjectVersion, type ResourcePool, type Task, type TaskTransition, type TaskUpdateInput } from "../types";
 import { anchorDay, isMilestone, shiftDay, weekAxisStart } from "../timelineGeometry";
-import { monthColumnLabel, weekColumnLabel } from "../dateLabels";
+import { monthColumnLabel, monthNumberOf, weekColumnLabel } from "../dateLabels";
 import { toast } from "../toast";
 import { changeSchedule, scheduleOf } from "../scheduleFields";
 import { formatPredecessors, parsePredecessors } from "../predecessorsText";
@@ -205,9 +205,9 @@ const DAYS_PER_COLUMN: Record<ViewMode, number> = {
   [ViewMode.Month]: 30.4,
 } as Record<ViewMode, number>;
 const VIEW_MODE_LABEL: Partial<Record<ViewMode, string>> = {
-  [ViewMode.Day]: "Ngày",
-  [ViewMode.Week]: "Tuần",
-  [ViewMode.Month]: "Tháng",
+  [ViewMode.Day]: "Days",
+  [ViewMode.Week]: "Weeks",
+  [ViewMode.Month]: "Months",
 };
 
 /** One row of the "Hiển thị" panel: a display option as a real switch, with the sentence
@@ -305,11 +305,11 @@ const spanDays = (r: { start: string; end: string }) =>
   Math.round((Date.parse(r.end + "T00:00:00Z") - Date.parse(r.start + "T00:00:00Z")) / DAY_MS) + 1;
 
 const COLUMNS: ColumnDef[] = [
-  { id: "type", label: "Loại", long: "Loại", width: 70, cell: (t) => t.issueType },
+  { id: "type", label: "Type", long: "Type", width: 70, cell: (t) => t.issueType },
   {
     id: "status",
-    label: "Trạng thái",
-    long: "Trạng thái",
+    label: "Status",
+    long: "Status",
     width: 112,
     cell: (t) => (
       <span className={`wbs-status is-${t.statusCategory} tone-${statusTone(t.statusCategory, t.statusName)}`} title={t.statusName}>
@@ -320,29 +320,29 @@ const COLUMNS: ColumnDef[] = [
   },
   {
     id: "priority",
-    label: "Ưu tiên",
-    long: "Ưu tiên",
+    label: "Priority",
+    long: "Priority",
     width: 76,
     cell: (t) => (t.priority ? <span className="wbs-prio"><PriorityMark priority={t.priority} /> {t.priority}</span> : "—"),
   },
   {
     id: "labels",
-    label: "Nhãn",
-    long: "Nhãn",
+    label: "Labels",
+    long: "Labels",
     width: 110,
     cell: (t) => (t.labels.length > 0 ? <span title={t.labels.join(", ")}>{t.labels.join(", ")}</span> : "—"),
   },
   {
     id: "components",
-    label: "Thành phần",
-    long: "Thành phần",
+    label: "Components",
+    long: "Components",
     width: 110,
     cell: (t) => (t.components.length > 0 ? <span title={t.components.join(", ")}>{t.components.join(", ")}</span> : "—"),
   },
   {
     id: "versions",
-    label: "Phiên bản",
-    long: "Phiên bản",
+    label: "Fix versions",
+    long: "Fix versions",
     width: 100,
     cell: (t) => (t.fixVersions.length > 0 ? <span title={t.fixVersions.join(", ")}>{t.fixVersions.join(", ")}</span> : "—"),
   },
@@ -355,8 +355,8 @@ const COLUMNS: ColumnDef[] = [
   },
   {
     id: "assignee",
-    label: "Người",
-    long: "Người",
+    label: "Assignee",
+    long: "Assignee",
     width: 120,
     cell: (t) =>
       t.assigneeName ? (
@@ -368,11 +368,11 @@ const COLUMNS: ColumnDef[] = [
         <span className="wbs-none">—</span>
       ),
   },
-  { id: "start", label: "Bắt đầu", long: "Ngày bắt đầu", width: 76, cell: (t, r) => dm(r?.start ?? t.startDate) },
+  { id: "start", label: "Start date", long: "Start date", width: 76, cell: (t, r) => dm(r?.start ?? t.startDate) },
   {
     id: "due",
-    label: "Kết thúc",
-    long: "Ngày kết thúc",
+    label: "Due date",
+    long: "Due date",
     width: 76,
     // Marked by the task's own due date — the same rule as the "Quá hạn" filter,
     // so a red date and a filter hit always agree.
@@ -402,8 +402,8 @@ const COLUMNS: ColumnDef[] = [
   },
   {
     id: "duration",
-    label: "T.lượng",
-    long: "Thời lượng",
+    label: "Duration",
+    long: "Duration",
     width: 66,
     align: "right",
     // A row with no date has no duration worth showing: the stored one is only a default.
@@ -411,8 +411,8 @@ const COLUMNS: ColumnDef[] = [
   },
   {
     id: "predecessors",
-    label: "Phụ thuộc",
-    long: "Phụ thuộc lịch",
+    label: "Dependencies",
+    long: "Dependencies",
     width: 96,
     cell: (t) =>
       t.predecessors.length > 0 ? (
@@ -423,11 +423,11 @@ const COLUMNS: ColumnDef[] = [
         "—"
       ),
   },
-  { id: "estimate", label: "Ước lượng", long: "Ước lượng", width: 76, align: "right", cell: (t) => hours(t.estimateHours) },
+  { id: "estimate", label: "Estimate", long: "Original estimate", width: 76, align: "right", cell: (t) => hours(t.estimateHours) },
   {
     id: "spent",
-    label: "Đã ghi",
-    long: "Giờ đã ghi",
+    label: "Time spent",
+    long: "Time spent",
     width: 66,
     align: "right",
     cell: (t) =>
@@ -439,7 +439,7 @@ const COLUMNS: ColumnDef[] = [
         hours(t.spentHours)
       ),
   },
-  { id: "pct", label: "%", long: "% hoàn thành", width: 48, align: "right", cell: (t) => (t.percentComplete > 0 ? `${t.percentComplete}%` : "") },
+  { id: "pct", label: "%", long: "% complete", width: 48, align: "right", cell: (t) => (t.percentComplete > 0 ? `${t.percentComplete}%` : "") },
 ];
 
 /** The same value a column shows, as plain data for a spreadsheet. */
@@ -1050,7 +1050,7 @@ export default function GanttView({
     // The overlay block (dependencies, baseline, and % unless it is already a
     // visible column) always follows: it is the data Jira's own export lacks.
     const includePct = !columnIds.includes("pct");
-    const header = ["Mã", "Tên việc", ...columns.map((c) => c.long), ...overlayCsvHeader(includePct)];
+    const header = ["Key", "Summary", ...columns.map((c) => c.long), ...overlayCsvHeader(includePct)];
     const body = list.map((o) => [
       o.task.id,
       o.task.summary,
@@ -1666,14 +1666,14 @@ export default function GanttView({
     return () => observer.disconnect();
   }, [bodyEl, viewMode, weekOrigin, columnWidth]);
 
-  // Month view: the library writes "Tháng 11" in every column, about 50px, and a column can be as narrow as
+  // Month view: the library writes "November" in every column, about 55px, and a column can be as narrow as
   // MIN_COLUMN_WIDTH — zoomed out, the names ran into each other. The label is cut to what the column holds.
   useEffect(() => {
     if (!bodyEl || viewMode !== ViewMode.Month) return;
     function relabel() {
       bodyEl!.querySelectorAll<SVGTextElement>("text._9w8d5").forEach((el) => {
         const raw = el.dataset.fullLabel ?? el.textContent ?? "";
-        if (!/\d\s*$/.test(raw)) return;
+        if (monthNumberOf(raw) === null) return;
         if (!el.dataset.fullLabel) el.dataset.fullLabel = raw;
         const next = monthColumnLabel(raw, columnWidth);
         if (el.textContent !== next) el.textContent = next;
@@ -1838,8 +1838,8 @@ export default function GanttView({
           onClick={(e) => e.stopPropagation()}
         />
       </div>
-      <div className="wbs-col wbs-col-key">Mã</div>
-      <div className="wbs-col wbs-col-name">Tên việc</div>
+      <div className="wbs-col wbs-col-key">Key</div>
+      <div className="wbs-col wbs-col-name">Summary</div>
       {shownColumns.map((c) => (
         <div
           key={c.id}
@@ -2088,9 +2088,9 @@ export default function GanttView({
               ))}
             </div>
             <span className="tb-today">
-              <button type="button" className="tb-btn" onClick={() => goToToday()} title="Cuộn tới hôm nay (T)">
+              <button type="button" className="tb-btn" onClick={() => goToToday()} title="Today (T)">
                 <Icon name="calendar" size={14} className="tb-today-icon" />
-                <span className="fb-label">Về hôm nay</span>
+                <span className="fb-label">Today</span>
               </button>
               {todayNote && (
                 <span className="gantt-today-note" role="status">
@@ -2311,7 +2311,7 @@ export default function GanttView({
                 viewMode={viewMode}
                 viewDate={viewDate}
                 TooltipContent={TooltipContent}
-                locale="vi"
+                locale="en"
                 rowHeight={ROW_HEIGHT}
                 headerHeight={HEADER_HEIGHT}
                 barFill={60}
