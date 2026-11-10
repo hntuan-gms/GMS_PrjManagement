@@ -270,6 +270,8 @@
   --type-task: var(--info);
   /* Jira's own Epic purple; deliberately not --ai, which marks the assistant. */
   --type-epic: #904ee2;
+  /* Change Request: the app's own green, re-lit in dark mode through --ok. */
+  --type-change: var(--ok);
 
   /* The Gimasys logo (BrandMark.tsx): navy text here, a light-text copy in dark mode. */
   --brand-mark: url("/brand/gimasys-mark.png");

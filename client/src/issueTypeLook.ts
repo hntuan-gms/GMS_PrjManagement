@@ -18,11 +18,12 @@
  *  - issue orange: Issue
  *  - task  blue:   Task and Sub-task
  *  - epic  purple: Epic, as in Jira
+ *  - change green: Change Request
  * Everything else stays ink.
  *
  * Drawn on a 16px grid, 1.5px strokes, round caps — the same rules as Icons.tsx.
  */
-export type IssueTypeTone = "bug" | "issue" | "task" | "epic" | null;
+export type IssueTypeTone = "bug" | "issue" | "task" | "epic" | "change" | null;
 
 export type IssueTypeKind =
   | "epic"
@@ -198,6 +199,7 @@ const TONE: Partial<Record<IssueTypeKind, IssueTypeTone>> = {
   task: "task",
   subtask: "task",
   epic: "epic",
+  changerequest: "change",
 };
 
 /**
