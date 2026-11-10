@@ -43,7 +43,6 @@ import PriorityMark from "./PriorityMark";
 import StatusGlyph from "./StatusGlyph";
 import { statusTone } from "../statusTone";
 import Avatar from "./Avatar";
-import { priorityTone } from "../boardModel";
 import { Icon, type IconName } from "./Icons";
 import Popover from "./Popover";
 import SavedFilterMenu from "./SavedFilterMenu";
@@ -1952,7 +1951,6 @@ export default function GanttView({
               )}
             </span>
             <IssueTypeIcon type={task.issueType} />
-            {priorityTone(task.priority) === "high" || priorityTone(task.priority) === "low" ? <PriorityMark priority={task.priority} /> : null}
             <span className={hasChildren ? "wbs-summary wbs-summary-parent" : "wbs-summary"}>
               {isMilestone(task) && (
                 <span className="wbs-milestone" title="Mốc" aria-hidden="true">
