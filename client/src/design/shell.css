@@ -794,6 +794,9 @@ button.toast-close:hover:not(:disabled) {
 .issue-icon.is-task {
   color: var(--type-task);
 }
+.issue-icon.is-change {
+  color: var(--type-change);
+}
 button.icon-btn {
   width: 28px;
   height: 28px;
