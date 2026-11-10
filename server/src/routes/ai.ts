@@ -8,7 +8,14 @@ import { priceFor, priceTable } from "../ai/pricing.js";
 import express from "express";
 import { requireProject } from "../auth/middleware.js";
 import { badRequest, notFound } from "../errors.js";
-import { activeModel, generatePlan, layoutSchedule, listAvailableModels, toPlannerResources } from "../ai/planner.js";
+import {
+  activeModel,
+  generatePlan,
+  isIsoDate,
+  layoutSchedule,
+  listAvailableModels,
+  toPlannerResources,
+} from "../ai/planner.js";
 import { streamChat, type ChatUsage } from "../ai/chat.js";
 import * as chatStore from "../ai/chatStore.js";
 import * as plans from "../ai/planStore.js";
@@ -39,14 +46,42 @@ function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-async function loadPlan(cloudId: string, projectKey: string, runId: string, startDate: string) {
+async function loadPlan(cloudId: string, projectKey: string, runId: string, fallbackStart: string) {
   const run = await plans.getRun(cloudId, projectKey, runId);
   if (!run) return null;
   const stored = await plans.listItems(runId);
   // Dates are derived on every read rather than stored: an edit to one task's
   // duration has to move everything downstream of it, and a stored copy would
-  // silently go stale the moment the reviewer changed anything.
-  return { run, items: layoutSchedule(stored, startDate) };
+  // silently go stale the moment the reviewer changed anything. Day 1 is the one
+  // the plan was generated with — laid out from "today" instead, a plan opened the
+  // next day moved and no longer matched what the assistant had said about it.
+  return { run, items: layoutSchedule(stored, run.startDate ?? fallbackStart) };
+}
+
+/** Same words for every route that may only touch a plan still waiting for review. */
+function notEditable(status: plans.PlanStatus): string | null {
+  if (status === "proposed") return null;
+  if (status === "discarded") return "Kế hoạch này đã huỷ, không sửa hay tạo việc từ nó được nữa.";
+  if (status === "applied") return "Kế hoạch này đã được tạo trên Jira rồi.";
+  return "Kế hoạch này chưa sẵn sàng để duyệt.";
+}
+
+/**
+ * The laid-out schedule as the assistant is told it, so the dates it says in the
+ * chat are the ones the review table shows (it used to be told only a count, and
+ * described the dates it had intended instead).
+ */
+function scheduleForChat(
+  items: Array<{ tempId: string; summary: string; startDate: string; dueDate: string; assigneeAccountId: string | null }>,
+  names: Map<string, string>
+): string {
+  const dmy = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
+  const lines = items.slice(0, 40).map((i) => {
+    const who = i.assigneeAccountId ? (names.get(i.assigneeAccountId) ?? "?") : "chưa gán";
+    return `- ${i.summary}: ${dmy(i.startDate)} – ${dmy(i.dueDate)} (${who})`;
+  });
+  if (items.length > 40) lines.push(`- … và ${items.length - 40} việc nữa`);
+  return lines.join("\n");
 }
 
 /**
@@ -68,7 +103,8 @@ aiRouter.get("/models", async (_req, res, next) => {
 aiRouter.post("/plans", requireProject, async (req, res, next) => {
   const { session, taskService } = req.auth!;
   const brief = String((req.body as { brief?: unknown })?.brief ?? "").trim();
-  const startDate = String((req.body as { startDate?: unknown })?.startDate ?? "").trim() || todayIso();
+  const askedStart = String((req.body as { startDate?: unknown })?.startDate ?? "").trim();
+  const startDate = isIsoDate(askedStart) ? askedStart : todayIso();
   if (brief.length < 20) {
     next(badRequest("Hãy mô tả dự án chi tiết hơn (ít nhất 20 ký tự) để AI có đủ ngữ cảnh."));
     return;
@@ -76,7 +112,7 @@ aiRouter.post("/plans", requireProject, async (req, res, next) => {
 
   let runId: string | undefined;
   try {
-    runId = await plans.createRun(session.cloudId, session.projectKey!, session.accountId, brief);
+    runId = await plans.createRun(session.cloudId, session.projectKey!, session.accountId, brief, startDate);
 
     const [issueTypes, users, profiles, absences] = await Promise.all([
       taskService!.listIssueTypes(),
@@ -276,7 +312,7 @@ aiRouter.post("/chat", requireProject, express.json({ limit: CHAT_BODY_LIMIT }),
         return Number.isFinite(n) && Math.abs(n) <= 14 * 60 ? n : 0;
       })(),
       createPlan: async (brief, startDate) => {
-        const runId = await plans.createRun(session.cloudId, session.projectKey!, session.accountId, brief);
+        const runId = await plans.createRun(session.cloudId, session.projectKey!, session.accountId, brief, startDate);
         try {
           const [issueTypes, users, profiles, absences] = await Promise.all([
             taskService!.listIssueTypes(),
@@ -295,11 +331,17 @@ aiRouter.post("/chat", requireProject, express.json({ limit: CHAT_BODY_LIMIT }),
           });
           await plans.saveProposal(runId, result.items, result);
           planRunId = runId;
+          const names = new Map(users.map((u) => [u.accountId, u.displayName]));
           return {
             runId,
             itemCount: result.items.length,
             warnings: result.warnings,
-            summary: `Đã dựng ${result.items.length} việc, chờ người duyệt. Hãy nói ngắn gọn kế hoạch gồm những giai đoạn nào và nhắc người dùng bấm vào bảng để kiểm tra trước khi tạo trên Jira.`,
+            summary:
+              `Đã dựng bản nháp MỚI gồm ${result.items.length} việc, chờ người duyệt. Lịch do hệ thống xếp, ` +
+              `đúng như bảng duyệt sẽ hiện:\n${scheduleForChat(result.items, names)}\n` +
+              `Nếu nhắc ngày, chỉ dùng đúng các ngày trên. Nếu lịch này khác điều người dùng muốn, nói rõ chỗ khác ` +
+              `và gợi ý sửa trong bảng (cột Bắt đầu, Số ngày). Mỗi lần gọi create_plan là một bản nháp mới, ` +
+              `không phải sửa bản cũ. Nhắc người dùng bấm vào bảng để kiểm tra trước khi tạo trên Jira.`,
           };
         } catch (err) {
           await plans.failRun(runId, (err as Error).message).catch(() => {});
@@ -457,12 +499,23 @@ aiRouter.patch("/plans/:runId/items/:itemId", requireProject, async (req, res, n
       next(notFound("Không tìm thấy kế hoạch này."));
       return;
     }
-    if (run.status !== "proposed") {
-      next(badRequest("Chỉ sửa được kế hoạch đang chờ duyệt."));
+    const locked = notEditable(run.status);
+    if (locked) {
+      next(badRequest(locked));
       return;
     }
     const body = req.body as Record<string, unknown>;
+    let notBefore: string | null | undefined;
+    if (body.notBefore === null || body.notBefore === "") notBefore = null;
+    else if (typeof body.notBefore === "string") {
+      if (!isIsoDate(body.notBefore)) {
+        next(badRequest("Ngày bắt đầu không hợp lệ."));
+        return;
+      }
+      notBefore = body.notBefore;
+    }
     await plans.updateItem(runId, itemId, {
+      notBefore,
       summary: typeof body.summary === "string" ? body.summary : undefined,
       issueType: typeof body.issueType === "string" ? body.issueType : undefined,
       durationDays:
@@ -489,8 +542,9 @@ aiRouter.delete("/plans/:runId/items/:itemId", requireProject, async (req, res, 
       next(notFound("Không tìm thấy kế hoạch này."));
       return;
     }
-    if (run.status !== "proposed") {
-      next(badRequest("Chỉ sửa được kế hoạch đang chờ duyệt."));
+    const locked = notEditable(run.status);
+    if (locked) {
+      next(badRequest(locked));
       return;
     }
     await plans.deleteItem(run.id, req.params.itemId);
@@ -506,6 +560,10 @@ aiRouter.post("/plans/:runId/discard", requireProject, async (req, res, next) =>
     const run = await plans.getRun(cloudId, projectKey!, req.params.runId);
     if (!run) {
       next(notFound("Không tìm thấy kế hoạch này."));
+      return;
+    }
+    if (run.status === "applied") {
+      next(badRequest("Kế hoạch này đã được tạo trên Jira rồi."));
       return;
     }
     await plans.setRunStatus(run.id, "discarded");
@@ -533,8 +591,11 @@ aiRouter.post("/plans/:runId/apply", requireProject, async (req, res, next) => {
       next(notFound("Không tìm thấy kế hoạch này."));
       return;
     }
-    if (loaded.run.status === "applied") {
-      next(badRequest("Kế hoạch này đã được áp dụng rồi."));
+    // A partly applied run stays 'proposed' (see the end of this route), so this
+    // also lets the remaining rows be retried; a discarded one can never be applied.
+    const locked = notEditable(loaded.run.status);
+    if (locked) {
+      next(badRequest(locked));
       return;
     }
 

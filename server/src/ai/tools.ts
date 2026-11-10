@@ -9,6 +9,7 @@ import { isAssignableType, type IssueTypeName, type JiraUser, type Task } from "
 import * as resources from "../resourceStore.js";
 import { computeProgress, HEALTH_LABEL } from "../progress.js";
 import { EDIT_TOOLS, editLabelFor, runEditTool } from "./editTools.js";
+import { isIsoDate } from "./planner.js";
 import { createProgressReport } from "./progressReport.js";
 import { DUPLICATE_THRESHOLD, findSimilarTasks } from "./similarity.js";
 import { addDays, turnCalendar, ISO_DATE, resolvePerson, str } from "./toolUtils.js";
@@ -103,7 +104,9 @@ const CREATE_PLAN: FunctionDeclaration = {
   name: "create_plan",
   description:
     "Break a project or a body of work into a reviewable work breakdown structure with durations, " +
-    "dependencies and suggested assignees. Use this when the user asks for a plan, a schedule, a WBS, " +
+    "dependencies and suggested assignees. Put any dates the user fixed for individual items (a monthly " +
+    "window, a named day) into the brief verbatim: the planner keeps them as each item's earliest start. " +
+    "Use this when the user asks for a plan, a schedule, a WBS, " +
     "or to split a body of work into many tasks. The result is a proposal a human reviews before " +
     "anything is created in Jira. For a single task the user described precisely, use create_task instead.",
   parameters: {
@@ -393,7 +396,9 @@ export async function runTool(
 
 async function runCreatePlan(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolOutcome> {
   const brief = str(args, "brief");
-  const startDate = str(args, "startDate") || ctx.today;
+  // Goes into a date column and is day 1 of the layout: a malformed value is today.
+  const asked = str(args, "startDate");
+  const startDate = isIsoDate(asked) ? asked : ctx.today;
   const plan = await ctx.createPlan(brief, startDate);
   return {
     response: { result: plan.summary },

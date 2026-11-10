@@ -645,7 +645,7 @@ app.post("/api/ai/chat", (req, res) => {
 
 // --- AI planner and AI report, for the user guide's walkthrough (guide-shots.mjs) -------------
 // Dates come from the REAL layoutSchedule, laid out from today like GET /api/ai/plans/:id.
-type GuideItem = { id: string; tempId: string; parentTempId: string | null; sortOrder: number; summary: string; description: string | null; issueType: string; durationDays: number; assigneeAccountId: string | null; dependencies: Array<{ tempId: string; type: "FS" | "SS" | "FF" | "SF"; lagDays: number }>; rationale: string | null; appliedIssueKey: string | null };
+type GuideItem = { id: string; tempId: string; parentTempId: string | null; sortOrder: number; summary: string; description: string | null; issueType: string; durationDays: number; assigneeAccountId: string | null; dependencies: Array<{ tempId: string; type: "FS" | "SS" | "FF" | "SF"; lagDays: number }>; rationale: string | null; notBefore?: string | null; appliedIssueKey: string | null };
 const GUIDE_ROWS: Array<[string, string | null, string, string, number, string | null, string]> = [
   // tempId, parent, summary, type, days, assignee, deps ("t1" = FS t1, "SS:t9" = SS)
   ["e1", null, "Khảo sát và phân tích yêu cầu", "Epic", 1, null, ""],
@@ -674,7 +674,7 @@ const GUIDE_ROWS: Array<[string, string | null, string, string, number, string |
   ["t19", "e5", "Đào tạo và bàn giao", "Task", 3, "binh", "t18"],
 ];
 const newGuidePlan = () => ({
-  run: { id: "plan-guide", projectKey: "DEMO", status: "proposed", brief: "Website bán hàng cho Công ty ABC", model: "gemini (mô phỏng)", inputTokens: null, outputTokens: null, error: null, createdAt: new Date().toISOString(), appliedAt: null },
+  run: { id: "plan-guide", projectKey: "DEMO", status: "proposed", brief: "Website bán hàng cho Công ty ABC", model: "gemini (mô phỏng)", inputTokens: null, outputTokens: null, error: null, createdAt: new Date().toISOString(), appliedAt: null, startDate: TODAY },
   items: GUIDE_ROWS.map(([tempId, parent, summary, type, days, who, deps], i): GuideItem => ({
     id: `pi${i + 1}`, tempId, parentTempId: parent, sortOrder: i, summary, description: null, issueType: type, durationDays: days, assigneeAccountId: who,
     dependencies: deps ? deps.split(",").map((d) => (d.startsWith("SS:") ? { tempId: d.slice(3), type: "SS" as const, lagDays: 0 } : { tempId: d, type: "FS" as const, lagDays: 0 })) : [],
@@ -697,17 +697,26 @@ const layoutGuide = (items: GuideItem[]) => {
 };
 const planResponse = () => ({ run: guidePlan.run, items: layoutGuide(guidePlan.items), warnings: [] });
 app.get("/api/ai/plans/:runId", (_q, r) => r.json(planResponse()));
+// Like routes/ai.ts: only a plan waiting for review can be edited, deleted from or applied.
+const planLocked = (r: express.Response) => {
+  if (guidePlan.run.status === "proposed") return false;
+  r.status(400).json({ error: "Kế hoạch này đã huỷ, không sửa hay tạo việc từ nó được nữa." });
+  return true;
+};
 app.patch("/api/ai/plans/:runId/items/:itemId", (req, r) => {
+  if (planLocked(r)) return;
   const it = guidePlan.items.find((i) => i.id === req.params.itemId);
-  if (it) for (const k of ["summary", "durationDays", "assigneeAccountId", "issueType"] as const) if (req.body?.[k] !== undefined) (it as any)[k] = req.body[k];
+  if (it) for (const k of ["summary", "durationDays", "assigneeAccountId", "issueType", "notBefore"] as const) if (req.body?.[k] !== undefined) (it as any)[k] = req.body[k];
   r.json(planResponse());
 });
 app.delete("/api/ai/plans/:runId/items/:itemId", (req, r) => {
+  if (planLocked(r)) return;
   guidePlan.items = guidePlan.items.filter((i) => i.id !== req.params.itemId);
   r.json(planResponse());
 });
 app.post("/api/ai/plans/:runId/discard", (_q, r) => { guidePlan.run.status = "discarded"; r.status(204).end(); });
 app.post("/api/ai/plans/:runId/apply", (_q, r) => {
+  if (planLocked(r)) return;
   const laid = layoutGuide(guidePlan.items);
   const keyOf = new Map<string, string>();
   const created: string[] = [];

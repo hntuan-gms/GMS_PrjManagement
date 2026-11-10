@@ -15,6 +15,8 @@ export interface PlanRun {
   error: string | null;
   createdAt: string;
   appliedAt: string | null;
+  /** Day 1 of the plan, fixed when it was generated. Null for runs made before migration 017. */
+  startDate: string | null;
 }
 
 export interface PlanItem extends PlannedItem {
@@ -34,6 +36,7 @@ interface RunRow {
   error: string | null;
   created_at: Date;
   applied_at: Date | null;
+  start_date: string | null;
 }
 
 interface ItemRow {
@@ -48,6 +51,7 @@ interface ItemRow {
   assignee_account_id: string | null;
   dependencies: Array<{ tempId: string; type: Predecessor["type"]; lagDays: number }>;
   rationale: string | null;
+  not_before: string | null;
   applied_issue_key: string | null;
 }
 
@@ -63,6 +67,7 @@ function toRun(row: RunRow): PlanRun {
     error: row.error,
     createdAt: row.created_at.toISOString(),
     appliedAt: row.applied_at?.toISOString() ?? null,
+    startDate: row.start_date,
   };
 }
 
@@ -70,12 +75,13 @@ export async function createRun(
   cloudId: string,
   projectKey: string,
   createdBy: string,
-  brief: string
+  brief: string,
+  startDate: string
 ): Promise<string> {
   const { rows } = await db().query<{ id: string }>(
-    `INSERT INTO ai_plan_run (cloud_id, project_key, created_by, brief, status)
-     VALUES ($1, $2, $3, $4, 'running') RETURNING id`,
-    [cloudId, projectKey, createdBy, brief]
+    `INSERT INTO ai_plan_run (cloud_id, project_key, created_by, brief, status, start_date)
+     VALUES ($1, $2, $3, $4, 'running', $5) RETURNING id`,
+    [cloudId, projectKey, createdBy, brief, startDate]
   );
   return rows[0].id;
 }
@@ -106,8 +112,8 @@ export async function saveProposal(
       await client.query(
         `INSERT INTO ai_plan_item
            (run_id, temp_id, parent_temp_id, sort_order, summary, description, issue_type,
-            duration_days, assignee_account_id, dependencies, rationale)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+            duration_days, assignee_account_id, dependencies, rationale, not_before)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
         [
           runId,
           item.tempId,
@@ -120,6 +126,7 @@ export async function saveProposal(
           item.assigneeAccountId,
           JSON.stringify(item.dependencies),
           item.rationale,
+          item.notBefore,
         ]
       );
     }
@@ -136,7 +143,8 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export async function getRun(cloudId: string, projectKey: string, runId: string): Promise<PlanRun | null> {
   if (!UUID.test(runId)) return null;
   const { rows } = await db().query<RunRow>(
-    `SELECT id, project_key, status, brief, model, input_tokens, output_tokens, error, created_at, applied_at
+    `SELECT id, project_key, status, brief, model, input_tokens, output_tokens, error, created_at, applied_at,
+            start_date
        FROM ai_plan_run WHERE cloud_id = $1 AND project_key = $2 AND id = $3`,
     [cloudId, projectKey, runId]
   );
@@ -146,7 +154,7 @@ export async function getRun(cloudId: string, projectKey: string, runId: string)
 export async function listItems(runId: string): Promise<Omit<PlanItem, "startDate" | "dueDate">[]> {
   const { rows } = await db().query<ItemRow>(
     `SELECT id, temp_id, parent_temp_id, sort_order, summary, description, issue_type,
-            duration_days, assignee_account_id, dependencies, rationale, applied_issue_key
+            duration_days, assignee_account_id, dependencies, rationale, not_before, applied_issue_key
        FROM ai_plan_item WHERE run_id = $1 ORDER BY sort_order`,
     [runId]
   );
@@ -162,6 +170,7 @@ export async function listItems(runId: string): Promise<Omit<PlanItem, "startDat
     assigneeAccountId: r.assignee_account_id,
     dependencies: r.dependencies ?? [],
     rationale: r.rationale,
+    notBefore: r.not_before,
     appliedIssueKey: r.applied_issue_key,
   }));
 }
@@ -170,13 +179,20 @@ export async function listItems(runId: string): Promise<Omit<PlanItem, "startDat
 export async function updateItem(
   runId: string,
   itemId: string,
-  patch: { summary?: string; durationDays?: number; assigneeAccountId?: string | null; issueType?: string }
+  patch: {
+    summary?: string;
+    durationDays?: number;
+    assigneeAccountId?: string | null;
+    issueType?: string;
+    notBefore?: string | null;
+  }
 ): Promise<void> {
   const columns: Record<string, string> = {
     summary: "summary",
     durationDays: "duration_days",
     assigneeAccountId: "assignee_account_id",
     issueType: "issue_type",
+    notBefore: "not_before",
   };
   const sets: string[] = [];
   const values: unknown[] = [runId, itemId];

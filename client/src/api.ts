@@ -468,7 +468,14 @@ export const api = {
   updatePlanItem: (
     runId: string,
     itemId: string,
-    patch: { summary?: string; durationDays?: number; assigneeAccountId?: string | null; issueType?: string }
+    patch: {
+      summary?: string;
+      durationDays?: number;
+      assigneeAccountId?: string | null;
+      issueType?: string;
+      /** The row's earliest start, YYYY-MM-DD; null frees it. */
+      notBefore?: string | null;
+    }
   ) =>
     request<PlanResponse>(
       `/ai/plans/${encodeURIComponent(runId)}/items/${encodeURIComponent(itemId)}`,

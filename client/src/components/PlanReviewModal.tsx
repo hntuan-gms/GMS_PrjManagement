@@ -1,8 +1,23 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { formatDateInput } from "../dateInput";
-import { isAssignableType, type JiraUser, type PlanResponse } from "../types";
+import { isAssignableType, type JiraUser, type PlanResponse, type PlanRun } from "../types";
+import DateField from "./DateField";
 import { useDialogs } from "./dialogContext";
+
+/**
+ * Why a plan can no longer be edited, or null while it waits for review. The server
+ * refuses edits to any other state; showing the table as editable anyway let a
+ * reviewer reopen a discarded plan from the chat and type into it, each change
+ * answered by a 400 (MEIKOS26, 2026-11-10).
+ */
+function lockedReason(status: PlanRun["status"]): string | null {
+  if (status === "proposed") return null;
+  if (status === "discarded") return "Kế hoạch này đã huỷ. Chỉ xem lại được, không sửa hay tạo việc từ nó.";
+  if (status === "applied") return "Kế hoạch này đã được tạo trên Jira.";
+  if (status === "failed") return "Không dựng được kế hoạch này.";
+  return "Kế hoạch đang được dựng.";
+}
 
 interface Props {
   /** The staged plan to review, produced by the assistant's create_plan tool. */
@@ -120,12 +135,15 @@ export default function PlanReviewModal({ runId, users, onClose, onApplied }: Pr
     }
   }
 
+  const locked = plan ? lockedReason(plan.run.status) : null;
+
   async function apply() {
     if (!plan) return;
     setBusy("applying");
     setError(null);
     try {
-      const startDate = plan.items[0]?.startDate ?? new Date().toISOString().slice(0, 10);
+      // The plan's own day 1, so the issues land on the dates the table shows.
+      const startDate = plan.run.startDate ?? plan.items[0]?.startDate ?? new Date().toISOString().slice(0, 10);
       setResult(await api.applyPlan(plan.run.id, startDate));
       await onApplied();
     } catch (e) {
@@ -177,7 +195,8 @@ export default function PlanReviewModal({ runId, users, onClose, onApplied }: Pr
           </div>
         ) : (
           <div className="ai-review">
-            {plan.warnings && plan.warnings.length > 0 && (
+            {locked && <div className="notice notice-warn">{locked}</div>}
+            {!locked && plan.warnings && plan.warnings.length > 0 && (
               <div className="notice notice-warn">
                 <div>
                   <strong>AI đề xuất vài chỗ không hợp lệ, đã tự sửa:</strong>
@@ -205,16 +224,18 @@ export default function PlanReviewModal({ runId, users, onClose, onApplied }: Pr
                   </tr>
                 </thead>
                 <tbody>
-                  {plan.items.map((item) => (
+                  {plan.items.map((item) => {
+                    const fixed = !!locked || !!item.appliedIssueKey;
+                    return (
                     <tr key={item.id} className={item.appliedIssueKey ? "ai-row-applied" : ""}>
                       <td
                         style={{ paddingLeft: 8 + depthOf(item.tempId) * 18 }}
                         title={item.rationale ?? ""}
                       >
-                        {item.appliedIssueKey ? (
+                        {fixed ? (
                           <>
                             {item.summary}
-                            <span className="ai-applied-key"> {item.appliedIssueKey}</span>
+                            {item.appliedIssueKey && <span className="ai-applied-key"> {item.appliedIssueKey}</span>}
                           </>
                         ) : (
                           <input
@@ -235,7 +256,7 @@ export default function PlanReviewModal({ runId, users, onClose, onApplied }: Pr
                         )}
                       </td>
                       <td>
-                        {item.appliedIssueKey ? (
+                        {fixed ? (
                           item.issueType
                         ) : (
                           <select
@@ -256,7 +277,7 @@ export default function PlanReviewModal({ runId, users, onClose, onApplied }: Pr
                           type="number"
                           min={1}
                           value={item.durationDays}
-                          disabled={!!item.appliedIssueKey}
+                          disabled={fixed}
                           onChange={(e) =>
                             setPlan({
                               ...plan,
@@ -272,7 +293,7 @@ export default function PlanReviewModal({ runId, users, onClose, onApplied }: Pr
                         <select
                           value={item.assigneeAccountId ?? ""}
                           // An Epic is a container and never takes an owner.
-                          disabled={!!item.appliedIssueKey || !isAssignableType(item.issueType)}
+                          disabled={fixed || !isAssignableType(item.issueType)}
                           onChange={(e) => patchItem(item.id, { assigneeAccountId: e.target.value || null })}
                         >
                           <option value="">Chưa gán</option>
@@ -283,7 +304,22 @@ export default function PlanReviewModal({ runId, users, onClose, onApplied }: Pr
                           ))}
                         </select>
                       </td>
-                      <td>{formatDateInput(item.startDate)}</td>
+                      <td>
+                        {fixed ? (
+                          formatDateInput(item.startDate)
+                        ) : (
+                          // Typing a day makes it this row's earliest start; a predecessor
+                          // that ends later still pushes it, and the table shows where it lands.
+                          <DateField
+                            className="ai-start-field"
+                            value={item.startDate}
+                            ariaLabel="Bắt đầu"
+                            onChange={(iso) => {
+                              if (iso !== item.startDate) patchItem(item.id, { notBefore: iso });
+                            }}
+                          />
+                        )}
+                      </td>
                       <td>{formatDateInput(item.dueDate)}</td>
                       <td className="ai-deps">
                         {item.dependencies.length === 0
@@ -298,24 +334,30 @@ export default function PlanReviewModal({ runId, users, onClose, onApplied }: Pr
                               .join("; ")}
                       </td>
                       <td>
-                        {!item.appliedIssueKey && (
+                        {!fixed && (
                           <button className="link-btn" onClick={() => removeItem(item.id)} title="Bỏ dòng này">
                             ×
                           </button>
                         )}
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
 
             <p className="ai-hint">
-              {plan.items.length} việc · ngày do hệ thống tính từ số ngày và quan hệ phụ thuộc (AI không
-              tự đặt ngày), tính lại mỗi khi bạn sửa số ngày.
+              {plan.items.length} việc · ngày tính từ số ngày, phụ thuộc và ngày bắt đầu đã đặt
               {plan.run.model && <> · mô hình: {plan.run.model}</>}
             </p>
 
+            {locked ? (
+              <div className="modal-footer">
+                <div className="spacer" />
+                <button onClick={onClose}>Đóng</button>
+              </div>
+            ) : (
             <div className="modal-footer">
               <button className="danger" onClick={discard} disabled={busy !== null}>
                 Huỷ kế hoạch
@@ -330,6 +372,7 @@ export default function PlanReviewModal({ runId, users, onClose, onApplied }: Pr
                 {busy === "applying" ? "Đang tạo việc..." : `Duyệt & tạo ${plan.items.length} việc`}
               </button>
             </div>
+            )}
           </div>
         )}
       </div>

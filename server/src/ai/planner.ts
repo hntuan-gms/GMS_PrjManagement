@@ -48,6 +48,12 @@ export interface PlannedItem {
   assigneeAccountId: string | null;
   dependencies: Array<{ tempId: string; type: Predecessor["type"]; lagDays: number }>;
   rationale: string | null;
+  /**
+   * The earliest day this item may start, when the brief fixes one (a monthly window,
+   * a date the user named). Copied from the brief, not computed by the model; the
+   * schedule still decides the actual start, which is never earlier than this.
+   */
+  notBefore: string | null;
   /** Derived here, never asked of the model. */
   startDate: string;
   dueDate: string;
@@ -113,6 +119,12 @@ const PLAN_SCHEMA = {
             },
           },
           rationale: { type: Type.STRING, description: "One short sentence: why this duration and this assignee." },
+          notBefore: {
+            type: Type.STRING,
+            description:
+              "YYYY-MM-DD: the earliest day this item may start, ONLY when the brief fixes it (e.g. a monthly " +
+              "window starting on the 20th, a date the user named). Otherwise an empty string.",
+          },
         },
         required: [
           "tempId",
@@ -124,6 +136,7 @@ const PLAN_SCHEMA = {
           "assigneeAccountId",
           "dependencies",
           "rationale",
+          "notBefore",
         ],
       },
     },
@@ -173,7 +186,11 @@ function systemPrompt(input: PlannerInput): string {
     "   where there is none, from what Jira history shows the person actually works on. Evidence is weak: a keyword",
     "   count is not a job title. When nobody clearly fits, leave it EMPTY — an unassigned task a human fills in is",
     "   far better than a confident wrong assignment. Do not invent people and do not put dates in any field.",
-    "8. Do NOT output dates or a schedule. Dates are computed from durations and dependencies by the caller.",
+    "8. Do NOT compute a schedule. Dates are computed from durations and dependencies by the caller, starting",
+    `   on ${input.startDate}. The one exception is notBefore: when the brief itself fixes when an item may start`,
+    "   (a recurring window such as 'from the 20th of each month', or a date the user named), copy that first day",
+    "   into notBefore and make durationDays the number of calendar days of that window (20/12-31/12 is 12).",
+    "   Leave notBefore empty for everything else; never invent one to spread work out.",
     "",
     `Allowed issue types for project ${input.projectKey}:`,
     types,
@@ -323,6 +340,11 @@ function normalize(raw: unknown[], input: PlannerInput, warnings: string[]): Dra
     }
 
     const duration = Number(row.durationDays);
+    const notBefore = String(row.notBefore ?? "").trim();
+    const validNotBefore = isIsoDate(notBefore) ? notBefore : null;
+    if (notBefore && !validNotBefore) {
+      warnings.push(`"${summary}": ngày bắt đầu "${notBefore}" không hợp lệ nên đã bỏ.`);
+    }
     items.push({
       tempId,
       parentTempId: String(row.parentTempId ?? "").trim() || null,
@@ -333,6 +355,7 @@ function normalize(raw: unknown[], input: PlannerInput, warnings: string[]): Dra
       assigneeAccountId: assignee || null,
       dependencies: [],
       rationale: String(row.rationale ?? "").trim() || null,
+      notBefore: validNotBefore,
     });
   }
 
@@ -402,7 +425,7 @@ function breakCycles(items: DraftItem[], warnings: string[]): DraftItem[] {
  * live cascade uses (taskService.applyDependencyCascade), so the preview a
  * reviewer approves matches what the app will enforce once the issues exist.
  */
-export function layoutSchedule<T extends DraftItem>(
+export function layoutSchedule<T extends Omit<DraftItem, "notBefore"> & { notBefore?: string | null }>(
   items: T[],
   projectStart: string
 ): Array<T & { startDate: string; dueDate: string }> {
@@ -422,7 +445,9 @@ export function layoutSchedule<T extends DraftItem>(
     }
     guard.add(id);
 
-    let start = projectStart;
+    // A fixed earliest day (notBefore) is a floor like a predecessor is, never a
+    // pin: a dependency that ends later still pushes the item past it.
+    let start = item.notBefore && item.notBefore > projectStart ? item.notBefore : projectStart;
     for (const dep of item.dependencies) {
       const pred = byId.get(dep.tempId);
       if (!pred) continue;
@@ -442,6 +467,13 @@ export function layoutSchedule<T extends DraftItem>(
   };
 
   return items.map((item) => ({ ...item, ...resolve(item.tempId, new Set()) }));
+}
+
+/** A real calendar date as YYYY-MM-DD (2026-02-30 is not one). */
+export function isIsoDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const d = new Date(value + "T00:00:00Z");
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
 }
 
 /** UTC-based, matching the server's convention everywhere else. */

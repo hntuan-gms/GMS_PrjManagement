@@ -2931,6 +2931,14 @@ button.rv-un-main:active {
   max-width: 150px;
   padding: 2px 4px;
 }
+.ai-table .ai-start-field {
+  width: 132px;
+  min-width: 132px;
+}
+.ai-table .ai-start-field input[type="text"] {
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
 .ai-deps {
   max-width: 260px;
   font-size: var(--font-size-sm);

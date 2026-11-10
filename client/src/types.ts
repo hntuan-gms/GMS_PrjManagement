@@ -345,7 +345,9 @@ export interface PlanItem {
   assigneeAccountId: string | null;
   dependencies: Array<{ tempId: string; type: DependencyType; lagDays: number }>;
   rationale: string | null;
-  /** Derived server-side from durations and the dependency graph, never stored. */
+  /** Earliest day this row may start (fixed in the brief, or typed by the reviewer); null when free. */
+  notBefore?: string | null;
+  /** Derived server-side from durations, the dependency graph and notBefore, never stored. */
   startDate: string;
   dueDate: string;
   /** Set once this row has been created in Jira. */
@@ -363,6 +365,8 @@ export interface PlanRun {
   error: string | null;
   createdAt: string;
   appliedAt: string | null;
+  /** Day 1 the plan is laid out from; null for plans made before it was stored. */
+  startDate?: string | null;
 }
 
 export interface PlanResponse {
