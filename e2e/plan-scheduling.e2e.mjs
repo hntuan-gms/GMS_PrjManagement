@@ -37,8 +37,10 @@ await step("DEMO-9 (chưa có ngày) có dòng WBS và ô ngày ghi —", async 
 });
 await step("kéo trên dòng DEMO-9 vẽ thanh: PATCH startDate + durationDays, không gì khác", async () => {
   const lane = await page.locator(".unsched-lane[data-task-id='DEMO-9']").boundingBox();
+  // The lane spans the whole padded axis, most of it scrolled out of the pane: press inside the part on screen.
+  const chart = await page.locator("._CZjuD").boundingBox();
   const y = lane.y + lane.height / 2;
-  const x = lane.x + Math.min(600, lane.width / 2);
+  const x = Math.max(lane.x, chart.x) + 200;
   await page.mouse.move(x, y);
   await page.mouse.down();
   await page.mouse.move(x + 40, y, { steps: 4 });

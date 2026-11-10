@@ -3,6 +3,7 @@
 // the REAL computeProgress, so the report page is exercised end to end.
 import express from "express";
 import { computeProgress } from "../server/src/progress.ts";
+import { layoutSchedule } from "../server/src/ai/planner.ts";
 import { autoFieldMap, FIELD_SOURCES, mappableFields } from "../server/src/kbkt/fields.ts";
 import { parseWorkbook } from "../server/src/kbkt/parse.ts";
 import { DEFAULT_SETTINGS, validateSettings } from "../server/src/kbkt/settings.ts";
@@ -103,6 +104,7 @@ app.post("/api/__restore", (_q, r) => {
   tasksSeen = [];
   attachmentsOf5 = seedFiles();
   sla = { settings: structuredClone(DEFAULT_SLA_SETTINGS), canEdit: true };
+  guideReports = [];
   log.length = 0;
   r.json({});
 });
@@ -339,7 +341,8 @@ app.get("/api/progress", (req, res) => {
   // The last point of the chain is today's measurement, so the chart and the headline say the same number.
   const m = metrics as unknown as { actualPct: number; plannedPct: number };
   const now = snap(0, Math.round(m.actualPct * 10) / 10, Math.round(m.plannedPct * 10) / 10);
-  res.json({ metrics, latest: null, history: [], trend: [snap(-14, 5, 12), snap(-7, 11, 20), now] });
+  const history = guideReports.map((x) => ({ id: x.id, createdAt: x.createdAt, asOf: x.asOf, health: x.health, actualPct: x.actualPct, plannedPct: x.plannedPct, headline: x.narrative.headline }));
+  res.json({ metrics, latest: guideReports.at(-1) ?? null, history, trend: [snap(-14, 5, 12), snap(-7, 11, 20), now] });
 });
 app.get("/api/progress/flow", (req, res) => {
   const days = Number(req.query.days) || 60;
@@ -550,6 +553,48 @@ app.post("/api/ai/chat", (req, res) => {
     res.end();
   };
 
+  // A whole project planned from one sentence (guide-shots.mjs). The plan is scripted; staging,
+  // review and apply below behave like routes/ai.ts (nothing reaches "Jira" before Duyệt & tạo).
+  if (message.toLowerCase().includes("lập kế hoạch")) {
+    answerCount++;
+    lastAnswerMutated = false;
+    guidePlan = newGuidePlan();
+    send("tool", { name: "team_workload", label: "Đang xem tải của nhóm..." });
+    send("tool", { name: "create_plan", label: "Đang dựng kế hoạch..." });
+    send("plan", { runId: guidePlan.run.id, itemCount: guidePlan.items.length, warnings: [] });
+    const span = layoutGuide(guidePlan.items);
+    const last = span.reduce((m, i) => (i.dueDate > m ? i.dueDate : m), TODAY);
+    const vn = (iso: string) => iso.split("-").reverse().join("/");
+    send("text", { text:
+      `Tôi đã dựng kế hoạch **${guidePlan.items.length} việc** chia 5 giai đoạn, từ **${vn(TODAY)}** đến **${vn(last)}** (khoảng ${Math.round((Date.parse(last) - Date.parse(TODAY)) / 86400000 / 7)} tuần), kịp trước 31/01/2027.\n\n` +
+      "- Khảo sát → Thiết kế → Phát triển → Kiểm thử → Triển khai, nối FS theo đúng thứ tự.\n" +
+      "- Lê Chi làm giao diện, Nguyễn Anh làm backend, Trần Bình viết tài liệu và kiểm thử.\n" +
+      "- **Chuẩn bị máy chủ & tên miền** để trống người làm vì chưa rõ ai phụ trách hạ tầng.\n\n" +
+      "Chưa có gì được tạo trên Jira. Bấm thẻ kế hoạch để kiểm tra rồi **Duyệt & tạo**." });
+    return done();
+  }
+  if (message.includes("đang vướng gì") && message.includes("Việc đính kèm:")) {
+    answerCount++;
+    lastAnswerMutated = false;
+    send("tool", { name: "task_digest", label: "Đang xem tình trạng từng việc..." });
+    send("tool", { name: "team_workload", label: "Đang xem tải của nhóm..." });
+    send("text", { text:
+      "**DEMO-5 Thiết kế cơ sở dữ liệu** chưa vướng gì: chưa tới ngày bắt đầu, đã có người làm (Nguyễn Anh) và ước lượng 16 giờ.\n\n" +
+      "**DEMO-6 Dựng API đăng nhập** không phụ thuộc DEMO-5, nhưng Lê Chi bị trùng lịch 2 ngày với việc khác trong tuần tới.\n\n" +
+      "- Người rảnh nhất trong khoảng ngày của hai việc: **Trần Bình** (rảnh).\n" +
+      "- Gợi ý: giao bớt DEMO-6 cho Trần Bình nếu muốn giữ đúng hạn." });
+    return done();
+  }
+  if (message.toLowerCase().includes("viết báo cáo")) {
+    answerCount++;
+    lastAnswerMutated = false;
+    send("tool", { name: "create_progress_report", label: "Đang viết báo cáo tiến độ..." });
+    const report = makeGuideReport(TODAY);
+    send("report", { reportId: report.id, headline: report.narrative.headline, health: report.health });
+    send("text", { text: `Đã lưu báo cáo. ${report.narrative.summary}` });
+    return done();
+  }
+
   // Fast, scripted turns for the tests that are not about streaming.
   const scripted = ["xoá", "gán", "ngữ cảnh"].some((w) => message.includes(w));
   if (message.includes("nhanh") || body.regenerate === true || scripted) {
@@ -596,6 +641,145 @@ app.post("/api/ai/chat", (req, res) => {
     send("text", { text: slowWords[i++] });
   }, 400);
   res.on("close", () => { if (!res.writableFinished) { chatAborts++; clearInterval(iv); } });
+});
+
+// --- AI planner and AI report, for the user guide's walkthrough (guide-shots.mjs) -------------
+// Dates come from the REAL layoutSchedule, laid out from today like GET /api/ai/plans/:id.
+type GuideItem = { id: string; tempId: string; parentTempId: string | null; sortOrder: number; summary: string; description: string | null; issueType: string; durationDays: number; assigneeAccountId: string | null; dependencies: Array<{ tempId: string; type: "FS" | "SS" | "FF" | "SF"; lagDays: number }>; rationale: string | null; appliedIssueKey: string | null };
+const GUIDE_ROWS: Array<[string, string | null, string, string, number, string | null, string]> = [
+  // tempId, parent, summary, type, days, assignee, deps ("t1" = FS t1, "SS:t9" = SS)
+  ["e1", null, "Khảo sát và phân tích yêu cầu", "Epic", 1, null, ""],
+  ["t1", "e1", "Họp khởi động với khách hàng", "Task", 2, "me", ""],
+  ["t2", "e1", "Khảo sát quy trình bán hàng hiện tại", "Task", 5, "binh", "t1"],
+  ["t3", "e1", "Viết tài liệu đặc tả yêu cầu (SRS)", "Task", 7, "binh", "t2"],
+  ["t4", "e1", "Khách hàng duyệt SRS", "Task", 3, "me", "t3"],
+  ["e2", null, "Thiết kế", "Epic", 1, null, ""],
+  ["t5", "e2", "Thiết kế giao diện (UI/UX)", "Task", 10, "chi", "t4"],
+  ["t6", "e2", "Thiết kế cơ sở dữ liệu", "Task", 5, "anh", "t4"],
+  ["t7", "e2", "Thiết kế kiến trúc và API", "Task", 5, "anh", "t6"],
+  ["e3", null, "Phát triển", "Epic", 1, null, ""],
+  ["t8", "e3", "Trang chủ và danh mục sản phẩm", "Story", 10, "chi", "t5"],
+  ["t9", "e3", "Giỏ hàng và thanh toán", "Story", 12, "chi", "t8"],
+  ["t10", "e3", "API sản phẩm và đơn hàng", "Story", 12, "anh", "t7"],
+  ["t11", "e3", "Tích hợp cổng thanh toán VNPay", "Task", 6, "anh", "t10"],
+  ["t12", "e3", "Trang quản trị (admin)", "Story", 10, "binh", "t7"],
+  ["e4", null, "Kiểm thử", "Epic", 1, null, ""],
+  ["t13", "e4", "Viết kịch bản kiểm thử", "Task", 5, "binh", "SS:t9"],
+  ["t14", "e4", "Kiểm thử tích hợp", "Task", 8, "binh", "t9,t11,t12"],
+  ["t15", "e4", "Sửa lỗi sau kiểm thử", "Task", 5, "chi", "t14"],
+  ["t16", "e4", "Kiểm thử chấp nhận (UAT) với khách hàng", "Task", 5, "me", "t15"],
+  ["e5", null, "Triển khai", "Epic", 1, null, ""],
+  ["t17", "e5", "Chuẩn bị máy chủ và tên miền", "Task", 3, null, "SS:t14"],
+  ["t18", "e5", "Đưa website lên chính thức (go-live)", "Task", 1, "me", "t16,t17"],
+  ["t19", "e5", "Đào tạo và bàn giao", "Task", 3, "binh", "t18"],
+];
+const newGuidePlan = () => ({
+  run: { id: "plan-guide", projectKey: "DEMO", status: "proposed", brief: "Website bán hàng cho Công ty ABC", model: "gemini (mô phỏng)", inputTokens: null, outputTokens: null, error: null, createdAt: new Date().toISOString(), appliedAt: null },
+  items: GUIDE_ROWS.map(([tempId, parent, summary, type, days, who, deps], i): GuideItem => ({
+    id: `pi${i + 1}`, tempId, parentTempId: parent, sortOrder: i, summary, description: null, issueType: type, durationDays: days, assigneeAccountId: who,
+    dependencies: deps ? deps.split(",").map((d) => (d.startsWith("SS:") ? { tempId: d.slice(3), type: "SS" as const, lagDays: 0 } : { tempId: d, type: "FS" as const, lagDays: 0 })) : [],
+    rationale: who || type === "Epic" ? null : "Chưa rõ ai phụ trách hạ tầng nên để trống.", appliedIssueKey: null,
+  })),
+});
+let guidePlan = newGuidePlan();
+let guideReports: any[] = [];
+/** The real forward pass, then an Epic spans its children (its own bar is their rollup anyway). */
+const layoutGuide = (items: GuideItem[]) => {
+  const laid = layoutSchedule(items, TODAY);
+  return laid.map((i) => {
+    if (i.issueType !== "Epic") return i;
+    const kids = laid.filter((k) => k.parentTempId === i.tempId);
+    if (kids.length === 0) return i;
+    const startDate = kids.reduce((m, k) => (k.startDate < m ? k.startDate : m), kids[0].startDate);
+    const dueDate = kids.reduce((m, k) => (k.dueDate > m ? k.dueDate : m), kids[0].dueDate);
+    return { ...i, startDate, dueDate, durationDays: Math.round((Date.parse(dueDate) - Date.parse(startDate)) / 86400000) + 1 };
+  });
+};
+const planResponse = () => ({ run: guidePlan.run, items: layoutGuide(guidePlan.items), warnings: [] });
+app.get("/api/ai/plans/:runId", (_q, r) => r.json(planResponse()));
+app.patch("/api/ai/plans/:runId/items/:itemId", (req, r) => {
+  const it = guidePlan.items.find((i) => i.id === req.params.itemId);
+  if (it) for (const k of ["summary", "durationDays", "assigneeAccountId", "issueType"] as const) if (req.body?.[k] !== undefined) (it as any)[k] = req.body[k];
+  r.json(planResponse());
+});
+app.delete("/api/ai/plans/:runId/items/:itemId", (req, r) => {
+  guidePlan.items = guidePlan.items.filter((i) => i.id !== req.params.itemId);
+  r.json(planResponse());
+});
+app.post("/api/ai/plans/:runId/discard", (_q, r) => { guidePlan.run.status = "discarded"; r.status(204).end(); });
+app.post("/api/ai/plans/:runId/apply", (_q, r) => {
+  const laid = layoutGuide(guidePlan.items);
+  const keyOf = new Map<string, string>();
+  const created: string[] = [];
+  let n = 100;
+  for (const it of [...laid].sort((a, b) => Number(!!a.parentTempId) - Number(!!b.parentTempId) || a.sortOrder - b.sortOrder)) {
+    const id = `DEMO-${++n}`;
+    keyOf.set(it.tempId, id);
+    tasks.push({
+      ...base, id, summary: it.summary, issueType: it.issueType, wbsParentId: it.parentTempId ? keyOf.get(it.parentTempId) ?? null : null,
+      assigneeAccountId: it.issueType === "Epic" ? null : it.assigneeAccountId, assigneeName: it.issueType === "Epic" ? null : nameOf(it.assigneeAccountId),
+      startDate: it.startDate, dueDate: it.dueDate, durationDays: it.durationDays, baselineStart: null, baselineDue: null, createdAt: new Date().toISOString(),
+    });
+    created.push(id);
+  }
+  for (const it of laid) {
+    const t = tasks.find((x) => x.id === keyOf.get(it.tempId));
+    if (t) t.predecessors = it.dependencies.map((d) => ({ taskId: keyOf.get(d.tempId)!, type: d.type, lagDays: d.lagDays }));
+  }
+  guidePlan.items = guidePlan.items.map((i) => ({ ...i, appliedIssueKey: keyOf.get(i.tempId) ?? null }));
+  guidePlan.run.status = "applied";
+  r.json({ created, errors: [] });
+});
+// An empty project to plan into, and "three weeks later": the plan moved back so today is day 21,
+// with the first steps done and the client's sign-off running late (so the report has something to say).
+app.post("/api/__guide/empty", (_q, r) => { tasks = []; guideReports = []; guidePlan = newGuidePlan(); r.json({}); });
+app.post("/api/__guide/advance", (req, r) => {
+  const by = Number(req.body?.days ?? 21);
+  const shift = (d: string | null) => (d ? new Date(Date.parse(d) - by * 86400000).toISOString().slice(0, 10) : d);
+  for (const t of tasks) Object.assign(t, { startDate: shift(t.startDate), dueDate: shift(t.dueDate), baselineStart: shift(t.baselineStart), baselineDue: shift(t.baselineDue) });
+  const set = (summary: string, statusName: string, statusCategory: string, percentComplete: number) => {
+    const t = tasks.find((x) => x.summary === summary);
+    if (t) Object.assign(t, { statusName, statusCategory, percentComplete });
+  };
+  for (const s of ["Họp khởi động với khách hàng", "Khảo sát quy trình bán hàng hiện tại", "Viết tài liệu đặc tả yêu cầu (SRS)"]) set(s, "Done", "done", 100);
+  set("Khách hàng duyệt SRS", "In Progress", "indeterminate", 50);
+  r.json({});
+});
+app.get("/api/progress/reports/:id", (req, r) => {
+  const rep = guideReports.find((x) => x.id === req.params.id);
+  return rep ? r.json(rep) : r.status(404).json({ error: "Không tìm thấy báo cáo." });
+});
+function makeGuideReport(asOf: string) {
+  const metrics: any = computeProgress(tasks, asOf, { types: [] } as any);
+  const key = (summary: string) => tasks.find((t) => t.summary === summary)?.id ?? "";
+  const srs = key("Khách hàng duyệt SRS"), ui = key("Thiết kế giao diện (UI/UX)"), db = key("Thiết kế cơ sở dữ liệu"), infra = key("Chuẩn bị máy chủ và tên miền");
+  const report = {
+    id: `rep${guideReports.length + 1}`, createdAt: new Date().toISOString(), createdBy: "me", asOf, health: metrics.health,
+    actualPct: metrics.actualPct, plannedPct: metrics.plannedPct, metrics, model: "gemini (mô phỏng)",
+    usage: { promptTokens: 5200, outputTokens: 900, thoughtTokens: 400, cachedTokens: 0 },
+    narrative: {
+      headline: "Khâu duyệt SRS đang chặn cả giai đoạn Thiết kế",
+      summary: `Ba việc khảo sát đã xong đúng hạn, nhưng ${srs} (khách hàng duyệt SRS) trễ 5 ngày nên ${ui} và ${db} chưa bắt đầu được. Mọi việc phía sau đều nối FS sau khâu này, nên mỗi ngày trễ ở đây là một ngày trễ của ngày go-live.`,
+      outlook: { verdict: "at_risk", confidence: "medium", reasoning: "Nếu SRS được duyệt trong tuần này, phần trễ có thể bù trong giai đoạn Phát triển vì Nguyễn Anh và Lê Chi làm song song." },
+      insights: [
+        { kind: "bottleneck", title: "Một việc đang chặn 15 việc phía sau", detail: `${srs} nằm trên đường găng; ${ui}, ${db} và toàn bộ giai đoạn Phát triển đang chờ nó.`, issueKeys: [srs, ui, db] },
+        { kind: "data", title: "Một việc chưa có người làm", detail: `${infra} chưa có người phụ trách; việc này cần xong trước ngày go-live.`, issueKeys: [infra] },
+      ],
+      highlights: ["Giai đoạn khảo sát xong đúng kế hoạch.", "Kế hoạch đã có baseline nên đo được độ trễ."],
+      risks: [{ title: "Trễ ngày go-live", detail: "Đường găng đi qua khâu duyệt SRS.", severity: "high", issueKeys: [srs], mitigation: "Hẹn khách hàng một buổi duyệt trực tiếp trong 2 ngày tới." }],
+      recommendations: [
+        { action: `Chốt lịch duyệt SRS với khách hàng (${srs})`, rationale: "Gỡ nút thắt của cả giai đoạn Thiết kế.", issueKeys: [srs], priority: "now", owner: "Tuấn Test" },
+        { action: `Giao ${infra} cho Nguyễn Anh`, rationale: "Anh rảnh hơn trong tuần go-live.", issueKeys: [infra], priority: "this_week", owner: "Tuấn Test" },
+      ],
+    },
+  };
+  guideReports.push(report);
+  return report;
+}
+app.post("/api/progress/reports", (req, r) => {
+  const report = makeGuideReport(String(req.body?.asOf ?? TODAY));
+  const history = guideReports.map((x) => ({ id: x.id, createdAt: x.createdAt, asOf: x.asOf, health: x.health, actualPct: x.actualPct, plannedPct: x.plannedPct, headline: x.narrative.headline }));
+  r.json({ report, warnings: [], history });
 });
 
 // KBKT import: the REAL parser and sync engine against an in-memory Jira, so the

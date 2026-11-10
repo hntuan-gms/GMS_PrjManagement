@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
+import { formatDateInput } from "../dateInput";
 import { isAssignableType, type JiraUser, type PlanResponse } from "../types";
 import { useDialogs } from "./dialogContext";
 
@@ -282,8 +283,8 @@ export default function PlanReviewModal({ runId, users, onClose, onApplied }: Pr
                           ))}
                         </select>
                       </td>
-                      <td>{item.startDate}</td>
-                      <td>{item.dueDate}</td>
+                      <td>{formatDateInput(item.startDate)}</td>
+                      <td>{formatDateInput(item.dueDate)}</td>
                       <td className="ai-deps">
                         {item.dependencies.length === 0
                           ? "—"

@@ -1,11 +1,12 @@
 import { buildEpicIndex, filterTaskIds, isOverdueTask, type TaskFilter } from "../taskFilter";
 import FilterBar, { type JqlControl } from "./FilterBar";
 import TimelineMarkers from "./TimelineMarkers";
+import HoverCard from "./HoverCard";
 import { dragKeysFor, startTaskDrag } from "../taskDrag";
 import { Gantt, ViewMode, type Task as GanttTaskT } from "gantt-task-react";
 import "gantt-task-react/dist/index.css";
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
-import { axisSentinels, axisSpan, isSentinel, isWindowed, windowEnd, windowRows, windowStartFor } from "../ganttWindow";
+import { axisSentinels, axisSpan, isSentinel, isWindowed, stickyAxisStart, windowEnd, windowRows, windowStartFor } from "../ganttWindow";
 import { csvName, downloadCsv, type CsvCell } from "../csv";
 import { computeCriticalPath } from "../criticalPath";
 import { resolveBaselines } from "../baselineGeometry";
@@ -1069,10 +1070,10 @@ export default function GanttView({
         const full = byId.get(task.id);
         if (full && !ranges.has(full.id)) {
           return (
-            <div className="gantt-tip">
+            <HoverCard>
               <b>{task.id}</b> · {full.summary}
               <div>Chưa có ngày · kéo để xếp lịch</div>
-            </div>
+            </HoverCard>
           );
         }
         const days = Math.max(1, Math.round((task.end.getTime() - task.start.getTime()) / DAY_MS));
@@ -1080,7 +1081,7 @@ export default function GanttView({
         // `end` is exclusive (see toGanttTasks), so the last day is one before it.
         const last = new Date(task.end.getTime() - DAY_MS);
         return (
-          <div className="gantt-tip">
+          <HoverCard>
             <b>{task.id}</b> · {task.name}
             <div>
               {fmt(task.start)} – {fmt(last)} ({days} ngày)
@@ -1091,7 +1092,7 @@ export default function GanttView({
               </div>
             )}
             <div>Hoàn thành: {Math.round(task.progress)}%</div>
-          </div>
+          </HoverCard>
         );
       },
     [byId, ranges]
@@ -1559,6 +1560,18 @@ export default function GanttView({
   // Room kept on each side of the plan (ganttAxis.axisPadDays): the axis is always wider than the pane, so
   // the chart has no blank page to its right and the zoom can hold a date across Day / Week / Month.
   const padDays = axisPadDays(pxPerDay);
+  // Where the axis begins, held still while bars are dragged (ganttWindow.stickyAxisStart). A zoom changes
+  // the pad and starts it afresh; the zoom keeps its own date (zoomAnchor).
+  const axisStartRef = useRef<{ pad: number; start: Date } | null>(null);
+  const axisStart = useMemo(() => {
+    let min: Date | null = null;
+    for (const t of allGanttTasks) if (!min || t.start < min) min = t.start;
+    if (!min) return null;
+    const prev = axisStartRef.current?.pad === padDays ? axisStartRef.current.start : null;
+    const start = stickyAxisStart(prev, min, padDays);
+    axisStartRef.current = { pad: padDays, start };
+    return start;
+  }, [allGanttTasks, padDays]);
   const ganttTasks = useMemo(() => {
     const make = (id: string, s: Date, e: Date): GanttTaskT => ({
       id,
@@ -1573,9 +1586,9 @@ export default function GanttView({
     });
     // Invisible bars hold the date axis where the whole list puts it (ganttWindow.axisSentinels): two while
     // windowed (the window slides), one empty row at the end otherwise.
-    if (!windowed) return [...allGanttTasks, ...axisSpan(allGanttTasks, make, padDays)];
-    return [...allGanttTasks.slice(start, end), ...axisSentinels(allGanttTasks, make, padDays)];
-  }, [windowed, allGanttTasks, start, end, padDays]);
+    if (!windowed) return [...allGanttTasks, ...axisSpan(allGanttTasks, make, padDays, axisStart)];
+    return [...allGanttTasks.slice(start, end), ...axisSentinels(allGanttTasks, make, padDays, axisStart)];
+  }, [windowed, allGanttTasks, start, end, padDays, axisStart]);
   // The bars the DOM has, for the overlays that measure them.
   const drawnGanttTasks = useMemo(
     () => (windowed ? allGanttTasks.slice(drawn.start, drawn.start + drawn.count) : allGanttTasks),

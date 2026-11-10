@@ -7593,6 +7593,12 @@ button.tf-chip-x:hover:not(:disabled) {
   color: var(--color-text-primary);
   max-width: 320px;
 }
+/* The bar's hover card sits beside the pointer, on <body>, out of the chart's own layout (HoverCard.tsx). */
+.gantt-tip-float {
+  position: fixed;
+  z-index: var(--z-popover);
+  pointer-events: none;
+}
 .unscheduled-item {
   display: block;
   width: 100%;

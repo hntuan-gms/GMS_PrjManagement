@@ -8,6 +8,7 @@ import {
   axisSpan,
   isSentinel,
   isWindowed,
+  stickyAxisStart,
   windowEnd,
   windowRows,
   windowStartFor,
@@ -102,5 +103,43 @@ describe("axis padding", () => {
   it("no padding is the old behaviour, and an empty plan has no sentinels", () => {
     assert.equal(axisSentinels(all, mk)[0].start.getTime(), new Date(2026, 9, 5).getTime());
     assert.deepEqual(axisSpan([], mk, 30), []);
+  });
+  it("a given start replaces the padded plan start, the end still follows the plan", () => {
+    const from = new Date(2026, 7, 1);
+    const [span] = axisSpan(all, mk, 30, from);
+    assert.equal(span.start.getTime(), from.getTime());
+    assert.equal(span.end.getTime(), new Date(2026, 11, 3).getTime());
+    const [first, last] = axisSentinels(all, mk, 30, from);
+    assert.equal(first.start.getTime(), from.getTime());
+    assert.equal(last.end.getTime(), new Date(2026, 11, 3).getTime());
+  });
+});
+
+describe("stickyAxisStart", () => {
+  const day = (m: number, d: number) => new Date(2026, m, d);
+  const PAD = 90;
+
+  it("with nothing before, the axis begins one pad before the plan", () => {
+    assert.equal(stickyAxisStart(null, day(9, 5), PAD).getTime(), new Date(2026, 9, 5 - PAD).getTime());
+  });
+
+  it("dragging the earliest bar a few days either way does not move the axis (the chart would slide)", () => {
+    const start = stickyAxisStart(null, day(9, 5), PAD);
+    assert.equal(stickyAxisStart(start, day(9, 8), PAD).getTime(), start.getTime());
+    assert.equal(stickyAxisStart(start, day(9, 2), PAD).getTime(), start.getTime());
+    // Weeks, too: anything that still leaves half a pad before the plan.
+    assert.equal(stickyAxisStart(start, day(8, 1), PAD).getTime(), start.getTime());
+  });
+
+  it("re-seats when the plan comes within half a pad of the start", () => {
+    const start = stickyAxisStart(null, day(9, 5), PAD);
+    const earlier = new Date(2026, 9, 5 - PAD + 30); // 30 days of room left, under half of 90
+    assert.equal(stickyAxisStart(start, earlier, PAD).getTime(), new Date(2026, 9, 5 - PAD + 30 - PAD).getTime());
+  });
+
+  it("re-seats when the plan moved more than two pads away, so no wide empty strip is left", () => {
+    const start = stickyAxisStart(null, day(0, 1), PAD);
+    const far = new Date(2026, 0, 1 + 2 * PAD + 10);
+    assert.equal(stickyAxisStart(start, far, PAD).getTime(), new Date(2026, 0, 1 + 2 * PAD + 10 - PAD).getTime());
   });
 });

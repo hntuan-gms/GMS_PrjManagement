@@ -39,10 +39,12 @@ export const windowEnd = (start: number, rowCount: number, viewportRows: number)
  */
 export const SENTINEL_PREFIX = "__gms-axis-";
 
+/** `start`, when given, is where the axis begins (see stickyAxisStart); otherwise the plan's start minus the pad. */
 export function axisSentinels<T extends { start: Date; end: Date }>(
   all: T[],
   make: (id: string, start: Date, end: Date) => T,
-  padDays = 0
+  padDays = 0,
+  start?: Date | null
 ): T[] {
   if (all.length === 0) return [];
   let min = all[0].start.getTime();
@@ -52,8 +54,9 @@ export function axisSentinels<T extends { start: Date; end: Date }>(
     if (t.end.getTime() > max) max = t.end.getTime();
   }
   const DAY = 86_400_000;
+  const from = start ?? shiftDays(new Date(min), -padDays);
   return [
-    make(`${SENTINEL_PREFIX}start`, shiftDays(new Date(min), -padDays), shiftDays(new Date(min + DAY), -padDays)),
+    make(`${SENTINEL_PREFIX}start`, from, new Date(from.getTime() + DAY)),
     make(`${SENTINEL_PREFIX}end`, shiftDays(new Date(max - DAY), padDays), shiftDays(new Date(max), padDays)),
   ];
 }
@@ -65,7 +68,8 @@ export function axisSentinels<T extends { start: Date; end: Date }>(
 export function axisSpan<T extends { start: Date; end: Date }>(
   all: T[],
   make: (id: string, start: Date, end: Date) => T,
-  padDays: number
+  padDays: number,
+  start?: Date | null
 ): T[] {
   if (all.length === 0) return [];
   let min = all[0].start;
@@ -74,7 +78,25 @@ export function axisSpan<T extends { start: Date; end: Date }>(
     if (t.start < min) min = t.start;
     if (t.end > max) max = t.end;
   }
-  return [make(`${SENTINEL_PREFIX}span`, shiftDays(min, -padDays), shiftDays(max, padDays))];
+  return [make(`${SENTINEL_PREFIX}span`, start ?? shiftDays(min, -padDays), shiftDays(max, padDays))];
+}
+
+/**
+ * Where the date axis begins, kept where it was while that still works.
+ *
+ * The library draws its first column from the earliest task it is given, and keeps its scroll position in
+ * pixels. When the axis began exactly `padDays` before the plan, dragging the plan's earliest bar three days
+ * moved the axis three days too, and every bar on screen — the dropped one included — slid by three days the
+ * other way: the bar went forward with the mouse, jumped back on release, and (once the save came back) forward
+ * again. Now the start stays put as long as the plan keeps at least half the pad before it and no more than
+ * twice the pad (so a plan that moved far away does not leave a wide empty strip); only then is it re-seated
+ * at `padDays` before the plan.
+ */
+export function stickyAxisStart(prev: Date | null, earliest: Date, padDays: number): Date {
+  const ideal = shiftDays(earliest, -padDays);
+  if (!prev) return ideal;
+  const roomDays = Math.round((earliest.getTime() - prev.getTime()) / 86_400_000);
+  return roomDays >= padDays / 2 && roomDays <= padDays * 2 ? prev : ideal;
 }
 
 function shiftDays(d: Date, n: number): Date {
