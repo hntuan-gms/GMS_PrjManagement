@@ -120,7 +120,7 @@ export default function ProjectPicker({ session, variant, onSelect, onCancel, on
               void choose(visible[active].key);
             }
           }}
-          placeholder="Tìm theo tên hoặc mã dự án..."
+          placeholder="Search projects"
         />
       </label>
 

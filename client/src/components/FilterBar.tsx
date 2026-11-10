@@ -85,6 +85,8 @@ interface Props {
   trailing?: ReactNode;
   /** Adds the free-text box that narrows `filter.text`. */
   showSearch?: boolean;
+  /** Jira's wording for the box on this screen: "Search list", "Search board", "Search backlog". */
+  searchPlaceholder?: string;
   /** Extra class on the row, for callers (and tests) that name it. */
   className?: string;
   jql?: JqlControl;
@@ -272,6 +274,7 @@ export default function FilterBar({
   quick = [],
   trailing,
   showSearch,
+  searchPlaceholder = "Search",
   className,
   jql,
   searchInputClassName,
@@ -391,7 +394,7 @@ export default function FilterBar({
                 onKeyDown={(e) => {
                   if (e.key === "Escape") onChange({ ...filter, text: "" });
                 }}
-                placeholder="Tìm việc…"
+                placeholder={searchPlaceholder}
                 aria-label="Tìm việc"
               />
               {filter.text && (
@@ -429,7 +432,7 @@ export default function FilterBar({
                         autoFocus
                         value={jqlDraft}
                         onChange={(e) => setJqlDraft(e.target.value)}
-                        placeholder='JQL, ví dụ: assignee = currentUser() AND status != Done'
+                        placeholder='JQL, e.g. assignee = currentUser() AND status != Done'
                         spellCheck={false}
                         aria-label="Truy vấn JQL"
                       />
@@ -471,13 +474,13 @@ export default function FilterBar({
               className="tf-btn tf-add"
               caret={false}
               active={activeCount > 0}
-              menuLabel="Bộ lọc"
+              menuLabel="Filter"
               menuClassName="tf-menu tf-filter-menu"
-              title="Bộ lọc"
+              title="Filter"
               label={
                 <>
                   <Icon name="plus" size={14} />
-                  <span className="fb-label">Bộ lọc</span>
+                  <span className="fb-label">Filter</span>
                   {activeCount > 0 && <span className="tf-badge">{activeCount}</span>}
                 </>
               }

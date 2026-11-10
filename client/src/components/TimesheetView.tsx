@@ -133,7 +133,7 @@ export default function TimesheetView({
           <>
             <div className="tf-search ts-member-search">
               <Icon name="search" size={14} className="tf-search-icon" />
-              <input type="search" value={text} onChange={(e) => setText(e.target.value)} placeholder="Tìm thành viên…" aria-label="Tìm thành viên" />
+              <input type="search" value={text} onChange={(e) => setText(e.target.value)} placeholder="Search people" aria-label="Tìm thành viên" />
             </div>
           </>
         )}

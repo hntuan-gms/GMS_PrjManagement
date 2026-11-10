@@ -913,6 +913,7 @@ export default function BoardView({
           total={scoped.length}
           countLabel="thẻ"
           showSearch
+          searchPlaceholder={view === "backlog" ? "Search backlog" : "Search board"}
           searchInputClassName="bd-search"
           searchInputRef={searchRef}
           leading={filterLeading}

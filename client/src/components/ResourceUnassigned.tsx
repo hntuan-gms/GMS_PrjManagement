@@ -198,7 +198,7 @@ export default function ResourceUnassigned({
             className="rv-un-search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Lọc theo mã hoặc tên…"
+            placeholder="Search"
             aria-label="Lọc việc chưa gán"
           />
           {shown.length === 0 ? (

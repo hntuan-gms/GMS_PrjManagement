@@ -97,12 +97,12 @@ await step("'Chưa có ngày' là bộ lọc: chỉ còn dòng chưa có ngày, 
   await quickFilter(page, "Chưa có ngày");
   await page.waitForFunction(() => document.querySelectorAll(".wbs-row").length >= 8);
 });
-await step("'Hôm nay' không gây lỗi", async () => { await page.locator(".gantt-toolbar button", { hasText: "Hôm nay" }).click(); });
+await step("'Hôm nay' không gây lỗi", async () => { await page.locator(".gantt-toolbar button", { hasText: "Today" }).click(); });
 await step("xuất CSV: BOM + đúng cột + có dữ liệu", async () => {
   const [dl] = await Promise.all([page.waitForEvent("download"), ioAction(page, "Xuất CSV")]);
   const txt = fs.readFileSync(await dl.path(), "utf8");
   assert.ok(txt.charCodeAt(0) === 0xfeff, "thiếu BOM");
-  assert.ok(txt.includes("Mã,Tên việc") && txt.includes("DEMO-5"), txt.slice(0, 120));
+  assert.ok(txt.includes("Key,Summary") && txt.includes("DEMO-5"), txt.slice(0, 120));
 });
 
 console.log("\n== Gantt: thao tác hàng loạt ==");

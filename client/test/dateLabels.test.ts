@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { formatRange, fullDate, monthColumnLabel, monthLabels, shortDay, shortRange, weekColumnLabel } from "../src/dateLabels";
+import { formatRange, fullDate, monthColumnLabel, monthLabels, monthNumberOf, shortDay, shortRange, weekColumnLabel } from "../src/dateLabels";
 
 describe("dateLabels", () => {
   it("writes a month in three lengths", () => {
@@ -52,16 +52,33 @@ describe("dateLabels", () => {
 
 describe("monthColumnLabel", () => {
   it("cuts a month column's label to what the column holds", () => {
-    assert.equal(monthColumnLabel("Tháng 11", 110), "Tháng 11");
-    assert.equal(monthColumnLabel("Tháng 11", 64), "Tháng 11");
-    assert.equal(monthColumnLabel("Tháng 11", 63), "T11");
-    assert.equal(monthColumnLabel("Tháng 11", 36), "T11");
-    assert.equal(monthColumnLabel("Tháng 11", 35), "11");
-    assert.equal(monthColumnLabel("Tháng 1", 26), "1");
+    assert.equal(monthColumnLabel("November", 110), "November");
+    assert.equal(monthColumnLabel("November", 76), "November");
+    assert.equal(monthColumnLabel("November", 75), "Nov");
+    assert.equal(monthColumnLabel("November", 36), "Nov");
+    assert.equal(monthColumnLabel("November", 35), "11");
+    assert.equal(monthColumnLabel("January", 26), "1");
   });
 
   it("reads a label already shortened the same, so the pass can run again after a zoom", () => {
-    assert.equal(monthColumnLabel("T11", 110), "Tháng 11");
-    assert.equal(monthColumnLabel("11", 40), "T11");
+    assert.equal(monthColumnLabel("Nov", 110), "November");
+    assert.equal(monthColumnLabel("11", 40), "Nov");
+    assert.equal(monthColumnLabel("Tháng 11", 110), "November");
+    assert.equal(monthColumnLabel("T11", 40), "Nov");
+  });
+
+  it("leaves a label that names no month alone", () => {
+    assert.equal(monthColumnLabel("2026", 40), "2026");
+    assert.equal(monthColumnLabel("Ma", 40), "Ma");
+  });
+});
+
+describe("monthNumberOf", () => {
+  it("reads English names, short forms and numbers", () => {
+    assert.equal(monthNumberOf("September"), 9);
+    assert.equal(monthNumberOf("Sep"), 9);
+    assert.equal(monthNumberOf("12"), 12);
+    assert.equal(monthNumberOf("13"), null);
+    assert.equal(monthNumberOf("May"), 5);
   });
 });

@@ -446,7 +446,7 @@ export default function ResourceView({
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={(e) => e.key === "Escape" && setQuery("")}
-                  placeholder="Tìm thành viên..."
+                  placeholder="Search people"
                   aria-label="Tìm thành viên"
                 />
               </div>

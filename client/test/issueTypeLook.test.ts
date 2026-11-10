@@ -39,13 +39,14 @@ describe("issueTypeLook", () => {
     assert.equal(a.tone, null);
   });
 
-  it("colours bugs red, Issue orange, Task and Sub-task blue, Epic purple", () => {
+  it("colours bugs red, Issue orange, Task and Sub-task blue, Epic purple, Change Request green", () => {
     for (const n of ["Bug", "Sub Bug", "Lỗi"]) assert.equal(issueTypeLook(n).tone, "bug", n);
     assert.equal(issueTypeLook("Issue").tone, "issue");
     assert.equal(issueTypeLook("Task").tone, "task");
     assert.equal(issueTypeLook("Sub-task").tone, "task");
     assert.equal(issueTypeLook("Epic").tone, "epic");
-    for (const n of ["Story", "Risk", "Change Request", "Spike", "Hồ sơ"]) assert.equal(issueTypeLook(n).tone, null, n);
+    for (const n of ["Change Request", "change-request", "CR"]) assert.equal(issueTypeLook(n).tone, "change", n);
+    for (const n of ["Story", "Risk", "Spike", "Hồ sơ"]) assert.equal(issueTypeLook(n).tone, null, n);
   });
 });
 

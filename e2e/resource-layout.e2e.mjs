@@ -104,7 +104,7 @@ await step("không còn ô 'Chỉ hiện người đang có việc' và dòng ch
   assert.equal(await page.locator(".resource-view input[type=checkbox]").count(), 0, "còn ô tick trên trang");
   assert.equal(await page.locator(".rv-source").count(), 0);
   assert.ok(!text.includes("lấy từ vai trò dự án"), "dòng chữ nguồn danh sách phải nằm trong ⓘ");
-  for (const t of ["Mức tải", "Kỹ năng", "Bộ lọc"]) assert.ok(text.includes(t), t + " thiếu");
+  for (const t of ["Mức tải", "Kỹ năng", "Filter"]) assert.ok(text.includes(t), t + " thiếu");
   assert.equal(await page.locator(".resource-view .tf-bar .sf-select").count(), 1, "thiếu menu bộ lọc đã lưu");
 });
 await step("Tất cả / Có việc / Quá tải kèm số trong một nhóm nút ngay trên thanh; nút chưa gán; không còn 'Mức sử dụng'", async () => {

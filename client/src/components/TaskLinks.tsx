@@ -161,7 +161,7 @@ export default function TaskLinks({ task, allTasks, onCount, hidden }: Props) {
           anchor={pickRect}
           tasks={allTasks}
           exclude={[task.id]}
-          placeholder="Mã hoặc tên việc"
+          placeholder="Search for issues"
           typed={(q) => {
             const key = q.trim().toUpperCase();
             return KEY_RE.test(key) && !allTasks.some((t) => t.id === key) ? { value: key, label: "Dùng mã này" } : null;
