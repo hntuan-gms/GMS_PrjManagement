@@ -1,14 +1,14 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { JiraUser, Task } from "../types";
-import { NO_EXTRAS, hasExtras, type QuickExtras } from "../quickAddExtras";
+import { NO_EXTRAS, type QuickExtras } from "../quickAddExtras";
 import QuickAddExtrasFields from "./QuickAddExtras";
 
 /**
  * "+" on a plan row: a small box under that row to type the title of a child. Enter creates it and keeps the
  * box open for the next one, Esc or a click outside closes it. The title takes quick-add words (@người, 3n,
- * !cao…) like every other quick-create; the parent is added by the caller. "Ngày, người" opens Bắt đầu,
- * Kết thúc and Người for this child.
+ * !cao…) like every other quick-create; the parent is added by the caller. Bắt đầu, Kết thúc and Người are
+ * always on the card, so a child is made with its dates and owner in one go.
  */
 export default function SubtaskQuickAdd({
   parent,
@@ -27,7 +27,6 @@ export default function SubtaskQuickAdd({
 }) {
   const [text, setText] = useState("");
   const [extras, setExtras] = useState<QuickExtras>(NO_EXTRAS);
-  const [more, setMore] = useState(false);
   const [busy, setBusy] = useState(false);
   const boxRef = useRef<HTMLFormElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -41,7 +40,7 @@ export default function SubtaskQuickAdd({
     // Under the row, or above it when there is no room; never off the right edge.
     const top = anchor.bottom + 4 + h > window.innerHeight - 8 ? Math.max(8, anchor.top - h - 4) : anchor.bottom + 4;
     setPos({ left: Math.max(8, Math.min(anchor.left, window.innerWidth - w - 8)), top });
-  }, [anchor, more]);
+  }, [anchor]);
 
   // On open, and again when a create finishes (the box is disabled while it runs, which drops focus), so Esc and
   // the next title go to the box.
@@ -93,28 +92,19 @@ export default function SubtaskQuickAdd({
         aria-label="Tên việc con"
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Escape") {
+          // With more than one text box in the form the browser no longer submits on Enter by itself.
+          // Not while an accent is still being composed (Telex/VNI end it with Enter).
+          if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+            e.preventDefault();
+            boxRef.current?.requestSubmit();
+          } else if (e.key === "Escape") {
             e.preventDefault();
             e.stopPropagation();
             onClose();
           }
         }}
       />
-      {/* With several text boxes in the form the browser no longer submits on Enter by itself. */}
-      <button type="submit" hidden tabIndex={-1} aria-hidden="true" />
-      {users && (
-        <>
-          <button
-            type="button"
-            className="subtask-add-more"
-            aria-expanded={more}
-            onClick={() => setMore((m) => !m)}
-          >
-            {more ? "Ẩn ngày, người" : hasExtras(extras) ? "Ngày, người ●" : "Ngày, người"}
-          </button>
-          {more && <QuickAddExtrasFields value={extras} onChange={setExtras} users={users} disabled={busy} />}
-        </>
-      )}
+      {users && <QuickAddExtrasFields value={extras} onChange={setExtras} users={users} disabled={busy} />}
     </form>,
     document.body
   );

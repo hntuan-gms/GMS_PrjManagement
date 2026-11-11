@@ -88,7 +88,7 @@ await step("'+' trên hàng mở ô gõ tên việc con; Enter tạo, gửi kèm
   await fetch(API + "/api/__reset", { method: "POST" });
   await row("DEMO-5").hover();
   await row("DEMO-5").locator("button.wbs-add-child").click();
-  const box = page.locator(".subtask-add input");
+  const box = page.locator(".subtask-add input[aria-label='Tên việc con']");
   await box.waitFor();
   assert.match(await page.textContent(".subtask-add-parent"), /DEMO-5/);
   await box.fill("Việc con thử nhanh");
@@ -98,15 +98,17 @@ await step("'+' trên hàng mở ô gõ tên việc con; Enter tạo, gửi kèm
   assert.equal(post.b.wbsParentId, "DEMO-5");
   assert.deepEqual(post.b.summaries, ["Việc con thử nhanh"]);
   // The box stays for the next one, emptied.
-  await page.waitForFunction(() => document.querySelector(".subtask-add input")?.value === "");
+  await page.waitForFunction(() => document.querySelector(".subtask-add input[aria-label=\"Tên việc con\"]")?.value === "");
   assert.equal(await page.locator(".peek-panel").count(), 0);
 });
 await step("'Ngày, người' trong ô '+': Bắt đầu, Kết thúc, Người đi kèm lúc tạo", async () => {
   await fetch(API + "/api/__reset", { method: "POST" });
   const before = (await log()).filter((l) => l.m === "POST" && l.p === "/api/tasks/bulk").length;
   const box = page.locator(".subtask-add input[aria-label='Tên việc con']");
-  assert.equal(await page.locator(".qa-extras").count(), 0, "chưa bấm mà đã mở sẵn");
-  await page.locator(".subtask-add-more").click();
+  // Nothing to open first: the dates and the owner are on the card from the start.
+  await page.locator(".subtask-add .qa-extras").waitFor();
+  assert.equal(await page.locator(".subtask-add-more").count(), 0, "không còn nút mở thêm");
+  assert.equal(await page.locator(".subtask-add button[hidden]").count(), 0, "nút gửi ẩn lộ ra thành một thanh trống");
   await page.locator(".subtask-add [aria-label='Ngày bắt đầu']").fill("02/11/2026");
   await page.locator(".subtask-add [aria-label='Ngày kết thúc']").fill("06/11/2026");
   await page.locator(".subtask-add [aria-label='Ngày kết thúc']").press("Enter");
@@ -140,7 +142,9 @@ await step("Esc đóng ô gõ mà không bỏ chọn hay mở gì", async () => 
 await step("dòng 'Thêm việc…' cuối bảng cũng có 'Ngày, người'", async () => {
   await fetch(API + "/api/__reset", { method: "POST" });
   const before = (await log()).filter((l) => l.m === "POST" && l.p === "/api/tasks/bulk").length;
-  await page.locator(".wbs-add-more").click();
+  // The panel is there as soon as the row has focus.
+  await page.locator(".wbs-add > input").click();
+  await page.locator(".wbs-add-panel").waitFor({ state: "visible" });
   await page.locator(".wbs-add-panel [aria-label='Ngày kết thúc']").fill("20/11/2026");
   await page.locator(".wbs-add-panel [aria-label='Ngày kết thúc']").press("Enter");
   const input = page.locator(".wbs-add input[aria-label='Thêm việc']");

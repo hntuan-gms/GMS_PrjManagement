@@ -24,7 +24,7 @@ import { predecessorProblem } from "../predecessorCheck";
 import { fitColumns, MIN_NAME_PX } from "../wbsFit";
 import SubtaskQuickAdd from "./SubtaskQuickAdd";
 import QuickAddExtrasFields from "./QuickAddExtras";
-import { NO_EXTRAS, hasExtras, type QuickExtras } from "../quickAddExtras";
+import { NO_EXTRAS, type QuickExtras } from "../quickAddExtras";
 import { KIND_OF_COLUMN, editableKinds, neighbourStop, nextRowFor, stopsFor, type CellKind } from "../wbsCells";
 import { buildResourceLoad } from "../resourceAllocation";
 import { isTypingTarget, overlayOpen } from "../shortcuts";
@@ -652,7 +652,6 @@ function AddRow({
   const [text, setText] = useState("");
   const [asChild, setAsChild] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [more, setMore] = useState(false);
   const [extras, setExtras] = useState<QuickExtras>(NO_EXTRAS);
   return (
     <form
@@ -678,7 +677,11 @@ function AddRow({
         disabled={busy}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Tab" && parent && !e.shiftKey && !asChild) {
+          if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+            // More than one text box in the form: the browser no longer submits on Enter by itself.
+            e.preventDefault();
+            e.currentTarget.form?.requestSubmit();
+          } else if (e.key === "Tab" && parent && !e.shiftKey && !asChild) {
             e.preventDefault();
             setAsChild(true);
           } else if (e.key === "Tab" && e.shiftKey && asChild) {
@@ -692,21 +695,9 @@ function AddRow({
         placeholder={asChild && parent ? `Sub-task của ${parent.id}… (Shift Tab để bỏ)` : "Thêm việc…"}
         aria-label="Thêm việc"
       />
-      {/* With several text boxes in the form the browser no longer submits on Enter by itself. */}
-      <button type="submit" hidden tabIndex={-1} aria-hidden="true" />
-      {users && (
-        <button
-          type="button"
-          className={`wbs-add-more${hasExtras(extras) ? " has-value" : ""}`}
-          aria-expanded={more}
-          title="Thêm ngày bắt đầu, kết thúc, người"
-          onClick={() => setMore((m) => !m)}
-        >
-          Ngày, người
-        </button>
-      )}
       <kbd>Enter</kbd>
-      {users && more && (
+      {/* Shown while the row has focus (CSS), so the dates and owner are there as soon as you start typing. */}
+      {users && (
         <div className="wbs-add-panel">
           <QuickAddExtrasFields value={extras} onChange={setExtras} users={users} disabled={busy} />
         </div>

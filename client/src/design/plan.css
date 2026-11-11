@@ -298,7 +298,7 @@
   background: var(--raised);
   box-shadow: inset 0 0 0 1px var(--line-strong);
 }
-.wbs-add input {
+.wbs-add > input {
   flex: 1;
   min-width: 0;
   height: 100%;
@@ -308,7 +308,7 @@
   box-shadow: none;
   font-size: var(--font-size-md);
 }
-.wbs-add input:focus-visible {
+.wbs-add > input:focus-visible {
   outline: none;
 }
 .wbs-add kbd {
@@ -828,11 +828,11 @@ button.wbs-add-child:hover:not(:disabled) {
 .subtask-add {
   position: fixed;
   z-index: 47;
-  width: 300px;
-  padding: 8px;
+  width: 320px;
+  padding: 10px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--raised);
@@ -847,9 +847,9 @@ button.wbs-add-child:hover:not(:disabled) {
 .qa-extra {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
   min-width: 0;
-  font-size: var(--font-size-sm);
+  font-size: 12px;
   color: var(--ink-3);
 }
 .qa-extra-wide {
@@ -860,26 +860,8 @@ button.wbs-add-child:hover:not(:disabled) {
   width: 100%;
   min-width: 0;
 }
-button.subtask-add-more,
-button.wbs-add-more {
-  align-self: flex-start;
-  padding: 0 4px;
-  border: none;
-  background: transparent;
-  color: var(--ink-3);
-  font-size: var(--font-size-sm);
-  cursor: pointer;
-  white-space: nowrap;
-}
-button.subtask-add-more:hover,
-button.wbs-add-more:hover,
-button.wbs-add-more.has-value {
-  color: var(--ink);
-}
-button.wbs-add-more {
-  align-self: center;
-}
 .wbs-add-panel {
+  display: none;
   position: absolute;
   left: 8px;
   bottom: calc(100% + 4px);
@@ -891,6 +873,9 @@ button.wbs-add-more {
   background: var(--raised);
   box-shadow: var(--shadow-float);
   color: var(--ink-2);
+}
+.wbs-add:focus-within .wbs-add-panel {
+  display: block;
 }
 .subtask-add-parent {
   font-size: var(--font-size-sm);
