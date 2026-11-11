@@ -11,9 +11,14 @@
 /** Below this the chart is drawn whole, exactly as it always was. */
 export const WINDOW_THRESHOLD = 250;
 /** Rows drawn above and below the visible ones, so a fast scroll does not outrun the window. */
-export const BUFFER_ROWS = 40;
-/** The window only moves in steps of this many rows: a re-render every 20 rows scrolled, not every row. */
-export const CHUNK_ROWS = 20;
+export const BUFFER_ROWS = 30;
+/**
+ * The window only moves in steps of this many rows: a re-render every 40 rows scrolled, not every row. Every
+ * move re-renders the whole window (table, bars, arrows, label measuring), so fewer, equally sized moves are
+ * fewer long frames: the window is the same size as with 40 buffer + 20 chunk (viewport + 100 rows), and the
+ * buffer left on each side is never below BUFFER_ROWS.
+ */
+export const CHUNK_ROWS = 40;
 
 export const isWindowed = (rowCount: number): boolean => rowCount > WINDOW_THRESHOLD;
 
