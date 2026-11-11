@@ -1,3 +1,4 @@
+import type { CreateRequirements } from "../createRequirements.js";
 import { cachedDetail, cachedList, forgetDetail, type ListKind } from "../detailCache.js";
 import { pgDetailStore } from "../detailCacheStore.js";
 import express, { Router } from "express";
@@ -99,6 +100,29 @@ apiRouter.get("/priorities", requireProject, async (req, res, next) => {
 apiRouter.get("/issue-types", requireProject, async (req, res, next) => {
   try {
     res.json(await listOf(req, "issue-types", () => req.auth!.taskService!.listIssueTypes()));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * What a new Task or Sub-task must carry in this project (`?kind=subtask|task`). Read from the create screen,
+ * kept ten minutes in memory per project and kind, and never an error: unknown means "send it and let Jira say".
+ */
+const requirementsCache = new Map<string, { at: number; value: CreateRequirements }>();
+apiRouter.get("/create-requirements", requireProject, async (req, res, next) => {
+  try {
+    const { cloudId, projectKey } = req.auth!.session;
+    const subtask = req.query.kind === "subtask";
+    const key = `${cloudId}|${projectKey}|${subtask ? "s" : "t"}`;
+    const hit = requirementsCache.get(key);
+    if (hit && Date.now() - hit.at < 10 * 60_000) {
+      res.json(hit.value);
+      return;
+    }
+    const value = await req.auth!.taskService!.createRequirements(subtask);
+    requirementsCache.set(key, { at: Date.now(), value });
+    res.json(value);
   } catch (err) {
     next(err);
   }

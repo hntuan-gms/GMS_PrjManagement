@@ -852,6 +852,11 @@ button.wbs-add-child:hover:not(:disabled) {
   font-size: 12px;
   color: var(--ink-3);
 }
+.qa-req {
+  margin-left: 6px;
+  font-style: normal;
+  color: var(--risk-text);
+}
 .qa-extra-wide {
   grid-column: 1 / -1;
 }

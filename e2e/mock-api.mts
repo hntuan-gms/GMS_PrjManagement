@@ -105,6 +105,7 @@ app.post("/api/__restore", (_q, r) => {
   attachmentsOf5 = seedFiles();
   sla = { settings: structuredClone(DEFAULT_SLA_SETTINGS), canEdit: true };
   guideReports = [];
+  createRequirements = { dueDate: false, startDate: false, assignee: false, others: [] };
   log.length = 0;
   r.json({});
 });
@@ -273,6 +274,10 @@ app.post("/api/tasks", (req, res) => {
   tasks.push(t);
   res.status(201).json(t);
 });
+// What a project's create screen makes mandatory; a test switches it on with POST /api/__requirements.
+let createRequirements = { dueDate: false, startDate: false, assignee: false, others: [] as string[] };
+app.get("/api/create-requirements", (_q, r) => r.json(createRequirements));
+app.post("/api/__requirements", (req, r) => { createRequirements = { dueDate: false, startDate: false, assignee: false, others: [], ...req.body }; r.json({}); });
 app.post("/api/tasks/bulk", (req, res) => {
   const b = req.body; const created: any[] = [];
   const errors: Array<{ summary: string; message: string }> = [];

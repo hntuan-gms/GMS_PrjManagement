@@ -1,3 +1,4 @@
+import { NO_REQUIREMENTS, readRequirements, type CreateRequirements } from "./createRequirements.js";
 import { getProjectMembers, type ProjectMembers } from "./projectMembers.js";
 import { adfToText, textToAdf } from "./adf.js";
 import { isRateLimited, searchProjectIssues, shareInflight, type ProjectSearchResult } from "./parallelSearch.js";
@@ -1014,6 +1015,24 @@ export class TaskService {
   async listIssueTypes(): Promise<Array<{ name: string; subtask: boolean }>> {
     const types = await this.jira.getProjectIssueTypes(this.ctx.projectKey);
     return types.map((t) => ({ name: t.name, subtask: t.subtask }));
+  }
+
+  /**
+   * What this project's create screen makes mandatory for a new Sub-task (`subtask`) or Task, so the quick-add
+   * card can ask for it before sending. Never throws: no permission to read the screen, or a type the project
+   * lacks, means "nothing known", and Jira's own refusal stays the safety net.
+   */
+  async createRequirements(subtask: boolean): Promise<CreateRequirements> {
+    try {
+      const types = await this.jira.getProjectIssueTypes(this.ctx.projectKey);
+      // The same pick quickCreate makes: the first sub-task type, else the type called Task.
+      const type = subtask ? types.find((t) => t.subtask) : types.find((t) => t.name === "Task") ?? types.find((t) => !t.subtask && (t.hierarchyLevel ?? 0) === 0);
+      if (!type) return NO_REQUIREMENTS;
+      return readRequirements(await this.jira.getCreateMetaFields(this.ctx.projectKey, type.id), this.ctx.startDateFieldId);
+    } catch (err) {
+      if (err instanceof JiraApiError && err.status === 401) throw err;
+      return NO_REQUIREMENTS;
+    }
   }
 
   /**

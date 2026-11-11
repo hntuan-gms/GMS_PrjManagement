@@ -67,6 +67,7 @@ import { buildTaskLink } from "../deepLink";
 import { parseQuickAdd } from "../quickAdd";
 import { mergeExtras, type QuickExtras } from "../quickAddExtras";
 import { createErrorMessage } from "../createError";
+import { missingMessage, missingRequired } from "../createRequirements";
 import { SEQUENCES, createSequence, isTypingTarget, overlayOpen, shortcutIdFor } from "../shortcuts";
 import { isOpen as layersOpen } from "../layers";
 import { setDensity, setThemeChoice } from "../theme";
@@ -1309,6 +1310,16 @@ export default function ProjectWorkspace({
     }
     const f = merged ? { ...r.fields, ...merged.fields } : r.fields;
     const parent = f.parentId ? tasks.find((t) => t.id === f.parentId) : undefined;
+    // What the project's create screen makes mandatory, asked before anything is sent (for the type this
+    // sentence will make by default; an explicit /type leaves it to Jira). Unknown or failing: send it.
+    if (!f.issueType) {
+      const need = await api.getCreateRequirements(parent && parent.issueType !== "Epic" ? "subtask" : "task").catch(() => null);
+      const missing = need ? missingRequired(f, need) : [];
+      if (missing.length > 0) {
+        toast(missingMessage(missing) + " Điền xong rồi tạo lại.", { tone: "error" });
+        return false;
+      }
+    }
     const subtaskType = meta?.issueTypes.find((t) => t.subtask)?.name ?? "Sub-task";
     // Under a Story or Task, Jira only takes a sub-task; under an Epic (or nothing) a Task.
     const issueType = (f.issueType ?? (parent && parent.issueType !== "Epic" ? subtaskType : "Task")) as Task["issueType"];

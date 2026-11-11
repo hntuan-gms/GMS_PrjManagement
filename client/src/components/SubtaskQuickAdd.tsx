@@ -106,7 +106,7 @@ export default function SubtaskQuickAdd({
           }
         }}
       />
-      {users && <QuickAddExtrasFields value={extras} onChange={setExtras} users={users} disabled={busy} />}
+      {users && <QuickAddExtrasFields value={extras} onChange={setExtras} users={users} kind={parent.issueType === "Epic" ? "task" : "subtask"} disabled={busy} />}
     </form>,
     document.body
   );

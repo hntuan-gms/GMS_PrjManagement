@@ -132,7 +132,7 @@ await step("Kết thúc trước Bắt đầu: không tạo gì, báo lỗi", as
   const box = page.locator(".subtask-add input[aria-label='Tên việc con']");
   await box.fill("Sai ngày");
   await box.press("Enter");
-  await page.waitForSelector(".toast", { timeout: 4000 });
+  await page.locator(".toast-error", { hasText: "Kết thúc trước ngày bắt đầu" }).last().waitFor();
   assert.equal((await log()).filter((l) => l.m === "POST" && l.p === "/api/tasks/bulk").length, before);
 });
 await step("Jira từ chối vì dự án bắt buộc ngày kết thúc: báo bằng tiếng Việt, giữ nguyên chữ đã gõ, rồi điền ngày là tạo được", async () => {
@@ -153,6 +153,29 @@ await step("Jira từ chối vì dự án bắt buộc ngày kết thúc: báo b
   await box.press("Enter");
   await waitForBulk(before);
   await page.waitForFunction(() => document.querySelector(".subtask-add input[aria-label='Tên việc con']")?.value === "");
+});
+await step("dự án bắt buộc ngày kết thúc: thẻ ghi 'bắt buộc', chặn trước khi gửi, điền ngày thì tạo được", async () => {
+  // Close and reopen the card so it reads the project's requirements fresh.
+  await page.keyboard.press("Escape");
+  await fetch(API + "/api/__requirements", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ dueDate: true }) });
+  await row("DEMO-5").hover();
+  await row("DEMO-5").locator("button.wbs-add-child").click();
+  await page.locator(".subtask-add .qa-extra", { hasText: "Kết thúc" }).locator(".qa-req").waitFor();
+  assert.equal(await page.locator(".subtask-add .qa-extra", { hasText: "Bắt đầu" }).locator(".qa-req").count(), 0, "Bắt đầu không bắt buộc");
+  const box = page.locator(".subtask-add input[aria-label='Tên việc con']");
+  const before = (await bulkPosts()).length;
+  await box.fill("Việc thiếu hạn");
+  await box.press("Enter");
+  const toast = page.locator(".toast-error", { hasText: "bắt buộc điền «Kết thúc»" }).last();
+  await toast.waitFor();
+  await page.waitForTimeout(300);
+  assert.equal((await bulkPosts()).length, before, "đã gửi lên khi còn thiếu ô bắt buộc");
+  assert.equal(await box.inputValue(), "Việc thiếu hạn", "mất chữ đã gõ");
+  await page.locator(".subtask-add [aria-label='Ngày kết thúc']").fill("20/11/2026");
+  await page.locator(".subtask-add [aria-label='Ngày kết thúc']").press("Enter");
+  await box.press("Enter");
+  await waitForBulk(before);
+  await fetch(API + "/api/__requirements", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
 });
 await step("Esc đóng ô gõ mà không bỏ chọn hay mở gì", async () => {
   await page.keyboard.press("Escape");

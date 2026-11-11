@@ -701,7 +701,7 @@ function AddRow({
       {/* Shown while the row has focus (CSS), so the dates and owner are there as soon as you start typing. */}
       {users && (
         <div className="wbs-add-panel">
-          <QuickAddExtrasFields value={extras} onChange={setExtras} users={users} disabled={busy} />
+          <QuickAddExtrasFields value={extras} onChange={setExtras} users={users} kind={asChild && parent && parent.issueType !== "Epic" ? "subtask" : "task"} disabled={busy} />
         </div>
       )}
     </form>

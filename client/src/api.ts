@@ -1,3 +1,4 @@
+import type { CreateRequirements } from "./createRequirements";
 import type {
   BoardSnapshot,
   ChatSessionSummary,
@@ -301,6 +302,7 @@ export const api = {
   listPriorities: () => request<string[]>("/priorities"),
   listLabels: () => request<string[]>("/labels"),
   listIssueTypes: () => request<Array<{ name: string; subtask: boolean }>>("/issue-types"),
+  getCreateRequirements: (kind: "task" | "subtask") => request<CreateRequirements>(`/create-requirements?kind=${kind}`),
   listComponents: () => request<ProjectComponent[]>("/components"),
   listVersions: () => request<ProjectVersion[]>("/versions"),
   listLinkTypes: () => request<LinkType[]>("/link-types"),
