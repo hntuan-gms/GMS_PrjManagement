@@ -56,11 +56,14 @@ await step("Alt →: dời việc đang chọn một ngày; Alt ←: dời lại
   await page.keyboard.press("Alt+ArrowLeft");
   await page.waitForFunction(async ([, b]) => (await (await fetch("/api/tasks")).json()).find((t) => t.id === "DEMO-8").startDate === b, [API, before]);
 });
-await step("Ctrl .: sao chép mã, có thông báo", async () => {
+await step("Ctrl .: sao chép liên kết của việc, có thông báo", async () => {
   await select("DEMO-6");
   await page.keyboard.press("Control+.");
   await page.waitForSelector(".toast", { hasText: "DEMO-6" });
-  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), "DEMO-6");
+  assert.equal(
+    await page.evaluate(() => navigator.clipboard.readText()),
+    await page.evaluate(() => `${location.origin}/?project=DEMO&task=DEMO-6`)
+  );
 });
 await step("J / K: đi xuống, đi lên theo dòng đang hiện", async () => {
   await select("DEMO-3");

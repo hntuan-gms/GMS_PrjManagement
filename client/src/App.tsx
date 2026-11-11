@@ -17,45 +17,49 @@ export default function App() {
   const { status, session, authError, login, logout, selectProject } = useSession();
   const [switching, setSwitching] = useState(false);
 
-  // A link to one saved report (deepLink.ts): parked on load, acted on once there is a session —
-  // switch this tab to the link's project, then open the Báo cáo tab on that report.
+  // A link to one saved report or one task (deepLink.ts): parked on load, acted on once there is a
+  // session — switch this tab to the link's project, then open the Báo cáo tab on that report or the
+  // task's detail panel.
   const [link, setLink] = useState<DeepLink | null>(captureDeepLink);
   const [openReportId, setOpenReportId] = useState<string | null>(null);
+  const [openTaskId, setOpenTaskId] = useState<string | null>(null);
   const [linkError, setLinkError] = useState<string | null>(null);
   const handlingLink = useRef(false);
   const projectKey = session?.project?.key ?? null;
   useEffect(() => {
     if (!link || !session || handlingLink.current) return;
     handlingLink.current = true;
-    const finish = (reportId: string | null, error: string | null) => {
+    const finish = (target: DeepLink | null, error: string | null) => {
       clearDeepLink();
       setLink(null);
-      setOpenReportId(reportId);
+      setOpenReportId(target?.reportId ?? null);
+      setOpenTaskId(target?.taskId ?? null);
       setLinkError(error);
       handlingLink.current = false;
     };
     if (projectKey === link.project) {
-      finish(link.reportId, null);
+      finish(link, null);
       return;
     }
     selectProject(link.project).then(
-      () => finish(link.reportId, null),
+      () => finish(link, null),
       () => finish(null, `Không mở được liên kết: bạn chưa có quyền xem dự án ${link.project}.`)
     );
   }, [link, session, projectKey, selectProject]);
 
   // The splash (index.html) covers the wait for the session; it leaves once there is a real
   // screen under it, so the mark can fly into the rail's.
-  const waiting = status === "checking" || Boolean(link && session && projectKey !== link.project);
+  const waiting = status === "checking" || Boolean(link && session);
   useEffect(() => {
     if (!waiting) dismissSplash();
   }, [waiting]);
 
   if (status === "checking") return null;
-  // Holding the workspace back while the link's project is being switched to, so the wrong
-  // project's tasks do not flash up first.
-  if (link && session && projectKey !== link.project) {
-    return <div className="center-message">Đang mở báo cáo...</div>;
+  // Holding the workspace back until the link has been taken (its project switched to, and the
+  // target handed down): the workspace reads it once, on mount, and the wrong project's tasks
+  // must not flash up first.
+  if (link && session) {
+    return <div className="center-message">Đang mở liên kết...</div>;
   }
 
   if (status === "anonymous" || !session) {
@@ -96,6 +100,8 @@ export default function App() {
         <ProjectWorkspace
           initialReportId={openReportId}
           onInitialReportShown={() => setOpenReportId(null)}
+          initialTaskId={openTaskId}
+          onInitialTaskShown={() => setOpenTaskId(null)}
           session={session}
           onSwitchProject={() => setSwitching(true)}
           onLogout={logout}

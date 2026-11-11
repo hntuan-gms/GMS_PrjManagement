@@ -63,6 +63,7 @@ import CommandBar, { type Command, type CreatePreview } from "./CommandBar";
 import ShortcutSheet from "./ShortcutSheet";
 import Toaster from "./Toaster";
 import { toast } from "../toast";
+import { buildTaskLink } from "../deepLink";
 import { parseQuickAdd } from "../quickAdd";
 import { SEQUENCES, createSequence, isTypingTarget, overlayOpen, shortcutIdFor } from "../shortcuts";
 import { isOpen as layersOpen } from "../layers";
@@ -76,6 +77,9 @@ interface Props {
   /** A saved report to open on arrival, from a shared link. */
   initialReportId?: string | null;
   onInitialReportShown?: () => void;
+  /** A task to open in the detail panel on arrival, from a shared link (deepLink.ts). */
+  initialTaskId?: string | null;
+  onInitialTaskShown?: () => void;
 }
 
 /**
@@ -112,7 +116,15 @@ const OVERLAY_WARNING =
   "Phụ thuộc, baseline và % hoàn thành được lưu tạm trên máy chủ và sẽ mất khi ứng dụng " +
   "được cập nhật. Ngày bắt đầu và ngày kết thúc vẫn được đồng bộ với Jira.";
 
-export default function ProjectWorkspace({ session, onSwitchProject, onLogout, initialReportId = null, onInitialReportShown }: Props) {
+export default function ProjectWorkspace({
+  session,
+  onSwitchProject,
+  onLogout,
+  initialReportId = null,
+  onInitialReportShown,
+  initialTaskId = null,
+  onInitialTaskShown,
+}: Props) {
   const dialogs = useDialogs();
   // What this browser saw last time, shown at once while the fresh copy loads (tasksCache.ts).
   // Read once, on the first render; the workspace is keyed by project so it never goes stale.
@@ -390,6 +402,27 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
     },
     [editingTask]
   );
+  // A link to one task (deepLink.ts): taken once on arrival, opened as soon as the plan has it. A copy saved
+  // by this browser may already hold it; otherwise it waits for the fresh read, and a task that is not in the
+  // project (deleted, moved, mistyped) is said so rather than silently ignored.
+  const taskLink = useRef<string | null>(initialTaskId);
+  useEffect(() => {
+    if (initialTaskId) onInitialTaskShown?.();
+    // Once, on arrival: the link has done its job and must not reopen the task on a later remount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    const id = taskLink.current;
+    if (!id || loading) return;
+    const found = tasks.find((t) => t.id.toUpperCase() === id);
+    if (found) {
+      taskLink.current = null;
+      openTask(found);
+    } else if (!showingCache) {
+      taskLink.current = null;
+      if (!loadError) toast(`Không tìm thấy việc ${id} trong dự án.`, { tone: "error" });
+    }
+  }, [tasks, loading, showingCache, loadError, openTask]);
   // A row selected is usually a row about to be opened: start the panel's reads a beat early, so the
   // double-click that follows finds them under way (detailCache shares the request with the panel).
   useEffect(() => {
@@ -1527,9 +1560,10 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
           const keys = ks.selectedTasks().map((t) => t.id);
           if (keys.length === 0 && selectedId) keys.push(selectedId);
           if (keys.length === 0) return false;
-          const text = keys.join(" ");
+          // One link per task, one per line: whoever opens it sees that task's detail without going to Jira.
+          const text = keys.map((k) => buildTaskLink(window.location.origin, k)).join("\n");
           navigator.clipboard?.writeText(text).then(
-            () => toast(keys.length === 1 ? `Đã sao chép ${text}` : `Đã sao chép ${keys.length} mã`, { ms: 2500 }),
+            () => toast(keys.length === 1 ? `Đã sao chép liên kết ${keys[0]}` : `Đã sao chép ${keys.length} liên kết`, { ms: 2500 }),
             () => toast("Không sao chép được.", { tone: "error" })
           );
           return true;

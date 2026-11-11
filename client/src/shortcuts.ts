@@ -41,7 +41,7 @@ export const SHORTCUTS: Shortcut[] = [
   { id: "shift-back", keys: "Alt ←", label: "Dời lùi 1 ngày", group: "Việc đang chọn" },
   { id: "shift-fwd", keys: "Alt →", label: "Dời tới 1 ngày", group: "Việc đang chọn" },
   { id: "card-column", keys: "Shift H  Shift L", label: "Board: chuyển thẻ sang cột trái, phải", group: "Việc đang chọn" },
-  { id: "copy-key", keys: "Ctrl .", label: "Sao chép mã", group: "Việc đang chọn" },
+  { id: "copy-key", keys: "Ctrl .", label: "Sao chép liên kết", group: "Việc đang chọn" },
   { id: "delete", keys: "Delete", label: "Xoá (có hỏi lại)", group: "Việc đang chọn" },
   { id: "today", keys: "T", label: "Cuộn tới hôm nay", group: "List" },
   { id: "draft", keys: "Shift D", label: "Bật / tắt bản nháp kế hoạch", group: "List" },

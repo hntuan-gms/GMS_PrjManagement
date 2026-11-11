@@ -3,6 +3,7 @@ import { useLayer } from "../useLayer";
 import DateField from "./DateField";
 import StatusGlyph from "./StatusGlyph";
 import { api } from "../api";
+import { buildTaskLink } from "../deepLink";
 import { isAssignableType } from "../types";
 import type { DependencyType, JiraUser, Predecessor, SlaSettings, Task, TaskTransition, TaskUpdateInput, TransitionField } from "../types";
 import { filesFromClipboard, hasPending, MAX_ATTACHMENT_BYTES, NO_ATTACHMENTS, uploadPending, type PendingAttachments } from "../attachments";
@@ -369,12 +370,13 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
     }
   }
 
-  async function copyKey() {
+  /** A link to this task inside the app (deepLink.ts): whoever opens it sees this detail panel, not Jira. */
+  async function copyLink() {
     try {
-      await navigator.clipboard.writeText(task.id);
-      toast(`Đã sao chép ${task.id}`);
+      await navigator.clipboard.writeText(buildTaskLink(window.location.origin, task.id));
+      toast(`Đã sao chép liên kết ${task.id}`);
     } catch {
-      toast("Không sao chép được mã", { tone: "error" });
+      toast("Không sao chép được liên kết", { tone: "error" });
     }
   }
 
@@ -458,7 +460,7 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
       requestClose();
     } else if ((e.ctrlKey || e.metaKey) && e.key === ".") {
       e.preventDefault();
-      void copyKey();
+      void copyLink();
     }
   }
 
@@ -605,11 +607,11 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
                   className="menu-item"
                   onClick={() => {
                     close();
-                    void copyKey();
+                    void copyLink();
                   }}
                 >
                   <Icon name="link" />
-                  <span className="menu-item-text">Sao chép mã</span>
+                  <span className="menu-item-text">Sao chép liên kết</span>
                   <kbd className="menu-kbd">Ctrl .</kbd>
                 </button>
                 {/* A sub-task has no sub-tasks of its own in Jira, so this is only for tasks that can be a parent. */}

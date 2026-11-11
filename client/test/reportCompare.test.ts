@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildReportLink, parseDeepLink } from "../src/deepLink";
+import { buildReportLink, buildTaskLink, parseDeepLink } from "../src/deepLink";
 import { compareReports, diffLists, foldText, orderPair } from "../src/reportCompare";
 import type { Health, ProgressReport } from "../src/types";
 
@@ -96,5 +96,24 @@ describe("report deep link (3.10)", () => {
     assert.equal(parseDeepLink(`?project=../etc&report=${id}`), null);
     assert.equal(parseDeepLink(`?report=${id}`), null);
     assert.equal(parseDeepLink(""), null);
+  });
+});
+
+describe("task deep link", () => {
+  it("round-trips a task key, the project coming from the key itself", () => {
+    const link = buildTaskLink("https://gms.example/", "GPM-104");
+    assert.equal(link, "https://gms.example/?project=GPM&task=GPM-104");
+    assert.deepEqual(parseDeepLink(new URL(link).search), { project: "GPM", taskId: "GPM-104" });
+  });
+
+  it("normalises the case of the key", () => {
+    assert.deepEqual(parseDeepLink("?project=gpm&task=gpm-7"), { project: "gpm", taskId: "GPM-7" });
+  });
+
+  it("ignores a task that is not of the named project, or not a key at all", () => {
+    assert.equal(parseDeepLink("?project=GPM&task=AI-1"), null);
+    assert.equal(parseDeepLink("?project=GPM&task=GPM-1/../x"), null);
+    assert.equal(parseDeepLink("?project=GPM&task=GPM"), null);
+    assert.equal(parseDeepLink("?task=GPM-1"), null);
   });
 });
