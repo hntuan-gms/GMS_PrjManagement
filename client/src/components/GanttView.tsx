@@ -857,6 +857,31 @@ export default function GanttView({
     return () => el.removeEventListener("wheel", onWheel, { capture: true });
   }, []);
 
+  // Wheel at the end of the list. gantt-task-react still handles a wheel step when its vertical scroller is
+  // already at the very end (or the very start) and clamps it itself: the clamp came out as -(pane height),
+  // and the whole list jumped back to the first row (seen on a project of ~180 rows, scrolling on past the
+  // last one; e2e/gantt-scroll-end.e2e.mjs). A step that goes nowhere is swallowed here so the library never
+  // sees it. That includes a step of zero: a trackpad's momentum scrolling sends `deltaY: -0` right after the
+  // step that reached the end (seen in the console of a real trackpad on ADT), and that one made the list
+  // jump too. The windowed chart (VirtualStage, past WINDOW_THRESHOLD rows) scrolls natively and is left alone.
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    function onEdgeWheel(e: WheelEvent) {
+      if (e.ctrlKey || e.shiftKey || e.deltaX !== 0) return;
+      if (el!.querySelector(".gantt-vscroll")) return;
+      const sc = el!.querySelector<HTMLElement>("._1eT-t");
+      if (!sc) return;
+      const max = sc.scrollHeight - sc.clientHeight;
+      const goesNowhere = e.deltaY === 0 || (e.deltaY > 0 && sc.scrollTop >= max - 1) || (e.deltaY < 0 && sc.scrollTop <= 0);
+      if (!goesNowhere) return;
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    el.addEventListener("wheel", onEdgeWheel, { passive: false, capture: true });
+    return () => el.removeEventListener("wheel", onEdgeWheel, { capture: true });
+  }, []);
+
   // Day-view header: gantt-task-react always renders "Th 2, 15" (weekday + day),
   // with no prop to ask for just the day number, and always at the same pixel
   // width regardless of zoom — at low zoom that text collides with its
@@ -1535,12 +1560,33 @@ export default function GanttView({
   // Rows move up by how far the page is scrolled past the first drawn row. A CSS variable on
   // the stage, not state: a scroll event only writes it, and a row the library has just
   // created already has the right offset on its first frame.
-  const applyOffset = useCallback(() => {
-    const sc = scrollerRef.current;
+  // A scroll step writes the offset straight onto the two elements that move (the table's rows and the bars'
+  // svg): a custom property set on the stage is inherited, so changing it made the browser re-style every node
+  // below it (thousands, on a window of ~120 rows) on every wheel step — most of the 500 ms frames measured on
+  // a 4000-task project. The variable is still written when the window moves, for an element the library has
+  // just created (the CSS rule reads it), and the inline transform wins on the elements that exist.
+  const moveEls = useRef<{ rows: HTMLElement | null; svg: HTMLElement | null }>({ rows: null, svg: null });
+  const moveRows = useCallback((px: number) => {
     const stage = stageRef.current;
-    if (!sc || !stage) return;
-    stage.style.setProperty("--gms-row-offset", `${sc.scrollTop - drawnStartRef.current * ROW_HEIGHT}px`);
+    if (!stage) return;
+    const els = moveEls.current;
+    if (!els.rows?.isConnected) els.rows = stage.querySelector<HTMLElement>(".wbs-rows");
+    if (!els.svg?.isConnected) els.svg = stage.querySelector<HTMLElement>("svg:has(g.content)");
+    const t = `translateY(${-px}px)`;
+    if (els.rows) els.rows.style.transform = t;
+    if (els.svg) els.svg.style.transform = t;
   }, []);
+  const applyOffset = useCallback(
+    (scrollTop?: number, andVariable = true) => {
+      const sc = scrollerRef.current;
+      const stage = stageRef.current;
+      if (!sc || !stage) return;
+      const px = (scrollTop ?? sc.scrollTop) - drawnStartRef.current * ROW_HEIGHT;
+      if (andVariable) stage.style.setProperty("--gms-row-offset", `${px}px`);
+      moveRows(px);
+    },
+    [moveRows]
+  );
   const onCommitted = useCallback(
     (s: number, count: number) => {
       drawnStartRef.current = s;
@@ -1552,8 +1598,12 @@ export default function GanttView({
   const onVScroll = () => {
     const sc = scrollerRef.current;
     if (!sc) return;
-    applyOffset();
-    const s = windowStartFor(sc.scrollTop, ROW_HEIGHT, rows.length, viewportRows);
+    // Read once, before anything is written: a second read after the write below would flush the layout.
+    const top = sc.scrollTop;
+    applyOffset(top, false);
+    const s = windowStartFor(top, ROW_HEIGHT, rows.length, viewportRows);
+    // Not a transition: rendered in slices the window lagged the scroll and a fast fling showed blank rows
+    // (measured: 2000-3000px of empty chart on a 4000-task project in the dev build, none without it).
     setWantedStart((prev) => (prev === s ? prev : s));
   };
   // Room kept on each side of the plan (ganttAxis.axisPadDays): the axis is always wider than the pane, so
@@ -1707,24 +1757,44 @@ export default function GanttView({
     // this wrote last needs no second look (measuring all of them on every scroll made frames 600 ms long).
     function clip() {
       frame = 0;
+      // Reads and writes are kept in separate batches: a measure after a write flushes layout, and doing that
+      // label by label (a new window brings ~20 of them) cost ~130 ms a step. Every label is measured in one go,
+      // the long ones are cut to a length guessed from their own width, and only those are measured again.
+      const todo: { el: SVGTextElement; full: string; next: string; n: number; len: number }[] = [];
+      const seen: SVGTextElement[] = [];
+      const fulls = new Map<SVGTextElement, string>();
       bodyEl!.querySelectorAll<SVGTextElement>("text._3KcaM").forEach((el) => {
         const cur = el.textContent ?? "";
         if (el.dataset.clipped !== undefined && cur === el.dataset.clipped) return;
         // What React last wrote is the full name; what this wrote last is the cut one.
         const full = el.dataset.full === undefined || (cur !== el.dataset.clipped && cur !== el.dataset.full) ? cur : el.dataset.full;
-        let next = full;
-        if (full.length > 0 && el.getComputedTextLength() > MAX_OUTSIDE_LABEL) {
-          let n = full.length;
-          do {
-            n = Math.max(1, n - Math.max(1, Math.ceil(n / 8)));
-            next = full.slice(0, n).trimEnd() + "…";
-            el.textContent = next;
-          } while (n > 1 && el.getComputedTextLength() > MAX_OUTSIDE_LABEL);
+        seen.push(el);
+        fulls.set(el, full);
+      });
+      for (const el of seen) {
+        const full = fulls.get(el)!;
+        const len = full.length > 0 ? el.getComputedTextLength() : 0;
+        if (len > MAX_OUTSIDE_LABEL) todo.push({ el, full, next: full, n: full.length, len });
+      }
+      let round = todo;
+      for (let pass = 0; pass < 12 && round.length > 0; pass++) {
+        for (const t of round) {
+          // First pass: proportional guess from the measured width (a little short of it); then 1/8 steps.
+          const guess = pass === 0 ? Math.floor((t.n * MAX_OUTSIDE_LABEL) / t.len) - 1 : t.n - Math.max(1, Math.ceil(t.n / 8));
+          t.n = Math.max(1, Math.min(t.n - 1, guess));
+          t.next = t.full.slice(0, t.n).trimEnd() + "…";
+          t.el.textContent = t.next;
         }
+        round = round.filter((t) => t.n > 1 && t.el.getComputedTextLength() > MAX_OUTSIDE_LABEL);
+      }
+      const cut = new Map(todo.map((t) => [t.el, t.next]));
+      for (const el of seen) {
+        const full = fulls.get(el)!;
+        const next = cut.get(el) ?? full;
         el.dataset.full = full;
         el.dataset.clipped = next;
         if (el.textContent !== next) el.textContent = next;
-      });
+      }
     }
     const schedule = () => {
       if (!frame)
