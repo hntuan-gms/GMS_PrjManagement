@@ -11,14 +11,17 @@
 /** Below this the chart is drawn whole, exactly as it always was. */
 export const WINDOW_THRESHOLD = 250;
 /** Rows drawn above and below the visible ones, so a fast scroll does not outrun the window. */
-export const BUFFER_ROWS = 30;
+export const BUFFER_ROWS = 15;
 /**
- * The window only moves in steps of this many rows: a re-render every 40 rows scrolled, not every row. Every
- * move re-renders the whole window (table, bars, arrows, label measuring), so fewer, equally sized moves are
- * fewer long frames: the window is the same size as with 40 buffer + 20 chunk (viewport + 100 rows), and the
- * buffer left on each side is never below BUFFER_ROWS.
+ * The window only moves in steps of this many rows: a re-render every 30 rows scrolled, not every row. Every
+ * move re-renders the whole window (table, bars, arrows, label measuring), and the page stalls for as long as
+ * that takes, so a smaller window is a shorter stall. Measured on a 4400-row chart (production build, median of
+ * 3 alternating runs): buffer 30 / chunk 40 (a window of viewport + 100 rows) stalled 104 ms a move, buffer 15 /
+ * chunk 30 (viewport + 60) 63 ms; 20 / 20 stalled less often-but-more (more moves). The price is a thin strip of
+ * blank rows (120 px at most) in a fling faster than a trackpad produces (~37,000 px/s); the buffer left on each
+ * side is never below BUFFER_ROWS.
  */
-export const CHUNK_ROWS = 40;
+export const CHUNK_ROWS = 30;
 
 export const isWindowed = (rowCount: number): boolean => rowCount > WINDOW_THRESHOLD;
 
