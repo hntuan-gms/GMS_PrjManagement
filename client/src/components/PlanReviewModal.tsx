@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { formatDateInput } from "../dateInput";
+import { inclusiveDays } from "../scheduleFields";
 import { isAssignableType, type JiraUser, type PlanResponse, type PlanRun } from "../types";
 import DateField from "./DateField";
 import { useDialogs } from "./dialogContext";
@@ -96,16 +97,46 @@ export default function PlanReviewModal({ runId, users, onClose, onApplied }: Pr
     return (tempId: string) => walk(tempId);
   }, [plan]);
 
-  async function patchItem(itemId: string, patch: Parameters<typeof api.updatePlanItem>[2]) {
-    if (!plan) return;
+  /** Saves one change and returns the plan as the server laid it out again, or null when it was refused. */
+  async function patchItem(itemId: string, patch: Parameters<typeof api.updatePlanItem>[2]): Promise<PlanResponse | null> {
+    if (!plan) return null;
     setBusy("saving");
+    setError(null);
     try {
-      setPlan(await api.updatePlanItem(plan.run.id, itemId, patch));
+      const next = await api.updatePlanItem(plan.run.id, itemId, patch);
+      setPlan(next);
+      return next;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Không lưu được thay đổi.");
+      return null;
     } finally {
       setBusy(null);
     }
+  }
+
+  /**
+   * A typed start day is only the earliest the row may start (the server lays the rest out), so one before
+   * the plan's first day, or before a predecessor ends, lands somewhere else. Say so instead of letting the
+   * box quietly jump back.
+   */
+  async function setStart(itemId: string, iso: string) {
+    const next = await patchItem(itemId, { notBefore: iso });
+    const landed = next?.items.find((i) => i.id === itemId)?.startDate;
+    if (landed && landed !== iso) {
+      setError(
+        `Không đặt được bắt đầu ${formatDateInput(iso)}: sớm nhất là ${formatDateInput(landed)}, theo ngày bắt đầu của kế hoạch và việc phải xong trước.`
+      );
+    }
+  }
+
+  /** The end day sets the length: start to end, both counted. */
+  function setEnd(itemId: string, start: string, iso: string) {
+    const days = inclusiveDays(start, iso);
+    if (days < 1) {
+      setError("Kết thúc trước ngày bắt đầu.");
+      return;
+    }
+    void patchItem(itemId, { durationDays: days });
   }
 
   async function removeItem(itemId: string) {
@@ -315,12 +346,27 @@ export default function PlanReviewModal({ runId, users, onClose, onApplied }: Pr
                             value={item.startDate}
                             ariaLabel="Bắt đầu"
                             onChange={(iso) => {
-                              if (iso !== item.startDate) patchItem(item.id, { notBefore: iso });
+                              if (iso !== item.startDate) void setStart(item.id, iso);
                             }}
                           />
                         )}
                       </td>
-                      <td>{formatDateInput(item.dueDate)}</td>
+                      <td>
+                        {fixed ? (
+                          formatDateInput(item.dueDate)
+                        ) : (
+                          // The end day is the start plus the length, so typing one changes "Số ngày".
+                          <DateField
+                            className="ai-end-field"
+                            value={item.dueDate}
+                            base={item.startDate}
+                            ariaLabel="Kết thúc"
+                            onChange={(iso) => {
+                              if (iso !== item.dueDate) setEnd(item.id, item.startDate, iso);
+                            }}
+                          />
+                        )}
+                      </td>
                       <td className="ai-deps">
                         {item.dependencies.length === 0
                           ? "—"

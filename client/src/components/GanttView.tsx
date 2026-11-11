@@ -489,8 +489,7 @@ function csvValue(id: ColumnId, t: Task, r: { start: string; end: string } | und
 // who has it, how far along. The rest (dates, estimates, labels…) is a tick away in "Hiển thị".
 // Type is the icon beside the name and priority a mark beside it when it is not the ordinary one,
 // so neither needs a column of its own (plan §6.1.2): a column of "Medium" was 180px of nothing.
-// Dates are in too: they are what a plan is adjusted by, and a column that is not there cannot be edited.
-const DEFAULT_COLUMNS: ColumnId[] = ["status", "assignee", "start", "due", "pct"];
+const DEFAULT_COLUMNS: ColumnId[] = ["status", "assignee", "pct"];
 
 const COLUMNS_KEY = "gms.gantt.columns";
 const KEY_COL_WIDTH = 64;

@@ -75,6 +75,45 @@ await step("Đặt ngày bắt đầu cho một dòng: dòng đó và việc ph�
   assert.deepEqual(sent.b, { notBefore: target }, "chỉ gửi ngày bắt đầu");
 });
 
+await step("Sửa ngày kết thúc: đổi số ngày, việc phụ thuộc dời theo", async () => {
+  const first = "Họp khởi động với khách hàng"; // bắt đầu TODAY+7 từ bước trước, 2 ngày
+  const next = "Khảo sát quy trình bán hàng hiện tại";
+  const start = plusDays(TODAY, 7);
+  const end = plusDays(start, 4); // 5 ngày
+  const box = rowOf(first).locator(".ai-end-field input[type=text]");
+  await box.fill(dmy(end));
+  await box.press("Enter");
+  await page.waitForFunction(
+    ([s, v]) =>
+      [...document.querySelectorAll(".ai-modal .ai-table tbody tr")].some(
+        (tr) => tr.querySelector(`input[value='${s}']`) && tr.querySelectorAll("td")[5].querySelector("input[type=text]")?.value === v
+      ),
+    [first, dmy(end)]
+  );
+  assert.equal(await rowOf(first).locator("td").nth(2).locator("input").inputValue(), "5");
+  assert.equal(await startOf(next), dmy(plusDays(end, 1)));
+  assert.deepEqual((await planPatches()).at(-1).b, { durationDays: 5 }, "chỉ gửi số ngày");
+});
+
+await step("Kết thúc trước bắt đầu: báo lỗi, không gửi gì", async () => {
+  const first = "Họp khởi động với khách hàng";
+  const before = (await planPatches()).length;
+  const box = rowOf(first).locator(".ai-end-field input[type=text]");
+  await box.fill(dmy(plusDays(TODAY, 1)));
+  await box.press("Enter");
+  await modal.locator(".notice-error", { hasText: "Kết thúc trước ngày bắt đầu" }).waitFor();
+  assert.equal((await planPatches()).length, before);
+});
+
+await step("Bắt đầu sớm hơn mức cho phép: nói rõ ngày sớm nhất thay vì tự nhảy lại", async () => {
+  const first = "Họp khởi động với khách hàng";
+  const box = rowOf(first).locator(".ai-start-field input[type=text]");
+  await box.fill(dmy(plusDays(TODAY, -3)));
+  await box.press("Enter");
+  await modal.locator(".notice-error", { hasText: "sớm nhất là " + dmy(TODAY) }).waitFor();
+  assert.equal(await startOf(first), dmy(TODAY));
+});
+
 await step("Kế hoạch đã huỷ mở ra ở dạng chỉ đọc, không gửi sửa đổi nào", async () => {
   await modal.locator(".modal-footer button.danger").click();
   await page.locator(".dlg button.danger-solid").click();
