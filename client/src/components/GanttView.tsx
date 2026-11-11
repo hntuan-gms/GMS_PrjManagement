@@ -2011,13 +2011,16 @@ export default function GanttView({
             // Selecting on grab is deferred: re-rendering the row inside dragstart can cancel the drag.
             if (!selectedIds.has(task.id)) window.setTimeout(() => onSelect(task.id, { toggle: false, range: false }, order), 0);
           }}
-          onClick={(e) =>
+          onClick={(e) => {
+            // A click that did not arm a rename (the cells that do stop it before it gets here) drops one armed by
+            // an earlier click, so a rename never opens on a row the person has already left.
+            cancelArmedEdit();
             onSelect(
               task.id,
               { toggle: e.ctrlKey || e.metaKey, range: e.shiftKey },
               rows.map((r) => r.task.id)
-            )
-          }
+            );
+          }}
           onDoubleClick={() => {
             cancelArmedEdit();
             setBoxEdit(null);

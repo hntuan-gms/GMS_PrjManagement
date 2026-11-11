@@ -96,10 +96,15 @@ await step("chữ không phải giờ: ô đỏ, có một câu giải thích, k
 });
 await step("Esc khi đang gõ trả giá trị cũ và không ghi gì", async () => {
   await reset();
-  await cell("DEMO-3", 2).fill("7");
+  // An empty cell, found rather than assumed: the demo worklogs follow today's weekday, so a fixed column
+  // is empty on some days and holds hours on others.
+  const cells = page.locator(".ts-mine input[data-key='DEMO-3']");
+  const empty = await cells.evaluateAll((els) => els.findIndex((e) => e.value === "" && !e.disabled));
+  assert.ok(empty >= 0, "không có ô trống để thử");
+  await cells.nth(empty).fill("7");
   await page.keyboard.press("Escape");
   await page.waitForTimeout(200);
-  assert.equal(await cell("DEMO-3", 2).inputValue(), "");
+  assert.equal(await cells.nth(empty).inputValue(), "");
   assert.equal((await log()).length, 0);
 });
 await step("sửa ô đã có giờ: chỉ PUT số giờ, số mới hiện ngay, tổng của dòng đổi theo", async () => {

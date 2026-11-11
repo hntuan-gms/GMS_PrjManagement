@@ -95,9 +95,11 @@ await step("sau khi cuộn ngang biểu đồ", async () => {
   await page.waitForTimeout(300);
   await checkAll("cuộn ngang", 8);
 });
+// The zoom buttons read Days / Weeks / Months.
+const ZOOM_BUTTON = { Ngày: "Days", Tháng: "Months", Tuần: "Weeks" };
 for (const mode of ["Ngày", "Tháng", "Tuần"]) {
   await step(`zoom ${mode}`, async () => {
-    await page.locator(".gantt-toolbar button", { hasText: new RegExp(`^${mode}$`) }).click();
+    await page.locator(".gantt-toolbar button", { hasText: new RegExp(`^${ZOOM_BUTTON[mode]}$`) }).click();
     await page.waitForTimeout(400);
     await checkAll(mode, 8);
   });

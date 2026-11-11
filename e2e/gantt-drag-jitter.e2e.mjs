@@ -154,9 +154,11 @@ async function draggableRow() {
 }
 
 console.log("\n== Gantt: kéo thanh không giật lùi ==");
+// The zoom buttons read Days / Weeks / Months.
+const ZOOM_BUTTON = { Tuần: "Weeks", Ngày: "Days" };
 for (const mode of ["Tuần", "Ngày"]) {
   await step(`zoom ${mode}: kéo tới 3 ngày`, async () => {
-    await page.locator(".gantt-toolbar button", { hasText: new RegExp(`^${mode}$`) }).click();
+    await page.locator(".gantt-toolbar button", { hasText: new RegExp(`^${ZOOM_BUTTON[mode]}$`) }).click();
     await page.waitForTimeout(400);
     const i = await draggableRow();
     await dragBar(i, 3, `${mode} +3`);

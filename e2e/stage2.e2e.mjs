@@ -158,7 +158,8 @@ await step("lọc theo thành phần / phiên bản / sprint", async () => {
 });
 await step("cột Sprint, Thành phần, Phiên bản chọn được và có dữ liệu", async () => {
   await openDisplay(page);
-  for (const name of ["Sprint", "Thành phần", "Phiên bản"]) {
+  // The column names read in English now (Components, Fix versions).
+  for (const name of ["Sprint", "Components", "Fix versions"]) {
     await page.locator(".col-chooser-item", { hasText: name }).locator("input").check();
   }
   const row = (await rowsText()).find((t) => t.includes("DEMO-5"));
