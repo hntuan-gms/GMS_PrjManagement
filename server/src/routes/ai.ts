@@ -20,6 +20,10 @@ import { streamChat, type ChatUsage } from "../ai/chat.js";
 import * as chatStore from "../ai/chatStore.js";
 import * as plans from "../ai/planStore.js";
 import * as resources from "../resourceStore.js";
+import * as bookingStore from "../bookingStore.js";
+import { resolveViewer } from "../resourceRoles.js";
+import { namePeople } from "../peopleDirectory.js";
+import type { Booking, Viewer } from "../booking.js";
 import { getWorkCalendar } from "../slaStore.js";
 import type { WorkCalendar } from "../workCalendar.js";
 import type { Predecessor } from "../types.js";
@@ -42,6 +46,11 @@ aiRouter.use("/board", boardAiRouter);
  */
 
 /** Today in UTC, matching the date convention used everywhere on the server. */
+function shiftDate(iso: string, days: number): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d) + days * 86_400_000).toISOString().slice(0, 10);
+}
+
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
@@ -307,6 +316,23 @@ aiRouter.post("/chat", requireProject, express.json({ limit: CHAT_BODY_LIMIT }),
         let loaded: Promise<WorkCalendar> | null = null;
         return () => (loaded ??= getWorkCalendar(session.cloudId, session.projectKey!));
       })(),
+      // Bookings of the whole site around today, once per turn; the tools decide what of them anyone sees.
+      bookings: (() => {
+        let loaded: Promise<Booking[]> | null = null;
+        return () => (loaded ??= bookingStore.listInRange(session.cloudId, shiftDate(today, -30), shiftDate(today, 365)));
+      })(),
+      bookingViewer: (() => {
+        let loaded: Promise<Viewer> | null = null;
+        return () =>
+          (loaded ??= bookingStore
+            .listInRange(session.cloudId, shiftDate(today, -30), shiftDate(today, 365))
+            .then((all) => resolveViewer(req.auth!.jira, session, [session.projectKey!, ...all.map((b) => b.projectKey)]))
+            .then((r) => r.viewer));
+      })(),
+      names: async (ids) => {
+        const found = await namePeople(req.auth!.jira, session.cloudId, ids);
+        return new Map([...found].map(([id, u]) => [id, u.displayName]));
+      },
       tzOffsetMinutes: (() => {
         const n = Number(body?.tzOffsetMinutes);
         return Number.isFinite(n) && Math.abs(n) <= 14 * 60 ? n : 0;

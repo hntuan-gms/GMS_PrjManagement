@@ -70,7 +70,7 @@ await step("Chấm công: hiện lại bảng giờ công cũ trong lúc tải",
   const before = await page.locator(".ts-grid tbody tr").count();
   await tab("List");
   await makeStale();
-  const held = await hold("**/api/timesheet*");
+  const held = await hold("**/api/clockwork?*");
   await openTimesheet(page, { wait: false });
   await page.waitForSelector(".ts-wrap");
   assert.ok(await page.getByText("Đang tải từ Jira").count(), "phải báo đang tải lại");

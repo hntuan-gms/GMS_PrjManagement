@@ -26,6 +26,8 @@ const patches = async () => (await (await fetch(API + "/api/__log")).json()).log
 await fetch(API + "/api/__restore", { method: "POST" });
 await fetch(API + "/api/__reset", { method: "POST" });
 await page.goto(APP);
+// The lens opens on Booking; these checks are about the load table.
+await page.locator(".rv-modes [data-mode=load]").click();
 await page.waitForSelector(".rv-pill-warn");
 await page.locator(".rv-pill-warn").click();
 await page.waitForSelector(".rv-unassigned");

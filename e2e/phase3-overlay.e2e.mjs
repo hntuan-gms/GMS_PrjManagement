@@ -176,6 +176,7 @@ await step("bộ lọc của người khác chỉ áp dụng được — không
 });
 await step("tab Nguồn lực có cùng menu và thấy bộ lọc đã lưu", async () => {
   await page.locator(".toolbar-tabs button", { hasText: "Resource" }).click();
+  await page.locator(".rv-modes [data-mode=load]").click();
   await page.waitForSelector(".resource-view .sf-select");
   await page.locator(".resource-view .sf-select > .tf-btn").click();
   const names = await page.$$eval(".sf-apply", (r) => r.map((x) => x.textContent));

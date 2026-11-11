@@ -30,6 +30,7 @@ const PRESS: Record<string, KeyLike> = {
   today: key("t"),
   draft: key("D", { shiftKey: true }),
   "log-time": key("l"),
+  "book-new": key("n"),
   mine: key("m"),
   overdue: key("o"),
   "clear-filter": key("F", { shiftKey: true }),

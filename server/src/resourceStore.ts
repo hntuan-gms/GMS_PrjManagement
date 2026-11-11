@@ -148,6 +148,17 @@ export async function listAbsences(cloudId: string, from?: string): Promise<Reso
   }));
 }
 
+/** One leave period, to check whose it is before it is changed. */
+export async function getAbsence(cloudId: string, id: string): Promise<ResourceAbsence | null> {
+  if (!/^\d{1,18}$/.test(id)) return null;
+  const { rows } = await db().query<AbsenceRow>(
+    `SELECT id, account_id, from_date, to_date, reason FROM resource_absence WHERE cloud_id = $1 AND id = $2`,
+    [cloudId, id]
+  );
+  const r = rows[0];
+  return r ? { id: String(r.id), accountId: r.account_id, from: r.from_date, to: r.to_date, reason: r.reason } : null;
+}
+
 /** Grouped by accountId, for the planner's "who is away when" prompt input. */
 export async function absencesByAccount(
   cloudId: string,

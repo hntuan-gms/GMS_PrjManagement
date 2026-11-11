@@ -1,6 +1,8 @@
 import { isAssignableType, type JiraUser, type Task } from "./types.js";
 import { DEFAULT_CAPACITY_HOURS, type ResourceAbsence, type ResourceProfile } from "./resourceStore.js";
 import { DEFAULT_WORK_CALENDAR, isWorkingDate, type WorkCalendar } from "./workCalendar.js";
+import type { Booking } from "./booking.js";
+import { heldByDay } from "./bookingLoad.js";
 
 /**
  * How busy each person is, day by day — the server's half of the workload model.
@@ -20,6 +22,10 @@ import { DEFAULT_WORK_CALENDAR, isWorkingDate, type WorkCalendar } from "./workC
  *   3. no estimate means one full working day, and a done task means nothing.
  *
  * If those three change, change them in both files.
+ *
+ * A fourth input is server-first: hours the person has promised to OTHER projects (`heldElsewhere`,
+ * bookingLoad.ts). They are added to what a day already holds before it is compared with capacity, and are
+ * reported apart (`held`, `Candidate.heldHours`) so a caller can say where a conflict comes from.
  */
 
 const DAY_MS = 86_400_000;
@@ -45,6 +51,8 @@ export interface WorkloadInput {
   absences: ResourceAbsence[];
   /** The project's working calendar; Monday–Friday with no holidays when omitted. */
   calendar?: WorkCalendar;
+  /** Bookings on projects other than this one (bookingLoad.heldElsewhere). Never this project's own. */
+  heldElsewhere?: Booking[];
 }
 
 export interface PersonWorkload {
@@ -55,6 +63,8 @@ export interface PersonWorkload {
   allocated: Map<string, number>;
   /** Task ids per ISO date, so a conflict can name what it collides with. */
   taskIds: Map<string, string[]>;
+  /** Hours promised to other projects, keyed by ISO date. Counted with `allocated` against capacity. */
+  held: Map<string, number>;
   isOff: (iso: string) => boolean;
   openTaskCount: number;
 }
@@ -94,9 +104,18 @@ export function buildWorkload(input: WorkloadInput): Map<string, PersonWorkload>
       capacityHoursPerDay,
       allocated: new Map(),
       taskIds: new Map(),
+      held: new Map(),
       isOff: (iso) => !isWorkingDate(iso, calendar) || away.some((a) => iso >= a.from && iso <= a.to),
       openTaskCount: 0,
     });
+  }
+
+  for (const person of out.values()) {
+    const mine = (input.heldElsewhere ?? []).filter((b) => b.accountId === person.accountId);
+    if (mine.length === 0) continue;
+    const first = mine.reduce((m, b) => (b.from < m ? b.from : m), mine[0].from);
+    const last = mine.reduce((m, b) => (b.to > m ? b.to : m), mine[0].to);
+    person.held = heldByDay(mine, person.accountId, eachDate(first, last), person.isOff);
   }
 
   for (const task of input.tasks) {
@@ -129,6 +148,12 @@ export interface Candidate {
   conflictDays: number;
   /** Hours they would be over capacity, summed — how bad the conflict is. */
   overflowHours: number;
+  /** Of `conflictDays`, those that exist only because of hours held by other projects. */
+  heldConflictDays: number;
+  /** Hours held by other projects across the window's working days — where a conflict comes from. */
+  heldHours: number;
+  /** The most hours a day held elsewhere in the window (0 when none). */
+  heldPerDay: number;
   /** Spare hours across the window before taking it. */
   freeHours: number;
   /** Share of capacity used after taking it, 0–1+. */
@@ -149,7 +174,7 @@ export interface Candidate {
  * the week this task needs, and a month-long average hides that completely.
  *
  * The client's assignHints (client/src/assignHints.ts) uses the same leading rule for the picker's
- * order. Change both.
+ * order, and the same "hours held by other projects count like tasks" rule. Change both.
  *
  * Nobody is filtered out for being busy. A fully-booked team still has to do the
  * work, and returning an empty list would just make the caller invent something;
@@ -175,19 +200,28 @@ export function rankCandidates(
     const perDay = hoursPerDay ?? person.capacityHoursPerDay;
 
     let conflictDays = 0;
+    let heldConflictDays = 0;
+    let heldHours = 0;
+    let heldPerDay = 0;
     let overflowHours = 0;
     let freeHours = 0;
     let usedHours = 0;
     const collidesWith = new Set<string>();
 
     for (const date of working) {
-      const already = person.allocated.get(date) ?? 0;
+      const tasksHere = person.allocated.get(date) ?? 0;
+      const held = person.held.get(date) ?? 0;
+      // What other projects hold counts like a task: the day has only so many hours.
+      const already = tasksHere + held;
       const capacity = person.capacityHoursPerDay;
       usedHours += already;
+      heldHours += held;
+      heldPerDay = Math.max(heldPerDay, held);
       freeHours += Math.max(0, capacity - already);
       const after = already + perDay;
       if (after > capacity + 0.0001) {
         conflictDays += 1;
+        if (tasksHere + perDay <= capacity + 0.0001) heldConflictDays += 1;
         overflowHours += after - capacity;
         for (const id of person.taskIds.get(date) ?? []) collidesWith.add(id);
       }
@@ -198,6 +232,9 @@ export function rankCandidates(
       accountId: person.accountId,
       displayName: person.displayName,
       conflictDays,
+      heldConflictDays,
+      heldHours: Math.round(heldHours * 10) / 10,
+      heldPerDay: Math.round(heldPerDay * 10) / 10,
       overflowHours: Math.round(overflowHours * 10) / 10,
       freeHours: Math.round(freeHours * 10) / 10,
       utilisationAfter:

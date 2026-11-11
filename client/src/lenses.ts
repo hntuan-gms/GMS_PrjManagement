@@ -1,16 +1,20 @@
 /** The workspace's places and lenses, shared by the header, the rail and the keyboard layer. */
 
 /**
- * "today" is the rail's home page, "timesheet" (Clockwork, the hours logged) a place of its own on the rail and
- * "settings" the project's settings page; the other four are lenses on one plan.
+ * "today" is the rail's home page; "booking" and "timesheet" (Clockwork, the hours logged) are places of their
+ * own on the rail, each about a person across every project; "settings" is the project's settings page; the
+ * other four are lenses on one plan. The rule: the rail is a person across projects, a lens is one project.
  */
-export type WorkspaceView = "today" | "gantt" | "board" | "resource" | "report" | "timesheet" | "settings";
+export type WorkspaceView = "today" | "gantt" | "board" | "resource" | "report" | "booking" | "timesheet" | "settings";
 
-/** The two ways to look at the same people on the Resource lens: planned load and skills. */
-export type ResourceMode = "load" | "skills";
-export const RESOURCE_MODES: ResourceMode[] = ["load", "skills"];
+/**
+ * The ways to look at a project's people on the Resource lens: who is booked (the rail's Booking cut to this
+ * project), what the tasks assigned add up to, and skills.
+ */
+export type ResourceMode = "booking" | "load" | "skills";
+export const RESOURCE_MODES: ResourceMode[] = ["booking", "load", "skills"];
 
-const VIEW_IDS: WorkspaceView[] = ["today", "gantt", "board", "resource", "report", "timesheet", "settings"];
+const VIEW_IDS: WorkspaceView[] = ["today", "gantt", "board", "resource", "report", "booking", "timesheet", "settings"];
 
 /** Reads a `?view=` value or a remembered one. "plan" is the old name of the plan lens. */
 export function parseView(raw: string | null | undefined): { view: WorkspaceView } | null {

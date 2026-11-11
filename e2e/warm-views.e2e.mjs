@@ -21,15 +21,16 @@ async function step(name, fn) {
   }
 }
 const tab = (name) => openLens(page, name);
-const counts = { tasks: 0, board: 0, timesheet: 0, progress: 0 };
+const counts = { tasks: 0, board: 0, timesheet: 0, progress: 0, bookings: 0 };
 page.on("request", (r) => {
-  const m = r.url().match(/\/api\/(tasks|board|timesheet|progress)(\?|$)/);
-  if (m && r.method() === "GET") counts[m[1]]++;
+  // The hours grid reads Clockwork (my hours on every project) since 2026-11-11; it is still counted as "timesheet".
+  const m = r.url().match(/\/api\/(tasks|board|clockwork|progress|bookings)(\?|$)/);
+  if (m && r.method() === "GET") counts[m[1] === "clockwork" ? "timesheet" : m[1]]++;
 });
 const snapshot = () => ({ ...counts });
 const seen = [];
 page.on("request", (r) => {
-  if (/\/api\/(tasks|board|timesheet|progress)(\?|$)/.test(r.url()) && r.method() === "GET") seen.push(Date.now() + " " + r.url());
+  if (/\/api\/(tasks|board|clockwork|progress)(\?|$)/.test(r.url()) && r.method() === "GET") seen.push(Date.now() + " " + r.url());
 });
 
 await page.goto(process.env.E2E_APP ?? "http://localhost:5173/");
@@ -38,8 +39,9 @@ await page.waitForTimeout(1500);
 
 console.log("\n== Tải sẵn khi mở dự án ==");
 await step("mỗi tab được hỏi đúng một lần, trước khi bấm vào", async () => {
-  const { board, timesheet, progress } = counts;
-  assert.deepEqual({ board, timesheet, progress }, { board: 1, timesheet: 1, progress: 1 }, JSON.stringify(counts));
+  const { board, timesheet, progress, bookings } = counts;
+  // The project's bookings (Resource › Booking, the lens badge, "who is free") are fetched with them, once.
+  assert.deepEqual({ board, timesheet, progress, bookings }, { board: 1, timesheet: 1, progress: 1, bookings: 1 }, JSON.stringify(counts));
 });
 
 console.log("\n== Mở tab: không hỏi lại ==");
@@ -56,7 +58,11 @@ await step("Báo cáo hiện số liệu ngay, không có request mới", async 
   await tab("Report");
   await page.waitForSelector(".pr-loading", { state: "detached", timeout: 1000 });
 });
-await step("cả ba tab không gọi thêm API nào", async () => {
+await step("Resource mở ở Booking bằng bản tải sẵn, không request mới", async () => {
+  await tab("Resource");
+  await page.waitForSelector(".bk-wrap.is-project .bk-person", { timeout: 1000 });
+});
+await step("cả các tab không gọi thêm API nào", async () => {
   await page.waitForTimeout(600);
   assert.deepEqual(snapshot(), before, "requests: " + seen.join(" | "));
 });

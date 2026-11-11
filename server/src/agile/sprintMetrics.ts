@@ -1,4 +1,6 @@
 import type { ResourceAbsence, ResourceProfile } from "../resourceStore.js";
+import type { Booking } from "../booking.js";
+import { heldByDay } from "../bookingLoad.js";
 import { eachDate } from "../workload.js";
 import { DEFAULT_WORK_CALENDAR, isWorkingDate, type WorkCalendar } from "../workCalendar.js";
 import type { BoardIssue, BoardSnapshot, Sprint } from "./boardTypes.js";
@@ -163,11 +165,17 @@ export interface Availability {
   /** Working days in the window (project calendar) minus declared absences. */
   days: number;
   hoursPerDay: number;
-  /** days × hoursPerDay — what this person can give the window. */
+  /** days × hoursPerDay, less what other projects hold — what this person can give this sprint. */
   capacityHours: number;
+  /** Hours other projects hold of this person in the window (bookings; 0 when none). Already out of `capacityHours`. */
+  heldHours: number;
 }
 
-/** Who can work how much in [from, to] — the resource tab's capacity and absences, applied to a sprint. */
+/**
+ * Who can work how much in [from, to] — the resource tab's capacity and absences, applied to a sprint.
+ * `heldElsewhere` are bookings on the OTHER projects (bookingLoad.heldElsewhere): those hours are promised
+ * away, so they come off the sprint's capacity and are reported beside it.
+ */
 export function availability(
   members: Array<{ accountId: string; displayName: string }>,
   profiles: ResourceProfile[],
@@ -175,20 +183,25 @@ export function availability(
   from: string,
   to: string,
   defaultHours: number,
-  calendar: WorkCalendar = DEFAULT_WORK_CALENDAR
+  calendar: WorkCalendar = DEFAULT_WORK_CALENDAR,
+  heldElsewhere: readonly Booking[] = []
 ): Availability[] {
   const days = workingDays(from, to, calendar);
   return members.map((m) => {
     const profile = profiles.find((p) => p.accountId === m.accountId);
     const away = absences.filter((a) => a.accountId === m.accountId);
-    const free = days.filter((d) => !away.some((a) => d >= a.from && d <= a.to)).length;
+    const isAway = (d: string) => away.some((a) => d >= a.from && d <= a.to);
+    const free = days.filter((d) => !isAway(d)).length;
     const hoursPerDay = profile?.capacityHoursPerDay ?? defaultHours;
+    // `days` are already working days; only leave is left to switch off.
+    const held = [...heldByDay(heldElsewhere, m.accountId, days, isAway).values()].reduce((s, h) => s + h, 0);
     return {
       accountId: m.accountId,
       name: m.displayName,
       days: free,
       hoursPerDay,
-      capacityHours: Math.round(free * hoursPerDay * 10) / 10,
+      capacityHours: Math.max(0, Math.round((free * hoursPerDay - held) * 10) / 10),
+      heldHours: Math.round(held * 10) / 10,
     };
   });
 }

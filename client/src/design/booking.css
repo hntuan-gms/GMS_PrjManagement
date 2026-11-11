@@ -1,0 +1,621 @@
+/* ==========================================================================
+   Booking: a person across projects (rail), or one project's cut of it (Resource lens).
+   A person is a line of weekly totals drawn as the Mức tải skyline; opened, one line per project with
+   bookings as bars. Ink is the bar; a dashed outline is "not sure yet"; red is only past capacity.
+   The axis is linear: one width per day (--bk-day), so a bar is a left and a width. Tokens only.
+   ========================================================================== */
+.bk-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--paper);
+}
+.bk-toolbar {
+  flex-wrap: nowrap;
+  gap: 6px;
+}
+.tf-search.bk-search {
+  flex: 0 1 180px;
+  min-width: 72px;
+}
+.bk-toolbar .seg-group,
+.bk-toolbar .tb-btn,
+.bk-toolbar .popover {
+  flex: none;
+  white-space: nowrap;
+}
+.bk-scope button.is-risk {
+  color: var(--risk-text);
+}
+.tf-bar button.tb-btn.bk-nav,
+.tf-bar button.tb-btn.bk-more {
+  width: 28px;
+  padding: 0;
+  justify-content: center;
+}
+.bk-add-person {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.bk-error {
+  margin: var(--space-3) var(--space-4);
+}
+
+/* --- the table: one scroller, sticky header and names, like the load table --- */
+.bk-scroll {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;
+  margin: var(--space-3) var(--space-4) var(--space-4);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+}
+.bk-scroll.is-dragging {
+  user-select: none;
+}
+.bk-grid {
+  position: relative;
+  width: calc(var(--bk-name) + var(--bk-track));
+  min-width: 100%;
+}
+.bk-head {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  display: flex;
+  height: 44px;
+  background: var(--raised);
+  border-bottom: 1px solid var(--line);
+}
+.bk-head-track {
+  position: relative;
+  flex: none;
+  width: var(--bk-track);
+}
+.bk-months,
+.bk-weeks {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 22px;
+}
+.bk-weeks {
+  top: 22px;
+}
+.bk-month {
+  position: absolute;
+  top: 0;
+  height: 22px;
+  padding-left: 6px;
+  border-left: 1px solid var(--line);
+  font-size: var(--font-size-sm);
+  line-height: 22px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+/* The name follows the scroll inside its own month, so the month at the left edge is never a cut word. */
+.bk-month > b {
+  position: sticky;
+  left: calc(var(--bk-name) + 6px);
+  display: inline-block;
+  font-weight: 600;
+}
+.bk-week {
+  position: absolute;
+  top: 0;
+  width: calc(var(--bk-day) * 7);
+  height: 22px;
+  padding-left: 4px;
+  border-left: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  line-height: 22px;
+  color: var(--ink-3);
+  overflow: hidden;
+  white-space: nowrap;
+}
+.bk-week.is-now {
+  color: var(--son-text);
+  font-weight: 500;
+}
+.bk-body {
+  position: relative;
+}
+.bk-today {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 1;
+  width: 1px;
+  background: var(--son);
+  pointer-events: none;
+}
+
+.bk-row {
+  display: flex;
+  align-items: stretch;
+}
+.bk-person {
+  border-bottom: 1px solid var(--line);
+}
+.bk-name {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: var(--bk-name);
+  min-width: 0;
+  padding: 0 8px 0 6px;
+  background: var(--raised);
+  border-right: 1px solid var(--line);
+}
+.bk-corner {
+  z-index: 5;
+  padding-left: 14px;
+  font-size: var(--font-size-sm);
+  color: var(--ink-3);
+}
+.bk-row-person {
+  height: 44px;
+}
+button.bk-toggle {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  height: 100%;
+  padding: 0 2px;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink);
+  text-align: left;
+}
+button.bk-toggle:hover:not(:disabled) {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+.bk-toggle > .icon {
+  flex: none;
+  color: var(--ink-3);
+}
+.bk-avatar {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  font-size: 10px;
+}
+.bk-person-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-md);
+  font-weight: 500;
+}
+.bk-person.is-me .bk-person-name {
+  font-weight: 600;
+}
+.bk-person-role {
+  flex: 0 9999 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-sm);
+  font-weight: 400;
+  color: var(--ink-3);
+}
+.bk-over {
+  flex: none;
+  font-size: var(--font-size-xs);
+  color: var(--risk-text);
+  white-space: nowrap;
+}
+button.bk-add {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink-3);
+  opacity: 0;
+  justify-content: center;
+}
+.bk-row-person:hover .bk-add,
+button.bk-add:focus-visible {
+  opacity: 1;
+}
+button.bk-add:hover:not(:disabled) {
+  background: var(--sunken);
+  color: var(--ink);
+}
+@media (hover: none) {
+  button.bk-add {
+    opacity: 1;
+  }
+}
+
+/* --- tracks --- */
+.bk-track {
+  position: relative;
+  flex: none;
+  width: var(--bk-track);
+  /* A line at each Monday and the weekend shaded: the axis always starts on a Monday. */
+  background-image:
+    linear-gradient(to right, var(--line) 0, var(--line) 1px, transparent 1px),
+    linear-gradient(to right, transparent calc(var(--bk-day) * 5), var(--sunken) calc(var(--bk-day) * 5));
+  background-size: calc(var(--bk-day) * 7) 100%;
+  touch-action: pan-y;
+}
+.bk-track.is-creatable {
+  cursor: crosshair;
+}
+.bk-track-total {
+  height: 44px;
+}
+.bk-cell {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+/* The figure sits above the bar, never on it: the bar's full height is the cell less that line. */
+.bk-cell .rv-sky {
+  left: 3px;
+  right: 3px;
+  height: calc((100% - 22px) * var(--load, 0.5));
+}
+.bk-cell-pct {
+  position: absolute;
+  top: 4px;
+  left: 6px;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--ink-3);
+  pointer-events: none;
+}
+.bk-cell.band-over .bk-cell-pct {
+  color: var(--risk-text);
+  font-weight: 500;
+}
+
+.bk-row-project .bk-name,
+.bk-row-leave .bk-name {
+  background: var(--sheet);
+}
+.bk-row-project .bk-track,
+.bk-row-leave .bk-track {
+  background-color: var(--sheet);
+}
+.bk-name-project {
+  padding-left: 54px;
+  font-size: var(--font-size-sm);
+}
+.bk-project-key {
+  flex: none;
+  font-family: var(--font-mono);
+  color: var(--ink-2);
+}
+.bk-project-name {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-3);
+}
+.bk-project-other {
+  flex: 1 1 0;
+  color: var(--ink-3);
+}
+.bk-gap {
+  flex: none;
+  font-size: var(--font-size-xs);
+  color: var(--warn-text);
+  white-space: nowrap;
+}
+
+/* --- bars --- */
+.bk-bar {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  height: 22px;
+  min-height: 0;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  box-shadow: none;
+  font-size: var(--font-size-xs);
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  user-select: none;
+  touch-action: none;
+}
+.bk-bar.is-confirmed {
+  background: var(--ink-2);
+  color: var(--on-strong);
+}
+.bk-bar.is-tentative {
+  background: var(--raised);
+  border: 1px dashed var(--ink-3);
+  color: var(--ink);
+}
+.bk-bar.is-other {
+  background: var(--sunken);
+  border: 1px solid var(--line-strong);
+  color: var(--ink-3);
+}
+button.bk-bar.is-leave {
+  background: repeating-linear-gradient(45deg, var(--sunken), var(--sunken) 4px, var(--line-strong) 4px, var(--line-strong) 5px);
+  border: 1px solid var(--line-strong);
+  color: var(--ink-2);
+}
+button.bk-bar.is-leave:disabled {
+  opacity: 1;
+  cursor: default;
+}
+.bk-bar.is-ghost {
+  z-index: 1;
+  background: var(--info-wash);
+  border: 1px solid var(--info-line);
+  pointer-events: none;
+}
+.bk-bar.is-editable {
+  cursor: grab;
+}
+.bk-bar.is-editable:hover {
+  box-shadow: 0 0 0 1px var(--ink);
+}
+.bk-bar.is-dragging {
+  cursor: grabbing;
+  opacity: 0.85;
+}
+.bk-bar:focus-visible {
+  outline: 2px solid var(--info);
+  outline-offset: 1px;
+}
+.bk-bar-text {
+  flex: none;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  pointer-events: none;
+}
+.bk-bar.is-leave .bk-bar-text {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-family: var(--font-sans);
+  font-weight: 400;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bk-bar-note {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.8;
+  pointer-events: none;
+}
+.bk-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: ew-resize;
+}
+.bk-handle.is-start {
+  left: -1px;
+}
+.bk-handle.is-end {
+  right: -1px;
+}
+.bk-none {
+  padding: var(--space-4);
+  font-size: var(--font-size-md);
+  color: var(--ink-3);
+}
+
+/* --- the panel a booking is typed into --- */
+.bk-editor {
+  position: fixed;
+  z-index: var(--z-popover);
+  width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: var(--raised);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+.bk-ed-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 22px;
+}
+.bk-ed-who {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+button.bk-ed-del {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink-3);
+  justify-content: center;
+}
+button.bk-ed-del:hover:not(:disabled) {
+  background: var(--risk-wash);
+  color: var(--risk-text);
+}
+.bk-ed-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-size-sm);
+  color: var(--ink-3);
+}
+.bk-ed-row > span {
+  flex: none;
+}
+.bk-ed-row > span:first-child {
+  width: 52px;
+}
+.bk-ed-dates > span:first-child {
+  width: auto;
+}
+.bk-ed-row select {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.bk-editor input.bk-ed-hours {
+  flex: none;
+  width: 64px;
+  font-family: var(--font-mono);
+}
+.bk-ed-status {
+  flex: 1 1 0;
+}
+.bk-ed-status button {
+  flex: 1 1 0;
+  justify-content: center;
+  padding: 0 6px;
+  font-size: var(--font-size-sm);
+}
+.bk-ed-dates .date-field {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.bk-editor .is-bad,
+.bk-ed-dates.is-bad .date-field input[type="text"] {
+  border-color: var(--risk);
+}
+.bk-editor input.bk-ed-note {
+  width: 100%;
+}
+
+/* --- menus --- */
+.popover-menu.bk-person-menu {
+  width: 260px;
+  gap: 6px;
+}
+.bk-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  padding: 4px 8px 6px;
+  font-size: var(--font-size-sm);
+  color: var(--ink-2);
+}
+.bk-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.bk-swatch {
+  display: inline-block;
+  width: 18px;
+  height: 10px;
+  border-radius: 2px;
+}
+.bk-swatch.is-confirmed {
+  background: var(--ink-2);
+}
+.bk-swatch.is-tentative {
+  border: 1px dashed var(--ink-3);
+}
+.bk-swatch.is-over {
+  background: repeating-linear-gradient(45deg, var(--risk), var(--risk) 3px, var(--risk-text) 3px, var(--risk-text) 5px);
+}
+.bk-swatch.is-leave {
+  background: repeating-linear-gradient(45deg, var(--sunken), var(--sunken) 4px, var(--line-strong) 4px, var(--line-strong) 5px);
+  border: 1px solid var(--line-strong);
+}
+
+/* --- Clockwork: rows gathered by project, what was booked beside what was logged --- */
+.ts-grid .ts-group-row > th,
+.ts-grid .ts-group-row > td {
+  height: 28px;
+  background: var(--sheet);
+}
+.ts-group-name {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  padding-inline: 10px;
+  font-size: var(--font-size-sm);
+  font-weight: 400;
+}
+.ts-group-name b {
+  flex: none;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  color: var(--ink-2);
+}
+.ts-group-name span {
+  min-width: 0;
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ts-booked {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.ts-booked small {
+  font-size: var(--font-size-xs);
+}
+.ts-booked.is-off {
+  color: var(--warn-text);
+}
+.tf-bar select.ts-team-project {
+  flex: none;
+  width: auto;
+}
+
+/* A bar being handed to someone else, and the line the keyboard (J/K/N/Enter) is on. */
+.bk-person.is-drop {
+  outline: 2px solid var(--info);
+  outline-offset: -2px;
+}
+.bk-person.is-cursor > .bk-row-person .bk-name {
+  box-shadow: inset 2px 0 0 var(--son);
+}

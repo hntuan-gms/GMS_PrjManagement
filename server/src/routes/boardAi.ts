@@ -2,6 +2,8 @@ import { Router } from "express";
 import { requireProject } from "../auth/middleware.js";
 import { availability, plannedWindow, sprintFacts, velocityStats } from "../agile/sprintMetrics.js";
 import { estimateIssues, planSprint, sprintInsight } from "../ai/sprintAi.js";
+import * as bookings from "../bookingStore.js";
+import { heldElsewhere } from "../bookingLoad.js";
 import { badRequest } from "../errors.js";
 import * as resources from "../resourceStore.js";
 import { getWorkCalendar } from "../slaStore.js";
@@ -48,12 +50,13 @@ boardAiRouter.post("/plan", async (req, res, next) => {
     const { session, taskService } = req.auth!;
     // Best-effort, like the report's team list: without it the plan still works,
     // it just can't account for who is away.
-    const [members, profiles, absences] = await Promise.all([
+    const [members, profiles, absences, held] = await Promise.all([
       taskService!.listUsers().catch(() => []),
       resources.listProfiles(session.cloudId).catch(() => []),
       resources.listAbsences(session.cloudId).catch(() => []),
+      bookings.listInRange(session.cloudId, window.start, window.end).then((b) => heldElsewhere(b, session.projectKey!)).catch(() => []),
     ]);
-    const team = availability(members, profiles, absences, window.start, window.end, resources.DEFAULT_CAPACITY_HOURS, calendar);
+    const team = availability(members, profiles, absences, window.start, window.end, resources.DEFAULT_CAPACITY_HOURS, calendar, held);
 
     res.json(
       await planSprint({

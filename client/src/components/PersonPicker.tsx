@@ -1,10 +1,12 @@
 import { useMemo } from "react";
 import { assignHints, describeHint, type AssignHint } from "../assignHints";
+import type { HeldHours } from "../bookingModel";
 import { fold } from "../fold";
 import type { ResourceLoad } from "../resourceAllocation";
 import type { JiraUser, Task } from "../types";
 import { DEFAULT_WORK_CALENDAR, type WorkCalendar } from "../workCalendar";
 import Avatar from "./Avatar";
+import { useHeldHours } from "./heldHoursContext";
 import CellPicker, { type PickItem } from "./CellPicker";
 
 export const UNASSIGN_ID = "__none__";
@@ -13,6 +15,8 @@ const plain = (u: JiraUser): AssignHint => ({
   accountId: u.accountId,
   ranged: false,
   conflictDays: 0,
+  heldConflictDays: 0,
+  heldPerDay: 0,
   freeHours: 0,
   away: null,
   awayDays: 0,
@@ -31,6 +35,7 @@ export default function PersonPicker({
   task,
   load,
   calendar = DEFAULT_WORK_CALENDAR,
+  held: heldProp,
   currentAccountId,
   meAccountId,
   allowUnassign = true,
@@ -43,6 +48,8 @@ export default function PersonPicker({
   task?: Task | null;
   load?: Pick<ResourceLoad, "people"> | null;
   calendar?: WorkCalendar;
+  /** Hours other projects hold of each person (bookingModel.heldElsewhereByDay). */
+  held?: HeldHours;
   currentAccountId?: string | null;
   meAccountId?: string | null;
   allowUnassign?: boolean;
@@ -50,11 +57,13 @@ export default function PersonPicker({
   onPick: (accountId: string | null) => void;
   onClose: () => void;
 }) {
+  const heldCtx = useHeldHours();
+  const held = heldProp ?? heldCtx;
   const items = useMemo<PickItem[] | null>(() => {
     if (!people) return null;
     const byId = new Map(people.map((u) => [u.accountId, u]));
     const hints = task
-      ? assignHints(task, people, load ?? null, calendar)
+      ? assignHints(task, people, load ?? null, calendar, held)
       : [...people].sort((a, b) => a.displayName.localeCompare(b.displayName, "vi")).map(plain);
     const rows: PickItem[] = [];
     if (allowUnassign) rows.push({ id: UNASSIGN_ID, label: "Bỏ giao", hint: currentAccountId ? undefined : "hiện tại" });
@@ -72,7 +81,7 @@ export default function PersonPicker({
       });
     }
     return rows;
-  }, [people, task, load, calendar, currentAccountId, meAccountId, allowUnassign]);
+  }, [people, task, load, calendar, held, currentAccountId, meAccountId, allowUnassign]);
 
   // Typing filters by name only: "rảnh" or "trùng" in a hint must not make a row match "r".
   const search = useMemo(

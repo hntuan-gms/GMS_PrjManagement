@@ -2,7 +2,8 @@ import { fold } from "./csvImport";
 import { parseHours } from "./parseHours";
 import { roundHours } from "./taskForm";
 import { isAway, expectation } from "./timesheetDays";
-import { isAssignableType, type Task, type TimesheetPerson, type WorklogEntry } from "./types";
+import { bookedHours, isOffBooking } from "./bookingModel";
+import { isAssignableType, type Booking, type Task, type TimesheetPerson, type WorklogEntry } from "./types";
 import { dayKind, type WorkCalendar } from "./workCalendar";
 
 /*
@@ -25,11 +26,30 @@ export interface TaskRow {
   task: Task | null;
   /** "logged" = has hours in the period, "suggested" = my own open work with none yet, "added" = picked by hand. */
   kind: "logged" | "suggested" | "added";
+  /** The project the issue belongs to: the part of its key before the number. */
+  project: string;
   cells: Map<string, Cell>;
   total: number;
 }
 
 const NATURAL = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true });
+
+/** "GPM-104" → "GPM". */
+export function projectOfKey(issueKey: string): string {
+  const cut = issueKey.lastIndexOf("-");
+  return cut > 0 ? issueKey.slice(0, cut) : issueKey;
+}
+
+/** Work on a project this tab does not hold the plan of: enough to name a row and offer it. */
+export interface OpenWork {
+  key: string;
+  summary: string;
+  issueType: string;
+  inProgress?: boolean;
+}
+
+/** How many rows of other projects' open work are offered unasked. */
+export const FOREIGN_SUGGEST_LIMIT = 4;
 
 /** "2", "2,5", "1,33": hours the way people write them here. */
 export function fmtHours(h: number): string {
@@ -72,9 +92,12 @@ export function buildMyRows(input: {
   added: readonly string[];
   order?: readonly string[];
   suggestLimit?: number;
+  /** My open work on every project (Clockwork): names rows the loaded plan does not have, and is suggested after it. */
+  openWork?: readonly OpenWork[];
 }): TaskRow[] {
   const { entries, tasks, me, added } = input;
   const byTask = new Map(tasks.map((t) => [t.id, t]));
+  const foreign = new Map((input.openWork ?? []).map((w) => [w.key, w]));
   const mine = new Map<string, WorklogEntry[]>();
   for (const e of entries) {
     if (!e.mine) continue;
@@ -89,12 +112,26 @@ export function buildMyRows(input: {
     seen.add(key);
     const t = byTask.get(key) ?? null;
     const first = list[0];
+    const w = foreign.get(key);
     const { cells, total } = cellsOf(list);
-    rows.push({ key, summary: t?.summary ?? first?.summary ?? key, issueType: t?.issueType ?? first?.issueType ?? "", task: t, kind, cells, total });
+    rows.push({
+      key,
+      summary: t?.summary ?? first?.summary ?? w?.summary ?? key,
+      issueType: t?.issueType ?? first?.issueType ?? w?.issueType ?? "",
+      task: t,
+      kind,
+      project: projectOfKey(key),
+      cells,
+      total,
+    });
   };
   for (const key of [...mine.keys()].sort(NATURAL)) push(key, "logged", mine.get(key) ?? []);
   for (const key of added) push(key, "added", []);
   for (const t of suggestedTasks(tasks, me, seen, input.suggestLimit)) push(t.id, "suggested", []);
+  // Then what is open on other projects, work in progress first: a day spent across two projects is two rows.
+  const others = [...foreign.values()].filter((w) => !seen.has(w.key) && !byTask.has(w.key));
+  const ranked = [...others.filter((w) => w.inProgress), ...others.filter((w) => !w.inProgress)];
+  for (const w of ranked.slice(0, FOREIGN_SUGGEST_LIMIT)) push(w.key, "suggested", []);
   if (!input.order) return rows;
   const pos = new Map(input.order.map((k, i) => [k, i]));
   return rows.sort((a, b) => (pos.get(a.key) ?? Infinity) - (pos.get(b.key) ?? Infinity));
@@ -109,6 +146,27 @@ export function stableOrder(prev: readonly string[], next: readonly string[]): s
   const kept = prev.filter((k) => have.has(k));
   const keptSet = new Set(kept);
   return [...kept, ...next.filter((k) => !keptSet.has(k))];
+}
+
+export interface RowGroup {
+  project: string;
+  rows: TaskRow[];
+  total: number;
+}
+
+/**
+ * Rows gathered by project, each group where its first row stood, `first` (the project the tab is on) leading.
+ * Inside a group the rows keep their order, so a row that gets its first hours stays where it is.
+ */
+export function groupRows(rows: readonly TaskRow[], first: string | null = null): RowGroup[] {
+  const groups = new Map<string, TaskRow[]>();
+  for (const r of rows) groups.set(r.project, [...(groups.get(r.project) ?? []), r]);
+  return [...groups.keys()]
+    .sort((a, b) => Number(b === first) - Number(a === first))
+    .map((project) => {
+      const list = groups.get(project)!;
+      return { project, rows: list, total: roundHours(list.reduce((s, r) => s + r.total, 0)) };
+    });
 }
 
 /** Hours I logged on each day, across every row. */
@@ -169,6 +227,10 @@ export interface TeamRow {
   /** Working days already gone with nothing logged. */
   missing: string[];
   overDays: number;
+  /** Hours booked for the person in the period, on the projects this viewer was given (0 when none). */
+  booked: number;
+  /** Logged and booked disagree by more than a fifth (bookingModel.isOffBooking), counted only up to today. */
+  offBooking: boolean;
 }
 
 export function buildTeamRows(input: {
@@ -178,8 +240,10 @@ export function buildTeamRows(input: {
   today: string;
   calendar: WorkCalendar;
   me: string;
+  bookings?: readonly Booking[];
 }): TeamRow[] {
   const { people, entries, days, today, calendar, me } = input;
+  const gone = days.filter((d) => d <= today);
   const perPerson = new Map<string, Map<string, number>>();
   for (const e of entries) {
     if (!e.authorAccountId) continue;
@@ -193,7 +257,12 @@ export function buildTeamRows(input: {
     const total = roundHours(days.reduce((s, d) => s + hoursOn(d), 0));
     const { expected, missing } = expectation(person, [...days], today, hoursOn, calendar);
     const overDays = days.filter((d) => dayState(person, d, hoursOn(d), today, calendar) === "over").length;
-    return { person, hoursByDay, total, expected, missing: person.outsider ? [] : missing, overDays };
+    const book = (list: readonly string[]) =>
+      input.bookings ? bookedHours({ bookings: input.bookings, accountId: person.accountId, days: list, absences: person.absences, calendar }).total : 0;
+    const booked = book(days);
+    // Compared over the days already gone: a week half over is not "under" for the half still to come.
+    const soFar = roundHours(gone.reduce((s, d) => s + hoursOn(d), 0));
+    return { person, hoursByDay, total, expected, missing: person.outsider ? [] : missing, overDays, booked, offBooking: isOffBooking(soFar, book(gone)) };
   });
   // You first; then whoever owes the most days; then by name — so "who has not logged" is the top of the page.
   return rows.sort(
@@ -204,20 +273,21 @@ export function buildTeamRows(input: {
   );
 }
 
-export type TeamFilter = "all" | "missing" | "over";
+export type TeamFilter = "all" | "missing" | "over" | "off";
 
 export function filterTeam(rows: readonly TeamRow[], text: string, mode: TeamFilter): TeamRow[] {
   const q = fold(text.trim());
   return rows.filter(
     (r) =>
       (!q || fold(r.person.displayName).includes(q)) &&
-      (mode === "all" || (mode === "missing" ? r.missing.length > 0 : r.overDays > 0))
+      (mode === "all" || (mode === "missing" ? r.missing.length > 0 : mode === "off" ? r.offBooking : r.overDays > 0))
   );
 }
 
 /** People who owe days, people over capacity, and the over-capacity person-days (what the page's figures say). */
-export function teamCounts(rows: readonly TeamRow[]): { all: number; missing: number; over: number; overDays: number } {
+export function teamCounts(rows: readonly TeamRow[]): { all: number; missing: number; over: number; overDays: number; off: number } {
   return {
+    off: rows.filter((r) => r.offBooking).length,
     all: rows.length,
     missing: rows.filter((r) => r.missing.length > 0).length,
     over: rows.filter((r) => r.overDays > 0).length,
@@ -237,7 +307,7 @@ export function personRows(entries: readonly WorklogEntry[], accountId: string):
   return [...by.keys()].sort(NATURAL).map((key) => {
     const list = by.get(key) ?? [];
     const { cells, total } = cellsOf(list);
-    return { key, summary: list[0]?.summary ?? key, issueType: list[0]?.issueType ?? "", task: null, kind: "logged", cells, total };
+    return { key, summary: list[0]?.summary ?? key, issueType: list[0]?.issueType ?? "", task: null, kind: "logged", project: projectOfKey(key), cells, total };
   });
 }
 

@@ -12,7 +12,11 @@ import { dropViewCache, noteViewsStale, readViewCache, viewCacheScope, writeView
 import { setDetailScope } from "../detailCache";
 import { prefetchProjectLists, prefetchTaskDetail } from "../taskDetailReads";
 import { optimisticTask, restoreFields, touchedFields } from "../taskPatch";
-import { warmBoardAndTimesheet, warmProgress } from "../warmViews";
+import { bookingBadge, heldElsewhereByDay } from "../bookingModel";
+import { overloadWindow } from "../resourceColumns";
+import type { BookingSheet } from "../types";
+import { bookingParams, warmBoardAndTimesheet, warmProgress } from "../warmViews";
+import { HeldHoursContext } from "./heldHoursContext";
 import { computeSla, slaIds } from "../sla";
 import { rememberIssueTypes } from "../issueTypeLook";
 import SavedFilterMenu from "./SavedFilterMenu";
@@ -42,6 +46,8 @@ import PlanReviewModal from "./PlanReviewModal";
 import KbktImportModal from "./KbktImportModal";
 import ProgressReportView from "./ProgressReportView";
 import ResourceView from "./ResourceView";
+import BookingView from "./BookingView";
+import ResourceModes from "./ResourceModes";
 import TaskEditModal from "./TaskEditModal";
 import Spinner from "./Spinner";
 import ProjectSettings from "./ProjectSettings";
@@ -101,11 +107,12 @@ function initialView(storageKey: string): { view: WorkspaceView } {
 function savedResourceMode(storageKey: string): ResourceMode {
   try {
     const v = localStorage.getItem(storageKey);
-    if (v === "load" || v === "skills") return v;
+    if (v === "booking" || v === "load" || v === "skills") return v;
   } catch {
     /* private mode */
   }
-  return "load";
+  // Who is booked comes first: the load of the tasks assigned is what follows from it.
+  return "booking";
 }
 
 const OVERLAY_WARNING =
@@ -472,7 +479,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
         freshApplied.current = t;
         setTasks(t);
         // The plan is on screen: now the other tabs' own reads (board, this week's timesheet) can start.
-        void warmBoardAndTimesheet(viewScope, session.project?.key ?? "");
+        void warmBoardAndTimesheet(viewScope, session.project?.key ?? "").then(() => setBookingsTick((n) => n + 1));
       }
       shown = true;
       setLoading(false);
@@ -595,7 +602,28 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
       calendar: workCalendar,
     });
   }, [tasks, users, pool, workCalendar]);
-  const overloadedPeople = nearLoad.overloadedPeople;
+  // What the project's bookings say, read from the view cache (warmViews.ts fetches it with the board and the
+  // timesheet; the Booking view writes it on every change and the read below follows when the view changes).
+  // Hours other projects hold of someone feed the "who is free" hints; and a project that uses bookings counts
+  // its badge by them, since the lens now opens on Booking and the badge must be the number written inside it.
+  const [bookingsTick, setBookingsTick] = useState(0);
+  const projectKeyNow = session.project?.key ?? "";
+  const bookingSheet = useMemo(
+    () => readViewCache<BookingSheet>(viewScope, "bookings", bookingParams(todayIso(), projectKeyNow)) ?? null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [viewScope, projectKeyNow, bookingsTick, view, resourceMode]
+  );
+  const heldHours = useMemo(
+    () =>
+      bookingSheet
+        ? heldElsewhereByDay({ bookings: bookingSheet.bookings, absences: bookingSheet.absences, projectKey: projectKeyNow, from: bookingSheet.from, to: bookingSheet.to, calendar: workCalendar })
+        : undefined,
+    [bookingSheet, projectKeyNow, workCalendar]
+  );
+  const overloadedPeople = useMemo(
+    () => (bookingSheet ? bookingBadge(bookingSheet, projectKeyNow, overloadWindow(todayIso()), workCalendar) : null) ?? nearLoad.overloadedPeople,
+    [bookingSheet, projectKeyNow, workCalendar, nearLoad]
+  );
 
   // Esc backs out one layer at a time: closes the edit modal if one is open
   // (matching its own Esc-to-close, if it has one, but this is the fallback),
@@ -1372,6 +1400,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
       aliases: l.id === "gantt" ? "gantt wbs" : l.id === "report" ? "bao cao" : l.id === "resource" ? "nguon luc" : "kanban sprint",
       run: () => go(l.id),
     })),
+    { id: "go-booking", label: "Booking: ai đang ở dự án nào", group: "Đi tới", icon: "calendar", keys: "G B", aliases: "dat cho nguon luc phan bo", run: () => go("booking") },
     { id: "go-time", label: "Clockwork: giờ đã ghi", group: "Đi tới", icon: "clock", keys: "G T", aliases: "gio lam cham cong timesheet", run: () => go("timesheet") },
     ...(selectedIds.size > 0
       ? [
@@ -1441,6 +1470,8 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
     function run(id: string): boolean {
       const ks = keyState.current;
       const onPlan = view === "gantt";
+      // The Booking table answers J/K/N itself (BookingView): the rail's place, and the Resource lens in its Booking mode.
+      const bookingOn = view === "booking" || (view === "resource" && resourceModeRef.current === "booking");
       switch (id) {
         case "help":
           setShortcutsOpen(true);
@@ -1474,6 +1505,9 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
         case "go-today":
           ks.go("today");
           return true;
+        case "go-booking":
+          ks.go("booking");
+          return true;
         case "go-time":
           ks.go("timesheet");
           return true;
@@ -1497,8 +1531,16 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
           if (!onPlan || selectedIds.size === 0) return false;
           void ks.handleBulkShift(id === "shift-back" ? -1 : 1);
           return true;
+        case "book-new":
+          if (!bookingOn) return false;
+          window.dispatchEvent(new Event("gms:booking-new"));
+          return true;
         case "next":
         case "prev":
+          if (bookingOn) {
+            window.dispatchEvent(new CustomEvent("gms:booking-move", { detail: { delta: id === "next" ? 1 : -1 } }));
+            return true;
+          }
           if (!onPlan) return false;
           window.dispatchEvent(new CustomEvent("gms:gantt-move", { detail: { delta: id === "next" ? 1 : -1 } }));
           return true;
@@ -1669,6 +1711,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
 
   return (
     <WorkCalendarContext.Provider value={workCalendar}>
+      <HeldHoursContext.Provider value={heldHours}>
       <div className="app">
         {toolbar}
 
@@ -1876,6 +1919,10 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
             />
           ) : view === "timesheet" ? (
             <TimesheetView session={session} tasks={tasks} onOpenEdit={openTask} onTasksChanged={refreshTasks} />
+          ) : view === "booking" ? (
+            <BookingView session={session} scope="site" />
+          ) : view === "resource" && resourceMode === "booking" ? (
+            <BookingView session={session} scope="project" tasks={tasks} focusPerson={focusPerson} lead={<ResourceModes mode={resourceMode} onChange={setResourceMode} />} />
           ) : view === "resource" ? (
             <ResourceView
               focusPerson={focusPerson}
@@ -1904,7 +1951,9 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
               backLabel={
                 settingsFrom.current === "timesheet"
                   ? "Clockwork"
-                  : (LENSES.find((l) => l.id === settingsFrom.current)?.label ?? "Hôm nay")
+                  : settingsFrom.current === "booking"
+                    ? "Booking"
+                    : (LENSES.find((l) => l.id === settingsFrom.current)?.label ?? "Hôm nay")
               }
               onBack={() => {
                 // Opened from a lens by this session: that is the previous history entry, so go back to it.
@@ -1933,6 +1982,15 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
               onOpenPersonLoad={(accountId) => {
                 setFocusPerson({ accountId, nonce: Date.now() });
                 goResource("load");
+              }}
+              bookings={
+                bookingSheet
+                  ? { bookings: bookingSheet.bookings, absences: bookingSheet.absences, projectKey: projectKeyNow, soon: overloadWindow(todayIso()) }
+                  : null
+              }
+              onOpenBooking={(accountId) => {
+                setFocusPerson({ accountId, nonce: Date.now() });
+                goResource("booking");
               }}
               taskFilter={taskFilter}
             />
@@ -1998,7 +2056,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
             users={users}
             meId={session.user.accountId}
             tasks={tasks}
-            view={view === "timesheet" ? "gantt" : view}
+            view={view === "timesheet" || view === "booking" ? "gantt" : view}
             selectedKeys={chatSelectedKeys}
             onOpenChange={setAssistantOpen}
             onUnreadChange={setAssistantUnread}
@@ -2062,6 +2120,7 @@ export default function ProjectWorkspace({ session, onSwitchProject, onLogout, i
           />
         )}
       </div>
+      </HeldHoursContext.Provider>
     </WorkCalendarContext.Provider>
   );
 }

@@ -96,10 +96,14 @@ await step("chữ không phải giờ: ô đỏ, có một câu giải thích, k
 });
 await step("Esc khi đang gõ trả giá trị cũ và không ghi gì", async () => {
   await reset();
-  await cell("DEMO-3", 2).fill("7");
+  // An empty cell, whatever day it is: the mock already holds hours on today's.
+  const cells = page.locator(".ts-mine input[data-key='DEMO-3']");
+  const idx = await cells.evaluateAll((els) => els.findIndex((e) => e.value === "" && !e.disabled));
+  assert.ok(idx >= 0, "không có ô trống");
+  await cells.nth(idx).fill("7");
   await page.keyboard.press("Escape");
   await page.waitForTimeout(200);
-  assert.equal(await cell("DEMO-3", 2).inputValue(), "");
+  assert.equal(await cells.nth(idx).inputValue(), "");
   assert.equal((await log()).length, 0);
 });
 await step("sửa ô đã có giờ: chỉ PUT số giờ, số mới hiện ngay, tổng của dòng đổi theo", async () => {

@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { api } from "../api";
+import { bookedHours, OTHER } from "../bookingModel";
 import { toast } from "../toast";
 import { orderTasksForLogging, parseHours } from "../parseHours";
 import { expectation, isAway } from "../timesheetDays";
@@ -7,9 +9,11 @@ import {
   cellEntries,
   dayState,
   fmtHours,
+  groupRows,
   myDayTotals,
   stableOrder,
   type Cell,
+  type OpenWork,
   type TaskRow,
 } from "../timesheetModel";
 import type { Task, Timesheet, TimesheetPerson } from "../types";
@@ -43,7 +47,10 @@ export default function TimesheetMine({
   onFocusDone,
   onOpenTask,
   rangeKey,
+  homeProject = null,
 }: {
+  /** The project this tab is on: its rows lead. */
+  homeProject?: string | null;
   sheet: Timesheet;
   days: string[];
   month: boolean;
@@ -78,11 +85,32 @@ export default function TimesheetMine({
     setDismissed([]);
   }
   const placed = useMemo(() => (order.range === rangeKey ? order.keys : NO_KEYS), [order, rangeKey]);
-  const rows = useMemo(
-    () => buildMyRows({ entries: sheet.entries, tasks, me, added, order: placed }).filter((r) => !(dismissed.includes(r.key) && r.total === 0)),
-    [sheet.entries, tasks, me, added, placed, dismissed]
+  // What was picked from another project's search: it is in neither the plan nor my open work, so the row needs
+  // its name from here (buildMyRows reads `openWork`).
+  const [picked, setPicked] = useState<ReadonlyMap<string, OpenWork>>(new Map());
+  const searchIssues = useCallback((q: string) => api.searchClockworkIssues(q), []);
+  const openWork = useMemo(() => {
+    const have = new Set((sheet.openWork ?? []).map((w) => w.key));
+    return [...(sheet.openWork ?? []), ...[...picked.values()].filter((w) => !have.has(w.key))];
+  }, [sheet.openWork, picked]);
+  const unordered = useMemo(
+    () =>
+      buildMyRows({ entries: sheet.entries, tasks, me, added, order: placed, openWork }).filter((r) => !(dismissed.includes(r.key) && r.total === 0)),
+    [sheet.entries, openWork, tasks, me, added, placed, dismissed]
   );
-  const nextOrder = stableOrder(placed, rows.map((r) => r.key));
+  // Gathered by project (Clockwork is every project of a person); the rows are then numbered in the order drawn,
+  // which is what the arrow keys walk.
+  const groups = useMemo(() => groupRows(unordered, homeProject), [unordered, homeProject]);
+  const rows = useMemo(() => groups.flatMap((g) => g.rows), [groups]);
+  const booked = useMemo(
+    () => bookedHours({ bookings: sheet.bookings ?? [], accountId: me, days, absences: person.absences, calendar }),
+    [sheet.bookings, me, days, person.absences, calendar]
+  );
+  const projectName = useMemo(() => new Map((sheet.projects ?? []).map((p) => [p.key, p.name])), [sheet.projects]);
+  // Projects I am booked on with nothing logged yet still get their line: that is the gap worth seeing.
+  const bookedOnly = [...booked.byProject.keys()].filter((k) => k !== OTHER && !groups.some((g) => g.project === k));
+  const showGroups = groups.length > 1 || booked.total > 0;
+  const nextOrder = stableOrder(placed, unordered.map((r) => r.key));
   if (order.range !== rangeKey || nextOrder.length !== order.keys.length || nextOrder.some((k, i) => k !== order.keys[i])) {
     setOrder({ range: rangeKey, keys: nextOrder });
   }
@@ -114,7 +142,15 @@ export default function TimesheetMine({
     if (landOn.current && focusCell(landOn.current, landDate)) landOn.current = null;
   }, [rows.length, landDate]);
 
-  const loggable = useMemo(() => orderTasksForLogging(tasks, me, sheet.entries), [tasks, me, sheet.entries]);
+  // The plan this tab holds, then my open work on other projects (enough of a task to be picked and named).
+  const loggable = useMemo(() => {
+    const local = orderTasksForLogging(tasks, me, sheet.entries);
+    const have = new Set(tasks.map((t) => t.id));
+    const others = (sheet.openWork ?? [])
+      .filter((w) => !have.has(w.key))
+      .map((w) => ({ id: w.key, summary: w.summary, issueType: w.issueType, statusCategory: w.inProgress ? "indeterminate" : "new", assigneeAccountId: me }) as unknown as Task);
+    return [...local, ...others];
+  }, [tasks, me, sheet.entries, sheet.openWork]);
   const shownKeys = useMemo(() => rows.map((r) => r.key), [rows]);
 
   /** Move between cells like a spreadsheet: by row and column index. */
@@ -135,6 +171,7 @@ export default function TimesheetMine({
     <>
       <MetricRow className="ts-tiles">
         <Metric value={`${fmtHours(logged)}h`} label="Bạn đã ghi" sub={expected > 0 ? `/ ${fmtHours(expected)}h kỳ vọng` : undefined} />
+        {booked.total > 0 && <Metric value={`${fmtHours(booked.total)}h`} label="được book" className="ts-tile-booked" />}
         {missing.length > 0 && (
           <Metric
             value={missing.length}
@@ -166,7 +203,14 @@ export default function TimesheetMine({
                 </td>
               </tr>
             )}
-            {rows.map((row, r) => (
+            {groups.map((group) => (
+              <Fragment key={group.project}>
+                {showGroups && (
+                  <GroupRow project={group.project} name={projectName.get(group.project)} logged={group.total} booked={booked.byProject.get(group.project) ?? 0} span={days.length} />
+                )}
+                {group.rows.map((row) => {
+                  const r = rows.indexOf(row);
+                  return (
               <tr key={row.key} className={`ts-row is-${row.kind}`}>
                 <th className="ts-task" scope="row">
                   <div className="ts-task-in">
@@ -201,7 +245,11 @@ export default function TimesheetMine({
                 ))}
                 <td className="ts-total"><b>{row.total > 0 ? fmtHours(row.total) : ""}</b></td>
               </tr>
+                  );
+                })}
+              </Fragment>
             ))}
+            {showGroups && bookedOnly.map((k) => <GroupRow key={k} project={k} name={projectName.get(k)} logged={0} booked={booked.byProject.get(k) ?? 0} span={days.length} />)}
             <tr className="ts-add-row">
               <th className="ts-task" scope="row">
                 <button type="button" className="ts-add" onClick={(e) => setPick(e.currentTarget.getBoundingClientRect())}>
@@ -259,9 +307,14 @@ export default function TimesheetMine({
           anchor={pick}
           tasks={loggable}
           exclude={shownKeys}
+          remote={searchIssues}
           placeholder="Thêm việc vào bảng giờ"
           onPick={(t) => {
             setPick(null);
+            // Not in the plan and not mine: keep what the search told us so the row has a name.
+            if (!tasks.some((x) => x.id === t.id) && !(sheet.openWork ?? []).some((w) => w.key === t.id)) {
+              setPicked((m) => new Map(m).set(t.id, { key: t.id, summary: t.summary, issueType: t.issueType, inProgress: t.statusCategory === "indeterminate" }));
+            }
             setDismissed((x) => x.filter((k) => k !== t.id));
             setAdded((a) => (a.includes(t.id) ? a : [...a, t.id]));
             if (!focusCell(t.id, landDate)) landOn.current = t.id;
@@ -270,6 +323,29 @@ export default function TimesheetMine({
         />
       )}
     </>
+  );
+}
+
+/** The line that opens a project's rows: its name, and what was logged on it beside what was booked. */
+function GroupRow({ project, name, logged, booked, span }: { project: string; name: string | undefined; logged: number; booked: number; span: number }) {
+  return (
+    <tr className="ts-group-row" data-project={project}>
+      <th className="ts-task" scope="rowgroup">
+        <div className="ts-group-name">
+          <b>{project}</b>
+          {name && <span>{name}</span>}
+        </div>
+      </th>
+      <td colSpan={span} />
+      <td className="ts-total">
+        {(logged > 0 || booked > 0) && (
+          <span className="ts-booked" title={booked > 0 ? `Đã ghi ${fmtHours(logged)}h, được book ${fmtHours(booked)}h` : undefined}>
+            {fmtHours(logged)}
+            {booked > 0 && <small> / {fmtHours(booked)}h book</small>}
+          </span>
+        )}
+      </td>
+    </tr>
   );
 }
 

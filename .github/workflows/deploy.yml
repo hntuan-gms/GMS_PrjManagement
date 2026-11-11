@@ -47,6 +47,12 @@ name: Deploy to Cloud Run
 #                              issue copy hears of changes instead of asking every 30 s
 #                              (server/src/jiraWebhooks.ts). Same rule: enable that scope
 #                              on BOTH apps first. Unset = no webhooks.
+#     RESOURCE_MANAGER_GROUP   optional; the Jira group whose members are resource managers:
+#                              they see and edit every booking and read every team's hours
+#                              (server/src/resourceRoles.ts). Unset = nobody has the role;
+#                              project admins still book their own projects.
+#     RESOURCE_MANAGER_ACCOUNT_IDS  optional; the same role by Atlassian account id,
+#                              separated by `;` (no commas). For when the group cannot be read.
 #     ISSUE_CACHE              optional; "off" reads every project whole from Jira on
 #                              every load, as before the Postgres issue copy. Unset = on.
 #     BOARD_CACHE              optional; "off" makes the Bảng tab read Jira's board API
@@ -152,6 +158,8 @@ jobs:
             JIRA_WEBHOOKS=${{ vars.JIRA_WEBHOOKS }}
             ISSUE_CACHE=${{ vars.ISSUE_CACHE }}
             BOARD_CACHE=${{ vars.BOARD_CACHE }}
+            RESOURCE_MANAGER_GROUP=${{ vars.RESOURCE_MANAGER_GROUP }}
+            RESOURCE_MANAGER_ACCOUNT_IDS=${{ vars.RESOURCE_MANAGER_ACCOUNT_IDS }}
           # The runtime service account needs roles/secretmanager.secretAccessor on
           # both. Rotate session-encryption-keys by PREPENDING a new key — replacing
           # the list outright logs every user out immediately.

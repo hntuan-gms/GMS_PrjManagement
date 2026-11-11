@@ -7,10 +7,12 @@ import {
   dayState,
   filterTeam,
   fmtHours,
+  groupRows,
   isOddCapacity,
   myDayTotals,
   personRows,
   planCell,
+  projectOfKey,
   replacingEntry,
   stableOrder,
   suggestedTasks,
@@ -161,6 +163,38 @@ describe("dayState", () => {
   });
 });
 
+describe("rows across projects", () => {
+  const openWork = [
+    { key: "AI-9", summary: "Việc bên AI", issueType: "Task", inProgress: false },
+    { key: "AI-3", summary: "Đang làm bên AI", issueType: "Task", inProgress: true },
+    { key: "X-1", summary: "đã có trong kế hoạch", issueType: "Task", inProgress: true },
+  ];
+
+  it("names a row the loaded plan does not have, and offers other projects' open work after the plan's", () => {
+    const rows = buildMyRows({ entries: [entry({ id: "1", issueKey: "AI-9", date: "2026-11-02", hours: 2, summary: "" })], tasks: [task({ id: "X-1", summary: "Việc trong kế hoạch", assigneeAccountId: ME })], me: ME, added: [], openWork });
+    assert.deepEqual(rows.map((r) => [r.key, r.kind, r.project]), [["AI-9", "logged", "AI"], ["X-1", "suggested", "X"], ["AI-3", "suggested", "AI"]]);
+    assert.equal(rows[2].summary, "Đang làm bên AI");
+    assert.equal(rows[2].task, null);
+  });
+
+  it("gathers rows by project, the tab's own project first, rows in the order they stood", () => {
+    const rows = buildMyRows({
+      entries: [entry({ id: "1", issueKey: "AI-9", date: "2026-11-02", hours: 2 }), entry({ id: "2", issueKey: "X-4", date: "2026-11-02", hours: 3 }), entry({ id: "3", issueKey: "X-1", date: "2026-11-03", hours: 1 })],
+      tasks: [],
+      me: ME,
+      added: [],
+    });
+    const groups = groupRows(rows, "X");
+    assert.deepEqual(groups.map((g) => [g.project, g.rows.map((r) => r.key), g.total]), [["X", ["X-1", "X-4"], 4], ["AI", ["AI-9"], 2]]);
+    assert.deepEqual(groupRows(rows).map((g) => g.project), ["AI", "X"]);
+  });
+
+  it("reads the project out of a key, hyphens in the key included", () => {
+    assert.equal(projectOfKey("GPM-104"), "GPM");
+    assert.equal(projectOfKey("MY-TEAM-7"), "MY-TEAM");
+  });
+});
+
 describe("team grid", () => {
   const people = [person("zed", { displayName: "Zed" }), person("anh", { displayName: "Anh" }), person("me", { displayName: "Tôi" }), person("out", { displayName: "Ngoài", outsider: true })];
   const entries = [
@@ -185,7 +219,22 @@ describe("team grid", () => {
     assert.deepEqual(filterTeam(rows, "toi", "all").map((r) => r.person.accountId), ["me"]);
     assert.deepEqual(filterTeam(rows, "", "over").map((r) => r.person.accountId), ["anh"]);
     assert.ok(filterTeam(rows, "", "missing").every((r) => r.missing.length > 0));
-    assert.deepEqual(teamCounts(rows), { all: 4, missing: rows.filter((r) => r.missing.length > 0).length, over: 1, overDays: 1 });
+    assert.deepEqual(teamCounts(rows), { all: 4, missing: rows.filter((r) => r.missing.length > 0).length, over: 1, overDays: 1, off: 0 });
+  });
+  it("sets what was booked beside what was logged, over the days already gone", () => {
+    const booking = (accountId: string, hoursPerDay: number, projectKey: string | null = "X") => ({
+      id: accountId + projectKey, accountId, projectKey, from: "2026-11-02", to: "2026-11-06", hoursPerDay, status: "confirmed" as const, note: null, editable: false,
+    });
+    // Today is Thursday the 5th: four working days gone.
+    const withBooks = buildTeamRows({ people, entries, days: DAYS, today: "2026-11-05", calendar: DEFAULT_WORK_CALENDAR, me: ME, bookings: [booking("me", 4), booking("zed", 8), booking("anh", 4), booking("anh", 1, null)] });
+    const by = Object.fromEntries(withBooks.map((r) => [r.person.accountId, r]));
+    assert.equal(by.me.booked, 20);
+    assert.equal(by.me.offBooking, false, "16h logged against 16h booked so far");
+    assert.equal(by.zed.offBooking, true, "nothing logged against 32h booked so far");
+    assert.equal(by.anh.booked, 25, "a project the viewer cannot name still counts");
+    assert.equal(by.out.booked, 0);
+    assert.deepEqual(filterTeam(withBooks, "", "off").map((r) => r.person.accountId), ["zed", "anh"]);
+    assert.equal(teamCounts(withBooks).off, 2);
   });
   it("opens a person into their own tasks", () => {
     const opened = personRows(entries, "anh");

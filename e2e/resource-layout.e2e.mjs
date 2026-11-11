@@ -60,6 +60,8 @@ await reset();
 await page.goto(process.env.E2E_APP ?? "http://localhost:5173/");
 await page.waitForSelector(".wbs-row");
 await page.locator(".toolbar-tabs button", { hasText: "Resource" }).click();
+// The lens opens on Booking (booking.e2e.mjs); this file is the contract of the load table.
+await page.locator(".rv-modes [data-mode=load]").click();
 await page.waitForSelector(".resource-view .rv-row-person");
 
 const rect = (sel) => page.locator(sel).first().boundingBox();
@@ -657,7 +659,7 @@ await step("bấm lên lớp mờ đóng cửa sổ và ghi nốt ô đang gõ",
 console.log("\n== Tải lại trang (F5): các tab không phải chờ Jira lần nữa ==");
 // Jira answers slowly: if the tab only paints once the answer lands, the checks below time out.
 const SLOW = 2500;
-const slow = (re) => page.route(re, async (route) => { await new Promise((r) => setTimeout(r, SLOW)); route.continue(); });
+const slow = (re) => page.route(re, async (route) => { await new Promise((r) => setTimeout(r, SLOW)); await route.continue().catch(() => {}); /* the page may have been reloaded meanwhile */ });
 await step("nhãn 'Nhân lực' và số quá tải hiện ngay sau F5, không đợi danh sách thành viên", async () => {
   await slow(/\/api\/resources(\?|$)/);
   await page.reload();
@@ -676,14 +678,15 @@ await step("Nhịp dự án, Bảng, Giờ làm đã xem trước đó hiện ng
     await open(name);
     await page.waitForSelector({ "Report": ".pr-tile", "Board": ".bd-card", "Giờ làm": ".ts-grid" }[name]);
   }
-  await slow(/\/api\/(progress|board|timesheet)/);
+  await slow(/\/api\/(progress|board|timesheet|clockwork)/);
   await page.reload();
-  await page.waitForSelector(".toolbar-tabs");
+  // The last place visited was Clockwork (a rail place, no lens tabs): wait for the rail, not for the tabs.
+  await page.waitForSelector(".app-rail");
   for (const [name, sel] of [["Report", ".pr-tile"], ["Board", ".bd-card"], ["Giờ làm", ".ts-grid"]]) {
     await open(name);
     await page.waitForSelector(sel, { timeout: 1500 });
   }
-  await page.unroute(/\/api\/(progress|board|timesheet)/);
+  await page.unroute(/\/api\/(progress|board|timesheet|clockwork)/);
 });
 console.log(`\n${failed ? failed + " lỗi" : "đạt hết"}`);
 console.log("Hộp thoại/console:", problems.length ? problems.join("\n") : "không có");

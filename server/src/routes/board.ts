@@ -2,6 +2,8 @@ import { Router, type Request } from "express";
 import { requireProject } from "../auth/middleware.js";
 import { BoardService } from "../agile/boardService.js";
 import { availability, plannedWindow } from "../agile/sprintMetrics.js";
+import * as bookings from "../bookingStore.js";
+import { heldElsewhere } from "../bookingLoad.js";
 import { badRequest } from "../errors.js";
 import * as resources from "../resourceStore.js";
 import { getWorkCalendar } from "../slaStore.js";
@@ -226,14 +228,16 @@ boardRouter.get("/sprints/:id/capacity", async (req, res, next) => {
     if (snapshot.mode !== "agile" || !target) throw badRequest("Chỉ xem được công suất của sprint đang chạy hoặc chưa bắt đầu.");
 
     const window = plannedWindow(snapshot, target, today, offset, calendar);
-    const [members, profiles, absences] = await Promise.all([
+    const [members, profiles, absences, held] = await Promise.all([
       taskService!.listMembers().then((m) => m.users),
       resources.listProfiles(session.cloudId).catch(() => []),
       resources.listAbsences(session.cloudId).catch(() => []),
+      // Hours only: what other projects hold of these people. A failed read means no deduction, not no answer.
+      bookings.listInRange(session.cloudId, window.start, window.end).then((b) => heldElsewhere(b, session.projectKey!)).catch(() => []),
     ]);
     res.json({
       window,
-      team: availability(members, profiles, absences, window.start, window.end, resources.DEFAULT_CAPACITY_HOURS, calendar),
+      team: availability(members, profiles, absences, window.start, window.end, resources.DEFAULT_CAPACITY_HOURS, calendar, held),
     });
   } catch (err) {
     next(err);

@@ -118,6 +118,11 @@ export default function TimesheetTeam({
                           thiếu {row.missing.length} ngày
                         </span>
                       )}
+                      {row.booked > 0 && (
+                        <span className={`ts-booked${row.offBooking ? " is-off" : ""}`} title={row.offBooking ? "Giờ đã ghi khác giờ được book quá 20%" : "Giờ được book trong kỳ"}>
+                          book {fmtHours(row.booked)}h
+                        </span>
+                      )}
                       {odd && (
                         <span className="ts-odd" title={`Công suất ${fmtHours(p.capacityHoursPerDay)}h/ngày: có thể nhập nhầm trong hồ sơ nhân lực`}>
                           {fmtHours(p.capacityHoursPerDay)}h/ngày?

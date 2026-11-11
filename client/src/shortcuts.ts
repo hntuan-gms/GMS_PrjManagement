@@ -25,6 +25,7 @@ export const SHORTCUTS: Shortcut[] = [
   { id: "undo", keys: "Ctrl Z", label: "Hoàn tác thao tác kéo thả", group: "Chung" },
   { id: "escape", keys: "Esc", label: "Đóng lớp trên cùng, rồi bỏ chọn", group: "Chung" },
   { id: "go-today", keys: "G H", label: "Hôm nay", group: "Đi tới" },
+  { id: "go-booking", keys: "G B", label: "Booking", group: "Đi tới" },
   { id: "go-time", keys: "G T", label: "Clockwork (giờ đã ghi)", group: "Đi tới" },
   { id: "lens-1", keys: "1", label: "List", group: "Đi tới" },
   { id: "lens-2", keys: "2", label: "Board", group: "Đi tới" },
@@ -33,7 +34,8 @@ export const SHORTCUTS: Shortcut[] = [
   { id: "go-settings", keys: "G S", label: "Cài đặt dự án", group: "Đi tới" },
   { id: "next", keys: "J  ↓", label: "Dòng sau", group: "Danh sách" },
   { id: "prev", keys: "K  ↑", label: "Dòng trước", group: "Danh sách" },
-  { id: "open", keys: "Enter", label: "Mở chi tiết", group: "Danh sách" },
+  { id: "open", keys: "Enter", label: "Mở chi tiết (Booking: mở / đóng người)", group: "Danh sách" },
+  { id: "book-new", keys: "N", label: "Booking: book người đang chọn", group: "Danh sách" },
   { id: "select-all", keys: "Ctrl A", label: "Chọn tất cả (đang lọc)", group: "Danh sách" },
   { id: "status", keys: "S", label: "Đổi trạng thái", group: "Việc đang chọn" },
   { id: "assign", keys: "A", label: "Giao người", group: "Việc đang chọn" },
@@ -58,7 +60,7 @@ export const SHORTCUTS: Shortcut[] = [
 export const LOCAL_SHORTCUTS: ReadonlySet<string> = new Set(["undo", "escape", "open", "card-column"]);
 
 /** Two-key sequences; the workspace feeds them to `createSequence`. */
-export const SEQUENCES: Record<string, string> = { "g h": "go-today", "g t": "go-time", "g s": "go-settings" };
+export const SEQUENCES: Record<string, string> = { "g h": "go-today", "g b": "go-booking", "g t": "go-time", "g s": "go-settings" };
 
 export interface KeyLike {
   key: string;
@@ -115,6 +117,7 @@ export function shortcutIdFor(e: KeyLike): string | null {
     case "m": return "mine";
     case "o": return "overdue";
     case "l": return "log-time";
+    case "n": return "book-new";
     case "Delete": return "delete";
     default: return null;
   }

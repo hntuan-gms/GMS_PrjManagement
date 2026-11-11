@@ -79,3 +79,31 @@ export function descendantIds(tasks: readonly Task[], rootId: string): Set<strin
   }
   return out;
 }
+
+/** An issue found on Jira by `GET /clockwork/issues`: enough of one to be listed, named and logged on. */
+export interface RemoteIssue {
+  key: string;
+  summary: string;
+  issueType: string;
+  inProgress?: boolean;
+}
+
+/** A found issue as the picker's own kind of row. Only what a picker and a name need; not a loaded task. */
+export function remoteAsTask(r: RemoteIssue): Task {
+  return { id: r.key, summary: r.summary, issueType: r.issueType, statusCategory: r.inProgress ? "indeterminate" : "new" } as unknown as Task;
+}
+
+/**
+ * Found issues after the ones already in the plan, never twice (a key the plan has is the plan's own row),
+ * and never one the caller excluded (rows already on the sheet).
+ */
+export function mergeRemote(local: readonly Task[], remote: readonly RemoteIssue[], exclude: Iterable<string> = []): Task[] {
+  const taken = new Set<string>([...local.map((t) => t.id), ...exclude]);
+  const out: Task[] = [];
+  for (const r of remote) {
+    if (taken.has(r.key)) continue;
+    taken.add(r.key);
+    out.push(remoteAsTask(r));
+  }
+  return out;
+}

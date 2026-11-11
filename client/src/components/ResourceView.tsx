@@ -41,6 +41,7 @@ import ResourceProfileDialog from "./ResourceProfileDialog";
 import ResourceUnassigned, { type DragState } from "./ResourceUnassigned";
 import SavedFilterMenu from "./SavedFilterMenu";
 import SkillMatrixView from "./SkillMatrixView";
+import { useHeldHours } from "./heldHoursContext";
 import { useWorkCalendar } from "./workCalendarContext";
 import { dayKind, dayLabel } from "../workCalendar";
 
@@ -228,13 +229,14 @@ export default function ResourceView({
    * assistant's auto-assign, nobody is ruled out for being busy), but handing work to someone who is
    * already full inside its dates says so, with the one click that undoes it.
    */
+  const heldHours = useHeldHours();
   function assign(taskId: string, accountId: string | null) {
     const t = tasks.find((x) => x.id === taskId);
     const previous = t?.assigneeAccountId ?? null;
     let note: string | null = null;
     if (t && accountId && accountId !== previous) {
       const who = users.find((u) => u.accountId === accountId) ?? load.people.find((p) => p.accountId === accountId);
-      const h = who ? assignHints(t, [{ accountId, displayName: who.displayName, avatarUrl: null }], load, calendar)[0] : undefined;
+      const h = who ? assignHints(t, [{ accountId, displayName: who.displayName, avatarUrl: null }], load, calendar, heldHours)[0] : undefined;
       const dates = taskBarDates(t);
       if (who && h && h.ranged && h.conflictDays > 0 && dates) {
         note = `${who.displayName} đã kín ${h.conflictDays} ngày trong ${shortRange(dates.start, dates.end)}`;

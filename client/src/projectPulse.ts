@@ -1,7 +1,8 @@
+import { bookingGap } from "./bookingModel";
 import { computeCriticalPath } from "./criticalPath";
 import { formatDayMonth, formatDayRange } from "./humanDate";
 import { addDays, DEFAULT_CAPACITY_HOURS, diffDays, type ResourceLoad } from "./resourceAllocation";
-import { isAssignableType, type Health, type JiraUser, type ProgressMetrics, type Task } from "./types";
+import { isAssignableType, type Booking, type Health, type JiraUser, type ProgressMetrics, type ResourceAbsence, type Task } from "./types";
 import { DEFAULT_WORK_CALENDAR, isWorkingDate, workingDates, type WorkCalendar } from "./workCalendar";
 
 /*
@@ -153,15 +154,28 @@ export function pulseHeadline(m: ProgressMetrics, decisions: PulseDecision[] = [
 
 /* ------------------------------------------------------------------ decisions */
 
-export type PulseDecisionKind = "late-blocking" | "unassigned-critical" | "overloaded" | "overdue" | "no-baseline";
+export type PulseDecisionKind = "late-blocking" | "unassigned-critical" | "overloaded" | "booking-gap" | "overdue" | "no-baseline";
+
+/** More assigned work than booked on this project, by this many hours in the next two weeks, is a row. */
+export const BOOKING_GAP_MIN_HOURS = 8;
+
+/** What the bookings of this project say (the Resource lens's Booking read), for the "booking-gap" row. */
+export interface PulseBookings {
+  bookings: readonly Booking[];
+  absences: readonly Pick<ResourceAbsence, "accountId" | "from" | "to">[];
+  projectKey: string;
+  /** The two weeks ahead, the same window as the Nhân lực badge. */
+  soon: { from: string; to: string };
+}
 
 export interface PulseAction {
   /**
    * reschedule: pick a new due date for `taskId`. reassign / pick: choose a person for `taskId`.
    * assign: give `taskId` to `suggestedAccountId` in one click. rebalance: open that person's load.
    * set-baseline: freeze the current dates of the row's tasks as their baseline. open: the task.
+   * book: open that person in Resource › Booking, to book more of them.
    */
-  kind: "reschedule" | "reassign" | "pick" | "assign" | "open" | "rebalance" | "set-baseline";
+  kind: "reschedule" | "reassign" | "pick" | "assign" | "open" | "rebalance" | "set-baseline" | "book";
   label: string;
   taskId?: string;
   /** For "assign": the person code suggests. */
@@ -259,7 +273,12 @@ export function pulseDecisions(
    * names the same person and days as the Nhân lực badge and the "tải 2 tuần" column; without it (tests) the
    * row is worked out here against the default capacity.
    */
-  load?: ResourceLoad | null
+  load?: ResourceLoad | null,
+  /**
+   * The project's bookings. With none given, or none on this project yet, there is no "booking-gap" row:
+   * a project that does not use bookings has every person "over" them, which says nothing.
+   */
+  booking?: PulseBookings | null
 ): PulseDecision[] {
   const critical = computeCriticalPath(tasks);
   const work = workItemsOf(tasks);
@@ -349,6 +368,42 @@ export function pulseDecisions(
         actions: [{ kind: "rebalance", label: nameOf(overload.accountId) ? `Xem lịch ${givenName(name)}` : "Xem lịch", accountId: overload.accountId, date: overload.from }],
       },
     });
+  }
+
+  /* someone has been given more than was booked for them */
+  if (booking && load && booking.bookings.some((b) => b.projectKey === booking.projectKey)) {
+    let worst: { accountId: string; assigned: number; booked: number; taskIds: string[] } | null = null;
+    for (const p of [...load.people].sort((a, b) => a.accountId.localeCompare(b.accountId))) {
+      const gap = bookingGap({
+        person: p,
+        bookings: booking.bookings,
+        absences: booking.absences.filter((a) => a.accountId === p.accountId),
+        accountId: p.accountId,
+        projectKey: booking.projectKey,
+        soon: booking.soon,
+        calendar,
+        minGap: BOOKING_GAP_MIN_HOURS,
+      });
+      if (!gap || (worst && gap.assigned - gap.booked <= worst.assigned - worst.booked)) continue;
+      const ids = [...new Set(p.days.filter((d) => d.date >= booking.soon.from && d.date <= booking.soon.to).flatMap((d) => d.taskIds))];
+      worst = { accountId: p.accountId, ...gap, taskIds: ids };
+    }
+    if (worst) {
+      const name = nameOf(worst.accountId) || "Một người";
+      out.push({
+        rank: 3.5,
+        decision: {
+          kind: "booking-gap",
+          title: `${name} được giao nhiều hơn booking`,
+          body: `Việc đã giao ${formatDayRange(booking.soon.from, booking.soon.to, today)}: ${worst.assigned}h, mới book ${worst.booked}h trên ${booking.projectKey}.`,
+          taskIds: worst.taskIds,
+          actions: [
+            { kind: "rebalance", label: `Xem lịch ${givenName(name)}`, accountId: worst.accountId },
+            { kind: "book", label: "Book thêm", accountId: worst.accountId },
+          ],
+        },
+      });
+    }
   }
 
   /* other late work */

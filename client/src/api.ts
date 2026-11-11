@@ -1,3 +1,4 @@
+import type { RemoteIssue } from "./taskPickerModel";
 import type {
   BoardSnapshot,
   ChatSessionSummary,
@@ -23,6 +24,9 @@ import type {
   ProgressReport,
   ReportPoint,
   ResourceAbsence,
+  Booking,
+  BookingSheet,
+  BookingStatus,
   SprintCapacity,
   SprintReport,
   FlowReport,
@@ -168,6 +172,15 @@ let jiraLimitedHandler: ((seconds: number) => void) | null = null;
 
 export function setJiraLimitedHandler(fn: ((seconds: number) => void) | null): void {
   jiraLimitedHandler = fn;
+}
+
+/**
+ * A worklog is written through the project its issue belongs to, which on Clockwork (every project of a
+ * person) need not be the one this tab is on. The server checks the caller can browse it, as for any tab.
+ */
+function issueProjectHeader(issueKey: string): Record<string, string> {
+  const cut = issueKey.lastIndexOf("-");
+  return cut > 0 ? { "X-Project-Key": issueKey.slice(0, cut) } : {};
 }
 
 /**
@@ -375,18 +388,47 @@ export const api = {
   logWork: (input: { issueKey: string; date: string; hours: number; comment?: string | null }) =>
     request<WorklogEntry>("/timesheet/worklogs", {
       method: "POST",
+      headers: issueProjectHeader(input.issueKey),
       body: JSON.stringify({ ...input, tzOffsetMinutes: -new Date().getTimezoneOffset() }),
     }),
   /** Only what is passed changes; `comment: null` clears the note. */
   updateWorklog: (issueKey: string, id: string, patch: { date?: string; hours?: number; comment?: string | null }) =>
     request<WorklogEntry>(`/timesheet/worklogs/${encodeURIComponent(issueKey)}/${encodeURIComponent(id)}`, {
       method: "PUT",
+      headers: issueProjectHeader(issueKey),
       body: JSON.stringify({ ...patch, tzOffsetMinutes: -new Date().getTimezoneOffset() }),
     }),
   deleteWorklog: (issueKey: string, id: string) =>
     request<void>(`/timesheet/worklogs/${encodeURIComponent(issueKey)}/${encodeURIComponent(id)}`, {
       method: "DELETE",
+      headers: issueProjectHeader(issueKey),
     }),
+
+  // Clockwork: a person's hours on every project (the rail), beside what they were booked for.
+  getClockwork: (from: string, to: string, opts?: { background?: boolean }) =>
+    request<Timesheet>(`/clockwork?from=${from}&to=${to}&tz=${-new Date().getTimezoneOffset()}`, opts?.background ? BACKGROUND : undefined),
+  /** Open issues of ANY project by key or title, for "+ Thêm việc" in Clockwork. */
+  searchClockworkIssues: (q: string) => request<RemoteIssue[]>(`/clockwork/issues?q=${encodeURIComponent(q)}`),
+  getClockworkTeam: (from: string, to: string, project?: string | null) =>
+    request<Timesheet>(
+      `/clockwork/team?from=${from}&to=${to}&tz=${-new Date().getTimezoneOffset()}${project ? `&project=${encodeURIComponent(project)}` : ""}`
+    ),
+
+  // Booking: who is promised to which project. Site-wide; `project` cuts the read to one (the Resource lens).
+  getBookings: (from: string, to: string, project?: string | null, opts?: { background?: boolean }) =>
+    request<BookingSheet>(`/bookings?from=${from}&to=${to}${project ? `&project=${encodeURIComponent(project)}` : ""}`, opts?.background ? BACKGROUND : undefined),
+  createBooking: (input: { accountId: string; projectKey: string; from: string; to: string; hoursPerDay: number; status?: BookingStatus; note?: string | null }) =>
+    request<Booking>("/bookings", { method: "POST", body: JSON.stringify(input) }),
+  updateBooking: (id: string, patch: { accountId?: string; from?: string; to?: string; hoursPerDay?: number; status?: BookingStatus; note?: string | null }) =>
+    request<Booking>(`/bookings/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  deleteBooking: (id: string) => request<void>(`/bookings/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  searchBookingPeople: (q: string) => request<JiraUser[]>(`/bookings/people?q=${encodeURIComponent(q)}`),
+  /** Leave entered from the Booking view: your own, or anyone's for a manager. */
+  addLeave: (accountId: string, from: string, to: string, reason: string | null) =>
+    request<ResourceAbsence>("/bookings/absences", { method: "POST", body: JSON.stringify({ accountId, from, to, reason }) }),
+  updateLeave: (id: string, patch: { from?: string; to?: string; reason?: string | null }) =>
+    request<ResourceAbsence>(`/bookings/absences/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  deleteLeave: (id: string) => request<void>(`/bookings/absences/${encodeURIComponent(id)}`, { method: "DELETE" }),
   // Progress report. The overview is free (computed, no model call); generating a
   // report waits on Gemini and can take several seconds.
   getProgress: (asOf: string, scope?: ProgressScope) => {

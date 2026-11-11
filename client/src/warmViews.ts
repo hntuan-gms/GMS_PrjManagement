@@ -1,4 +1,5 @@
 import { api } from "./api";
+import { bookingWindow } from "./bookingModel";
 import { readStoredBoardId } from "./boardModel";
 import { todayIso } from "./resourceAllocation";
 import { localToday } from "./taskForm";
@@ -51,7 +52,13 @@ export function warmProgress(scope: string): Promise<void> {
   return warm(scope, "progress", overviewParams(asOf, none), () => api.getProgress(asOf, none));
 }
 
-/** The board and this week's timesheet: Jira reads of their own, so they wait until the plan is on screen. */
+/** Params of the project-scoped booking read in the view cache — the window the Booking view itself uses. */
+export function bookingParams(today: string, projectKey: string): string {
+  const { from, to } = bookingWindow(today);
+  return `${from}|${to}|${projectKey}`;
+}
+
+/** The board, this week's timesheet and the project's bookings: reads of their own, so they wait until the plan is on screen. */
 export function warmBoardAndTimesheet(scope: string, projectKey: string): Promise<void> {
   const boardId = readStoredBoardId(projectKey);
   const { from, to } = rangeOf("week", localToday());
@@ -59,7 +66,12 @@ export function warmBoardAndTimesheet(scope: string, projectKey: string): Promis
     // Marked as background: while the Jira quota is nearly spent the server turns these away, and each tab
     // asks for itself when it is opened.
     warm(scope, "board", String(boardId), () => api.getBoard(boardId, { background: true })),
-    warm(scope, "timesheet", `${from}|${to}`, () => api.getTimesheet(from, to, { background: true })),
+    warm(scope, "timesheet", `${from}|${to}`, () => api.getClockwork(from, to, { background: true })),
+    // The lens badge and the hints of "who is free" read it. No Jira call but the (remembered) role check.
+    warm(scope, "bookings", bookingParams(localToday(), projectKey), () => {
+      const { from: f, to: t } = bookingWindow(localToday());
+      return api.getBookings(f, t, projectKey, { background: true });
+    }),
   ]).then(() => undefined);
 }
 

@@ -28,6 +28,8 @@ const COLLAPSED_ROWS = 8;
 export default function CapacityTable({ rows, window, unit, inHours }: Props) {
   const [all, setAll] = useState(false);
   const shown = all ? rows : rows.slice(0, COLLAPSED_ROWS);
+  // Only when somebody is held: a column of zeros says nothing.
+  const anyHeld = rows.some((r) => r.heldHours > 0);
   return (
     <div className="cap">
       <div className="cap-head bd-muted">
@@ -40,6 +42,7 @@ export default function CapacityTable({ rows, window, unit, inHours }: Props) {
             <th>Thành viên</th>
             <th>Ngày làm</th>
             <th>Công suất</th>
+            {anyHeld && <th title="Giờ đã book ở dự án khác, đã trừ khỏi công suất">Dự án khác</th>}
             <th>Đã giao</th>
             {inHours && <th>Còn lại</th>}
           </tr>
@@ -55,6 +58,7 @@ export default function CapacityTable({ rows, window, unit, inHours }: Props) {
                 </th>
                 <td>{r.accountId ? r.days : "—"}</td>
                 <td>{r.accountId ? `${r.capacityHours}h` : "—"}</td>
+                {anyHeld && <td>{r.heldHours > 0 ? `bị giữ ${r.heldHours}h` : ""}</td>}
                 <td>
                   {r.count} việc{r.weight > 0 && r.count > 0 ? ` · ${r.weight} ${unit}` : ""}
                 </td>

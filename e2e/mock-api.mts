@@ -8,6 +8,7 @@ import { autoFieldMap, FIELD_SOURCES, mappableFields } from "../server/src/kbkt/
 import { parseWorkbook } from "../server/src/kbkt/parse.ts";
 import { DEFAULT_SETTINGS, validateSettings } from "../server/src/kbkt/settings.ts";
 import { AppError } from "../server/src/errors.ts";
+import { canEditAbsence, canWrite, roleOf, shapeForViewer, validateBookingInput, validateBookingPatch, validateRange, visibleAccounts, type Booking, type Viewer } from "../server/src/booking.ts";
 import { validateFilterInput } from "../server/src/savedFilters.ts";
 import { calendarOf, DEFAULT_SLA_SETTINGS, validateCalendar, validateSlaSettings } from "../server/src/sla.ts";
 import { KbktSync, type LogLine } from "../server/src/kbkt/sync.ts";
@@ -100,6 +101,8 @@ app.post("/api/__restore", (_q, r) => {
   listDelayMs = 0;
   worklogs = seedWorklogs();
   failWorklogWrites = false;
+  bookings = seedBookings();
+  bookingRole = "pm";
   sessionProject = "DEMO";
   tasksSeen = [];
   attachmentsOf5 = seedFiles();
@@ -375,7 +378,7 @@ app.post("/api/__worklogs/fail", (req, r) => { failWorklogWrites = !!req.body?.o
 app.post("/api/timesheet/worklogs", (req, res) => {
   if (failWorklogWrites) return res.status(400).json({ error: "Jira từ chối ghi giờ" });
   const b = req.body ?? {};
-  const t = tasks.find((x: any) => x.id === b.issueKey);
+  const t = tasks.find((x: any) => x.id === b.issueKey) ?? otherIssues.find((x) => x.key === b.issueKey);
   const w = { id: `w${++worklogSeq}`, issueKey: b.issueKey, summary: t?.summary ?? b.issueKey, issueType: t?.issueType ?? "Task", authorAccountId: "me", authorName: "Tuấn Test", date: b.date, hours: b.hours, comment: b.comment ?? null, mine: true };
   worklogs.push(w);
   res.status(201).json(w);
@@ -942,6 +945,170 @@ app.delete("/api/filters/:id", (req, res) => {
   savedFilters = savedFilters.filter((x) => !(x.id === req.params.id && x.createdBy === "me"));
   if (savedFilters.length === before) return res.status(404).json({ error: "Không tìm thấy bộ lọc." });
   res.status(204).end();
+});
+
+// --- Booking and Clockwork: a person across projects --------------------------------------------
+// The REAL rules (server/src/booking.ts) decide who sees and writes what; only the store is memory.
+// The signed-in account manages DEMO by default; POST /api/__booking/role switches it to a plain
+// member or a resource manager. "SECRET" is a project this account cannot browse.
+const monday = (() => { const d = new Date(TODAY + "T00:00:00Z"); const wd = d.getUTCDay() || 7; return new Date(d.getTime() - (wd - 1) * 86400000).toISOString().slice(0, 10); })();
+const wk = (weeks: number, plusDays = 0) => new Date(Date.parse(monday) + (weeks * 7 + plusDays) * 86400000).toISOString().slice(0, 10);
+const seedBookings = (): Booking[] => [
+  { id: "1", accountId: "anh", projectKey: "DEMO", from: wk(0), to: wk(3, 4), hoursPerDay: 4, status: "confirmed", note: null, createdBy: "me" },
+  { id: "2", accountId: "anh", projectKey: "SECRET", from: wk(1), to: wk(1, 4), hoursPerDay: 6, status: "confirmed", note: "bí mật", createdBy: "x" },
+  { id: "3", accountId: "binh", projectKey: "DEMO", from: wk(0), to: wk(1, 4), hoursPerDay: 8, status: "tentative", note: "chờ ký", createdBy: "me" },
+  { id: "4", accountId: "me", projectKey: "DEMO", from: wk(0), to: wk(1, 4), hoursPerDay: 4, status: "confirmed", note: null, createdBy: "me" },
+  { id: "5", accountId: "me", projectKey: "OTHER", from: wk(0), to: wk(0, 4), hoursPerDay: 2, status: "confirmed", note: null, createdBy: "x" },
+];
+let bookings: Booking[] = seedBookings();
+let bookingSeq = 100;
+let bookingRole: "member" | "pm" | "manager" = "pm";
+const viewerNow = (): Viewer => ({
+  accountId: "me",
+  manager: bookingRole === "manager",
+  pmOf: new Set(bookingRole === "pm" ? ["DEMO"] : []),
+  accessible: new Set(PROJECTS.map((p) => p.key)),
+});
+const bookingError = (res: express.Response, e: unknown) =>
+  e instanceof AppError ? res.status(e.status).json({ error: e.message, code: e.code }) : res.status(500).json({ error: String(e) });
+const capacityOf = (id: string) => profiles.find((p) => p.accountId === id)?.capacityHoursPerDay ?? 8;
+app.post("/api/__booking/role", (req, r) => { bookingRole = req.body?.role ?? "pm"; r.json({}); });
+app.post("/api/__booking/reset", (_q, r) => { bookings = seedBookings(); bookingRole = "pm"; absences = []; r.json({}); });
+
+app.get("/api/bookings", (req, res) => {
+  try {
+    const { from, to } = validateRange(req.query.from, req.query.to);
+    const scope = typeof req.query.project === "string" && req.query.project ? req.query.project : null;
+    const viewer = viewerNow();
+    const all = bookings.filter((b) => b.to >= from && b.from <= to);
+    const teamKey = scope ?? projectOf(req).key;
+    const team = canWrite(viewer, teamKey) ? users.map((u) => u.accountId) : [];
+    const visible = visibleAccounts(viewer, all, team);
+    const shown = new Set<string>(["me"]);
+    if (scope) {
+      if (canWrite(viewer, scope)) {
+        for (const id of team) shown.add(id);
+        for (const b of all) if (b.projectKey === scope) shown.add(b.accountId);
+      }
+    } else {
+      for (const id of team) shown.add(id);
+      for (const b of all) if (visible === "all" || visible.has(b.accountId)) shown.add(b.accountId);
+    }
+    const views = shapeForViewer(viewer, all, visible).filter((b) => shown.has(b.accountId));
+    const referenced = new Set(views.map((b) => b.projectKey).filter(Boolean));
+    res.json({
+      role: roleOf(viewer), me: "me", from, to, scope,
+      people: [...shown].map((id) => {
+        const p = profiles.find((x) => x.accountId === id);
+        return { accountId: id, displayName: nameOf(id) ?? id, avatarUrl: null, capacityHoursPerDay: capacityOf(id), role: p?.role ?? null, skills: p?.skills ?? [] };
+      }).sort((a, b) => a.displayName.localeCompare(b.displayName, "vi")),
+      bookings: views,
+      absences: absences.filter((a) => shown.has(a.accountId) && a.to >= from && a.from <= to),
+      projects: PROJECTS.filter((p) => referenced.has(p.key) || canWrite(viewer, p.key)).map((p) => ({ key: p.key, name: p.name, writable: canWrite(viewer, p.key) })),
+      defaultCapacityHours: 8,
+    });
+  } catch (e) { bookingError(res, e); }
+});
+app.get("/api/bookings/people", (req, res) => {
+  if (roleOf(viewerNow()) === "member") return res.status(403).json({ error: "Chỉ quản lý mới tìm người để book được.", code: "BOOKING_FORBIDDEN" });
+  const q = String(req.query.q ?? "").toLowerCase();
+  res.json([{ accountId: "dung", displayName: "Phạm Dũng", avatarUrl: null }, ...users].filter((u) => u.displayName.toLowerCase().includes(q)));
+});
+app.post("/api/bookings", (req, res) => {
+  try {
+    const input = validateBookingInput(req.body);
+    const viewer = viewerNow();
+    if (!canWrite(viewer, input.projectKey)) return res.status(403).json({ error: "Chỉ quản lý dự án hoặc quản lý nguồn lực mới book người cho dự án này được.", code: "BOOKING_FORBIDDEN" });
+    const b: Booking = { id: String(++bookingSeq), ...input, createdBy: "me" };
+    bookings.push(b);
+    res.status(201).json(shapeForViewer(viewer, [b], "all")[0]);
+  } catch (e) { bookingError(res, e); }
+});
+app.post("/api/bookings/absences", (req, res) => {
+  const b = req.body ?? {};
+  const accountId = b.accountId || "me";
+  if (!canEditAbsence(viewerNow(), accountId)) return res.status(403).json({ error: "Chỉ quản lý mới nhập nghỉ phép cho người khác được.", code: "BOOKING_FORBIDDEN" });
+  if (b.to < b.from) return res.status(400).json({ error: "Ngày kết thúc phải sau hoặc bằng ngày bắt đầu." });
+  const a = { id: "ab" + (absences.length + 1) + "-" + Date.now(), accountId, from: b.from, to: b.to, reason: b.reason ?? null };
+  absences = [...absences, a];
+  res.status(201).json(a);
+});
+app.patch("/api/bookings/absences/:id", (req, res) => {
+  const a = absences.find((x) => x.id === req.params.id);
+  if (!a || !canEditAbsence(viewerNow(), a.accountId)) return res.status(404).json({ error: "Không tìm thấy kỳ nghỉ này." });
+  const b = req.body ?? {};
+  Object.assign(a, { from: b.from ?? a.from, to: b.to ?? a.to, reason: b.reason === undefined ? a.reason : b.reason });
+  res.json(a);
+});
+app.delete("/api/bookings/absences/:id", (req, res) => {
+  const a = absences.find((x) => x.id === req.params.id);
+  if (!a || !canEditAbsence(viewerNow(), a.accountId)) return res.status(404).json({ error: "Không tìm thấy kỳ nghỉ này." });
+  absences = absences.filter((x) => x.id !== a.id);
+  res.status(204).end();
+});
+app.patch("/api/bookings/:id", (req, res) => {
+  try {
+    const viewer = viewerNow();
+    const cur = bookings.find((b) => b.id === req.params.id);
+    if (!cur || !canWrite(viewer, cur.projectKey)) return res.status(404).json({ error: "Không tìm thấy booking này." });
+    Object.assign(cur, validateBookingPatch(req.body, cur));
+    res.json(shapeForViewer(viewer, [cur], "all")[0]);
+  } catch (e) { bookingError(res, e); }
+});
+app.delete("/api/bookings/:id", (req, res) => {
+  const cur = bookings.find((b) => b.id === req.params.id);
+  if (!cur || !canWrite(viewerNow(), cur.projectKey)) return res.status(404).json({ error: "Không tìm thấy booking này." });
+  bookings = bookings.filter((b) => b.id !== cur.id);
+  res.status(204).end();
+});
+
+// Clockwork: my hours on every project (an issue of OTHER is logged through X-Project-Key: OTHER).
+const otherIssues = [{ key: "OTHER-7", summary: "Hỗ trợ triển khai", issueType: "Task", inProgress: true }];
+const personSheet = (id: string, from: string, to: string) => ({
+  accountId: id, displayName: nameOf(id) ?? id, avatarUrl: null, capacityHoursPerDay: capacityOf(id),
+  absences: absences.filter((a) => a.accountId === id && a.from <= to).map((a) => ({ from: a.from, to: a.to })), outsider: false,
+});
+app.get("/api/clockwork", (req, res) => {
+  const { from, to } = req.query as Record<string, string>;
+  const viewer = viewerNow();
+  const mine = bookings.filter((b) => b.accountId === "me" && b.to >= from && b.from <= to);
+  res.json({
+    role: roleOf(viewer), from, to,
+    people: [personSheet("me", from, to)],
+    entries: worklogs.filter((w) => w.authorAccountId === "me" && w.date >= from && w.date <= to),
+    bookings: shapeForViewer(viewer, mine, "all"),
+    projects: PROJECTS.map((p) => ({ key: p.key, name: p.name })),
+    openWork: [
+      ...tasks.filter((t: any) => t.assigneeAccountId === "me" && t.statusCategory !== "done" && t.issueType !== "Epic").map((t: any) => ({ key: t.id, summary: t.summary, issueType: t.issueType, inProgress: t.statusCategory === "indeterminate" })),
+      ...otherIssues,
+    ],
+  });
+});
+// "+ Thêm việc": open issues of ANY project by key or title (the real route builds JQL; here a plain match).
+const foreignIssues = [
+  ...otherIssues,
+  { key: "OTHER-12", summary: "Rà soát hợp đồng khách hàng", issueType: "Task", inProgress: false },
+  { key: "OTHER-13", summary: "Chuẩn bị tài liệu đào tạo", issueType: "Task", inProgress: false },
+];
+app.get("/api/clockwork/issues", (req, res) => {
+  const q = String(req.query.q ?? "").trim().toLowerCase();
+  if (q.length < 2) return res.json([]);
+  res.json(foreignIssues.filter((i) => i.key.toLowerCase() === q || i.summary.toLowerCase().includes(q)));
+});
+app.get("/api/clockwork/team", (req, res) => {
+  const { from, to } = req.query as Record<string, string>;
+  const viewer = viewerNow();
+  if (roleOf(viewer) === "member") return res.status(403).json({ error: "Chỉ quản lý dự án hoặc quản lý nguồn lực mới xem giờ của cả nhóm được.", code: "BOOKING_FORBIDDEN" });
+  const all = bookings.filter((b) => b.to >= from && b.from <= to);
+  const visible = visibleAccounts(viewer, all, users.map((u) => u.accountId));
+  res.json({
+    from, to,
+    people: users.map((u) => personSheet(u.accountId, from, to)),
+    entries: worklogs.filter((w) => w.date >= from && w.date <= to),
+    bookings: shapeForViewer(viewer, all, visible),
+    projects: PROJECTS.map((p) => ({ key: p.key, name: p.name })),
+    managed: PROJECTS.filter((p) => canWrite(viewer, p.key)).map((p) => ({ key: p.key, name: p.name })),
+  });
 });
 
 const port = Number(process.env.MOCK_PORT ?? 4000);

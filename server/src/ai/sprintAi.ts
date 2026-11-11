@@ -192,7 +192,7 @@ export async function planSprint(input: {
     "",
     `CỬA SỔ SPRINT: ${input.window.start} → ${input.window.end} (${input.window.lengthDays} ngày lịch).`,
     `VẬN TỐC các sprint trước (${velocity.unit}, cũ → mới): ${JSON.stringify(snapshot.velocity.map((v) => ({ name: v.name, completed: estimated ? v.completed : v.completedCount })))}`,
-    `NĂNG LỰC NHÓM (ngày làm việc thực tế trong cửa sổ, đã trừ nghỉ): ${JSON.stringify(input.team.map((m) => ({ name: m.name, days: m.days })))}`,
+    `NĂNG LỰC NHÓM (ngày làm việc thực tế trong cửa sổ, đã trừ nghỉ): ${JSON.stringify(input.team.map((m) => ({ name: m.name, days: m.days, ...(m.heldHours > 0 ? { heldHoursElsewhere: m.heldHours } : {}) })))}`,
     active
       ? `SPRINT ĐANG CHẠY "${active.name}" còn ${carryOver.length} việc chưa xong (có thể tràn sang): ${JSON.stringify(carryOver.slice(0, 20).map((i) => i.key))}`
       : "Không có sprint đang chạy.",
@@ -239,6 +239,9 @@ export async function planSprint(input: {
   }
   const away = input.team.filter((m) => m.days === 0).map((m) => m.name);
   if (away.length > 0) warnings.push(`Vắng cả sprint: ${away.join(", ")}.`);
+  // Present on the sprint, but every hour of it is promised to other projects.
+  const held = input.team.filter((m) => m.days > 0 && m.capacityHours <= 0 && m.heldHours > 0).map((m) => m.name);
+  if (held.length > 0) warnings.push(`${held.join(", ")} bị giữ hết ở dự án khác trong sprint.`);
 
   const goal = str(r.goal);
   if (!goal && picks.length === 0) throw new Error("AI không đề xuất được kế hoạch sprint. Hãy thử lại.");

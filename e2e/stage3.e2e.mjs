@@ -45,6 +45,7 @@ await page.waitForSelector(".wbs-row");
 console.log("\n== Nguồn lực: kỹ năng, nghỉ phép, kỳ ==");
 await step("ma trận kỹ năng: thêm cột, bấm ô → lưu vào hồ sơ người đó", async () => {
   await tab("Resource");
+  await page.locator(".rv-modes [data-mode=load]").click();
   await page.waitForSelector(".resource-view .rv-modes");
   await page.locator(".rv-modes button", { hasText: "Kỹ năng" }).click();
   await page.waitForSelector(".sm-view");

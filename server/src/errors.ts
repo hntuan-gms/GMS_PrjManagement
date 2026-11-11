@@ -26,6 +26,7 @@ export type ErrorCode =
   | "STAFF_ONLY"
   | "RESOURCES_ADMIN_ONLY"
   | "SLA_ADMIN_ONLY"
+  | "BOOKING_FORBIDDEN"
   | "BAD_REQUEST"
   | "TRANSITION_FIELDS_REQUIRED"
   | "TRANSITION_REFUSED"
@@ -83,6 +84,10 @@ export const slaAdminOnly = (what = "cài đặt SLA") =>
     "SLA_ADMIN_ONLY",
     `Chỉ người có quyền Administer Projects trên dự án này mới sửa được ${what}.`
   );
+
+/** Booking a person is the project manager's call (or the resource manager's): routes/bookings.ts. */
+export const bookingForbidden = (what = "book người cho dự án này") =>
+  new AppError(403, "BOOKING_FORBIDDEN", `Chỉ quản lý dự án hoặc quản lý nguồn lực mới ${what} được.`);
 
 export const badRequest = (message: string) => new AppError(400, "BAD_REQUEST", message);
 

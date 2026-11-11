@@ -127,6 +127,10 @@ Mỗi họ tín hiệu có 5 bậc: `-wash` (nền) · `-soft` · `-line` (viề
 | Epic | Giai đoạn (Epic), Theo giai đoạn |
 | Công suất | Năng lực (của một người hay nhóm: số giờ có thể làm) |
 | Giờ đã ghi | Giờ làm |
+| Booking (giữ giờ của một người cho một dự án, trước khi có việc) | Đặt chỗ, Phân bổ |
+| Dự kiến / Chắc (hai trạng thái của một booking) | Tạm / Đã duyệt, Soft / Hard |
+| book (động từ: "book 20h", "được book") | đặt, giữ chỗ |
+| Mức tải (giờ của các việc đã giao; khác Booking) | Tải công việc |
 | Sub-task | Việc con, Công việc con |
 | Loại việc | Loại issue |
 | việc | công việc (trừ "ngày làm việc", "Giờ làm việc", "Lịch làm việc": đó là khái niệm khác) |

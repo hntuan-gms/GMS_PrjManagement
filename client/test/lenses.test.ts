@@ -25,6 +25,6 @@ describe("view in the address", () => {
   });
   it("every place is written as its own name and reads back to the same place", () => {
     assert.equal(viewParam("timesheet"), "timesheet");
-    for (const v of ["today", "gantt", "board", "resource", "report", "timesheet", "settings"] as const) assert.deepEqual(parseView(viewParam(v)), { view: v });
+    for (const v of ["today", "gantt", "board", "resource", "report", "booking", "timesheet", "settings"] as const) assert.deepEqual(parseView(viewParam(v)), { view: v });
   });
 });

@@ -179,6 +179,10 @@ export default function Toolbar({
         />
         <RailButton icon="sun" label="Hôm nay" keys="G H" view="today" active={view === "today"} onClick={() => onViewChange("today")} />
         {/* A phone has no room for the hours grid (phoneView sends it to Hôm nay), so it is not offered there. */}
+        {/* The rail's places are a person across every project; a lens is one project. */}
+        {!phone && (
+          <RailButton icon="calendar" label="Booking" keys="G B" view="booking" active={view === "booking"} onClick={() => onViewChange("booking")} />
+        )}
         {!phone && (
           <RailButton icon="clock" label="Clockwork" keys="G T" view="timesheet" active={view === "timesheet"} onClick={() => onViewChange("timesheet")} />
         )}

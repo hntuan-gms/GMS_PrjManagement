@@ -4,6 +4,9 @@ import type { TaskExtras } from "../taskExtras.js";
 import type { TimesheetService } from "../timesheet.js";
 import type { BoardService } from "../agile/boardService.js";
 import { sprintFacts, velocityStats } from "../agile/sprintMetrics.js";
+import type { Booking, Viewer } from "../booking.js";
+import { heldElsewhere } from "../bookingLoad.js";
+import { bookingsAnswer } from "./bookingAnswer.js";
 import type { TaskService } from "../taskService.js";
 import { isAssignableType, type IssueTypeName, type JiraUser, type Task } from "../types.js";
 import * as resources from "../resourceStore.js";
@@ -85,6 +88,15 @@ export interface ToolContext {
   workCalendar?: () => Promise<WorkCalendar>;
   /** Component / version option lists, issue links, watchers — what the task detail reads from Jira. */
   extras: TaskExtras;
+  /**
+   * Every booking of the site around today, loaded at most once per turn. Raw: it feeds "who is held elsewhere"
+   * (hours only) and, through `bookingViewer`, the `bookings` tool. Never handed to the model as it is.
+   */
+  bookings?: () => Promise<Booking[]>;
+  /** Who is asking, as the booking rules see them (member / project manager / resource manager). Once per turn. */
+  bookingViewer?: () => Promise<Viewer>;
+  /** Names for account ids beyond the project team (a booked person may belong to no project the asker has open). */
+  names?: (ids: string[]) => Promise<Map<string, string>>;
 }
 
 export interface ToolOutcome {
@@ -289,6 +301,24 @@ const SPRINT_STATUS: FunctionDeclaration = {
   },
 };
 
+const BOOKINGS: FunctionDeclaration = {
+  name: "bookings",
+  description:
+    "Booking = hours a person is PROMISED to a project (not the same as tasks already assigned). Per person: " +
+    "capacity, hours booked per week, which weeks are over capacity, how many hours are still free, and the " +
+    "bookings themselves. Read-only. Use for 'tuần sau ai còn trống', 'tháng 12 Quang ở dự án nào', " +
+    "'ai bị book quá'. Call it BEFORE team_workload when asked who is free. A member sees only their own " +
+    "bookings; a project the asker cannot browse appears as 'dự án khác' without a name.",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      person: { type: Type.STRING, description: "A name as the user said it. Omit for everyone the asker may see." },
+      from: { type: Type.STRING, description: "YYYY-MM-DD. Defaults to today." },
+      to: { type: Type.STRING, description: "YYYY-MM-DD. Defaults to 27 days after `from` (four weeks)." },
+    },
+  },
+};
+
 export const TOOLS: FunctionDeclaration[] = [
   PROJECT_PROGRESS,
   SPRINT_STATUS,
@@ -299,6 +329,7 @@ export const TOOLS: FunctionDeclaration[] = [
   ASSIGN_TASK,
   UNASSIGN_TASK,
   SUGGEST_ASSIGNEES,
+  BOOKINGS,
   TEAM_WORKLOAD,
 ];
 
@@ -317,6 +348,8 @@ export function labelFor(name: string): string {
       return "Đang so tải để chọn người...";
     case TEAM_WORKLOAD.name:
       return "Đang xem tải của team...";
+    case BOOKINGS.name:
+      return "Đang xem booking...";
     case PROJECT_PROGRESS.name:
       return "Đang tính tiến độ dự án...";
     case CREATE_PROGRESS_REPORT.name:
@@ -334,13 +367,23 @@ export function labelFor(name: string): string {
 
 async function workloadOf(ctx: ToolContext): Promise<Map<string, PersonWorkload>> {
   if (ctx.workload) return ctx.workload;
-  const [users, profiles, absences, calendar] = await Promise.all([
+  const [users, profiles, absences, calendar, booked] = await Promise.all([
     ctx.taskService.listUsers(),
     resources.listProfiles(ctx.cloudId),
     resources.listAbsences(ctx.cloudId),
     turnCalendar(ctx),
+    // A failed read is "nothing held elsewhere", not a failed answer: bookings improve the ranking, they do not gate it.
+    (ctx.bookings?.() ?? Promise.resolve([] as Booking[])).catch(() => [] as Booking[]),
   ]);
-  ctx.workload = buildWorkload({ tasks: ctx.tasks, users, profiles, absences, calendar });
+  ctx.workload = buildWorkload({
+    tasks: ctx.tasks,
+    users,
+    profiles,
+    absences,
+    calendar,
+    // Only OTHER projects: this project's own bookings are what its tasks spend (counted there, not twice).
+    heldElsewhere: heldElsewhere(booked, ctx.projectKey),
+  });
   return ctx.workload;
 }
 
@@ -361,6 +404,8 @@ function describeCandidate(c: Candidate): Record<string, unknown> {
       : null,
     openTasks: c.openTaskCount,
     ...(c.collidesWith.length > 0 ? { collidesWith: c.collidesWith.slice(0, 5) } : {}),
+    // Hours only, never which project: the asker may not be allowed to browse it.
+    ...(c.heldHours > 0 ? { heldElsewhereHours: c.heldHours, heldNote: `đã bị giữ ${c.heldHours} giờ ở dự án khác trong khoảng này` } : {}),
     ...(c.availableDays === 0 ? { note: "nghỉ toàn bộ khoảng này" } : {}),
   };
 }
@@ -383,6 +428,8 @@ export async function runTool(
       return runSuggestAssignees(args, ctx);
     case TEAM_WORKLOAD.name:
       return runTeamWorkload(args, ctx);
+    case BOOKINGS.name:
+      return runBookings(args, ctx);
     case PROJECT_PROGRESS.name:
       return runProjectProgress(args, ctx);
     case CREATE_PROGRESS_REPORT.name:
@@ -630,12 +677,40 @@ async function runTeamWorkload(args: Record<string, unknown>, ctx: ToolContext):
         accountId: c.accountId,
         name: c.displayName,
         openTasks: c.openTaskCount,
+        ...(c.heldHours > 0 ? { heldElsewhereHours: c.heldHours } : {}),
         freeHours: c.freeHours,
         workingDays: c.availableDays,
         loadPercent: Number.isFinite(c.utilisationAfter) ? Math.round(c.utilisationAfter * 100) : null,
         overloadedDays: c.conflictDays,
       })),
     },
+  };
+}
+
+async function runBookings(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolOutcome> {
+  if (!ctx.bookings || !ctx.bookingViewer) return { response: { error: "Booking chưa dùng được ở đây." } };
+  const [all, viewer, profiles, absences, calendar] = await Promise.all([
+    ctx.bookings(),
+    ctx.bookingViewer(),
+    resources.listProfiles(ctx.cloudId),
+    resources.listAbsences(ctx.cloudId),
+    turnCalendar(ctx),
+  ]);
+  return {
+    response: await bookingsAnswer({
+      person: str(args, "person"),
+      from: str(args, "from"),
+      to: str(args, "to"),
+      today: ctx.today,
+      projectKey: ctx.projectKey,
+      team: ctx.team,
+      bookings: all,
+      viewer,
+      profiles,
+      absences,
+      calendar,
+      names: ctx.names ?? (async () => new Map()),
+    }),
   };
 }
 

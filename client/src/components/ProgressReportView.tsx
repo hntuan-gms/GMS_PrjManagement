@@ -29,7 +29,7 @@ import Popover from "./Popover";
 import Spinner from "./Spinner";
 import { EpicTable, PeopleTable, ProgressLine } from "./progressCharts";
 import { useDialogs } from "./dialogContext";
-import { pct, pulseDecisions, pulseHeadline, STATE_LABEL, type PulseAction, type PulseDecision, type WorkState } from "../projectPulse";
+import { pct, pulseDecisions, pulseHeadline, STATE_LABEL, type PulseAction, type PulseBookings, type PulseDecision, type WorkState } from "../projectPulse";
 import { scopeFromTaskFilter } from "../reportScope";
 import { changeSchedule, scheduleOf } from "../scheduleFields";
 import { formatDayMonth } from "../humanDate";
@@ -78,6 +78,10 @@ interface Props {
    * Without it the row falls back to onOpenResources (the tab, no person).
    */
   onOpenPersonLoad?: (accountId: string, date?: string) => void;
+  /** The project's bookings, for the row that says someone was given more than was booked. */
+  bookings?: PulseBookings | null;
+  /** Book more of someone: Resource › Booking, on that person. */
+  onOpenBooking?: (accountId: string) => void;
   /** The next two weeks' load as Nhân lực computes it — the same object behind the lens badge. */
   nearLoad?: ResourceLoad | null;
   /** Profiles and leave, for the person picker's "rảnh / trùng n ngày" hints. */
@@ -151,6 +155,8 @@ export default function ProgressReportView({
   onOpenResources,
   onOpenPersonLoad,
   nearLoad = null,
+  bookings = null,
+  onOpenBooking,
   pool = null,
   taskFilter,
 }: Props) {
@@ -196,13 +202,13 @@ export default function ProgressReportView({
   // looking at one person, only the rows about their work — or their overload — are theirs to decide.
   const decisions = useMemo(() => {
     if (!overview) return [];
-    const all = pulseDecisions(overview.metrics, tasks, users ?? [], todayIso(), calendar, nearLoad);
+    const all = pulseDecisions(overview.metrics, tasks, users ?? [], todayIso(), calendar, nearLoad, bookings);
     if (!scoped) return all;
     const ids = scopedTaskIds(tasks, scope);
     return all.filter((d) =>
-      d.kind === "overloaded" ? !scope.assignee || d.actions.some((a) => a.accountId === scope.assignee) : d.taskIds.some((id) => ids.has(id))
+      d.kind === "overloaded" || d.kind === "booking-gap" ? !scope.assignee || d.actions.some((a) => a.accountId === scope.assignee) : d.taskIds.some((id) => ids.has(id))
     );
-  }, [overview, tasks, users, calendar, nearLoad, scoped, scope]);
+  }, [overview, tasks, users, calendar, nearLoad, bookings, scoped, scope]);
   const critical = useMemo(() => computeCriticalPath(tasks), [tasks]);
 
   // Refetched whenever the workspace's tasks change — an edit in the Gantt or a
@@ -572,6 +578,7 @@ export default function ProgressReportView({
             onSaveBaseline={onSaveBaseline}
             onOpenResources={onOpenResources}
             onOpenPersonLoad={onOpenPersonLoad}
+            onOpenBooking={onOpenBooking}
           />
 
           {showEpics && (
@@ -1120,6 +1127,7 @@ function Decisions({
   onSaveBaseline,
   onOpenResources,
   onOpenPersonLoad,
+  onOpenBooking,
 }: {
   decisions: PulseDecision[];
   tasks: Task[];
@@ -1133,6 +1141,7 @@ function Decisions({
   onSaveBaseline?: (taskIds: string[]) => Promise<void>;
   onOpenResources?: () => void;
   onOpenPersonLoad?: (accountId: string, date?: string) => void;
+  onOpenBooking?: (accountId: string) => void;
 }) {
   const calendar = useWorkCalendar();
   const byId = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
@@ -1185,6 +1194,10 @@ function Decisions({
         return;
       case "rebalance":
         if (a.accountId && onOpenPersonLoad) onOpenPersonLoad(a.accountId, a.date);
+        else onOpenResources?.();
+        return;
+      case "book":
+        if (a.accountId && onOpenBooking) onOpenBooking(a.accountId);
         else onOpenResources?.();
         return;
       case "set-baseline": {

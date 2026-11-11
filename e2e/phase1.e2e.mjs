@@ -241,6 +241,7 @@ await fetch(API + "/api/tasks/DEMO-7", { method: "PATCH", headers: { "Content-Ty
 await page.reload(); await page.waitForSelector(".wbs-row");
 await step("tab Nguồn lực: có bộ lọc, KHÔNG có ô người phụ trách", async () => {
   await tab("Resource");
+  await page.locator(".rv-modes [data-mode=load]").click();
   await page.waitForSelector(".resource-view .tf-bar");
   await openFilterPanel(page);
   const facets = await page.$$eval(".resource-view .tf-facet-head", (b) => b.map((x) => x.textContent));

@@ -1,5 +1,5 @@
-import { useMemo } from "react";
-import { rankTasks, type TaskPickOptions } from "../taskPickerModel";
+import { useEffect, useMemo, useState } from "react";
+import { mergeRemote, rankTasks, type RemoteIssue, type TaskPickOptions } from "../taskPickerModel";
 import type { Task } from "../types";
 import CellPicker, { type PickItem } from "./CellPicker";
 
@@ -20,6 +20,7 @@ export default function TaskPicker({
   placeholder = "Search for issues",
   typed,
   onPickTyped,
+  remote,
   onPick,
   onClose,
 }: {
@@ -34,8 +35,35 @@ export default function TaskPicker({
    */
   typed?: (query: string) => { value: string; label: string; hint?: string } | null;
   onPickTyped?: (value: string) => void;
+  /**
+   * Also ask somewhere else for what was typed (Clockwork: any project's open work). Called 250 ms after typing
+   * stops, from two characters on; what it finds is listed after the tasks given, never twice. A failure is
+   * ignored: the tasks given are still there.
+   */
+  remote?: (query: string) => Promise<RemoteIssue[]>;
 } & TaskPickOptions) {
-  const byId = useMemo(() => new Map((tasks ?? []).map((t) => [t.id, t])), [tasks]);
+  const [query, setQuery] = useState("");
+  const [found, setFound] = useState<{ query: string; issues: RemoteIssue[] } | null>(null);
+  useEffect(() => {
+    const q = query.trim();
+    if (!remote || q.length < 2) return;
+    let alive = true;
+    const t = setTimeout(() => {
+      remote(q)
+        .then((issues) => alive && setFound({ query: q, issues }))
+        .catch(() => alive && setFound({ query: q, issues: [] }));
+    }, 250);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [query, remote]);
+  // Only what answers the text now in the box: an older answer must not linger under a newer question.
+  const extra = useMemo(
+    () => (found && found.query === query.trim() ? mergeRemote(tasks ?? [], found.issues, exclude ?? []) : []),
+    [found, query, tasks, exclude]
+  );
+  const byId = useMemo(() => new Map([...(tasks ?? []), ...extra].map((t) => [t.id, t])), [tasks, extra]);
   const items = useMemo<PickItem[] | null>(
     () =>
       tasks
@@ -54,12 +82,13 @@ export default function TaskPicker({
       const found = rankTasks(tasks ?? [], q, { exclude, filter, limit })
         .map((t) => lookup.get(t.id))
         .filter((i): i is PickItem => !!i);
+      const more = extra.map((t) => ({ id: t.id, label: t.summary, lead: <span className="tp-key">{t.id}</span> }));
       const t = typed?.(q);
       return t
-        ? [{ id: TYPED_PREFIX + t.value, label: t.label, hint: t.hint, lead: <span className="tp-key">{t.value}</span> }, ...found]
-        : found;
+        ? [{ id: TYPED_PREFIX + t.value, label: t.label, hint: t.hint, lead: <span className="tp-key">{t.value}</span> }, ...found, ...more]
+        : [...found, ...more];
     };
-  }, [tasks, items, exclude, filter, limit, typed]);
+  }, [tasks, items, exclude, filter, limit, typed, extra]);
   return (
     <CellPicker
       anchor={anchor}
@@ -67,6 +96,7 @@ export default function TaskPicker({
       loading={tasks === null}
       placeholder={placeholder}
       search={search}
+      onQuery={remote ? setQuery : undefined}
       className="is-wide"
       onPick={(it) => {
         if (it.id.startsWith(TYPED_PREFIX)) {

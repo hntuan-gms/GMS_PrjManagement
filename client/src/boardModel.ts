@@ -86,6 +86,8 @@ export interface CapacityRow {
   days: number;
   hoursPerDay: number;
   capacityHours: number;
+  /** Hours other projects hold of this person in the window; 0 when none. */
+  heldHours: number;
   count: number;
   /** In the board's estimation unit (points, hours, or 1 per issue). */
   weight: number;
@@ -118,7 +120,7 @@ export function capacityRows(team: SprintCapacityPerson[], issues: BoardIssue[],
     else if (m.days === 0) status = "away";
     else if (remainingHours !== null && remainingHours < 0) status = "over";
     else if (remainingHours !== null && remainingHours <= m.capacityHours * 0.15) status = "tight";
-    return { accountId: m.accountId, name: m.name, days: m.days, hoursPerDay: m.hoursPerDay, capacityHours: m.capacityHours, count: list.length, weight, assignedHours, remainingHours, status };
+    return { accountId: m.accountId, name: m.name, days: m.days, hoursPerDay: m.hoursPerDay, capacityHours: m.capacityHours, heldHours: m.heldHours ?? 0, count: list.length, weight, assignedHours, remainingHours, status };
   });
   // Most committed first, so the people who need attention are on top and the free ones last.
   rows.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "vi"));
@@ -130,6 +132,7 @@ export function capacityRows(team: SprintCapacityPerson[], issues: BoardIssue[],
       days: 0,
       hoursPerDay: 0,
       capacityHours: 0,
+      heldHours: 0,
       count: orphans.length,
       weight: totalWeight(orphans, snapshot),
       assignedHours: inHours ? totalWeight(orphans, snapshot) : null,

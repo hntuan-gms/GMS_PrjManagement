@@ -186,3 +186,28 @@ Cần `JIRA_AGILE=on` cho các mục Bảng. Dùng dự án thử có board Scru
 | E19 | Sửa kỳ nghỉ (đổi ngày/lý do) | Heatmap đổi ngay; không sinh kỳ nghỉ thứ hai | |
 | E20 | Heatmap: kỳ trước/sau, "Tháng này", cột theo tháng | Cửa sổ dời đúng (tháng nguyên → tháng nguyên) | |
 | E21 | Chấm công: sửa giờ của mình (đổi giờ; đổi ngày; xoá ghi chú) | Worklog trong Jira đổi; đổi giờ không đổi giờ-trong-ngày; xoá ghi chú được hay Jira báo lỗi — **ghi lại**; giờ của người khác không có nút sửa | |
+
+## F. Booking và Clockwork xuyên dự án (2026-11-11) — thử trên Jira thật
+
+Chưa từng chạy với Jira thật: mọi mục dưới đây mới chỉ qua API giả lập (`e2e/booking.e2e.mjs`). Cần hai tài khoản: một có Administer Projects trên dự án thử, một không. Cần ít nhất hai dự án.
+
+| # | Thao tác | Phải thấy | Kết quả |
+|---|---|---|---|
+| F1 | Deploy xong, mở Booking trên rail bằng tài khoản quản lý dự án | Bảng `resource_booking` được tạo (migration 018); thấy thành viên của dự án đang mở, mỗi người một dòng | |
+| F2 | Kéo trên dòng một người, gõ `50%`, Enter | Booking 4h/ngày Dự kiến hiện ngay; F5 vẫn còn | |
+| F3 | Book cùng một người ở dự án thứ hai (mở dự án đó, Resource › Booking) cho trùng ngày, tổng vượt 8h | Tuần đó đỏ; có lời báo vượt công suất kèm Hoàn tác; không bị chặn | |
+| F4 | Tài khoản **không** quản lý dự án mở Booking | Chỉ thấy dòng của mình, không kéo được, không có "+ Người"; vẫn kéo được trên dòng Nghỉ của mình | |
+| F5 | Người quản lý dự án A, không xem được dự án B trên Jira; một người của A cũng được book ở B | Dòng "Dự án khác" có giờ, **không** có mã, tên hay ghi chú của B (xem cả trong tab Network) | |
+| F6 | Đặt `RESOURCE_MANAGER_GROUP` = tên một nhóm Jira, đăng nhập bằng người trong nhóm | Thấy mọi người có booking, sửa được booking của mọi dự án mình xem được. **Chỗ chưa chắc**: token có đọc được `GET /myself?expand=groups` không. Nếu không, log có dòng `[booking] could not read the groups…`; khi đó dùng `RESOURCE_MANAGER_ACCOUNT_IDS` | |
+| F7 | "+ Người", tìm một người không thuộc dự án | Tìm ra theo tên; thêm được dòng; book được. **Chỗ chưa chắc**: `GET /user/search` và `GET /user/bulk` với scope hiện tại | |
+| F8 | Resource › Booking › ⋯ › "Book từ việc đã giao" | Hỏi trước số booking sẽ tạo; tạo xong là booking Dự kiến theo tuần; chạy lại báo "đều đã có booking" | |
+| F9 | Clockwork › Của tôi, đã ghi giờ ở hai dự án trong tuần | Dòng gom theo dự án; mỗi dự án có "đã ghi / book"; tổng khớp Jira. **Chỗ chưa chắc**: JQL `worklogAuthor = currentUser()` không kèm dự án | |
+| F10 | Ở tab dự án A, ghi giờ vào một việc của dự án B (dòng gợi ý hoặc "+ Thêm việc") | Worklog nằm đúng issue của B trong Jira, tác giả là mình; không báo "Chỉ ghi giờ được cho việc của dự án A" | |
+| F11 | Clockwork › Cả nhóm bằng tài khoản quản lý dự án | Thấy giờ của người trong các dự án mình quản; cột book; ô "người lệch booking" lọc đúng. Tài khoản thường không có nút "Cả nhóm" | |
+| F12 | Clockwork › Cả nhóm bằng quản lý nguồn lực, không chọn dự án | Đọc cả site trong một lần; ghi lại thời gian và dòng `[perf] clockwork team site` trong log; nếu quá chậm hoặc bị 429 thì cần giới hạn theo dự án | |
+| F13 | Clockwork › Của tôi › "+ Thêm việc", gõ một phần tên việc ở dự án khác không giao cho mình | Sau chừng 0,3 giây có kết quả kèm mã; chọn được, dòng hiện đúng tên; ghi giờ vào nó đúng issue. **Chỗ chưa chắc**: JQL `summary ~ "…*" AND statusCategory != Done` không kèm dự án, và `key = "X-1"` | |
+| F14 | Một người rảnh theo task ở dự án A nhưng được book kín ở dự án B; ở A mở "Gán…" cho một việc có ngày | Dòng người đó ghi "bị giữ 8h/ngày" (hoặc "trùng n ngày · bị giữ …") và đứng sau người thật sự rảnh. Người không xem được B vẫn thấy con số giờ, không thấy mã B | |
+| F15 | Trợ lý (tài khoản staff): "tuần sau ai còn trống?", "tháng 12 Quang ở dự án nào?" | Trả lời theo `bookings`; tài khoản thành viên hỏi về người khác được báo "chỉ xem được booking của mình", không phải danh sách rỗng; dự án bị ẩn hiện là "dự án khác", không mã | |
+| F16 | Board › Backlog › Công suất, sprint chưa bắt đầu, có người được book ở dự án khác trong cửa sổ sprint | Cột "Dự án khác" hiện "bị giữ n h", công suất đã trừ; sprint plan AI cảnh báo "bị giữ hết ở dự án khác" khi ai đó hết giờ | |
+| F17 | Nhịp dự án, dự án đã có booking, một người được giao hơn booking trên 8 giờ trong hai tuần tới | Có dòng "… được giao nhiều hơn booking"; "Book thêm" mở Resource › Booking, dòng người đó đã mở | |
+| F18 | Booking: kéo thân một thanh sang dòng người khác | Chỉ gửi `accountId`; thanh sang dòng người kia; thả sang dòng dự án khác hoặc dòng Nghỉ thì không đổi | |

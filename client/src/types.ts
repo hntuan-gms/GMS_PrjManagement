@@ -318,6 +318,54 @@ export interface Timesheet {
   to: string;
   people: TimesheetPerson[];
   entries: WorklogEntry[];
+  /** Clockwork only (every project of a person): what the people shown are booked for in the period. */
+  bookings?: Booking[];
+  /** Clockwork only: names of the projects the rows belong to. */
+  projects?: Array<{ key: string; name: string }>;
+  /** Clockwork "Của tôi": my open work on any project, offered as empty rows. */
+  openWork?: Array<{ key: string; summary: string; issueType: string; inProgress: boolean }>;
+  /** Clockwork "Nhóm": the projects this viewer manages, for the project picker. */
+  managed?: Array<{ key: string; name: string }>;
+  /** Clockwork "Của tôi": what the viewer is, which decides whether the team's hours are offered at all. */
+  role?: BookingRole;
+}
+
+export type BookingStatus = "tentative" | "confirmed";
+/** member: sees their own bookings. pm: books the projects they administer. manager: everything. */
+export type BookingRole = "member" | "pm" | "manager";
+
+/** A person promised to a project for a stretch of days (server/src/booking.ts). */
+export interface Booking {
+  id: string;
+  accountId: string;
+  /** null: a project this viewer cannot browse; hours and dates only. */
+  projectKey: string | null;
+  from: string;
+  to: string;
+  hoursPerDay: number;
+  status: BookingStatus;
+  note: string | null;
+  editable: boolean;
+}
+
+export interface BookingPerson extends JiraUser {
+  capacityHoursPerDay: number;
+  role: string | null;
+  skills: string[];
+}
+
+export interface BookingSheet {
+  role: BookingRole;
+  me: string;
+  from: string;
+  to: string;
+  /** The one project the read was cut to (the Resource lens), or null for every project (the rail). */
+  scope: string | null;
+  people: BookingPerson[];
+  bookings: Booking[];
+  absences: ResourceAbsence[];
+  projects: Array<{ key: string; name: string; writable: boolean }>;
+  defaultCapacityHours: number;
 }
 
 /**
@@ -838,6 +886,8 @@ export interface SprintCapacityPerson {
   days: number;
   hoursPerDay: number;
   capacityHours: number;
+  /** Hours other projects hold of this person in the window (bookings); already out of `capacityHours`. Absent on older answers. */
+  heldHours?: number;
 }
 
 export interface SprintCapacity {

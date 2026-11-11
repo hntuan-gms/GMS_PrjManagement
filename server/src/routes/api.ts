@@ -10,6 +10,8 @@ import { kbktRouter } from "./kbkt.js";
 import { filtersRouter } from "./filters.js";
 import { slaRouter } from "./sla.js";
 import { calendarRouter } from "./calendar.js";
+import { bookingsRouter } from "./bookings.js";
+import { clockworkRouter } from "./clockwork.js";
 import { deferBackgroundWhenLow, requireAuth, requireProject, requireStaff } from "../auth/middleware.js";
 import { badRequest, notFound } from "../errors.js";
 import { TaskActivity } from "../taskActivity.js";
@@ -38,6 +40,9 @@ apiRouter.use("/kbkt", kbktRouter);
 apiRouter.use("/filters", filtersRouter);
 apiRouter.use("/sla", slaRouter);
 apiRouter.use("/calendar", calendarRouter);
+// Site routes: a person across projects, so not behind requireProject (see the two routers).
+apiRouter.use("/bookings", bookingsRouter);
+apiRouter.use("/clockwork", clockworkRouter);
 
 // Jira's own default attachment limit is 10 MB; this only has to sit above it
 // and below Cloud Run's 32 MB request cap, so Jira's message is the one people see.
