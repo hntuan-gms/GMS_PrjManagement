@@ -24,7 +24,7 @@ interface Props {
   capacityHours: number;
   onOpenTask: (task: Task) => void;
   onUpdateTask: (id: string, patch: TaskUpdateInput) => Promise<void>;
-  onQuickCreate: (text: string) => Promise<void>;
+  onQuickCreate: (text: string) => Promise<boolean | void>;
   onWorkLogged: () => void;
 }
 
@@ -312,7 +312,9 @@ export default function TodayView({ session, tasks, today, capacityHours, onOpen
               setDraft("");
               // Added from "Hôm nay": mine, starting today, unless the line says otherwise.
               const withMe = /(^|\s)@\S/.test(text) ? text : `${text} @tôi`;
-              await onQuickCreate(/(^|\s)(hôm nay|mai|t[2-7]|cn|\d{1,2}\/\d{1,2})(\s|$)/i.test(withMe) ? withMe : `${withMe} hôm nay`);
+              const made = await onQuickCreate(/(^|\s)(hôm nay|mai|t[2-7]|cn|\d{1,2}\/\d{1,2})(\s|$)/i.test(withMe) ? withMe : `${withMe} hôm nay`);
+              // Refused by Jira: put the line back so it can be fixed instead of retyped.
+              if (made === false) setDraft((d) => d || text);
             }}
           >
             <Icon name="plus" size={15} />

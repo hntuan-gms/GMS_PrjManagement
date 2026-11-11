@@ -22,7 +22,7 @@ export default function SubtaskQuickAdd({
   anchor: { left: number; bottom: number; top: number };
   /** Who the Người box offers; without it the box is left out. */
   users?: JiraUser[];
-  onCreate: (text: string, extras: QuickExtras) => Promise<void>;
+  onCreate: (text: string, extras: QuickExtras) => Promise<boolean | void>;
   onClose: () => void;
 }) {
   const [text, setText] = useState("");
@@ -73,9 +73,11 @@ export default function SubtaskQuickAdd({
         if (!t || busy) return;
         setBusy(true);
         try {
-          await onCreate(`${t} ^${parent.id}`, extras);
-          setText("");
-          setExtras(NO_EXTRAS);
+          // A refused create (false) keeps what was typed, so it can be fixed and sent again.
+          if ((await onCreate(`${t} ^${parent.id}`, extras)) !== false) {
+            setText("");
+            setExtras(NO_EXTRAS);
+          }
         } finally {
           setBusy(false);
         }

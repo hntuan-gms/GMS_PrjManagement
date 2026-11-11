@@ -275,11 +275,18 @@ app.post("/api/tasks", (req, res) => {
 });
 app.post("/api/tasks/bulk", (req, res) => {
   const b = req.body; const created: any[] = [];
+  const errors: Array<{ summary: string; message: string }> = [];
   for (const s of b.summaries) {
+    // A project that makes Due date mandatory (VCBIC did): no start date means no due date, and Jira refuses
+    // the row. The answer is still 201, with the refusal in the body.
+    if (s.includes("[cần hạn]") && !b.startDate) {
+      errors.push({ summary: s, message: "Due date: Due date is required. Due date is required." });
+      continue;
+    }
     const t = { ...base, baselineStart: b.startDate ?? null, baselineDue: null, id: `DEMO-${10 + tasks.length}`, summary: s, issueType: b.issueType, wbsParentId: b.wbsParentId ?? null, assigneeAccountId: b.assigneeAccountId ?? null, assigneeName: nameOf(b.assigneeAccountId ?? null), startDate: b.startDate ?? null, dueDate: null, priority: b.priority ?? base.priority, labels: b.labels ?? [], estimateHours: b.estimateHours ?? null };
     tasks.push(t); created.push(t);
   }
-  res.status(201).json({ created, errors: [] });
+  res.status(201).json({ created, errors });
 });
 app.delete("/api/tasks/:id", (req, res) => { tasks = tasks.filter((t) => t.id !== req.params.id); res.status(204).end(); });
 

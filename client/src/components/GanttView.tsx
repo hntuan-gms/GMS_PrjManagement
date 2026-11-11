@@ -609,7 +609,7 @@ interface Props {
   onOpenShortcuts?: () => void;
   /** "+ Thêm việc" under the last row: one sentence (quickAdd syntax) → one task. `extras` are the
    *  optional Bắt đầu / Kết thúc / Người boxes beside it. */
-  onQuickCreate?: (text: string, extras?: QuickExtras) => Promise<void>;
+  onQuickCreate?: (text: string, extras?: QuickExtras) => Promise<boolean | void>;
   /** In-place editing of the Người / Trạng thái cells (plan §6.1.4). */
   users?: JiraUser[];
   onAssign?: (taskId: string, accountId: string | null) => void;
@@ -647,7 +647,7 @@ function AddRow({
   width: number;
   parent: Task | null;
   users?: JiraUser[];
-  onCreate: (text: string, extras: QuickExtras) => Promise<void>;
+  onCreate: (text: string, extras: QuickExtras) => Promise<boolean | void>;
 }) {
   const [text, setText] = useState("");
   const [asChild, setAsChild] = useState(false);
@@ -663,9 +663,11 @@ function AddRow({
         if (!t || busy) return;
         setBusy(true);
         try {
-          await onCreate(asChild && parent ? `${t} ^${parent.id}` : t, extras);
-          setText("");
-          setExtras(NO_EXTRAS);
+          // A refused create (false) keeps what was typed, so it can be fixed and sent again.
+          if ((await onCreate(asChild && parent ? `${t} ^${parent.id}` : t, extras)) !== false) {
+            setText("");
+            setExtras(NO_EXTRAS);
+          }
         } finally {
           setBusy(false);
         }
@@ -2485,7 +2487,7 @@ export default function GanttView({
                   onCreate={async (text, extras) => {
                     // A collapsed parent opens so the new child is where the eye is.
                     if (collapsed.has(subAdd.id)) onToggleCollapse(subAdd.id);
-                    await onQuickCreate(text, extras);
+                    return onQuickCreate(text, extras);
                   }}
                 />
               )}

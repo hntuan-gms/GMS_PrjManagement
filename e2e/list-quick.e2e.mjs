@@ -135,6 +135,25 @@ await step("Kết thúc trước Bắt đầu: không tạo gì, báo lỗi", as
   await page.waitForSelector(".toast", { timeout: 4000 });
   assert.equal((await log()).filter((l) => l.m === "POST" && l.p === "/api/tasks/bulk").length, before);
 });
+await step("Jira từ chối vì dự án bắt buộc ngày kết thúc: báo bằng tiếng Việt, giữ nguyên chữ đã gõ, rồi điền ngày là tạo được", async () => {
+  await page.locator(".subtask-add [aria-label='Ngày bắt đầu']").fill("");
+  const box = page.locator(".subtask-add input[aria-label='Tên việc con']");
+  await page.locator(".subtask-add [aria-label='Ngày kết thúc']").fill("");
+  await box.fill("Việc bắt buộc hạn [cần hạn]");
+  await box.press("Enter");
+  const toast = page.locator(".toast-error", { hasText: "bắt buộc điền" });
+  await toast.waitFor();
+  assert.match(await toast.textContent(), /«Kết thúc»/);
+  assert.ok(!/is required/.test(await toast.textContent()), "còn câu tiếng Anh của Jira");
+  // Nothing was lost: the title is still there to be sent again.
+  assert.equal(await box.inputValue(), "Việc bắt buộc hạn [cần hạn]");
+  const before = (await bulkPosts()).length;
+  await page.locator(".subtask-add [aria-label='Ngày kết thúc']").fill("20/11/2026");
+  await page.locator(".subtask-add [aria-label='Ngày kết thúc']").press("Enter");
+  await box.press("Enter");
+  await waitForBulk(before);
+  await page.waitForFunction(() => document.querySelector(".subtask-add input[aria-label='Tên việc con']")?.value === "");
+});
 await step("Esc đóng ô gõ mà không bỏ chọn hay mở gì", async () => {
   await page.keyboard.press("Escape");
   await page.waitForSelector(".subtask-add", { state: "detached" });

@@ -66,6 +66,7 @@ import { toast } from "../toast";
 import { buildTaskLink } from "../deepLink";
 import { parseQuickAdd } from "../quickAdd";
 import { mergeExtras, type QuickExtras } from "../quickAddExtras";
+import { createErrorMessage } from "../createError";
 import { SEQUENCES, createSequence, isTypingTarget, overlayOpen, shortcutIdFor } from "../shortcuts";
 import { isOpen as layersOpen } from "../layers";
 import { setDensity, setThemeChoice } from "../theme";
@@ -1293,17 +1294,18 @@ export default function ProjectWorkspace({
   };
 
   /** C / Ctrl K / "+ Thêm việc": one sentence → one Jira issue, then its links (plan §6.4). */
-  async function quickCreate(text: string, open: boolean, extras?: QuickExtras) {
+  /** Resolves true when the issue was made, false when it was not (so a box can keep what was typed). */
+  async function quickCreate(text: string, open: boolean, extras?: QuickExtras): Promise<boolean> {
     const r = parseQuickAdd(text, quickCtx());
     if (!r.title.trim()) {
       toast("Chưa có tên việc.", { tone: "error" });
-      return;
+      return false;
     }
     // The Bắt đầu / Kết thúc / Người boxes, when filled, win over the same thing typed in the sentence.
     const merged = extras ? mergeExtras(r.fields, extras) : null;
     if (merged && !merged.ok) {
       toast(merged.error, { tone: "error" });
-      return;
+      return false;
     }
     const f = merged ? { ...r.fields, ...merged.fields } : r.fields;
     const parent = f.parentId ? tasks.find((t) => t.id === f.parentId) : undefined;
@@ -1322,7 +1324,7 @@ export default function ProjectWorkspace({
         priority: f.priority,
         labels: f.labels,
       });
-      if (res.errors.length > 0 || res.created.length === 0) throw new Error(res.errors[0]?.message ?? "Jira không tạo được việc.");
+      if (res.errors.length > 0 || res.created.length === 0) throw new Error(createErrorMessage(res.errors[0]?.message ?? "Jira không tạo được việc."));
       const created = res.created[0];
       if (f.predecessors?.length) await api.updateTask(created.id, { predecessors: f.predecessors });
       for (const key of f.successorOf ?? []) {
@@ -1339,9 +1341,11 @@ export default function ProjectWorkspace({
         setCmdk(null);
         setEditingTask(created);
       }
+      return true;
     } catch (e) {
-      if (e instanceof ApiError && e.status === 401) return;
-      toast(e instanceof Error ? e.message : "Không tạo được việc.", { tone: "error" });
+      if (e instanceof ApiError && e.status === 401) return false;
+      toast(e instanceof Error ? createErrorMessage(e.message) : "Không tạo được việc.", { tone: "error" });
+      return false;
     }
   }
 

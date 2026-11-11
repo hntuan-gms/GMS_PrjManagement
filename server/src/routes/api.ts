@@ -236,7 +236,14 @@ apiRouter.post("/tasks/bulk", requireProject, async (req, res, next) => {
       next(badRequest("Cần nhập ít nhất một tên việc và loại issue."));
       return;
     }
-    res.status(201).json(await req.auth!.taskService!.createTasksBulk({ ...input, summaries }));
+    const result = await req.auth!.taskService!.createTasksBulk({ ...input, summaries });
+    // The answer is 201 even when Jira refused rows (the refusals are in the body), so the access line alone
+    // reads as success. Say what was refused, without the titles people typed.
+    if (result.errors.length > 0) {
+      const why = [...new Set(result.errors.map((e) => e.message))].join(" | ").slice(0, 300);
+      console.warn(`[create] ${req.auth!.session.projectKey}: ${result.created.length} created, ${result.errors.length} refused by Jira: ${why}`);
+    }
+    res.status(201).json(result);
   } catch (err) {
     next(err);
   }
