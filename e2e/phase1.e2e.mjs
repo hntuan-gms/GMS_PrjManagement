@@ -108,8 +108,8 @@ await step("xuất CSV: BOM + đúng cột + có dữ liệu", async () => {
 console.log("\n== Gantt: thao tác hàng loạt ==");
 await reset();
 await step("chọn 2 task → thanh chọn hiện", async () => {
-  await page.locator(".wbs-row", { hasText: "DEMO-5" }).click();
-  await page.locator(".wbs-row", { hasText: "DEMO-6" }).click({ modifiers: ["Control"] });
+  await page.locator(".wbs-row", { hasText: "DEMO-5" }).locator(".wbs-col-name").click();
+  await page.locator(".wbs-row", { hasText: "DEMO-6" }).locator(".wbs-col-name").click({ modifiers: ["Control"] });
   await page.waitForSelector(".selection-bar");
   assert.ok((await page.textContent(".selection-bar")).includes("Đã chọn 2"));
 });
@@ -122,8 +122,8 @@ await step("gán hàng loạt → 2 PATCH assignee=binh", async () => {
 });
 await step("đổi trạng thái hàng loạt → statusTransition", async () => {
   await reset();
-  await page.locator(".wbs-row", { hasText: "DEMO-5" }).click();
-  await page.locator(".wbs-row", { hasText: "DEMO-6" }).click({ modifiers: ["Control"] });
+  await page.locator(".wbs-row", { hasText: "DEMO-5" }).locator(".wbs-col-name").click();
+  await page.locator(".wbs-row", { hasText: "DEMO-6" }).locator(".wbs-col-name").click({ modifiers: ["Control"] });
   // The status menu offers what the workflow allows (with how many of the selection can take it).
   await page.locator(".selection-bar .selection-trigger", { hasText: "Đổi trạng thái" }).click();
   await page.locator(".bulk-status-item", { hasText: "In Progress" }).click();
@@ -134,7 +134,7 @@ await step("dời ngày +2 → startDate mới, giữ thời lượng", async ()
   await reset();
   const before = await mock("/api/tasks");
   const s5 = before.find((t) => t.id === "DEMO-5").startDate;
-  await page.locator(".wbs-row", { hasText: "DEMO-5" }).click();
+  await page.locator(".wbs-row", { hasText: "DEMO-5" }).locator(".wbs-col-name").click();
   await page.fill(".selection-shift input", "2");
   await page.locator(".selection-shift button").last().click();
   await page.waitForFunction(async () => (await (await fetch("/api/__log")).json()).log.filter((l) => l.m === "PATCH").length >= 1);
@@ -144,8 +144,8 @@ await step("dời ngày +2 → startDate mới, giữ thời lượng", async ()
 });
 await step("Epic bị bỏ qua khi gán hàng loạt, Bug vẫn được gán", async () => {
   await reset();
-  await page.locator(".wbs-row", { hasText: "DEMO-1" }).first().click();
-  await page.locator(".wbs-row", { hasText: "DEMO-7" }).click({ modifiers: ["Control"] });
+  await page.locator(".wbs-row", { hasText: "DEMO-1" }).first().locator(".wbs-col-name").click();
+  await page.locator(".wbs-row", { hasText: "DEMO-7" }).locator(".wbs-col-name").click({ modifiers: ["Control"] });
   await page.locator(".selection-bar select").first().selectOption({ label: "Nguyễn Anh" });
   await page.waitForFunction(async () => (await (await fetch("/api/__log")).json()).log.filter((l) => l.m === "PATCH").length >= 1);
   const p = await patches();

@@ -65,6 +65,7 @@ import Toaster from "./Toaster";
 import { toast } from "../toast";
 import { buildTaskLink } from "../deepLink";
 import { parseQuickAdd } from "../quickAdd";
+import { mergeExtras, type QuickExtras } from "../quickAddExtras";
 import { SEQUENCES, createSequence, isTypingTarget, overlayOpen, shortcutIdFor } from "../shortcuts";
 import { isOpen as layersOpen } from "../layers";
 import { setDensity, setThemeChoice } from "../theme";
@@ -1292,13 +1293,19 @@ export default function ProjectWorkspace({
   };
 
   /** C / Ctrl K / "+ Thêm việc": one sentence → one Jira issue, then its links (plan §6.4). */
-  async function quickCreate(text: string, open: boolean) {
+  async function quickCreate(text: string, open: boolean, extras?: QuickExtras) {
     const r = parseQuickAdd(text, quickCtx());
-    const f = r.fields;
     if (!r.title.trim()) {
       toast("Chưa có tên việc.", { tone: "error" });
       return;
     }
+    // The Bắt đầu / Kết thúc / Người boxes, when filled, win over the same thing typed in the sentence.
+    const merged = extras ? mergeExtras(r.fields, extras) : null;
+    if (merged && !merged.ok) {
+      toast(merged.error, { tone: "error" });
+      return;
+    }
+    const f = merged ? { ...r.fields, ...merged.fields } : r.fields;
     const parent = f.parentId ? tasks.find((t) => t.id === f.parentId) : undefined;
     const subtaskType = meta?.issueTypes.find((t) => t.subtask)?.name ?? "Sub-task";
     // Under a Story or Task, Jira only takes a sub-task; under an Epic (or nothing) a Task.
@@ -1881,7 +1888,7 @@ export default function ProjectWorkspace({
               onOpenImport={() => setImporting(true)}
               onOpenShortcuts={() => setShortcutsOpen(true)}
               onImportKbkt={() => setImportingKbkt(true)}
-              onQuickCreate={(text) => quickCreate(text, false)}
+              onQuickCreate={(text, extras) => quickCreate(text, false, extras)}
               users={users}
               onAssign={(id, acc) => void handleAssign(id, acc)}
               onUpdate={async (id, patch) => {

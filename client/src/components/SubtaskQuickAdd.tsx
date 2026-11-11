@@ -1,25 +1,33 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { Task } from "../types";
+import type { JiraUser, Task } from "../types";
+import { NO_EXTRAS, hasExtras, type QuickExtras } from "../quickAddExtras";
+import QuickAddExtrasFields from "./QuickAddExtras";
 
 /**
  * "+" on a plan row: a small box under that row to type the title of a child. Enter creates it and keeps the
  * box open for the next one, Esc or a click outside closes it. The title takes quick-add words (@người, 3n,
- * !cao…) like every other quick-create; the parent is added by the caller.
+ * !cao…) like every other quick-create; the parent is added by the caller. "Ngày, người" opens Bắt đầu,
+ * Kết thúc and Người for this child.
  */
 export default function SubtaskQuickAdd({
   parent,
   anchor,
+  users,
   onCreate,
   onClose,
 }: {
   parent: Task;
   /** The row's "+" button, in viewport pixels. */
   anchor: { left: number; bottom: number; top: number };
-  onCreate: (text: string) => Promise<void>;
+  /** Who the Người box offers; without it the box is left out. */
+  users?: JiraUser[];
+  onCreate: (text: string, extras: QuickExtras) => Promise<void>;
   onClose: () => void;
 }) {
   const [text, setText] = useState("");
+  const [extras, setExtras] = useState<QuickExtras>(NO_EXTRAS);
+  const [more, setMore] = useState(false);
   const [busy, setBusy] = useState(false);
   const boxRef = useRef<HTMLFormElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -33,7 +41,7 @@ export default function SubtaskQuickAdd({
     // Under the row, or above it when there is no room; never off the right edge.
     const top = anchor.bottom + 4 + h > window.innerHeight - 8 ? Math.max(8, anchor.top - h - 4) : anchor.bottom + 4;
     setPos({ left: Math.max(8, Math.min(anchor.left, window.innerWidth - w - 8)), top });
-  }, [anchor]);
+  }, [anchor, more]);
 
   // On open, and again when a create finishes (the box is disabled while it runs, which drops focus), so Esc and
   // the next title go to the box.
@@ -66,8 +74,9 @@ export default function SubtaskQuickAdd({
         if (!t || busy) return;
         setBusy(true);
         try {
-          await onCreate(`${t} ^${parent.id}`);
+          await onCreate(`${t} ^${parent.id}`, extras);
           setText("");
+          setExtras(NO_EXTRAS);
         } finally {
           setBusy(false);
         }
@@ -91,6 +100,21 @@ export default function SubtaskQuickAdd({
           }
         }}
       />
+      {/* With several text boxes in the form the browser no longer submits on Enter by itself. */}
+      <button type="submit" hidden tabIndex={-1} aria-hidden="true" />
+      {users && (
+        <>
+          <button
+            type="button"
+            className="subtask-add-more"
+            aria-expanded={more}
+            onClick={() => setMore((m) => !m)}
+          >
+            {more ? "Ẩn ngày, người" : hasExtras(extras) ? "Ngày, người ●" : "Ngày, người"}
+          </button>
+          {more && <QuickAddExtrasFields value={extras} onChange={setExtras} users={users} disabled={busy} />}
+        </>
+      )}
     </form>,
     document.body
   );

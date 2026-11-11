@@ -137,7 +137,7 @@ await step("nhấp đúp một dòng ở giữa danh sách mở đúng việc đ
 await step("chọn một dòng rồi cuộn đi: lần sau quay lại dòng vẫn đang được chọn", async () => {
   await setScroll(ROW_H * 400);
   const key = (await snap()).firstKey;
-  await page.locator(".wbs-row", { hasText: key }).first().click();
+  await page.locator(".wbs-row", { hasText: key }).first().locator(".wbs-col-name").click();
   await page.waitForSelector(".wbs-row-selected");
   await setScroll(ROW_H * 1000);
   assert.equal(await page.locator(".wbs-row-selected").count(), 0);

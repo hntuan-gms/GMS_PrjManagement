@@ -23,6 +23,8 @@ import { formatPredecessors, parsePredecessors } from "../predecessorsText";
 import { predecessorProblem } from "../predecessorCheck";
 import { fitColumns, MIN_NAME_PX } from "../wbsFit";
 import SubtaskQuickAdd from "./SubtaskQuickAdd";
+import QuickAddExtrasFields from "./QuickAddExtras";
+import { NO_EXTRAS, hasExtras, type QuickExtras } from "../quickAddExtras";
 import { KIND_OF_COLUMN, editableKinds, neighbourStop, nextRowFor, stopsFor, type CellKind } from "../wbsCells";
 import { buildResourceLoad } from "../resourceAllocation";
 import { isTypingTarget, overlayOpen } from "../shortcuts";
@@ -487,7 +489,8 @@ function csvValue(id: ColumnId, t: Task, r: { start: string; end: string } | und
 // who has it, how far along. The rest (dates, estimates, labels…) is a tick away in "Hiển thị".
 // Type is the icon beside the name and priority a mark beside it when it is not the ordinary one,
 // so neither needs a column of its own (plan §6.1.2): a column of "Medium" was 180px of nothing.
-const DEFAULT_COLUMNS: ColumnId[] = ["status", "assignee", "pct"];
+// Dates are in too: they are what a plan is adjusted by, and a column that is not there cannot be edited.
+const DEFAULT_COLUMNS: ColumnId[] = ["status", "assignee", "start", "due", "pct"];
 
 const COLUMNS_KEY = "gms.gantt.columns";
 const KEY_COL_WIDTH = 64;
@@ -605,8 +608,9 @@ interface Props {
   onImportKbkt: () => void;
   /** The "?" sheet, from the "⋯" menu. */
   onOpenShortcuts?: () => void;
-  /** "+ Thêm việc" under the last row: one sentence (quickAdd syntax) → one task. */
-  onQuickCreate?: (text: string) => Promise<void>;
+  /** "+ Thêm việc" under the last row: one sentence (quickAdd syntax) → one task. `extras` are the
+   *  optional Bắt đầu / Kết thúc / Người boxes beside it. */
+  onQuickCreate?: (text: string, extras?: QuickExtras) => Promise<void>;
   /** In-place editing of the Người / Trạng thái cells (plan §6.1.4). */
   users?: JiraUser[];
   onAssign?: (taskId: string, accountId: string | null) => void;
@@ -633,10 +637,24 @@ function toIso(d: Date): string {
  * The empty row under the plan (plan §6.1.4): type a name — with quick-add tokens if you like —
  * and Enter makes it. Tab first makes it a child of the selected row ("^KEY").
  */
-function AddRow({ top, width, parent, onCreate }: { top: number; width: number; parent: Task | null; onCreate: (text: string) => Promise<void> }) {
+function AddRow({
+  top,
+  width,
+  parent,
+  users,
+  onCreate,
+}: {
+  top: number;
+  width: number;
+  parent: Task | null;
+  users?: JiraUser[];
+  onCreate: (text: string, extras: QuickExtras) => Promise<void>;
+}) {
   const [text, setText] = useState("");
   const [asChild, setAsChild] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [more, setMore] = useState(false);
+  const [extras, setExtras] = useState<QuickExtras>(NO_EXTRAS);
   return (
     <form
       className="wbs-add"
@@ -647,8 +665,9 @@ function AddRow({ top, width, parent, onCreate }: { top: number; width: number; 
         if (!t || busy) return;
         setBusy(true);
         try {
-          await onCreate(asChild && parent ? `${t} ^${parent.id}` : t);
+          await onCreate(asChild && parent ? `${t} ^${parent.id}` : t, extras);
           setText("");
+          setExtras(NO_EXTRAS);
         } finally {
           setBusy(false);
         }
@@ -674,7 +693,25 @@ function AddRow({ top, width, parent, onCreate }: { top: number; width: number; 
         placeholder={asChild && parent ? `Sub-task của ${parent.id}… (Shift Tab để bỏ)` : "Thêm việc…"}
         aria-label="Thêm việc"
       />
+      {/* With several text boxes in the form the browser no longer submits on Enter by itself. */}
+      <button type="submit" hidden tabIndex={-1} aria-hidden="true" />
+      {users && (
+        <button
+          type="button"
+          className={`wbs-add-more${hasExtras(extras) ? " has-value" : ""}`}
+          aria-expanded={more}
+          title="Thêm ngày bắt đầu, kết thúc, người"
+          onClick={() => setMore((m) => !m)}
+        >
+          Ngày, người
+        </button>
+      )}
       <kbd>Enter</kbd>
+      {users && more && (
+        <div className="wbs-add-panel">
+          <QuickAddExtrasFields value={extras} onChange={setExtras} users={users} disabled={busy} />
+        </div>
+      )}
     </form>
   );
 }
@@ -2450,11 +2487,12 @@ export default function GanttView({
                 <SubtaskQuickAdd
                   parent={byId.get(subAdd.id)!}
                   anchor={subAdd}
+                  users={users}
                   onClose={() => setSubAdd(null)}
-                  onCreate={async (text) => {
+                  onCreate={async (text, extras) => {
                     // A collapsed parent opens so the new child is where the eye is.
                     if (collapsed.has(subAdd.id)) onToggleCollapse(subAdd.id);
-                    await onQuickCreate(text);
+                    await onQuickCreate(text, extras);
                   }}
                 />
               )}
@@ -2463,6 +2501,7 @@ export default function GanttView({
                   top={HEADER_HEIGHT + rows.length * ROW_HEIGHT}
                   width={listWidth}
                   parent={selectedId ? (byId.get(selectedId) ?? null) : null}
+                  users={users}
                   onCreate={onQuickCreate}
                 />
               )}

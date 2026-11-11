@@ -28,7 +28,7 @@ const strip = (id) => page.locator(`.baseline-bar[data-task-id="${id}"]`);
 const stripTitle = (id) => strip(id).evaluate((el) => el.querySelector("title").textContent);
 const days = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 86400000);
 const selectRow = async (id) => {
-  await page.locator(".wbs-row", { hasText: id }).first().click();
+  await page.locator(".wbs-row", { hasText: id }).first().locator(".wbs-col-name").click();
   await page.waitForSelector(".selection-bar");
 };
 const baselineSelect = '.selection-bar select[aria-label^="Lưu hoặc xoá baseline"]';

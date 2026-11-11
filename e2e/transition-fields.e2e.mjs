@@ -35,8 +35,8 @@ await page.goto(process.env.E2E_APP ?? "http://localhost:5173/");
 await page.waitForSelector(".wbs-row");
 
 async function selectTwo() {
-  await row("DEMO-5").click();
-  await row("DEMO-6").click({ modifiers: ["Control"] });
+  await row("DEMO-5").locator(".wbs-col-name").click();
+  await row("DEMO-6").locator(".wbs-col-name").click({ modifiers: ["Control"] });
   await page.waitForSelector(".selection-bar");
 }
 const openStatusMenu = () => page.locator(".selection-bar .selection-trigger", { hasText: "Đổi trạng thái" }).click();

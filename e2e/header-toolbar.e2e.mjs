@@ -209,7 +209,7 @@ await step("nút chỉ có biểu tượng đều có tên truy cập", async ()
 console.log("\n== Thanh chọn ==");
 await step("chọn hàng không làm dịch bảng, và không che toolbar", async () => {
   const before = await box(".gantt-body");
-  await page.locator(".wbs-row", { hasText: "DEMO-5" }).click();
+  await page.locator(".wbs-row", { hasText: "DEMO-5" }).locator(".wbs-col-name").click();
   await page.waitForSelector(".selection-bar");
   assert.equal((await box(".gantt-body")).y, before.y, "thanh chọn làm dịch bảng");
   const bar = await box(".selection-bar");

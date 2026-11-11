@@ -68,7 +68,7 @@ await step("dự án nhỏ, chưa chọn gì", async () => {
   await checkAll("ban đầu");
 });
 await step("sau khi chọn một dòng (thanh thao tác hiện ra)", async () => {
-  await page.locator(".wbs-row").nth(2).click();
+  await page.locator(".wbs-row").nth(2).locator(".wbs-col-name").click();
   await page.waitForTimeout(200);
   await checkAll("đã chọn");
 });

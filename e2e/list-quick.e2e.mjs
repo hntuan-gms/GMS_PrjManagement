@@ -25,6 +25,14 @@ async function step(name, fn) {
   }
 }
 const log = async () => (await (await fetch(API + "/api/__log")).json()).log;
+const bulkPosts = async () => (await log()).filter((l) => l.m === "POST" && l.p === "/api/tasks/bulk");
+async function waitForBulk(n) {
+  for (let i = 0; i < 60; i++) {
+    if ((await bulkPosts()).length > n) return;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw new Error("không thấy POST /api/tasks/bulk");
+}
 const row = (key) => page.locator(".wbs-row", { hasText: key });
 
 await fetch(API + "/api/__restore", { method: "POST" });
@@ -93,9 +101,56 @@ await step("'+' trên hàng mở ô gõ tên việc con; Enter tạo, gửi kèm
   await page.waitForFunction(() => document.querySelector(".subtask-add input")?.value === "");
   assert.equal(await page.locator(".peek-panel").count(), 0);
 });
+await step("'Ngày, người' trong ô '+': Bắt đầu, Kết thúc, Người đi kèm lúc tạo", async () => {
+  await fetch(API + "/api/__reset", { method: "POST" });
+  const before = (await log()).filter((l) => l.m === "POST" && l.p === "/api/tasks/bulk").length;
+  const box = page.locator(".subtask-add input[aria-label='Tên việc con']");
+  assert.equal(await page.locator(".qa-extras").count(), 0, "chưa bấm mà đã mở sẵn");
+  await page.locator(".subtask-add-more").click();
+  await page.locator(".subtask-add [aria-label='Ngày bắt đầu']").fill("02/11/2026");
+  await page.locator(".subtask-add [aria-label='Ngày kết thúc']").fill("06/11/2026");
+  await page.locator(".subtask-add [aria-label='Ngày kết thúc']").press("Enter");
+  const select = page.locator(".subtask-add select[aria-label='Người được giao']");
+  const person = await select.locator("option:not([value=''])").first().getAttribute("value");
+  await select.selectOption(person);
+  await box.fill("Việc con có ngày");
+  await box.press("Enter");
+  await waitForBulk(before);
+  const all = (await log()).filter((l) => l.m === "POST" && l.p === "/api/tasks/bulk"); const post = all.at(-1);
+  assert.equal(post.b.startDate, "2026-11-02");
+  assert.equal(post.b.durationDays, 5);
+  assert.equal(post.b.assigneeAccountId, person);
+});
+await step("Kết thúc trước Bắt đầu: không tạo gì, báo lỗi", async () => {
+  const before = (await log()).filter((l) => l.m === "POST" && l.p === "/api/tasks/bulk").length;
+  await page.locator(".subtask-add [aria-label='Ngày bắt đầu']").fill("10/11/2026");
+  await page.locator(".subtask-add [aria-label='Ngày bắt đầu']").press("Enter");
+  await page.locator(".subtask-add [aria-label='Ngày kết thúc']").fill("05/11/2026");
+  await page.locator(".subtask-add [aria-label='Ngày kết thúc']").press("Enter");
+  const box = page.locator(".subtask-add input[aria-label='Tên việc con']");
+  await box.fill("Sai ngày");
+  await box.press("Enter");
+  await page.waitForSelector(".toast", { timeout: 4000 });
+  assert.equal((await log()).filter((l) => l.m === "POST" && l.p === "/api/tasks/bulk").length, before);
+});
 await step("Esc đóng ô gõ mà không bỏ chọn hay mở gì", async () => {
   await page.keyboard.press("Escape");
   await page.waitForSelector(".subtask-add", { state: "detached" });
+});
+await step("dòng 'Thêm việc…' cuối bảng cũng có 'Ngày, người'", async () => {
+  await fetch(API + "/api/__reset", { method: "POST" });
+  const before = (await log()).filter((l) => l.m === "POST" && l.p === "/api/tasks/bulk").length;
+  await page.locator(".wbs-add-more").click();
+  await page.locator(".wbs-add-panel [aria-label='Ngày kết thúc']").fill("20/11/2026");
+  await page.locator(".wbs-add-panel [aria-label='Ngày kết thúc']").press("Enter");
+  const input = page.locator(".wbs-add input[aria-label='Thêm việc']");
+  await input.fill("Việc có hạn");
+  await input.press("Enter");
+  await waitForBulk(before);
+  const all = (await log()).filter((l) => l.m === "POST" && l.p === "/api/tasks/bulk"); const post = all.at(-1);
+  // Only an end date: the task is the one day it ends on.
+  assert.equal(post.b.startDate, "2026-11-20");
+  assert.equal(post.b.durationDays, 1);
 });
 await step("hàng Sub-task không có nút '+' (Jira không cho sub-task có con)", async () => {
   const subs = page.locator(".wbs-row", { has: page.locator("[data-issue-type='Sub-task'], .issue-type-subtask") });

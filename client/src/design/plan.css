@@ -838,6 +838,60 @@ button.wbs-add-child:hover:not(:disabled) {
   background: var(--raised);
   box-shadow: var(--shadow-float);
 }
+/* Bắt đầu · Kết thúc · Người under a quick-add title (QuickAddExtras). */
+.qa-extras {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 8px;
+}
+.qa-extra {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-size: var(--font-size-sm);
+  color: var(--ink-3);
+}
+.qa-extra-wide {
+  grid-column: 1 / -1;
+}
+.qa-extra .date-field,
+.qa-extra select {
+  width: 100%;
+  min-width: 0;
+}
+button.subtask-add-more,
+button.wbs-add-more {
+  align-self: flex-start;
+  padding: 0 4px;
+  border: none;
+  background: transparent;
+  color: var(--ink-3);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+button.subtask-add-more:hover,
+button.wbs-add-more:hover,
+button.wbs-add-more.has-value {
+  color: var(--ink);
+}
+button.wbs-add-more {
+  align-self: center;
+}
+.wbs-add-panel {
+  position: absolute;
+  left: 8px;
+  bottom: calc(100% + 4px);
+  width: 300px;
+  max-width: calc(100% - 16px);
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--raised);
+  box-shadow: var(--shadow-float);
+  color: var(--ink-2);
+}
 .subtask-add-parent {
   font-size: var(--font-size-sm);
   color: var(--ink-3);
