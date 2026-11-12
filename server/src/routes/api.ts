@@ -1,5 +1,6 @@
 import { clientLogLines } from "../auth/clientLog.js";
 import { parseScheduleBatch } from "../scheduleBatch.js";
+import { createKeyedMutex } from "../keyedMutex.js";
 import { PROJECT_HEADER } from "../auth/projectScope.js";
 import type { CreateRequirements } from "../createRequirements.js";
 import { cachedDetail, cachedList, forgetDetail, type ListKind } from "../detailCache.js";
@@ -321,6 +322,13 @@ apiRouter.post("/tasks/change-type", requireProject, async (req, res, next) => {
 });
 
 /**
+ * Writes to one project's tasks take turns (keyedMutex.ts): a drag's cascade is several Jira calls, and one that
+ * the browser abandoned (a reload) keeps running here while the batch the page sent on its way out starts.
+ */
+const projectWrites = createKeyedMutex();
+const writeLockKey = (req: express.Request) => `${req.auth!.session.cloudId}:${req.auth!.session.projectKey}`;
+
+/**
  * What is left in the browser's queue when the page closes, in one request that outlives the page
  * (scheduleBatch.ts). Applied in order through the same updateTask as a single PATCH; the first refusal stops
  * the rest, because a later write was drawn on top of the one that failed. The answer is for tests and logs:
@@ -334,15 +342,17 @@ apiRouter.post("/tasks/schedule-batch", requireProject, async (req, res, next) =
       return;
     }
     const results: { id: string; ok: boolean; error?: string }[] = [];
-    for (const op of parsed.ops) {
-      try {
-        await req.auth!.taskService!.updateTask(op.id, op.patch);
-        results.push({ id: op.id, ok: true });
-      } catch (e) {
-        results.push({ id: op.id, ok: false, error: e instanceof Error ? e.message : String(e) });
-        break;
+    await projectWrites(writeLockKey(req), async () => {
+      for (const op of parsed.ops) {
+        try {
+          await req.auth!.taskService!.updateTask(op.id, op.patch);
+          results.push({ id: op.id, ok: true });
+        } catch (e) {
+          results.push({ id: op.id, ok: false, error: e instanceof Error ? e.message : String(e) });
+          break;
+        }
       }
-    }
+    });
     console.log(JSON.stringify({ severity: "INFO", kind: "schedule-batch", message: `[schedule-batch] ${results.filter((r) => r.ok).length}/${parsed.ops.length}`, results }));
     res.json({ results });
   } catch (err) {
@@ -403,7 +413,7 @@ apiRouter.patch("/tasks/:id", requireProject, async (req, res, next) => {
       }
     }
 
-    const { task, cascadeWarnings, cascaded } = await req.auth!.taskService!.updateTask(req.params.id, input);
+    const { task, cascadeWarnings, cascaded } = await projectWrites(writeLockKey(req), () => req.auth!.taskService!.updateTask(req.params.id, input));
     // `cascaded` (and cascadeWarnings, when non-empty) always present: the client
     // applies a schedule edit's full effect — including any successors the
     // dependency cascade moved — straight from this one response, rather than
