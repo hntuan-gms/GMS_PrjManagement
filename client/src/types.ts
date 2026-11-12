@@ -67,6 +67,8 @@ export interface Task {
   /** When the issue was resolved; null while it is open. */
   resolvedAt?: string | null;
   jiraUrl: string;
+  /** Asked for but not yet made by Jira (pendingTask.ts); never comes from the server. */
+  pending?: boolean;
 }
 
 export interface JiraUser {

@@ -565,6 +565,13 @@ body:has(.draft-bar) .gantt-body {
 /* ---- Đại phẫu C: rows without dates, cell editors, one-row toolbar, draft strip ---- */
 
 /* C1. An undated row keeps its place; its time side is a lane you draw a bar on. */
+/* A row asked for and not yet made by Jira: shown, but quiet until it is real. */
+.wbs-row.is-pending {
+  opacity: 0.55;
+}
+.wbs-row.is-pending .wbs-check {
+  visibility: hidden;
+}
 .wbs-row.is-unscheduled .wbs-summary {
   color: var(--ink-2);
 }

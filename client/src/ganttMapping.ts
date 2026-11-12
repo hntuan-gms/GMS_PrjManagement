@@ -171,7 +171,8 @@ export function toGanttTasks(
         // not its own schedule, so dragging it would just snap straight back on
         // the next render — disabled rather than left to look broken. A
         // childless Epic has no rollup to snap back to, so it stays draggable.
-        isDisabled: task.issueType === "Epic" && hasChildren,
+        // A row Jira has not made yet (task.pending) has nothing to save a drag to.
+        isDisabled: (task.issueType === "Epic" && hasChildren) || !!task.pending,
         ...(colors ? { styles: barStyles(task, hasChildren, colors, range.end) } : {}),
       };
     });

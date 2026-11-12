@@ -24,6 +24,18 @@ async function step(name, fn) {
 const patches = async () => (await (await fetch(API + "/api/__log")).json()).log.filter((l) => l.m === "PATCH");
 
 await fetch(API + "/api/__restore", { method: "POST" });
+// The demo tasks are dated from today, so on a Thursday or Friday the unassigned DEMO-7 would span only a
+// weekend and nobody could clash with it. Put it (and the colleague's DEMO-5) on the Tuesday and Wednesday
+// after today, so the clash is the same on every weekday.
+{
+  const pad = (n) => String(n).padStart(2, "0");
+  const m = new Date();
+  m.setDate(m.getDate() + (((8 - m.getDay()) % 7) || 7) + 1); // the Tuesday after the next Monday
+  const tuesday = `${m.getFullYear()}-${pad(m.getMonth() + 1)}-${pad(m.getDate())}`;
+  const move = (id, body) => fetch(API + `/api/tasks/${id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  await move("DEMO-7", { startDate: tuesday, durationDays: 2 });
+  await move("DEMO-5", { startDate: tuesday, durationDays: 3 });
+}
 await fetch(API + "/api/__reset", { method: "POST" });
 await page.goto(APP);
 await page.waitForSelector(".rv-pill-warn");
@@ -56,6 +68,7 @@ await step("gán người đã kín: vẫn gán, có toast nói đã kín và n�
   assert.ok(all[1].b.assigneeAccountId === null || all[1].b.assigneeAccountId === "" || all[1].b.assigneeAccountId === undefined, JSON.stringify(all[1].b));
 });
 
+await fetch(API + "/api/__restore", { method: "POST" });
 assert.deepEqual(problems, [], problems.join("\n"));
 console.log(`\n${failed ? failed + " lỗi" : "đạt hết"}`);
 await browser.close();

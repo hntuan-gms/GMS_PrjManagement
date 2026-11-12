@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { ApiError, NetworkError, api, setJiraLimitedHandler } from "../api";
+import { ApiError, NetworkError, api, setJiraLimitedHandler, peekCreateRequirements } from "../api";
 import { computeOptimisticCascade } from "../dependencyCascade";
 import { EMPTY_FILTER, type BoardFilter } from "../boardModel";
 import { EMPTY_TASK_FILTER, useTaskFilter } from "../taskFilter";
@@ -62,12 +62,13 @@ import { addDraftEdit, compactEdits, replayDraft, startDraft, type PlanDraft } f
 import CommandBar, { type Command, type CreatePreview } from "./CommandBar";
 import ShortcutSheet from "./ShortcutSheet";
 import Toaster from "./Toaster";
-import { toast } from "../toast";
+import { dismissToast, toast } from "../toast";
 import { buildTaskLink } from "../deepLink";
 import { parseQuickAdd } from "../quickAdd";
 import { mergeExtras, type QuickExtras } from "../quickAddExtras";
 import { createErrorMessage } from "../createError";
 import { missingMessage, missingRequired } from "../createRequirements";
+import { dropPending, isPendingId, nextPendingId, pendingTask, settlePending } from "../pendingTask";
 import { SEQUENCES, createSequence, isTypingTarget, overlayOpen, shortcutIdFor } from "../shortcuts";
 import { isOpen as layersOpen } from "../layers";
 import { setDensity, setThemeChoice } from "../theme";
@@ -382,7 +383,6 @@ export default function ProjectWorkspace({
   // `selectedId` stays the single "focused" row the edit modal opens on, and
   // doubles as the anchor a Shift range measures from.
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [deleting, setDeleting] = useState(false);
   // Progress text while a bulk action runs ("Đang gán 3/10…"); null when idle.
   const [bulkBusy, setBulkBusy] = useState<string | null>(null);
   // A bulk status change Jira stopped for a missing box: ask once, then send the rest again.
@@ -396,6 +396,8 @@ export default function ProjectWorkspace({
   const [closeRequest, setCloseRequest] = useState(0);
   const openTask = useCallback(
     (t: Task) => {
+      // A row Jira has not made yet has no panel to open (and no key to ask Jira about).
+      if (t.pending || isPendingId(t.id)) return;
       prefetchTaskDetail(t.id, t.description === undefined);
       prefetchProjectLists();
       if (editingTask && editingTask.id !== t.id) {
@@ -786,22 +788,36 @@ export default function ProjectWorkspace({
     });
     if (!ok) return;
 
-    setDeleting(true);
+    setSelectedIds(new Set());
+    setSelectedId(null);
+    void removeTasks(ids);
+  }
+
+  /**
+   * The rows go now; Jira is told one after another behind them (each delete is a Jira write plus an overlay
+   * cleanup). A refusal puts the rows back by re-reading, and says which. A sub-task goes with its parent,
+   * as it does in Jira, and the deleted keys leave other tasks' predecessor lists, as the server does.
+   */
+  async function removeTasks(ids: string[]) {
+    const gone = new Set(ids);
+    for (const t of tasksRef.current) if (t.issueType === "Sub-task" && t.wbsParentId && gone.has(t.wbsParentId)) gone.add(t.id);
+    setTasks((prev) =>
+      prev
+        .filter((t) => !gone.has(t.id))
+        .map((t) => (t.predecessors.some((p) => gone.has(p.taskId)) ? { ...t, predecessors: t.predecessors.filter((p) => !gone.has(p.taskId)) } : t))
+    );
     const failed: string[] = [];
     for (const id of ids) {
       try {
         await api.deleteTask(id);
-      } catch {
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 401) return;
         failed.push(id);
       }
     }
-    setSelectedIds(new Set(failed));
-    setSelectedId(null);
-    setDeleting(false);
-    if (failed.length > 0) {
-      setSyncError(`Không xoá được ${failed.length} việc: ${failed.join(", ")}`);
-    }
-    await refreshTasks();
+    if (failed.length > 0) toast(`Không xoá được ${failed.length} việc: ${failed.join(", ")}`, { tone: "error" });
+    // Settles what the cascade of deletes left behind, and brings back whatever Jira kept.
+    void refreshTasks();
   }
 
   async function refreshTasks() {
@@ -832,19 +848,30 @@ export default function ProjectWorkspace({
     edit: (id: string) => TaskUpdateInput,
     skipped: string[] = [],
     /** Takes a failure the caller can fix itself; true means handled, so it is not reported as one. */
-    takeover?: (id: string, err: unknown) => boolean
+    takeover?: (id: string, err: unknown) => boolean,
+    /** What a patch cannot say alone (the status name a transition leads to), for the value shown at once. */
+    bulkExtra?: (id: string) => Partial<Task>
   ) {
     if (ids.length === 0) {
       setSyncError(`Không có việc nào phù hợp để ${verb}.`);
       return;
     }
     const failed: string[] = [];
+    // Every row shows its new value now; Jira is written one task after another behind them, and a task Jira
+    // refuses gets its old values back.
+    const olds = new Map(tasksRef.current.filter((t) => ids.includes(t.id)).map((t) => [t.id, t]));
+    setTasks((prev) => prev.map((t) => (olds.has(t.id) ? optimisticTask(t, edit(t.id), users, bulkExtra?.(t.id) ?? {}) : t)));
     for (let i = 0; i < ids.length; i++) {
       setBulkBusy(`Đang ${verb} ${i + 1}/${ids.length}…`);
       try {
         await api.updateTask(ids[i], edit(ids[i]));
       } catch (e) {
         if (e instanceof ApiError && e.status === 401) return;
+        const before = olds.get(ids[i]);
+        if (before) {
+          const fields = touchedFields(edit(ids[i]), bulkExtra?.(ids[i]) ?? {});
+          setTasks((prev) => prev.map((t) => (t.id === ids[i] ? restoreFields(t, before, fields) : t)));
+        }
         if (takeover?.(ids[i], e)) continue;
         failed.push(`${ids[i]} (${e instanceof Error ? e.message : "lỗi"})`);
       }
@@ -888,7 +915,8 @@ export default function ProjectWorkspace({
         needed ??= n;
         waiting.push(id);
         return true;
-      }
+      },
+      () => ({ statusName })
     );
     if (needed && waiting.length > 0) {
       const n = needed as { fields: TransitionField[]; reason?: string };
@@ -1024,18 +1052,22 @@ export default function ProjectWorkspace({
       setTasks((prev) => prev.map((t) => cascade.get(t.id) ?? t));
     });
     for (const touchedId of cascade.keys()) taskVersion.current.set(touchedId, seq);
+    // "Đã dời" and its Hoàn tác are shown now, not when Jira answers (a second or three later): the bar already
+    // moved, and the cascade the server runs is the one computed above. A refusal takes both back.
+    const was = before.find((t) => t.id === id);
+    const entry =
+      was && (was.startDate !== startDate || was.durationDays !== durationDays) ? makeEntry(`dời ${id}`, before, [id, ...cascade.keys()]) : null;
+    let toastId: number | null = null;
+    if (entry) {
+      setUndoStack((s) => pushEntry(s, entry));
+      toastId = toast(`Đã dời ${id}`, { ms: 4000, action: { label: "Hoàn tác", hint: "Ctrl Z", run: () => void undoRef.current() } });
+    }
     try {
       const updated = await api.updateTask(id, { startDate, durationDays });
       setTasks((prev) => applyTaskUpdate(prev, updated, seq));
-      const was = before.find((t) => t.id === id);
-      if (was && (was.startDate !== startDate || was.durationDays !== durationDays)) {
-        const entry = makeEntry(`dời ${id}`, before, [id, ...cascade.keys(), ...updated.cascaded.map((t) => t.id)]);
-        if (entry) {
-          setUndoStack((s) => pushEntry(s, entry));
-          toast(`Đã dời ${id}`, { ms: 4000, action: { label: "Hoàn tác", hint: "Ctrl Z", run: () => void undoRef.current() } });
-        }
-      }
     } catch (e) {
+      if (entry) setUndoStack((s) => s.filter((x) => x !== entry));
+      if (toastId !== null) dismissToast(toastId);
       if ((taskVersion.current.get(id) ?? 0) > seq) return; // superseded by a newer drag
       setSyncError(e instanceof Error ? e.message : "Không thể lưu thay đổi lịch trình.");
       await refreshTasks();
@@ -1047,17 +1079,18 @@ export default function ProjectWorkspace({
     const before = tasks;
     setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, percentComplete } : t)));
     taskVersion.current.set(id, seq);
+    const entry = before.find((t) => t.id === id)?.percentComplete !== percentComplete ? makeEntry(`đổi % ${id}`, before, [id]) : null;
+    let toastId: number | null = null;
+    if (entry) {
+      setUndoStack((s) => pushEntry(s, entry));
+      toastId = toast(`Đã đổi % của ${id}`, { ms: 4000, action: { label: "Hoàn tác", hint: "Ctrl Z", run: () => void undoRef.current() } });
+    }
     try {
       const updated = await api.updateTask(id, { percentComplete });
       setTasks((prev) => applyTaskUpdate(prev, updated, seq));
-      if (before.find((t) => t.id === id)?.percentComplete !== percentComplete) {
-        const entry = makeEntry(`đổi % ${id}`, before, [id]);
-        if (entry) {
-          setUndoStack((s) => pushEntry(s, entry));
-          toast(`Đã đổi % của ${id}`, { ms: 4000, action: { label: "Hoàn tác", hint: "Ctrl Z", run: () => void undoRef.current() } });
-        }
-      }
     } catch (e) {
+      if (entry) setUndoStack((s) => s.filter((x) => x !== entry));
+      if (toastId !== null) dismissToast(toastId);
       if ((taskVersion.current.get(id) ?? 0) > seq) return;
       setSyncError(e instanceof Error ? e.message : "Không thể lưu % hoàn thành.");
       await refreshTasks();
@@ -1077,7 +1110,7 @@ export default function ProjectWorkspace({
   /** A status picked on the plan's cell: moved at once; a move that needs fields opens the panel to ask. */
   async function handleTransition(task: Task, transitionId: string, toStatusName: string) {
     try {
-      await updateOne(task.id, { statusTransition: transitionId });
+      await updateOne(task.id, { statusTransition: transitionId }, { statusName: toStatusName });
       toast(`Đã chuyển ${task.id} sang ${toStatusName}.`, { tone: "success" });
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) return;
@@ -1169,10 +1202,17 @@ export default function ProjectWorkspace({
    */
   async function writePredecessors(successorId: string, predecessors: Predecessor[]) {
     const seq = nextSeq();
+    const before = tasks.find((t) => t.id === successorId);
+    // The arrow is drawn now; whatever the cascade moves arrives with Jira's answer.
+    taskVersion.current.set(successorId, seq);
+    setTasks((prev) => prev.map((t) => (t.id === successorId ? { ...t, predecessors } : t)));
     try {
       const updated = await api.updateTask(successorId, { predecessors });
       setTasks((prev) => applyTaskUpdate(prev, updated, seq));
     } catch (e) {
+      if (before && (taskVersion.current.get(successorId) ?? 0) === seq) {
+        setTasks((prev) => prev.map((t) => (t.id === successorId ? { ...t, predecessors: before.predecessors } : t)));
+      }
       setSyncError(e instanceof Error ? e.message : "Không thể cập nhật phụ thuộc.");
     }
   }
@@ -1221,10 +1261,9 @@ export default function ProjectWorkspace({
   }
 
   /** One field-level write with the usual staleness guard (the detail window's save does the same). */
-  async function updateOne(id: string, patch: TaskUpdateInput) {
-    const seq = nextSeq();
-    const updated = await api.updateTask(id, patch);
-    setTasks((prev) => applyTaskUpdate(prev, updated, seq));
+  function updateOne(id: string, patch: TaskUpdateInput, extra: Partial<Task> = {}): Promise<void> {
+    // The same path as the panel's save: shown at once, put back (and thrown) if Jira refuses.
+    return savePanelField(id, patch, extra);
   }
 
   /**
@@ -1248,6 +1287,16 @@ export default function ProjectWorkspace({
       throw e;
     }
   }
+
+  // What the create screen makes mandatory, fetched shortly after the project opens so the "+" card and a
+  // create find it already held and never wait on it.
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      void api.getCreateRequirements("subtask").catch(() => undefined);
+      void api.getCreateRequirements("task").catch(() => undefined);
+    }, 1500);
+    return () => window.clearTimeout(t);
+  }, []);
 
   // The lists quick-add resolves words against; fetched once, the first time the command bar opens.
   useEffect(() => {
@@ -1294,9 +1343,14 @@ export default function ProjectWorkspace({
     };
   };
 
-  /** C / Ctrl K / "+ Thêm việc": one sentence → one Jira issue, then its links (plan §6.4). */
-  /** Resolves true when the issue was made, false when it was not (so a box can keep what was typed). */
-  async function quickCreate(text: string, open: boolean, extras?: QuickExtras): Promise<boolean> {
+  /**
+   * C / Ctrl K / "+ Thêm việc": one sentence → one Jira issue, then its links (plan §6.4).
+   *
+   * The row is drawn at once as a dimmed "pending" task and swapped for the real one when Jira answers (a
+   * second or two), or removed with a "Thử lại" when Jira refuses. Resolves true as soon as the row is shown,
+   * false when nothing was started (so a box keeps what was typed).
+   */
+  async function quickCreate(text: string, open: boolean, extras?: QuickExtras, onRefused?: () => void): Promise<boolean> {
     const r = parseQuickAdd(text, quickCtx());
     if (!r.title.trim()) {
       toast("Chưa có tên việc.", { tone: "error" });
@@ -1310,10 +1364,12 @@ export default function ProjectWorkspace({
     }
     const f = merged ? { ...r.fields, ...merged.fields } : r.fields;
     const parent = f.parentId ? tasks.find((t) => t.id === f.parentId) : undefined;
-    // What the project's create screen makes mandatory, asked before anything is sent (for the type this
-    // sentence will make by default; an explicit /type leaves it to Jira). Unknown or failing: send it.
+    // What the project's create screen makes mandatory, from what is already held (never waited for: the
+    // first call warms it, and Jira's own refusal is the net). An explicit /type leaves it to Jira.
     if (!f.issueType) {
-      const need = await api.getCreateRequirements(parent && parent.issueType !== "Epic" ? "subtask" : "task").catch(() => null);
+      const kind = parent && parent.issueType !== "Epic" ? "subtask" : "task";
+      const need = peekCreateRequirements(kind);
+      if (!need) void api.getCreateRequirements(kind).catch(() => undefined);
       const missing = need ? missingRequired(f, need) : [];
       if (missing.length > 0) {
         toast(missingMessage(missing) + " Điền xong rồi tạo lại.", { tone: "error" });
@@ -1323,41 +1379,73 @@ export default function ProjectWorkspace({
     const subtaskType = meta?.issueTypes.find((t) => t.subtask)?.name ?? "Sub-task";
     // Under a Story or Task, Jira only takes a sub-task; under an Epic (or nothing) a Task.
     const issueType = (f.issueType ?? (parent && parent.issueType !== "Epic" ? subtaskType : "Task")) as Task["issueType"];
-    try {
-      const res = await api.createTasksBulk({
-        summaries: [r.title],
+    const durationDays = f.durationDays ?? (f.startDate ? 1 : undefined);
+
+    const tempId = nextPendingId();
+    const person = f.assigneeAccountId ? (users.find((u) => u.accountId === f.assigneeAccountId) ?? null) : null;
+    setTasks((prev) => [
+      ...prev,
+      pendingTask({
+        id: tempId,
+        summary: r.title,
         issueType,
-        wbsParentId: f.parentId ?? null,
+        parentId: f.parentId ?? null,
         startDate: f.startDate ?? null,
-        durationDays: f.durationDays ?? (f.startDate ? 1 : undefined),
-        assigneeAccountId: f.assigneeAccountId ?? null,
+        durationDays: durationDays ?? 1,
+        assignee: isAssignableType(issueType) ? person : null,
+        priority: f.priority ?? null,
+        labels: f.labels ?? [],
         estimateHours: f.estimateHours ?? null,
-        priority: f.priority,
-        labels: f.labels,
-      });
-      if (res.errors.length > 0 || res.created.length === 0) throw new Error(createErrorMessage(res.errors[0]?.message ?? "Jira không tạo được việc."));
-      const created = res.created[0];
-      if (f.predecessors?.length) await api.updateTask(created.id, { predecessors: f.predecessors });
-      for (const key of f.successorOf ?? []) {
-        const succ = tasks.find((t) => t.id === key);
-        if (succ) await api.updateTask(key, { predecessors: [...succ.predecessors, { taskId: created.id, type: "FS", lagDays: 0 }] });
+      }),
+    ]);
+
+    void (async () => {
+      try {
+        const res = await api.createTasksBulk({
+          summaries: [r.title],
+          issueType,
+          wbsParentId: f.parentId ?? null,
+          startDate: f.startDate ?? null,
+          durationDays,
+          assigneeAccountId: f.assigneeAccountId ?? null,
+          estimateHours: f.estimateHours ?? null,
+          priority: f.priority,
+          labels: f.labels,
+        });
+        if (res.errors.length > 0 || res.created.length === 0) throw new Error(createErrorMessage(res.errors[0]?.message ?? "Jira không tạo được việc."));
+        const created = res.created[0];
+        setTasks((prev) => settlePending(prev, tempId, created));
+        const link = async (id: string, predecessors: Predecessor[]) => {
+          const seq = nextSeq();
+          const updated = await api.updateTask(id, { predecessors });
+          setTasks((prev) => applyTaskUpdate(prev, updated, seq));
+        };
+        if (f.predecessors?.length) await link(created.id, f.predecessors);
+        for (const key of f.successorOf ?? []) {
+          const succ = tasksRef.current.find((t) => t.id === key);
+          if (succ) await link(key, [...succ.predecessors, { taskId: created.id, type: "FS", lagDays: 0 }]);
+        }
+        for (const w of res.warnings ?? []) toast(w, { tone: "info" });
+        toast(`Đã tạo ${created.id} · ${r.title}`, {
+          tone: "success",
+          action: { label: "Mở", run: () => setEditingTask(tasksRef.current.find((t) => t.id === created.id) ?? created) },
+        });
+        if (open) {
+          setCmdk(null);
+          setEditingTask(created);
+        }
+      } catch (e) {
+        setTasks((prev) => dropPending(prev, tempId));
+        // The box it came from takes its words back (if it is still open and empty), so nothing is retyped.
+        onRefused?.();
+        if (e instanceof ApiError && e.status === 401) return;
+        toast(e instanceof Error ? createErrorMessage(e.message) : "Không tạo được việc.", {
+          tone: "error",
+          action: { label: "Thử lại", run: () => void quickCreate(text, false, extras) },
+        });
       }
-      await refreshTasks();
-      for (const w of res.warnings ?? []) toast(w, { tone: "info" });
-      toast(`Đã tạo ${created.id} · ${r.title}`, {
-        tone: "success",
-        action: { label: "Mở", run: () => setEditingTask(tasksRef.current.find((t) => t.id === created.id) ?? created) },
-      });
-      if (open) {
-        setCmdk(null);
-        setEditingTask(created);
-      }
-      return true;
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 401) return false;
-      toast(e instanceof Error ? createErrorMessage(e.message) : "Không tạo được việc.", { tone: "error" });
-      return false;
-    }
+    })();
+    return true;
   }
 
   // Someone who may not see the member list has no Resource lens: leave it if it is where they were.
@@ -1753,7 +1841,7 @@ export default function ProjectWorkspace({
             <select
               className="selection-select"
               value=""
-              disabled={deleting || bulkBusy !== null}
+              disabled={bulkBusy !== null}
               onChange={(e) => {
                 const v = e.target.value;
                 if (v) handleBulkAssign(v === "__none__" ? null : v);
@@ -1770,13 +1858,13 @@ export default function ProjectWorkspace({
             </select>
             <BulkStatusMenu
               tasks={selectedTasks()}
-              disabled={deleting || bulkBusy !== null}
+              disabled={bulkBusy !== null}
               onApply={(statusName, ids, values) => void handleBulkStatus(statusName, ids, values)}
             />
             <select
               className="selection-select"
               value=""
-              disabled={deleting || bulkBusy !== null}
+              disabled={bulkBusy !== null}
               onChange={(e) => {
                 const v = e.target.value;
                 if (v === "save" || v === "clear") handleBulkBaseline(v);
@@ -1791,7 +1879,7 @@ export default function ProjectWorkspace({
             <span className="selection-shift">
               <span className="selection-shift-label">Dời</span>
               <button
-                disabled={deleting || bulkBusy !== null}
+                disabled={bulkBusy !== null}
                 onClick={() => handleBulkShift(-shiftDays)}
                 aria-label="Dời lùi lại"
                 title="Dời ngày bắt đầu lùi lại (giữ nguyên thời lượng)"
@@ -1808,7 +1896,7 @@ export default function ProjectWorkspace({
               />
               <span>ngày</span>
               <button
-                disabled={deleting || bulkBusy !== null}
+                disabled={bulkBusy !== null}
                 onClick={() => handleBulkShift(shiftDays)}
                 aria-label="Dời tiến tới"
                 title="Dời ngày bắt đầu tiến tới (giữ nguyên thời lượng)"
@@ -1816,8 +1904,8 @@ export default function ProjectWorkspace({
                 <Icon name="chevronRight" size={14} />
               </button>
             </span>
-            <button className="danger" onClick={handleDeleteSelected} disabled={deleting || bulkBusy !== null}>
-              {deleting ? "Đang xoá..." : `Xoá ${selectedIds.size} việc`}
+            <button className="danger" onClick={handleDeleteSelected} disabled={bulkBusy !== null}>
+              {`Xoá ${selectedIds.size} việc`}
             </button>
             {bulkBusy && <span className="selection-hint">{bulkBusy}</span>}
           </div>
@@ -1869,7 +1957,7 @@ export default function ProjectWorkspace({
               }
               onOpenTask={openTask}
               onUpdateTask={updateOne}
-              onQuickCreate={(text) => quickCreate(text, false)}
+              onQuickCreate={(text, onRefused) => quickCreate(text, false, undefined, onRefused)}
               onWorkLogged={refreshTasks}
             />
           ) : view === "gantt" ? (
@@ -1903,7 +1991,7 @@ export default function ProjectWorkspace({
               onOpenImport={() => setImporting(true)}
               onOpenShortcuts={() => setShortcutsOpen(true)}
               onImportKbkt={() => setImportingKbkt(true)}
-              onQuickCreate={(text, extras) => quickCreate(text, false, extras)}
+              onQuickCreate={(text, extras, onRefused) => quickCreate(text, false, extras, onRefused)}
               users={users}
               onAssign={(id, acc) => void handleAssign(id, acc)}
               onUpdate={async (id, patch) => {
@@ -2023,8 +2111,7 @@ export default function ProjectWorkspace({
             closeRequest={closeRequest}
             onSave={(patch, extra) => savePanelField(editingTask.id, patch, extra)}
             onDelete={async () => {
-              await api.deleteTask(editingTask.id);
-              await refreshTasks();
+              void removeTasks([editingTask.id]);
             }}
             onWorkLogged={refreshTasks}
             myAccountId={session.user.accountId}
@@ -2109,7 +2196,8 @@ export default function ProjectWorkspace({
               // once silently dropped the estimate, and the bulk route also reports
               // half-stuck fields as warnings.
               const res = await api.createTasksBulk(input);
-              if (res.created.length > 0) await refreshTasks();
+              // Jira's answer carries the new tasks whole: they are shown from it, without a re-read first.
+              if (res.created.length > 0) setTasks((prev) => res.created.reduce((acc, t) => settlePending(acc, "", t), prev));
               // A single task that failed outright reads as a form error, so what was
               // typed stays in the form to be fixed and sent again.
               if (input.summaries.length === 1 && res.errors.length === 1) throw new Error(res.errors[0].message);

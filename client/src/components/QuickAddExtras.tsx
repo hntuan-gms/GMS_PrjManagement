@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api } from "../api";
+import { api, peekCreateRequirements } from "../api";
 import { NO_REQUIREMENTS, type CreateRequirements } from "../createRequirements";
 import type { JiraUser } from "../types";
 import type { QuickExtras } from "../quickAddExtras";
@@ -23,7 +23,7 @@ export default function QuickAddExtras({
   kind: "task" | "subtask";
   disabled?: boolean;
 }) {
-  const [req, setReq] = useState<CreateRequirements>(NO_REQUIREMENTS);
+  const [req, setReq] = useState<CreateRequirements>(() => peekCreateRequirements(kind) ?? NO_REQUIREMENTS);
   useEffect(() => {
     let cancelled = false;
     api.getCreateRequirements(kind).then(

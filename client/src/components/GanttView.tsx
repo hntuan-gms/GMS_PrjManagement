@@ -609,7 +609,7 @@ interface Props {
   onOpenShortcuts?: () => void;
   /** "+ Thêm việc" under the last row: one sentence (quickAdd syntax) → one task. `extras` are the
    *  optional Bắt đầu / Kết thúc / Người boxes beside it. */
-  onQuickCreate?: (text: string, extras?: QuickExtras) => Promise<boolean | void>;
+  onQuickCreate?: (text: string, extras?: QuickExtras, onRefused?: () => void) => Promise<boolean | void>;
   /** In-place editing of the Người / Trạng thái cells (plan §6.1.4). */
   users?: JiraUser[];
   onAssign?: (taskId: string, accountId: string | null) => void;
@@ -647,7 +647,7 @@ function AddRow({
   width: number;
   parent: Task | null;
   users?: JiraUser[];
-  onCreate: (text: string, extras: QuickExtras) => Promise<boolean | void>;
+  onCreate: (text: string, extras: QuickExtras, onRefused?: () => void) => Promise<boolean | void>;
 }) {
   const [text, setText] = useState("");
   const [asChild, setAsChild] = useState(false);
@@ -664,7 +664,10 @@ function AddRow({
         setBusy(true);
         try {
           // A refused create (false) keeps what was typed, so it can be fixed and sent again.
-          if ((await onCreate(asChild && parent ? `${t} ^${parent.id}` : t, extras)) !== false) {
+          const sent = asChild && parent ? `${t} ^${parent.id}` : t;
+          const sentExtras = extras;
+          // Jira refuses later (the row is already on screen): the words come back here, unless typing went on.
+          if ((await onCreate(sent, sentExtras, () => { setText((cur) => cur || t); setExtras(sentExtras); })) !== false) {
             setText("");
             setExtras(NO_EXTRAS);
           }
@@ -1281,6 +1284,7 @@ export default function GanttView({
     openCellAt(task, kind, el.getBoundingClientRect());
   }
   function openCellAt(task: Task, kind: CellKind, rect: DOMRect) {
+    if (task.pending) return; // not made yet: nothing to save an edit to
     setCursor({ id: task.id, kind });
     if (kind === "assignee") {
       setBoxEdit(null);
@@ -1989,7 +1993,7 @@ export default function GanttView({
           data-row-id={task.id}
           className={`wbs-row ${matchIds?.has(task.id) ? "wbs-row-match" : ""} ${rowSelected ? "wbs-row-selected" : ""} ${
             showCriticalPath && criticalIds.has(task.id) ? "wbs-row-critical" : ""
-          }${unscheduledIds.has(task.id) ? " is-unscheduled" : ""}`}
+          }${unscheduledIds.has(task.id) ? " is-unscheduled" : ""}${task.pending ? " is-pending" : ""}`}
           style={{ height: ROW_HEIGHT }}
           draggable
           onDragStart={(e) => {
@@ -2074,7 +2078,7 @@ export default function GanttView({
               )}
               {task.summary}
             </span>
-            {onQuickCreate && task.issueType !== "Sub-task" && (
+            {onQuickCreate && task.issueType !== "Sub-task" && !task.pending && (
               <button
                 type="button"
                 className={`wbs-add-child${subAdd?.id === task.id ? " is-open" : ""}`}
@@ -2484,10 +2488,10 @@ export default function GanttView({
                   anchor={subAdd}
                   users={users}
                   onClose={() => setSubAdd(null)}
-                  onCreate={async (text, extras) => {
+                  onCreate={async (text, extras, onRefused) => {
                     // A collapsed parent opens so the new child is where the eye is.
                     if (collapsed.has(subAdd.id)) onToggleCollapse(subAdd.id);
-                    return onQuickCreate(text, extras);
+                    return onQuickCreate(text, extras, onRefused);
                   }}
                 />
               )}

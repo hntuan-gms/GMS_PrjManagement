@@ -86,6 +86,14 @@ app.use((req, _res, next) => {
   if (req.method !== "GET" && !req.path.startsWith("/api/__")) log.push({ m: req.method, p: req.path, b: req.body, q: req.query });
   next();
 });
+// A slow Jira for the writes (the real one answers a PATCH in ~3 s): a test switches it on with
+// POST /api/__writedelay and checks the screen does not wait for it. Reset by __restore and __reset.
+let writeDelayMs = 0;
+app.post("/api/__writedelay", (req, r) => { writeDelayMs = Number(req.body?.ms ?? 0); r.json({}); });
+app.use((req, _res, next) => {
+  if (writeDelayMs > 0 && req.method !== "GET" && !req.path.startsWith("/api/__")) setTimeout(next, writeDelayMs);
+  else next();
+});
 
 // Back to the data the server started with — the e2e files share one stand-in API.
 const pristine = { tasks: structuredClone(tasks), comments: structuredClone(comments) };
@@ -98,6 +106,7 @@ app.post("/api/__restore", (_q, r) => {
   profiles = [];
   absences = [];
   listDelayMs = 0;
+  writeDelayMs = 0;
   worklogs = seedWorklogs();
   failWorklogWrites = false;
   sessionProject = "DEMO";
@@ -110,7 +119,7 @@ app.post("/api/__restore", (_q, r) => {
   r.json({});
 });
 app.get("/api/__log", (_q, r) => r.json({ log, chatAborts }));
-app.post("/api/__reset", (_q, r) => { log.length = 0; chatAborts = 0; r.json({}); });
+app.post("/api/__reset", (_q, r) => { log.length = 0; chatAborts = 0; writeDelayMs = 0; r.json({}); });
 app.post("/api/__tasks/reset", (_q, r) => { tasks = structuredClone(SEED); r.json({}); });
 // A big project, for measuring how the Gantt behaves with hundreds of rows (e2e/perf-scroll.mjs).
 // Epics > stories > tasks/bugs spread over about a year, a third of them chained by FS edges.

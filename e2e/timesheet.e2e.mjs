@@ -45,6 +45,13 @@ await reset();
 await page.goto(APP);
 await page.waitForSelector(".wbs-row");
 await openTimesheet(page);
+// The demo worklog sits on today, whatever weekday that is. Steps that need an empty DEMO-3 cell use two
+// weekday columns that are not today's, found here instead of assumed (they once were columns 1 and 3).
+await page.waitForSelector(".ts-mine thead th.ts-day");
+const todayCol = await page.locator(".ts-mine thead th.ts-day").evaluateAll((els) => els.findIndex((e) => e.classList.contains("is-today")));
+const spare = [0, 1, 2, 3, 4].filter((i) => i !== todayCol);
+const colA = spare[0];
+const colB = spare[2];
 
 console.log("\n== Của tôi ==");
 await step("mở ra là lưới của mình: việc đã ghi trước, việc của mình chưa ghi là dòng gợi ý", async () => {
@@ -72,26 +79,26 @@ await step("gõ 2h30 vào dòng gợi ý rồi Enter: ghi 2,5h đúng ngày, dò
   assert.deepEqual(await keysInOrder(), before, "dòng vừa có giờ đầu tiên không được đổi chỗ");
 });
 await step("Enter chuyển xuống ô dòng dưới, mũi tên đi lại như bảng tính", async () => {
-  await cell("DEMO-3", 1).focus();
+  await cell("DEMO-3", colA).focus();
   await page.keyboard.press("Enter");
-  assert.equal((await active("key")) + "|" + (await active("c")), "DEMO-9|1");
+  assert.equal((await active("key")) + "|" + (await active("c")), `DEMO-9|${colA}`);
   await page.keyboard.press("ArrowUp");
   assert.equal(await active("key"), "DEMO-3");
   await page.keyboard.press("ArrowRight");
-  assert.equal(await active("c"), "2");
+  assert.equal(await active("c"), String(colA + 1));
   await page.keyboard.press("ArrowLeft");
-  assert.equal(await active("c"), "1");
+  assert.equal(await active("c"), String(colA));
 });
 await step("chữ không phải giờ: ô đỏ, có một câu giải thích, không ghi gì", async () => {
   await reset();
-  await cell("DEMO-3", 1).fill("abc");
-  await cell("DEMO-3", 1).press("Tab");
+  await cell("DEMO-3", colA).fill("abc");
+  await cell("DEMO-3", colA).press("Tab");
   await page.waitForSelector(".ts-in.is-bad");
   await page.waitForSelector(".toast-error", { timeout: 2000 });
   await page.waitForTimeout(250);
   assert.equal((await log()).length, 0);
-  await cell("DEMO-3", 1).fill("");
-  await cell("DEMO-3", 1).press("Tab");
+  await cell("DEMO-3", colA).fill("");
+  await cell("DEMO-3", colA).press("Tab");
   assert.equal(await page.locator(".ts-in.is-bad").count(), 0);
 });
 await step("Esc khi đang gõ trả giá trị cũ và không ghi gì", async () => {
@@ -121,16 +128,16 @@ await step("sửa ô đã có giờ: chỉ PUT số giờ, số mới hiện nga
   assert.match(await page.locator(".ts-mine .ts-row", { hasText: "DEMO-3" }).locator(".ts-total").textContent(), /6/);
 });
 await step("vượt công suất: ô và tổng ngày báo ▲, số liệu đầu trang đếm", async () => {
-  await cell("DEMO-3", 3).fill("9");
-  await cell("DEMO-3", 3).press("Tab");
+  await cell("DEMO-3", colB).fill("9");
+  await cell("DEMO-3", colB).press("Tab");
   await page.waitForSelector(".ts-mine td.ts-cell.is-over");
   assert.ok((await page.locator(".ts-mine tfoot .ts-foot.st-over").textContent()).includes("▲"));
   await page.waitForFunction(() => document.querySelector(".ts-tiles")?.textContent.includes("ngày vượt công suất"));
 });
 await step("xoá ô: DELETE, không hộp thoại, 'Hoàn tác' ghi lại đúng giờ cũ", async () => {
   await reset();
-  await cell("DEMO-3", 3).fill("");
-  await cell("DEMO-3", 3).press("Tab");
+  await cell("DEMO-3", colB).fill("");
+  await cell("DEMO-3", colB).press("Tab");
   await waitLog((l) => l.m === "DELETE");
   await page.locator(".toast-action", { hasText: "Hoàn tác" }).click();
   const back = await waitLog((l) => l.m === "POST");

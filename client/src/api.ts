@@ -105,6 +105,15 @@ let tabProject: string | null = (() => {
   }
 })();
 
+const requirementsCache = new Map<string, { at: number; value: CreateRequirements }>();
+const REQUIREMENTS_TTL_MS = 10 * 60_000;
+
+/** The create requirements already held for this tab's project, or null: callers that must not wait use this. */
+export function peekCreateRequirements(kind: "task" | "subtask"): CreateRequirements | null {
+  const hit = requirementsCache.get(`${tabProject ?? ""}|${kind}`);
+  return hit && Date.now() - hit.at < REQUIREMENTS_TTL_MS ? hit.value : null;
+}
+
 export function setTabProject(key: string | null): void {
   tabProject = key;
   try {
@@ -302,7 +311,15 @@ export const api = {
   listPriorities: () => request<string[]>("/priorities"),
   listLabels: () => request<string[]>("/labels"),
   listIssueTypes: () => request<Array<{ name: string; subtask: boolean }>>("/issue-types"),
-  getCreateRequirements: (kind: "task" | "subtask") => request<CreateRequirements>(`/create-requirements?kind=${kind}`),
+  /** Held ten minutes per project and kind, so the "+" card and a create never wait on it. */
+  getCreateRequirements: (kind: "task" | "subtask"): Promise<CreateRequirements> => {
+    const hit = peekCreateRequirements(kind);
+    if (hit) return Promise.resolve(hit);
+    return request<CreateRequirements>(`/create-requirements?kind=${kind}`).then((value) => {
+      requirementsCache.set(`${tabProject ?? ""}|${kind}`, { at: Date.now(), value });
+      return value;
+    });
+  },
   listComponents: () => request<ProjectComponent[]>("/components"),
   listVersions: () => request<ProjectVersion[]>("/versions"),
   listLinkTypes: () => request<LinkType[]>("/link-types"),

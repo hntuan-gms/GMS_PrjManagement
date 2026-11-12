@@ -146,7 +146,7 @@ await step("Jira từ chối vì dự án bắt buộc ngày kết thúc: báo b
   assert.match(await toast.textContent(), /«Kết thúc»/);
   assert.ok(!/is required/.test(await toast.textContent()), "còn câu tiếng Anh của Jira");
   // Nothing was lost: the title is still there to be sent again.
-  assert.equal(await box.inputValue(), "Việc bắt buộc hạn [cần hạn]");
+  await page.waitForFunction(() => document.querySelector(".subtask-add input[aria-label='Tên việc con']")?.value === "Việc bắt buộc hạn [cần hạn]");
   const before = (await bulkPosts()).length;
   await page.locator(".subtask-add [aria-label='Ngày kết thúc']").fill("20/11/2026");
   await page.locator(".subtask-add [aria-label='Ngày kết thúc']").press("Enter");
@@ -158,6 +158,9 @@ await step("dự án bắt buộc ngày kết thúc: thẻ ghi 'bắt buộc', c
   // Close and reopen the card so it reads the project's requirements fresh.
   await page.keyboard.press("Escape");
   await fetch(API + "/api/__requirements", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ dueDate: true }) });
+  // The page holds what it read for ten minutes; a reload is what a project change of rules looks like to it.
+  await page.reload();
+  await page.waitForSelector(".wbs-row");
   await row("DEMO-5").hover();
   await row("DEMO-5").locator("button.wbs-add-child").click();
   await page.locator(".subtask-add .qa-extra", { hasText: "Kết thúc" }).locator(".qa-req").waitFor();
