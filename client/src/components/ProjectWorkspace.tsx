@@ -1060,6 +1060,9 @@ export default function ProjectWorkspace({
     const { cascaded, cascadeWarnings: _cascadeWarnings, ...primary } = response;
     const byId = new Map<string, Task>();
     for (const t of [primary, ...cascaded]) {
+      // A task with another change still waiting to be written keeps what the screen shows: this answer
+      // describes Jira part-way through the queue, and would put an older state back over a newer one.
+      if (pendingIds.current.has(t.id)) continue;
       if ((taskVersion.current.get(t.id) ?? 0) <= seq) {
         byId.set(t.id, t);
         taskVersion.current.set(t.id, seq);
