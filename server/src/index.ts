@@ -45,7 +45,11 @@ const jsonBody = express.json();
 // POST /api/ai/chat can carry attached files (base64), so it has its own, larger body
 // limit — applied in routes/ai.ts AFTER authentication. Parsing it here would let
 // anyone, logged in or not, make this public service read megabytes.
-app.use((req, res, next) => (req.method === "POST" && req.path.replace(/\/+$/, "") === "/api/ai/chat" ? next() : jsonBody(req, res, next)));
+// The Jira webhook is the same: its events carry the whole issue (a big description or many comments
+// passed the default 100 kb, answered 500 and the event was lost), so routes/webhooks.ts reads it with
+// a larger limit, and only after the bearer token is checked.
+const OWN_BODY_PARSER = new Set(["/api/ai/chat", WEBHOOK_PATH]);
+app.use((req, res, next) => (req.method === "POST" && OWN_BODY_PARSER.has(req.path.replace(/\/+$/, "")) ? next() : jsonBody(req, res, next)));
 
 // No CORS: production serves the client from this same process, and dev goes
 // through the Vite proxy (client/vite.config.ts), so every request is same-origin.
