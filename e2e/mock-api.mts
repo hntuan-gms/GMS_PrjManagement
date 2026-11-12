@@ -83,11 +83,22 @@ let failWorklogWrites = false;
 const app = express();
 app.use(express.json());
 app.use((req, _res, next) => {
-  if (req.method !== "GET" && !req.path.startsWith("/api/__")) log.push({ m: req.method, p: req.path, b: req.body, q: req.query });
+  if (req.method !== "GET" && !req.path.startsWith("/api/__") && req.path !== "/api/client-log") log.push({ m: req.method, p: req.path, b: req.body, q: req.query });
   next();
 });
 // A slow Jira for the writes (the real one answers a PATCH in ~3 s): a test switches it on with
 // POST /api/__writedelay and checks the screen does not wait for it. Reset by __restore and __reset.
+// The tab's action log (client/src/actionLog.ts): kept so a test can read what the screen reported.
+const clientEvents: { sid: string; n: number; t: number; e: string; d?: unknown }[] = [];
+app.post("/api/client-log", (req, r) => {
+  for (const ev of req.body?.events ?? []) clientEvents.push({ sid: req.body.sid, ...ev });
+  r.status(204).end();
+});
+app.get("/api/__clientlog", (req, r) => {
+  const out = [...clientEvents];
+  if (req.query.clear) clientEvents.length = 0;
+  r.json({ events: out });
+});
 let writeDelayMs = 0;
 app.post("/api/__writedelay", (req, r) => { writeDelayMs = Number(req.body?.ms ?? 0); r.json({}); });
 app.use((req, _res, next) => {

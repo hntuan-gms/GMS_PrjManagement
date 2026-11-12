@@ -1,3 +1,5 @@
+import { clientLogLines } from "../auth/clientLog.js";
+import { PROJECT_HEADER } from "../auth/projectScope.js";
 import type { CreateRequirements } from "../createRequirements.js";
 import { cachedDetail, cachedList, forgetDetail, type ListKind } from "../detailCache.js";
 import { pgDetailStore } from "../detailCacheStore.js";
@@ -31,6 +33,17 @@ apiRouter.use(deferBackgroundWhenLow);
 // fail-closed reason requireAuth does: a route added to ai.ts later is gated by
 // default instead of needing someone to remember.
 apiRouter.use("/ai", requireStaff, aiRouter);
+
+// What the browser did (a drag, Ctrl+Z, a re-read), one log line per event, beside the `access` lines: see
+// auth/clientLog.ts. Nothing is stored and nothing in the body is acted on. Any signed-in person may send it.
+apiRouter.post("/client-log", (req, res) => {
+  const who = req.auth?.session;
+  if (who) {
+    const key = req.header(PROJECT_HEADER);
+    for (const line of clientLogLines(who, req.body, key ?? null)) console.log(line);
+  }
+  res.status(204).end();
+});
 apiRouter.use("/resources", resourcesRouter);
 apiRouter.use("/progress", progressRouter);
 apiRouter.use("/board", boardRouter);

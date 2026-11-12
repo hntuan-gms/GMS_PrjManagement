@@ -63,6 +63,7 @@ import CommandBar, { type Command, type CreatePreview } from "./CommandBar";
 import ShortcutSheet from "./ShortcutSheet";
 import Toaster from "./Toaster";
 import { dismissToast, toast } from "../toast";
+import { logAction } from "../actionLog";
 import { buildTaskLink } from "../deepLink";
 import { parseQuickAdd } from "../quickAdd";
 import { mergeExtras, type QuickExtras } from "../quickAddExtras";
@@ -681,10 +682,34 @@ export default function ProjectWorkspace({
       }
     };
   }
+  const queueDepth = useRef(0);
   function enqueueWrite<T>(fn: () => Promise<T>): Promise<T> {
+    queueDepth.current++;
     const run = writeChain.current.then(fn, fn);
-    writeChain.current = run.catch(() => undefined);
+    writeChain.current = run.catch(() => undefined).then(() => {
+      queueDepth.current--;
+    });
     return run;
+  }
+  /** One write to Jira, with what was sent, how long it took and what came back in the tab's action log. */
+  async function loggedUpdate(id: string, patch: TaskUpdateInput, why: string) {
+    const started = performance.now();
+    logAction("write.send", { id, why, patch, queued: queueDepth.current - 1 });
+    try {
+      const updated = await api.updateTask(id, patch);
+      logAction("write.done", {
+        id,
+        why,
+        ms: Math.round(performance.now() - started),
+        start: updated.startDate,
+        dur: updated.durationDays,
+        cascaded: updated.cascaded.map((t) => `${t.id}:${t.startDate}/${t.durationDays}`),
+      });
+      return updated;
+    } catch (e) {
+      logAction("write.fail", { id, why, ms: Math.round(performance.now() - started), error: e instanceof Error ? e.message : String(e) });
+      throw e;
+    }
   }
 
   /**
@@ -695,6 +720,7 @@ export default function ProjectWorkspace({
    */
   async function undoEntry(entry: UndoEntry) {
     setUndoStack((s) => s.filter((e) => e !== entry));
+    logAction("undo", { label: entry.label, tasks: entry.before.map((b) => `${b.id}:${b.startDate}/${b.durationDays}`), queued: queueDepth.current });
     const serverView = tasksRef.current;
     const seq0 = nextSeq();
     const snaps = new Map(entry.before.map((b) => [b.id, b]));
@@ -722,7 +748,7 @@ export default function ProjectWorkspace({
           const seq = nextSeq();
           taskVersion.current.set(step.id, seq);
           working = working.map((t) => (t.id === step.id ? { ...t, ...step.patch } : t));
-          const updated = await api.updateTask(step.id, step.patch);
+          const updated = await loggedUpdate(step.id, step.patch, "undo");
           const { cascaded, cascadeWarnings: _w, ...primary } = updated;
           const fresh = new Map([primary, ...cascaded].map((t) => [t.id, t as Task]));
           working = working.map((t) => fresh.get(t.id) ?? t);
@@ -754,6 +780,7 @@ export default function ProjectWorkspace({
       if (editingTask || creating || reviewRunId || importing || importingKbkt) return;
       if (view !== "gantt") return;
       e.preventDefault();
+      logAction("undo.key", { repeat: e.repeat });
       void undoRef.current();
     }
     // Capture phase, like the shortcut listener: the bar just dragged keeps focus and stops every keydown it gets.
@@ -886,6 +913,7 @@ export default function ProjectWorkspace({
       setTasks(r.tasks);
       return;
     }
+    logAction("refresh", { tasks: t.length, pending: [...pendingIds.current.keys()], queued: queueDepth.current });
     setTasks((prev) => {
       if (pendingIds.current.size === 0) return t;
       const local = new Map(prev.map((x) => [x.id, x]));
@@ -1059,15 +1087,20 @@ export default function ProjectWorkspace({
   function applyTaskUpdate(prev: Task[], response: TaskUpdateResponse, seq: number): Task[] {
     const { cascaded, cascadeWarnings: _cascadeWarnings, ...primary } = response;
     const byId = new Map<string, Task>();
+    const skipped: string[] = [];
     for (const t of [primary, ...cascaded]) {
       // A task with another change still waiting to be written keeps what the screen shows: this answer
       // describes Jira part-way through the queue, and would put an older state back over a newer one.
-      if (pendingIds.current.has(t.id)) continue;
+      if (pendingIds.current.has(t.id)) {
+        skipped.push(`${t.id}:pending`);
+        continue;
+      }
       if ((taskVersion.current.get(t.id) ?? 0) <= seq) {
         byId.set(t.id, t);
         taskVersion.current.set(t.id, seq);
-      }
+      } else skipped.push(`${t.id}:newer`);
     }
+    logAction("apply", { seq, primary: primary.id, applied: [...byId.keys()], skipped });
     return prev.map((t) => byId.get(t.id) ?? t);
   }
 
@@ -1121,13 +1154,24 @@ export default function ProjectWorkspace({
         ? makeEntry(`dời ${id}`, before, [id, ...cascade.keys()])
         : null;
     const release = holdPending([id, ...cascade.keys()]);
+    logAction("drag", {
+      id,
+      from: was ? `${was.startDate}/${was.durationDays}` : null,
+      to: `${startDate}/${durationDays}`,
+      seq,
+      moved: [...cascade.keys()].filter((k) => k !== id),
+      queued: queueDepth.current,
+    });
     let toastId = 0;
     if (entry) {
       setUndoStack((s) => pushEntry(s, entry));
-      toastId = toast(`Đã dời ${id}`, { ms: 4000, action: { label: "Hoàn tác", hint: "Ctrl Z", run: () => void undoEntry(entry) } });
+      toastId = toast(`Đã dời ${id}`, { ms: 4000, action: { label: "Hoàn tác", hint: "Ctrl Z", run: () => {
+            logAction("undo.toast", { label: entry.label });
+            void undoEntry(entry);
+          } } });
     }
     try {
-      const updated = await enqueueWrite(() => api.updateTask(id, { startDate, durationDays }));
+      const updated = await enqueueWrite(() => loggedUpdate(id, { startDate, durationDays }, "drag"));
       release();
       setTasks((prev) => applyTaskUpdate(prev, updated, seq));
       if (entry) {
@@ -1155,13 +1199,17 @@ export default function ProjectWorkspace({
     taskVersion.current.set(id, seq);
     const entry = before.find((t) => t.id === id)?.percentComplete !== percentComplete ? makeEntry(`đổi % ${id}`, before, [id]) : null;
     const release = holdPending([id]);
+    logAction("progress", { id, from: before.find((t) => t.id === id)?.percentComplete ?? null, to: percentComplete, seq, queued: queueDepth.current });
     let toastId = 0;
     if (entry) {
       setUndoStack((s) => pushEntry(s, entry));
-      toastId = toast(`Đã đổi % của ${id}`, { ms: 4000, action: { label: "Hoàn tác", hint: "Ctrl Z", run: () => void undoEntry(entry) } });
+      toastId = toast(`Đã đổi % của ${id}`, { ms: 4000, action: { label: "Hoàn tác", hint: "Ctrl Z", run: () => {
+            logAction("undo.toast", { label: entry.label });
+            void undoEntry(entry);
+          } } });
     }
     try {
-      const updated = await enqueueWrite(() => api.updateTask(id, { percentComplete }));
+      const updated = await enqueueWrite(() => loggedUpdate(id, { percentComplete }, "progress"));
       release();
       setTasks((prev) => applyTaskUpdate(prev, updated, seq));
     } catch (e) {
@@ -2066,7 +2114,10 @@ export default function ProjectWorkspace({
               jqlKeys={jqlKeys}
               sla={slaView}
               jql={{ state: jqlState, onRun: runJql, onClear: () => setTaskFilter({ ...taskFilter, jql: "" }) }}
-              undo={{ label: undoStack.at(-1)?.label ?? null, onUndo: () => void undo() }}
+              undo={{ label: undoStack.at(-1)?.label ?? null, onUndo: () => {
+                logAction("undo.click");
+                void undo();
+              } }}
               onOpenImport={() => setImporting(true)}
               onOpenShortcuts={() => setShortcutsOpen(true)}
               onImportKbkt={() => setImportingKbkt(true)}
