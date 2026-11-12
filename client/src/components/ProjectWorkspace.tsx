@@ -360,7 +360,6 @@ export default function ProjectWorkspace({
 
   /* ---- undo: dragging bars and the % handle, this session only ---- */
   const [undoStack, setUndoStack] = useState<UndoEntry[]>([]);
-  const [undoing, setUndoing] = useState(false);
   const tasksRef = useRef<Task[]>([]);
 
   /** set_view_filter: one sentence → the same filters a person sets by hand. */
@@ -655,36 +654,92 @@ export default function ProjectWorkspace({
 
   tasksRef.current = tasks;
 
-  async function undo() {
-    const entry = undoStack.at(-1);
-    if (!entry || undoing) return;
-    setUndoStack((s) => s.slice(0, -1));
-    setUndoing(true);
-    // Each step is written, then the next is worked out from what that left behind:
-    // restoring the dragged task makes the cascade pull its zero-slack successors back
-    // by itself, and those then need no write of their own.
-    let working = tasksRef.current;
-    try {
-      for (let guard = 0; guard < entry.before.length + 3; guard++) {
-        const step = undoSteps(entry, working)[0];
-        if (!step) break;
-        const seq = nextSeq();
-        taskVersion.current.set(step.id, seq);
-        working = working.map((t) => (t.id === step.id ? { ...t, ...step.patch } : t));
-        setTasks(working);
-        const updated = await api.updateTask(step.id, step.patch);
-        const { cascaded, cascadeWarnings: _w, ...primary } = updated;
-        const fresh = new Map([primary, ...cascaded].map((t) => [t.id, t as Task]));
-        working = working.map((t) => fresh.get(t.id) ?? t);
-        setTasks((prev) => applyTaskUpdate(prev, updated, seq));
+  /**
+   * Writes to Jira from drags, the % handle and undo go through one queue, in the order they were made. A Jira
+   * save takes seconds; sent side by side, two saves of the same task could land in Jira in either order and the
+   * older one would win (then the next read showed bars "running around"). The screen never waits for the
+   * queue: every change is already drawn before it is sent.
+   */
+  const writeChain = useRef<Promise<unknown>>(Promise.resolve());
+  /**
+   * Tasks whose change is drawn but not yet written to Jira. The app's screen is the truth until Jira has caught
+   * up, so a re-read of the project (`refreshTasks`) keeps these tasks as they are on screen instead of putting
+   * back what Jira still holds: that is what made a bar snap back and then forward again.
+   */
+  const pendingIds = useRef<Map<string, number>>(new Map());
+  function holdPending(ids: string[]): () => void {
+    const list = [...new Set(ids)];
+    for (const id of list) pendingIds.current.set(id, (pendingIds.current.get(id) ?? 0) + 1);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      for (const id of list) {
+        const n = (pendingIds.current.get(id) ?? 1) - 1;
+        if (n <= 0) pendingIds.current.delete(id);
+        else pendingIds.current.set(id, n);
       }
+    };
+  }
+  function enqueueWrite<T>(fn: () => Promise<T>): Promise<T> {
+    const run = writeChain.current.then(fn, fn);
+    writeChain.current = run.catch(() => undefined);
+    return run;
+  }
+
+  /**
+   * Undo shows the old values at once and writes them behind the screen. The tasks of the entry are drawn back
+   * in one update (the dependency cascade then pulls back, on the server, whatever it had pushed); the steps
+   * that still need a write are worked out from the state before the revert, one at a time, so a successor the
+   * cascade already pulled back needs none of its own.
+   */
+  async function undoEntry(entry: UndoEntry) {
+    setUndoStack((s) => s.filter((e) => e !== entry));
+    const serverView = tasksRef.current;
+    const seq0 = nextSeq();
+    const snaps = new Map(entry.before.map((b) => [b.id, b]));
+    for (const b of entry.before) taskVersion.current.set(b.id, seq0);
+    const release = holdPending(entry.before.map((b) => b.id));
+    setTasks((prev) =>
+      prev.map((t) => {
+        const b = snaps.get(t.id);
+        if (!b) return t;
+        return {
+          ...t,
+          startDate: b.startDate,
+          durationDays: b.durationDays,
+          percentComplete: b.percentComplete,
+          dueDate: b.startDate ? addDays(b.startDate, b.durationDays - 1) : t.dueDate,
+        };
+      })
+    );
+    try {
+      await enqueueWrite(async () => {
+        let working = serverView;
+        for (let guard = 0; guard < entry.before.length + 3; guard++) {
+          const step = undoSteps(entry, working)[0];
+          if (!step) break;
+          const seq = nextSeq();
+          taskVersion.current.set(step.id, seq);
+          working = working.map((t) => (t.id === step.id ? { ...t, ...step.patch } : t));
+          const updated = await api.updateTask(step.id, step.patch);
+          const { cascaded, cascadeWarnings: _w, ...primary } = updated;
+          const fresh = new Map([primary, ...cascaded].map((t) => [t.id, t as Task]));
+          working = working.map((t) => fresh.get(t.id) ?? t);
+          setTasks((prev) => applyTaskUpdate(prev, updated, seq));
+        }
+      });
+      release();
     } catch (e) {
+      release();
       if (e instanceof ApiError && e.status === 401) return;
       setSyncError(e instanceof Error ? e.message : "Không hoàn tác được.");
       await refreshTasks();
-    } finally {
-      setUndoing(false);
     }
+  }
+  async function undo() {
+    const entry = undoStack.at(-1);
+    if (entry) await undoEntry(entry);
   }
   const undoRef = useRef(undo);
   undoRef.current = undo;
@@ -831,7 +886,11 @@ export default function ProjectWorkspace({
       setTasks(r.tasks);
       return;
     }
-    setTasks(t);
+    setTasks((prev) => {
+      if (pendingIds.current.size === 0) return t;
+      const local = new Map(prev.map((x) => [x.id, x]));
+      return t.map((x) => (pendingIds.current.has(x.id) ? local.get(x.id) ?? x : x));
+    });
   }
 
   /**
@@ -1052,22 +1111,34 @@ export default function ProjectWorkspace({
       setTasks((prev) => prev.map((t) => cascade.get(t.id) ?? t));
     });
     for (const touchedId of cascade.keys()) taskVersion.current.set(touchedId, seq);
-    // "Đã dời" and its Hoàn tác are shown now, not when Jira answers (a second or three later): the bar already
-    // moved, and the cascade the server runs is the one computed above. A refusal takes both back.
+    // "Hoàn tác" is offered the moment the bar is dropped, not when Jira has answered (5-10 s).
     const was = before.find((t) => t.id === id);
     const entry =
-      was && (was.startDate !== startDate || was.durationDays !== durationDays) ? makeEntry(`dời ${id}`, before, [id, ...cascade.keys()]) : null;
-    let toastId: number | null = null;
+      was && (was.startDate !== startDate || was.durationDays !== durationDays)
+        ? makeEntry(`dời ${id}`, before, [id, ...cascade.keys()])
+        : null;
+    const release = holdPending([id, ...cascade.keys()]);
+    let toastId = 0;
     if (entry) {
       setUndoStack((s) => pushEntry(s, entry));
-      toastId = toast(`Đã dời ${id}`, { ms: 4000, action: { label: "Hoàn tác", hint: "Ctrl Z", run: () => void undoRef.current() } });
+      toastId = toast(`Đã dời ${id}`, { ms: 4000, action: { label: "Hoàn tác", hint: "Ctrl Z", run: () => void undoEntry(entry) } });
     }
     try {
-      const updated = await api.updateTask(id, { startDate, durationDays });
+      const updated = await enqueueWrite(() => api.updateTask(id, { startDate, durationDays }));
+      release();
       setTasks((prev) => applyTaskUpdate(prev, updated, seq));
+      if (entry) {
+        // Tasks only the server's cascade moved join the entry, so undo puts them back too.
+        const extra = updated.cascaded.map((t) => t.id).filter((x) => !entry.before.some((b) => b.id === x));
+        const more = extra.length ? makeEntry(entry.label, before, extra) : null;
+        if (more) entry.before.push(...more.before);
+      }
     } catch (e) {
-      if (entry) setUndoStack((s) => s.filter((x) => x !== entry));
-      if (toastId !== null) dismissToast(toastId);
+      release();
+      if (entry) {
+        setUndoStack((s) => s.filter((x) => x !== entry));
+        dismissToast(toastId);
+      }
       if ((taskVersion.current.get(id) ?? 0) > seq) return; // superseded by a newer drag
       setSyncError(e instanceof Error ? e.message : "Không thể lưu thay đổi lịch trình.");
       await refreshTasks();
@@ -1080,17 +1151,22 @@ export default function ProjectWorkspace({
     setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, percentComplete } : t)));
     taskVersion.current.set(id, seq);
     const entry = before.find((t) => t.id === id)?.percentComplete !== percentComplete ? makeEntry(`đổi % ${id}`, before, [id]) : null;
-    let toastId: number | null = null;
+    const release = holdPending([id]);
+    let toastId = 0;
     if (entry) {
       setUndoStack((s) => pushEntry(s, entry));
-      toastId = toast(`Đã đổi % của ${id}`, { ms: 4000, action: { label: "Hoàn tác", hint: "Ctrl Z", run: () => void undoRef.current() } });
+      toastId = toast(`Đã đổi % của ${id}`, { ms: 4000, action: { label: "Hoàn tác", hint: "Ctrl Z", run: () => void undoEntry(entry) } });
     }
     try {
-      const updated = await api.updateTask(id, { percentComplete });
+      const updated = await enqueueWrite(() => api.updateTask(id, { percentComplete }));
+      release();
       setTasks((prev) => applyTaskUpdate(prev, updated, seq));
     } catch (e) {
-      if (entry) setUndoStack((s) => s.filter((x) => x !== entry));
-      if (toastId !== null) dismissToast(toastId);
+      release();
+      if (entry) {
+        setUndoStack((s) => s.filter((x) => x !== entry));
+        dismissToast(toastId);
+      }
       if ((taskVersion.current.get(id) ?? 0) > seq) return;
       setSyncError(e instanceof Error ? e.message : "Không thể lưu % hoàn thành.");
       await refreshTasks();
@@ -1987,7 +2063,7 @@ export default function ProjectWorkspace({
               jqlKeys={jqlKeys}
               sla={slaView}
               jql={{ state: jqlState, onRun: runJql, onClear: () => setTaskFilter({ ...taskFilter, jql: "" }) }}
-              undo={{ label: undoing ? null : (undoStack.at(-1)?.label ?? null), onUndo: () => void undo() }}
+              undo={{ label: undoStack.at(-1)?.label ?? null, onUndo: () => void undo() }}
               onOpenImport={() => setImporting(true)}
               onOpenShortcuts={() => setShortcutsOpen(true)}
               onImportKbkt={() => setImportingKbkt(true)}
