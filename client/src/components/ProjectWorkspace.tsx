@@ -7,6 +7,7 @@ import { EMPTY_TASK_FILTER, useTaskFilter } from "../taskFilter";
 import { toBoardFilter, toTaskFilter, type ViewFilterSpec } from "../viewFilter";
 import { makeEntry, pushEntry, type UndoEntry } from "../undo";
 import { pendingOps, sameSched, schedOf, type Sched } from "../scheduleSync";
+import { applyOps, clearOutbox, loadOutbox, outboxKey, saveOutbox } from "../exitOutbox";
 import { addDays, buildResourceLoad, todayIso } from "../resourceAllocation";
 import { loadBigTasksCache, loadTasksCache, saveTasksCache, tasksCacheKey } from "../tasksCache";
 import { dropViewCache, noteViewsStale, readViewCache, viewCacheScope, writeViewCache } from "../viewCache";
@@ -136,7 +137,13 @@ export default function ProjectWorkspace({
   // Read once, on the first render; the workspace is keyed by project so it never goes stale.
   const cacheKey = tasksCacheKey(session.site.cloudId, session.user.accountId, session.project?.key ?? "");
   const [cached] = useState(() => loadTasksCache(cacheKey));
-  const [tasks, setTasks] = useState<Task[]>(cached?.tasks ?? []);
+  // What the last page of this project left unwritten when it closed (exitOutbox.ts): drawn over what is read
+  // until Jira has caught up, so a reload shows what the person had decided, not Jira half-way through.
+  const outboxRef = useRef<ReturnType<typeof loadOutbox>>(null);
+  const [tasks, setTasks] = useState<Task[]>(() => {
+    outboxRef.current = loadOutbox(outboxKey(cacheKey), Date.now());
+    return applyOps(cached?.tasks ?? [], outboxRef.current ?? []);
+  });
   const [users, setUsers] = useState<JiraUser[]>(cached?.users ?? []);
   const [loading, setLoading] = useState(!cached);
   // True while a cached copy is on screen and the real one has not arrived.
@@ -493,8 +500,9 @@ export default function ProjectWorkspace({
     if (!cached) {
       void loadBigTasksCache(cacheKey).then((big) => {
         if (!big || fresh || seqCounter.current !== seqAtStart) return;
-        firstTasks.current = big.tasks; // a saved copy, not an edit: it must not mark the warmed tabs stale
-        setTasks(big.tasks);
+        const drawn = applyOps(big.tasks, outboxRef.current ?? []);
+        firstTasks.current = drawn; // a saved copy, not an edit: it must not mark the warmed tabs stale
+        setTasks(drawn);
         setUsers(big.users);
         setLoading(false);
         setShowingCache(true);
@@ -508,8 +516,12 @@ export default function ProjectWorkspace({
       // A drag or edit made while the old copy was showing has its own refresh coming;
       // this response was asked for before it and would put the old schedule back.
       if (seqCounter.current === seqAtStart) {
-        freshApplied.current = t;
-        setTasks(t);
+        // The wishes of the last page are registered first, so this read and any that follows keep them.
+        const left = outboxRef.current ?? [];
+        registerOutbox(t);
+        const drawn = keepWishes(tasksRef.current, applyOps(t, left));
+        freshApplied.current = drawn;
+        setTasks(drawn);
         // The plan is on screen: now the other tabs' own reads (board, this week's timesheet) can start.
         void warmBoardAndTimesheet(viewScope, session.project?.key ?? "");
       }
@@ -722,6 +734,17 @@ export default function ProjectWorkspace({
     }
   }
 
+  /**
+   * A fresh read of the project, as it goes on screen: for the tasks the screen is still waiting on, what the
+   * screen shows stays (Jira may not hold it yet), and the rest is what was read. Every place that puts a whole
+   * read on screen goes through this, or a second read arriving while writes are pending puts the old dates back.
+   */
+  function keepWishes(prev: Task[], fresh: Task[]): Task[] {
+    if (wantedRef.current.size === 0) return fresh;
+    const local = new Map(prev.map((x) => [x.id, x]));
+    return fresh.map((x) => (wantedRef.current.has(x.id) ? local.get(x.id) ?? x : x));
+  }
+
   /** The screen takes Jira's values for these tasks: schedule fields only, so nothing else on a task is touched. */
   function showSched(values: Map<string, { sched: Sched; dueDate: string | null }>) {
     if (values.size === 0) return;
@@ -811,6 +834,46 @@ export default function ProjectWorkspace({
   }
 
   /**
+   * The ops the last page left (outboxRef) become wishes of this one, now that Jira has been read: what Jira
+   * already holds is done and vanishes, the rest stays on screen as the person left it. They are not written
+   * at once, since the server is most likely still working through the batch the last page sent: Jira is read
+   * again every few seconds and each wish goes when Jira shows it; only what Jira still does not show after
+   * a minute and a half is written again (the batch may have been lost). A wish the person has since changed
+   * themselves is theirs and is left alone.
+   */
+  const outboxTimer = useRef<number | null>(null);
+  function registerOutbox(fetched: Task[]) {
+    const ops = outboxRef.current;
+    if (!ops) return;
+    outboxRef.current = null;
+    clearOutbox(outboxKey(cacheKey));
+    const byId = new Map(fetched.map((t) => [t.id, t]));
+    for (const op of ops) {
+      const f = byId.get(op.id);
+      if (!f || wantedRef.current.has(op.id)) continue;
+      const base = schedOf(f);
+      want(op.id, {
+        startDate: "startDate" in op.patch ? (op.patch.startDate ?? null) : base.startDate,
+        durationDays: op.patch.durationDays ?? base.durationDays,
+        percentComplete: op.patch.percentComplete ?? base.percentComplete,
+      }, base);
+    }
+    logAction("outbox.resume", { ops: ops.map((o) => o.id), waiting: [...wantedRef.current.keys()] });
+    if (wantedRef.current.size === 0 || outboxTimer.current !== null) return;
+    const startedAt = Date.now();
+    outboxTimer.current = window.setInterval(() => {
+      const give = Date.now() - startedAt > 90_000;
+      if (wantedRef.current.size === 0 || give) {
+        window.clearInterval(outboxTimer.current!);
+        outboxTimer.current = null;
+        if (give && wantedRef.current.size > 0) void runSync();
+        return;
+      }
+      refreshTasks().catch(() => undefined);
+    }, 8000);
+  }
+
+  /**
    * The page is closing (or this project is being left): what is still waiting goes out as one request that
    * outlives the page, so leaving fast loses nothing. Values are absolute, so a write that was already in flight
    * and is sent again changes nothing.
@@ -821,6 +884,7 @@ export default function ProjectWorkspace({
     logAction("flush.exit", { ops: ops.map((o) => o.id) });
     flushActionLog();
     api.sendScheduleBatchOnExit(ops);
+    saveOutbox(outboxKey(cacheKey), ops, Date.now());
   }
   const flushOnExitRef = useRef(flushOnExit);
   flushOnExitRef.current = flushOnExit;
@@ -829,6 +893,7 @@ export default function ProjectWorkspace({
     window.addEventListener("pagehide", onHide);
     return () => {
       window.removeEventListener("pagehide", onHide);
+      if (outboxTimer.current !== null) window.clearInterval(outboxTimer.current);
       onHide();
     };
   }, []);
@@ -1015,6 +1080,7 @@ export default function ProjectWorkspace({
     }
     // Jira's values are now known for the tasks the screen is still waiting on: what differs is still to write,
     // what agrees is done. The screen keeps what it wants for the rest of them.
+    registerOutbox(t);
     // While a write is out its answer says what Jira holds, and this read may be older than that: leave it be.
     const byId = new Map(t.map((x) => [x.id, x]));
     if (!syncRunning.current) {
@@ -1029,11 +1095,7 @@ export default function ProjectWorkspace({
       }
     }
     logAction("refresh", { tasks: t.length, waiting: [...wantedRef.current.keys()] });
-    setTasks((prev) => {
-      if (wantedRef.current.size === 0) return t;
-      const local = new Map(prev.map((x) => [x.id, x]));
-      return t.map((x) => (wantedRef.current.has(x.id) ? local.get(x.id) ?? x : x));
-    });
+    setTasks((prev) => keepWishes(prev, t));
     if (wantedRef.current.size > 0) void runSync();
   }
 

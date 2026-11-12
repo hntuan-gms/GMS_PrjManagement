@@ -130,6 +130,36 @@ await step("lô gửi lúc đóng trang chỉ chứa ngày, số ngày và %: kh
   }
 });
 
+await step("F5 ngay sau khi kéo: trang mới hiện đúng chỗ vừa kéo dù Jira chưa kịp ghi, và vẫn đúng khi Jira ghi xong", async () => {
+  await reset();
+  await delay(3500);
+  await page.close();
+  page = await ctx.newPage();
+  page.setDefaultTimeout(8000);
+  await open();
+  const original = (await taskOf("DEMO-7")).startDate;
+  // Distance of the bar from a task nobody touches: the same before and after a reload, whatever the scroll.
+  const rel = async () => (await barLeft("DEMO-7")) - (await barLeft("DEMO-8"));
+  const d0 = await rel();
+  await dragBar("DEMO-7", 90);
+  await page.waitForTimeout(200);
+  const d1 = await rel();
+  assert.notEqual(d1, d0, "thanh phải dời được");
+  await page.reload();
+  await page.waitForSelector(".wbs-row");
+  await page.waitForTimeout(600);
+  // Jira (the stand-in) still holds the old date: the batch is held back by the simulated delay.
+  assert.equal((await taskOf("DEMO-7")).startDate, original, "lúc này Jira chưa ghi");
+  const d2 = await rel();
+  assert(Math.abs(d2 - d1) <= 2, `sau F5 thanh phải ở chỗ vừa kéo (${d1}), đang ở ${d2}`);
+  // Jira catches up (the batch lands); several re-reads later the bar has not moved.
+  assert(await waitUntil(async () => (await taskOf("DEMO-7")).startDate !== original, 12000), "lô phải được Jira ghi");
+  await sleep(9500);
+  const d3 = await rel();
+  assert(Math.abs(d3 - d1) <= 2, `sau khi Jira ghi xong thanh vẫn phải ở ${d1}, đang ở ${d3}`);
+  assert.equal((await patchesFor("DEMO-7")).length <= 1, true, "việc đã có trong lô không được ghi lại lần nữa");
+});
+
 await delay(0);
 console.log(`\n${failed ? failed + " lỗi" : "đạt hết"}`);
 await browser.close();

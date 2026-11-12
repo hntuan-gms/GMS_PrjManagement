@@ -1,4 +1,5 @@
 import { idbStore, type AsyncStore } from "./idbCache";
+import { OUTBOX_PREFIX } from "./exitOutbox";
 import type { JiraUser, Task } from "./types";
 
 /**
@@ -84,7 +85,8 @@ export function clearTasksCache(storage: Pick<Storage, "length" | "key" | "remov
     const keys: string[] = [];
     for (let i = 0; i < storage.length; i++) {
       const k = storage.key(i);
-      if (k?.startsWith(PREFIX)) keys.push(k);
+      // The unwritten changes of the last page (exitOutbox.ts) belong to the same account and go with it.
+      if (k?.startsWith(PREFIX) || k?.startsWith(OUTBOX_PREFIX)) keys.push(k);
     }
     for (const k of keys) storage.removeItem(k);
   } catch {
