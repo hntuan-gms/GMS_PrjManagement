@@ -346,6 +346,23 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(input),
     }),
+  /**
+   * What is still waiting to be written when the page closes (or the project changes), in ONE request that
+   * outlives the page (`keepalive`): the server applies it in order (server/src/scheduleBatch.ts). Fire and
+   * forget: the page that sends it is usually gone before the answer. The project is named by the issues' own
+   * key, not by the tab, which may already have moved on.
+   */
+  sendScheduleBatchOnExit: (ops: { id: string; patch: TaskUpdateInput }[]) => {
+    if (ops.length === 0) return;
+    const projectKey = ops[0].id.slice(0, ops[0].id.lastIndexOf("-"));
+    void fetch(`${API_BASE}/tasks/schedule-batch`, {
+      method: "POST",
+      credentials: "include",
+      keepalive: true,
+      headers: { "Content-Type": "application/json", ...projectHeaders(), "X-Project-Key": projectKey },
+      body: JSON.stringify({ ops }),
+    }).catch(() => undefined);
+  },
   deleteTask: (id: string) =>
     request<void>(`/tasks/${encodeURIComponent(id)}`, { method: "DELETE" }),
   getTaskTransitions: (id: string) =>

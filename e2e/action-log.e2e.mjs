@@ -64,8 +64,8 @@ await step("kéo rồi Ctrl+Z: đủ các sự kiện, đúng thứ tự, cùng 
   assert.equal(d.id, "DEMO-7");
   assert.match(d.from, /^\d{4}-\d\d-\d\d\/\d+$/);
   assert.match(d.to, /^\d{4}-\d\d-\d\d\/\d+$/);
-  assert.equal(ev[send2].d.why, "undo");
-  assert(ev.some((e) => e.e === "apply"), "thiếu sự kiện apply");
+  assert.equal(ev[send2].d.id, "DEMO-7", "sau hoàn tác phải ghi lại DEMO-7");
+  assert(ev.some((e) => e.e === "write.done"), "thiếu sự kiện write.done");
 });
 await step("không ghi nội dung công việc (mô tả, bình luận, tên người)", async () => {
   const all = JSON.stringify(await events());

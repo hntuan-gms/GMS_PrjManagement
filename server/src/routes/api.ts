@@ -1,4 +1,5 @@
 import { clientLogLines } from "../auth/clientLog.js";
+import { parseScheduleBatch } from "../scheduleBatch.js";
 import { PROJECT_HEADER } from "../auth/projectScope.js";
 import type { CreateRequirements } from "../createRequirements.js";
 import { cachedDetail, cachedList, forgetDetail, type ListKind } from "../detailCache.js";
@@ -314,6 +315,36 @@ apiRouter.post("/tasks/change-type", requireProject, async (req, res, next) => {
       }
     }
     res.json(await svc.changeIssueType(keys, issueType, statusMap));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * What is left in the browser's queue when the page closes, in one request that outlives the page
+ * (scheduleBatch.ts). Applied in order through the same updateTask as a single PATCH; the first refusal stops
+ * the rest, because a later write was drawn on top of the one that failed. The answer is for tests and logs:
+ * the page that sent it is usually gone.
+ */
+apiRouter.post("/tasks/schedule-batch", requireProject, async (req, res, next) => {
+  try {
+    const parsed = parseScheduleBatch(req.body, req.auth!.session.projectKey!);
+    if (!parsed.ok) {
+      next(badRequest(parsed.error));
+      return;
+    }
+    const results: { id: string; ok: boolean; error?: string }[] = [];
+    for (const op of parsed.ops) {
+      try {
+        await req.auth!.taskService!.updateTask(op.id, op.patch);
+        results.push({ id: op.id, ok: true });
+      } catch (e) {
+        results.push({ id: op.id, ok: false, error: e instanceof Error ? e.message : String(e) });
+        break;
+      }
+    }
+    console.log(JSON.stringify({ severity: "INFO", kind: "schedule-batch", message: `[schedule-batch] ${results.filter((r) => r.ok).length}/${parsed.ops.length}`, results }));
+    res.json({ results });
   } catch (err) {
     next(err);
   }

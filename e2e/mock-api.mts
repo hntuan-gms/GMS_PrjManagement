@@ -247,6 +247,18 @@ app.delete("/api/tasks/:id/attachments/:attId", (req, r) => {
   r.status(204).end();
 });
 
+// What the page sends as it closes (server/src/scheduleBatch.ts): applied in order like single PATCHes.
+app.post("/api/tasks/schedule-batch", (req, res) => {
+  const results: { id: string; ok: boolean }[] = [];
+  for (const op of req.body?.ops ?? []) {
+    const t = tasks.find((x) => x.id === op.id);
+    if (!t) { results.push({ id: op.id, ok: false }); break; }
+    for (const k of ["startDate", "durationDays", "percentComplete"]) if (op.patch?.[k] !== undefined) t[k] = op.patch[k];
+    if (op.patch?.startDate) t.dueDate = day(Math.round((Date.parse(op.patch.startDate) - Date.parse(TODAY)) / 86400000) + (t.durationDays ?? 1) - 1);
+    results.push({ id: op.id, ok: true });
+  }
+  res.json({ results });
+});
 app.patch("/api/tasks/:id", (req, res) => {
   const t = tasks.find((x) => x.id === req.params.id);
   if (!t) return res.status(404).json({ error: "Không tìm thấy" });

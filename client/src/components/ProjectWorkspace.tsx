@@ -5,7 +5,8 @@ import { computeOptimisticCascade } from "../dependencyCascade";
 import { EMPTY_FILTER, type BoardFilter } from "../boardModel";
 import { EMPTY_TASK_FILTER, useTaskFilter } from "../taskFilter";
 import { toBoardFilter, toTaskFilter, type ViewFilterSpec } from "../viewFilter";
-import { makeEntry, pushEntry, undoSteps, type UndoEntry } from "../undo";
+import { makeEntry, pushEntry, type UndoEntry } from "../undo";
+import { pendingOps, sameSched, schedOf, type Sched } from "../scheduleSync";
 import { addDays, buildResourceLoad, todayIso } from "../resourceAllocation";
 import { loadBigTasksCache, loadTasksCache, saveTasksCache, tasksCacheKey } from "../tasksCache";
 import { dropViewCache, noteViewsStale, readViewCache, viewCacheScope, writeViewCache } from "../viewCache";
@@ -62,8 +63,8 @@ import { addDraftEdit, compactEdits, replayDraft, startDraft, type PlanDraft } f
 import CommandBar, { type Command, type CreatePreview } from "./CommandBar";
 import ShortcutSheet from "./ShortcutSheet";
 import Toaster from "./Toaster";
-import { dismissToast, toast } from "../toast";
-import { logAction } from "../actionLog";
+import { toast } from "../toast";
+import { flushActionLog, logAction } from "../actionLog";
 import { buildTaskLink } from "../deepLink";
 import { parseQuickAdd } from "../quickAdd";
 import { mergeExtras, type QuickExtras } from "../quickAddExtras";
@@ -656,45 +657,54 @@ export default function ProjectWorkspace({
   tasksRef.current = tasks;
 
   /**
-   * Writes to Jira from drags, the % handle and undo go through one queue, in the order they were made. A Jira
-   * save takes seconds; sent side by side, two saves of the same task could land in Jira in either order and the
-   * older one would win (then the next read showed bars "running around"). The screen never waits for the
-   * queue: every change is already drawn before it is sent.
+   * Jira follows the screen (scheduleSync.ts). A drag, the % handle and undo change the plan on screen at once
+   * and say what they now WANT for each task they touched; the page remembers what Jira is known to HOLD for it
+   * (the values before the first change, then each answer). One loop writes only what still differs, a task
+   * before those that depend on it, one request at a time. So nine drags and nine undos are not eighteen saves:
+   * a drag undone before it was saved is no write at all, and what is left at the end is a few. The screen never
+   * waits for any of it, and a re-read of the project keeps what the screen wants for these tasks instead of
+   * putting back what Jira still holds (that is what made a bar snap back and then forward again).
    */
-  const writeChain = useRef<Promise<unknown>>(Promise.resolve());
-  /**
-   * Tasks whose change is drawn but not yet written to Jira. The app's screen is the truth until Jira has caught
-   * up, so a re-read of the project (`refreshTasks`) keeps these tasks as they are on screen instead of putting
-   * back what Jira still holds: that is what made a bar snap back and then forward again.
-   */
-  const pendingIds = useRef<Map<string, number>>(new Map());
-  function holdPending(ids: string[]): () => void {
-    const list = [...new Set(ids)];
-    for (const id of list) pendingIds.current.set(id, (pendingIds.current.get(id) ?? 0) + 1);
-    let released = false;
-    return () => {
-      if (released) return;
-      released = true;
-      for (const id of list) {
-        const n = (pendingIds.current.get(id) ?? 1) - 1;
-        if (n <= 0) pendingIds.current.delete(id);
-        else pendingIds.current.set(id, n);
+  const confirmedRef = useRef<Map<string, Sched>>(new Map());
+  const wantedRef = useRef<Map<string, Sched>>(new Map());
+  const attemptsRef = useRef<Map<string, number>>(new Map());
+  const syncRunning = useRef(false);
+  /** A task Jira did not take the screen's values for after this many tries is shown as Jira holds it. */
+  const MAX_SYNC_TRIES = 3;
+
+  /** The screen now wants `s` for task `id`; `base` is what Jira holds if this is the first change to it. */
+  function want(id: string, s: Sched, base: Sched) {
+    if (!confirmedRef.current.has(id)) confirmedRef.current.set(id, base);
+    wantedRef.current.set(id, s);
+    attemptsRef.current.delete(id);
+    // Back where Jira is: nothing to write, and nothing to remember (a stale "confirmed" would hide a later
+    // change). Not while a write is out, though: it may be about to land, and then Jira is somewhere else and
+    // this wish is what takes it back. The loop sweeps these up when it has no answers left to wait for.
+    if (!syncRunning.current && sameSched(s, confirmedRef.current.get(id)!)) {
+      wantedRef.current.delete(id);
+      confirmedRef.current.delete(id);
+    }
+  }
+
+  function sweepSettled() {
+    for (const [id, w] of [...wantedRef.current]) {
+      const c = confirmedRef.current.get(id);
+      if (!c || sameSched(w, c)) {
+        wantedRef.current.delete(id);
+        confirmedRef.current.delete(id);
+        attemptsRef.current.delete(id);
       }
-    };
+    }
   }
-  const queueDepth = useRef(0);
-  function enqueueWrite<T>(fn: () => Promise<T>): Promise<T> {
-    queueDepth.current++;
-    const run = writeChain.current.then(fn, fn);
-    writeChain.current = run.catch(() => undefined).then(() => {
-      queueDepth.current--;
-    });
-    return run;
+
+  function nextSyncOp() {
+    return pendingOps(confirmedRef.current, wantedRef.current, tasksRef.current).find((o) => (attemptsRef.current.get(o.id) ?? 0) < MAX_SYNC_TRIES) ?? null;
   }
+
   /** One write to Jira, with what was sent, how long it took and what came back in the tab's action log. */
   async function loggedUpdate(id: string, patch: TaskUpdateInput, why: string) {
     const started = performance.now();
-    logAction("write.send", { id, why, patch, queued: queueDepth.current - 1 });
+    logAction("write.send", { id, why, patch, waiting: wantedRef.current.size });
     try {
       const updated = await api.updateTask(id, patch);
       logAction("write.done", {
@@ -712,20 +722,132 @@ export default function ProjectWorkspace({
     }
   }
 
+  /** The screen takes Jira's values for these tasks: schedule fields only, so nothing else on a task is touched. */
+  function showSched(values: Map<string, { sched: Sched; dueDate: string | null }>) {
+    if (values.size === 0) return;
+    setTasks((prev) =>
+      prev.map((t) => {
+        const v = values.get(t.id);
+        if (!v || sameSched(schedOf(t), v.sched)) return t;
+        return { ...t, startDate: v.sched.startDate, durationDays: v.sched.durationDays, percentComplete: v.sched.percentComplete, dueDate: v.dueDate };
+      })
+    );
+  }
+
+  /** What an answer from Jira changes: Jira's values become the known ones, and tasks the screen has no wish about follow it. */
+  function takeAnswer(updated: TaskUpdateResponse) {
+    const { cascaded, cascadeWarnings: _w, ...primary } = updated;
+    const follow = new Map<string, { sched: Sched; dueDate: string | null }>();
+    for (const t of [primary, ...cascaded]) {
+      const got = schedOf(t);
+      const w = wantedRef.current.get(t.id);
+      if (!w) {
+        follow.set(t.id, { sched: got, dueDate: t.dueDate });
+        confirmedRef.current.delete(t.id);
+      } else if (sameSched(w, got)) {
+        wantedRef.current.delete(t.id);
+        confirmedRef.current.delete(t.id);
+      } else {
+        confirmedRef.current.set(t.id, got);
+      }
+    }
+    showSched(follow);
+  }
+
+  /** Tasks Jira kept answering differently: the screen shows them as Jira holds them, and says so. */
+  function giveUpOnRefused() {
+    const back = new Map<string, { sched: Sched; dueDate: string | null }>();
+    for (const [id, w] of [...wantedRef.current]) {
+      const c = confirmedRef.current.get(id);
+      if (!c || sameSched(w, c) || (attemptsRef.current.get(id) ?? 0) < MAX_SYNC_TRIES) continue;
+      back.set(id, { sched: c, dueDate: c.startDate ? addDays(c.startDate, c.durationDays - 1) : null });
+      wantedRef.current.delete(id);
+      confirmedRef.current.delete(id);
+      attemptsRef.current.delete(id);
+      toast(`Jira giữ ${id} ở ngày khác với bạn chọn.`, { tone: "error" });
+    }
+    showSched(back);
+  }
+
+  async function runSync() {
+    if (syncRunning.current) return;
+    syncRunning.current = true;
+    let sending: string | null = null;
+    let retryLater = false;
+    try {
+      for (let guard = 0; guard < 300; guard++) {
+        const op = nextSyncOp();
+        if (!op) break;
+        sending = op.id;
+        attemptsRef.current.set(op.id, (attemptsRef.current.get(op.id) ?? 0) + 1);
+        takeAnswer(await loggedUpdate(op.id, op.patch, "sync"));
+        sending = null;
+      }
+      sweepSettled();
+      giveUpOnRefused();
+    } catch (e) {
+      if (e instanceof NetworkError) {
+        // The request did not get through (offline, or the page is being left and the browser cut it): nothing was
+        // refused, so nothing is taken back. What is waiting stays, is sent on the way out if the page is closing,
+        // and is tried again shortly otherwise.
+        if (sending) attemptsRef.current.set(sending, Math.max(0, (attemptsRef.current.get(sending) ?? 1) - 1));
+        retryLater = true;
+        window.setTimeout(() => void runSync(), 5000);
+        return;
+      }
+      // Whatever was still waiting was drawn on top of the write that failed: the screen goes back to Jira's.
+      wantedRef.current.clear();
+      confirmedRef.current.clear();
+      attemptsRef.current.clear();
+      setUndoStack([]);
+      if (!(e instanceof ApiError && e.status === 401)) {
+        setSyncError(e instanceof Error ? e.message : "Không thể lưu thay đổi lịch trình.");
+        await refreshTasks();
+      }
+    } finally {
+      syncRunning.current = false;
+      if (!retryLater && nextSyncOp()) void runSync();
+    }
+  }
+
   /**
-   * Undo shows the old values at once and writes them behind the screen. The tasks of the entry are drawn back
-   * in one update (the dependency cascade then pulls back, on the server, whatever it had pushed); the steps
-   * that still need a write are worked out from the state before the revert, one at a time, so a successor the
-   * cascade already pulled back needs none of its own.
+   * The page is closing (or this project is being left): what is still waiting goes out as one request that
+   * outlives the page, so leaving fast loses nothing. Values are absolute, so a write that was already in flight
+   * and is sent again changes nothing.
    */
-  async function undoEntry(entry: UndoEntry) {
+  function flushOnExit() {
+    const ops = pendingOps(confirmedRef.current, wantedRef.current, tasksRef.current);
+    if (ops.length === 0) return;
+    logAction("flush.exit", { ops: ops.map((o) => o.id) });
+    flushActionLog();
+    api.sendScheduleBatchOnExit(ops);
+  }
+  const flushOnExitRef = useRef(flushOnExit);
+  flushOnExitRef.current = flushOnExit;
+  useEffect(() => {
+    const onHide = () => flushOnExitRef.current();
+    window.addEventListener("pagehide", onHide);
+    return () => {
+      window.removeEventListener("pagehide", onHide);
+      onHide();
+    };
+  }, []);
+
+  /**
+   * Undo shows the old values at once; what Jira has to be told is worked out by the loop above, from what it
+   * holds. A drag that was not saved yet is simply cancelled, and a successor the server's cascade pulls back by
+   * itself needs no write of its own.
+   */
+  function undoEntry(entry: UndoEntry) {
     setUndoStack((s) => s.filter((e) => e !== entry));
-    logAction("undo", { label: entry.label, tasks: entry.before.map((b) => `${b.id}:${b.startDate}/${b.durationDays}`), queued: queueDepth.current });
-    const serverView = tasksRef.current;
+    logAction("undo", { label: entry.label, tasks: entry.before.map((b) => `${b.id}:${b.startDate}/${b.durationDays}`), waiting: wantedRef.current.size });
     const seq0 = nextSeq();
     const snaps = new Map(entry.before.map((b) => [b.id, b]));
-    for (const b of entry.before) taskVersion.current.set(b.id, seq0);
-    const release = holdPending(entry.before.map((b) => b.id));
+    for (const b of entry.before) {
+      taskVersion.current.set(b.id, seq0);
+      const now = tasksRef.current.find((t) => t.id === b.id);
+      if (now) want(b.id, { startDate: b.startDate, durationDays: b.durationDays, percentComplete: b.percentComplete }, schedOf(now));
+    }
     setTasks((prev) =>
       prev.map((t) => {
         const b = snaps.get(t.id);
@@ -739,33 +861,11 @@ export default function ProjectWorkspace({
         };
       })
     );
-    try {
-      await enqueueWrite(async () => {
-        let working = serverView;
-        for (let guard = 0; guard < entry.before.length + 3; guard++) {
-          const step = undoSteps(entry, working)[0];
-          if (!step) break;
-          const seq = nextSeq();
-          taskVersion.current.set(step.id, seq);
-          working = working.map((t) => (t.id === step.id ? { ...t, ...step.patch } : t));
-          const updated = await loggedUpdate(step.id, step.patch, "undo");
-          const { cascaded, cascadeWarnings: _w, ...primary } = updated;
-          const fresh = new Map([primary, ...cascaded].map((t) => [t.id, t as Task]));
-          working = working.map((t) => fresh.get(t.id) ?? t);
-          setTasks((prev) => applyTaskUpdate(prev, updated, seq));
-        }
-      });
-      release();
-    } catch (e) {
-      release();
-      if (e instanceof ApiError && e.status === 401) return;
-      setSyncError(e instanceof Error ? e.message : "Không hoàn tác được.");
-      await refreshTasks();
-    }
+    void runSync();
   }
-  async function undo() {
+  function undo() {
     const entry = undoStack.at(-1);
-    if (entry) await undoEntry(entry);
+    if (entry) undoEntry(entry);
   }
   const undoRef = useRef(undo);
   undoRef.current = undo;
@@ -913,12 +1013,28 @@ export default function ProjectWorkspace({
       setTasks(r.tasks);
       return;
     }
-    logAction("refresh", { tasks: t.length, pending: [...pendingIds.current.keys()], queued: queueDepth.current });
+    // Jira's values are now known for the tasks the screen is still waiting on: what differs is still to write,
+    // what agrees is done. The screen keeps what it wants for the rest of them.
+    // While a write is out its answer says what Jira holds, and this read may be older than that: leave it be.
+    const byId = new Map(t.map((x) => [x.id, x]));
+    if (!syncRunning.current) {
+      for (const [id, w] of [...wantedRef.current]) {
+        const f = byId.get(id);
+        if (!f || sameSched(w, schedOf(f))) {
+          wantedRef.current.delete(id);
+          confirmedRef.current.delete(id);
+        } else {
+          confirmedRef.current.set(id, schedOf(f));
+        }
+      }
+    }
+    logAction("refresh", { tasks: t.length, waiting: [...wantedRef.current.keys()] });
     setTasks((prev) => {
-      if (pendingIds.current.size === 0) return t;
+      if (wantedRef.current.size === 0) return t;
       const local = new Map(prev.map((x) => [x.id, x]));
-      return t.map((x) => (pendingIds.current.has(x.id) ? local.get(x.id) ?? x : x));
+      return t.map((x) => (wantedRef.current.has(x.id) ? local.get(x.id) ?? x : x));
     });
+    if (wantedRef.current.size > 0) void runSync();
   }
 
   /**
@@ -1091,7 +1207,7 @@ export default function ProjectWorkspace({
     for (const t of [primary, ...cascaded]) {
       // A task with another change still waiting to be written keeps what the screen shows: this answer
       // describes Jira part-way through the queue, and would put an older state back over a newer one.
-      if (pendingIds.current.has(t.id)) {
+      if (wantedRef.current.has(t.id)) {
         skipped.push(`${t.id}:pending`);
         continue;
       }
@@ -1153,43 +1269,34 @@ export default function ProjectWorkspace({
       was && (was.startDate !== startDate || was.durationDays !== durationDays)
         ? makeEntry(`dời ${id}`, before, [id, ...cascade.keys()])
         : null;
-    const release = holdPending([id, ...cascade.keys()]);
     logAction("drag", {
       id,
       from: was ? `${was.startDate}/${was.durationDays}` : null,
       to: `${startDate}/${durationDays}`,
       seq,
       moved: [...cascade.keys()].filter((k) => k !== id),
-      queued: queueDepth.current,
+      waiting: wantedRef.current.size,
     });
-    let toastId = 0;
     if (entry) {
       setUndoStack((s) => pushEntry(s, entry));
-      toastId = toast(`Đã dời ${id}`, { ms: 4000, action: { label: "Hoàn tác", hint: "Ctrl Z", run: () => {
+      toast(`Đã dời ${id}`, {
+        ms: 4000,
+        action: {
+          label: "Hoàn tác",
+          hint: "Ctrl Z",
+          run: () => {
             logAction("undo.toast", { label: entry.label });
-            void undoEntry(entry);
-          } } });
+            undoEntry(entry);
+          },
+        },
+      });
     }
-    try {
-      const updated = await enqueueWrite(() => loggedUpdate(id, { startDate, durationDays }, "drag"));
-      release();
-      setTasks((prev) => applyTaskUpdate(prev, updated, seq));
-      if (entry) {
-        // Tasks only the server's cascade moved join the entry, so undo puts them back too.
-        const extra = updated.cascaded.map((t) => t.id).filter((x) => !entry.before.some((b) => b.id === x));
-        const more = extra.length ? makeEntry(entry.label, before, extra) : null;
-        if (more) entry.before.push(...more.before);
-      }
-    } catch (e) {
-      release();
-      if (entry) {
-        setUndoStack((s) => s.filter((x) => x !== entry));
-        dismissToast(toastId);
-      }
-      if ((taskVersion.current.get(id) ?? 0) > seq) return; // superseded by a newer drag
-      setSyncError(e instanceof Error ? e.message : "Không thể lưu thay đổi lịch trình.");
-      await refreshTasks();
+    // Jira is told by the loop (runSync), from the difference; the screen has what it wants already.
+    for (const [tid, t] of cascade) {
+      const was0 = before.find((x) => x.id === tid);
+      if (was0) want(tid, schedOf(t), schedOf(was0));
     }
+    void runSync();
   }
 
   async function handleProgressChange(id: string, percentComplete: number) {
@@ -1198,29 +1305,25 @@ export default function ProjectWorkspace({
     setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, percentComplete } : t)));
     taskVersion.current.set(id, seq);
     const entry = before.find((t) => t.id === id)?.percentComplete !== percentComplete ? makeEntry(`đổi % ${id}`, before, [id]) : null;
-    const release = holdPending([id]);
-    logAction("progress", { id, from: before.find((t) => t.id === id)?.percentComplete ?? null, to: percentComplete, seq, queued: queueDepth.current });
-    let toastId = 0;
+    logAction("progress", { id, from: before.find((t) => t.id === id)?.percentComplete ?? null, to: percentComplete, seq, waiting: wantedRef.current.size });
     if (entry) {
       setUndoStack((s) => pushEntry(s, entry));
-      toastId = toast(`Đã đổi % của ${id}`, { ms: 4000, action: { label: "Hoàn tác", hint: "Ctrl Z", run: () => {
+      toast(`Đã đổi % của ${id}`, {
+        ms: 4000,
+        action: {
+          label: "Hoàn tác",
+          hint: "Ctrl Z",
+          run: () => {
             logAction("undo.toast", { label: entry.label });
-            void undoEntry(entry);
-          } } });
+            undoEntry(entry);
+          },
+        },
+      });
     }
-    try {
-      const updated = await enqueueWrite(() => loggedUpdate(id, { percentComplete }, "progress"));
-      release();
-      setTasks((prev) => applyTaskUpdate(prev, updated, seq));
-    } catch (e) {
-      release();
-      if (entry) {
-        setUndoStack((s) => s.filter((x) => x !== entry));
-        dismissToast(toastId);
-      }
-      if ((taskVersion.current.get(id) ?? 0) > seq) return;
-      setSyncError(e instanceof Error ? e.message : "Không thể lưu % hoàn thành.");
-      await refreshTasks();
+    const was0 = before.find((t) => t.id === id);
+    if (was0) {
+      want(id, { ...schedOf(was0), percentComplete }, schedOf(was0));
+      void runSync();
     }
   }
 
