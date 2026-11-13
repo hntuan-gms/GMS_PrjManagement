@@ -17,6 +17,8 @@ import { filtersRouter } from "./filters.js";
 import { slaRouter } from "./sla.js";
 import { calendarRouter } from "./calendar.js";
 import { deferBackgroundWhenLow, requireAuth, requireProject, requireStaff } from "../auth/middleware.js";
+import { confluenceLinksEnabled } from "../auth/config.js";
+import { confluencePageId, isGenericTitle, linkTitle, resolvePageTitles } from "../confluenceLinks.js";
 import { badRequest, notFound } from "../errors.js";
 import { TaskActivity } from "../taskActivity.js";
 import { TaskExtras } from "../taskExtras.js";
@@ -516,9 +518,13 @@ apiRouter.get("/tasks/:id/attachments", requireProject, async (req, res, next) =
     service.assertOwnKey(req.params.id);
     const jira = req.auth!.jira;
     const key = req.params.id;
-    type View = { files: Array<{ id: string; filename: string; size: number; mimeType: string; created: string; author: string | null }>; links: Array<{ id: string; url: string; title: string }> };
-    res.json(
-      await cachedDetail<View>(
+    // `pageId`/`generic`: a Confluence page whose Jira label ("Wiki Page") names nothing; its real name is read
+    // below, per viewer, and never kept in the shared copy (confluenceLinks.ts).
+    type View = {
+      files: Array<{ id: string; filename: string; size: number; mimeType: string; created: string; author: string | null }>;
+      links: Array<{ id: string; url: string; title: string; pageId?: string | null; generic?: boolean }>;
+    };
+    const view = await cachedDetail<View>(
         pgDetailStore,
         whoReads(req, key),
         "attachments",
@@ -535,13 +541,31 @@ apiRouter.get("/tasks/:id/attachments", requireProject, async (req, res, next) =
             })),
             links: links
               .filter((l) => l.object?.url)
-              .map((l) => ({ id: String(l.id), url: l.object!.url!, title: l.object?.title || l.object!.url! })),
+              .map((l) => {
+                const generic = isGenericTitle(l.object?.title, l.object!.url!);
+                return { id: String(l.id), url: l.object!.url!, title: linkTitle(l, null), pageId: generic ? confluencePageId(l) : null, generic };
+              }),
           };
         },
         // Every person who can see the issue sees the same files, so the answer is kept whole.
         { split: (v) => ({ data: v, restricted: false }), join: (d) => d as View }
-      )
-    );
+      );
+    // A copy written before pages were told apart has neither field: work them out from its title and address.
+    const pages = view.links.map((l) => ((l.generic ?? isGenericTitle(l.title, l.url)) ? (l.pageId ?? confluencePageId({ object: { url: l.url } })) : null));
+    const wanted = pages.filter((p): p is string => !!p);
+    const names =
+      wanted.length && confluenceLinksEnabled()
+        ? await resolvePageTitles(wanted, req.auth!.session, (id) => jira.getConfluencePageTitle(id))
+        : new Map<string, string | null>();
+    res.json({
+      files: view.files,
+      links: view.links.map((l, i) => {
+        const pageId = pages[i];
+        // No title passed: linkTitle then falls back to the address, or "Trang Confluence <id>".
+        const title = pageId ? linkTitle({ object: { url: l.url }, globalId: `pageId=${pageId}` }, names.get(pageId)) : l.title;
+        return { id: l.id, url: l.url, title };
+      }),
+    });
   } catch (err) {
     next(err);
   }

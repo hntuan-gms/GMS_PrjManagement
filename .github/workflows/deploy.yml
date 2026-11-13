@@ -47,6 +47,10 @@ name: Deploy to Cloud Run
 #                              issue copy hears of changes instead of asking every 30 s
 #                              (server/src/jiraWebhooks.ts). Same rule: enable that scope
 #                              on BOTH apps first. Unset = no webhooks.
+#     CONFLUENCE_LINKS         optional; "on" makes login also request read:page:confluence,
+#                              so a Confluence page linked to an issue shows its real name
+#                              instead of Jira's "Wiki Page" (server/src/confluenceLinks.ts).
+#                              Same rule: enable that scope on BOTH apps first. Unset = off.
 #     RESOURCE_MANAGER_GROUP   optional; the Jira group whose members are resource managers:
 #                              Clockwork's "Cả nhóm" shows them every team's hours
 #                              (server/src/resourceRoles.ts). Unset = nobody has the role;
@@ -158,6 +162,7 @@ jobs:
             JIRA_WEBHOOKS=${{ vars.JIRA_WEBHOOKS }}
             ISSUE_CACHE=${{ vars.ISSUE_CACHE }}
             BOARD_CACHE=${{ vars.BOARD_CACHE }}
+            CONFLUENCE_LINKS=${{ vars.CONFLUENCE_LINKS }}
             RESOURCE_MANAGER_GROUP=${{ vars.RESOURCE_MANAGER_GROUP }}
             RESOURCE_MANAGER_ACCOUNT_IDS=${{ vars.RESOURCE_MANAGER_ACCOUNT_IDS }}
           # The runtime service account needs roles/secretmanager.secretAccessor on

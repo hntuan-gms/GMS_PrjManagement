@@ -124,11 +124,22 @@ export function webhooksEnabled(): boolean {
 
 const WEBHOOK_SCOPES = ["manage:jira-webhook"];
 
+/**
+ * The real names of Confluence pages linked to an issue (confluenceLinks.ts) need `read:page:confluence`.
+ * Same rule again: enable it on both apps in the developer console first, then set CONFLUENCE_LINKS=on.
+ * A user sees the names after logging in again (an existing refresh token keeps its old scopes).
+ */
+export function confluenceLinksEnabled(): boolean {
+  return /^(on|true|1|yes)$/i.test(process.env.CONFLUENCE_LINKS?.trim() ?? "");
+}
+
+const CONFLUENCE_SCOPES = ["read:page:confluence"];
+
 /** Everything /authorize asks for. A function, not a constant, so it reads JIRA_AGILE after dotenv. */
 export function requestedScopes(): string[] {
-  const webhooks = webhooksEnabled() ? WEBHOOK_SCOPES : [];
-  if (!agileEnabled()) return [...BASE_SCOPES, ...webhooks];
-  return [...BASE_SCOPES, ...AGILE_SCOPES, ...(agileDeleteEnabled() ? AGILE_DELETE_SCOPES : []), ...webhooks];
+  const extra = [...(webhooksEnabled() ? WEBHOOK_SCOPES : []), ...(confluenceLinksEnabled() ? CONFLUENCE_SCOPES : [])];
+  if (!agileEnabled()) return [...BASE_SCOPES, ...extra];
+  return [...BASE_SCOPES, ...AGILE_SCOPES, ...(agileDeleteEnabled() ? AGILE_DELETE_SCOPES : []), ...extra];
 }
 
 export const AUTHORIZE_URL = "https://auth.atlassian.com/authorize";

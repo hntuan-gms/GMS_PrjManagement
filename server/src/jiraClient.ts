@@ -811,8 +811,28 @@ export class JiraClient {
     });
   }
 
-  async getRemoteLinks(key: string): Promise<Array<{ id: number; object?: { url?: string; title?: string } }>> {
+  async getRemoteLinks(
+    key: string
+  ): Promise<Array<{ id: number; object?: { url?: string; title?: string }; globalId?: string; application?: { type?: string; name?: string }; relationship?: string }>> {
     return this.request(`/rest/api/3/issue/${encodeURIComponent(key)}/remotelink`);
+  }
+
+  /**
+   * The name of a Confluence page on this site, read with the viewer's own token (confluenceLinks.ts). Needs
+   * `read:page:confluence`; without it, or for a page the viewer may not open, null — never an error, and never
+   * a refresh: a 401 here is the gateway refusing the scope, not an expired session.
+   */
+  async getConfluencePageTitle(id: string): Promise<string | null> {
+    if (!/^\d{1,20}$/.test(id)) return null;
+    const res = await fetch(`${JIRA_API_BASE}/ex/confluence/${this.opts.cloudId}/wiki/api/v2/pages/${id}`, {
+      headers: { Authorization: `Bearer ${await this.opts.getAccessToken()}`, Accept: "application/json" },
+    });
+    if (!res.ok) {
+      void res.body?.cancel().catch(() => {});
+      return null;
+    }
+    const body = (await res.json().catch(() => null)) as { title?: unknown } | null;
+    return typeof body?.title === "string" && body.title.trim() ? body.title.trim() : null;
   }
 
   /* --------------------------------------------------------------- worklogs */
