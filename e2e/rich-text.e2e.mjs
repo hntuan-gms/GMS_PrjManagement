@@ -145,6 +145,38 @@ await step("@ gợi ý người; chọn thì thành mention, API nhận @[Tên](
   assert.equal((await comments())[0].text, "Nhờ @[Nguyễn Anh](anh) xem giúp");
 });
 
+await step("thả 3 ảnh + 1 PDF vào ô: cả 3 ảnh nằm trong ô, PDF thành đính kèm, khung không kẹt lớp 'Thả tệp'", async () => {
+  await box().click();
+  const before = await attachmentCount();
+  const rect = await box().boundingBox();
+  await page.evaluate(
+    ({ b64, x, y }) => {
+      const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      const dt = new DataTransfer();
+      for (const n of [1, 2, 3]) dt.items.add(new File([bytes], `man-${n}.png`, { type: "image/png" }));
+      dt.items.add(new File(["%PDF-1.4"], "dac-ta.pdf", { type: "application/pdf" }));
+      const target = document.querySelector(".td-box .ProseMirror");
+      const panel = document.querySelector(".modal.peek-panel");
+      panel.dispatchEvent(new DragEvent("dragenter", { dataTransfer: dt, bubbles: true, cancelable: true }));
+      target.dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true, clientX: x, clientY: y }));
+    },
+    { b64: PNG, x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
+  );
+  await page.waitForFunction(() => document.querySelectorAll(".td-box .ProseMirror .rt-img-btn img").length === 3);
+  assert.equal(await page.locator(".modal.peek-panel.is-dropping").count(), 0, "lớp 'Thả tệp để đính kèm' còn kẹt");
+  await page.waitForFunction(async (n) => (await (await fetch("/api/tasks/DEMO-5/attachments")).json()).files.length >= n, before + 4);
+  await page.keyboard.type("sau ảnh");
+  assert.equal(await box().locator(".rt-img-btn img").count(), 3, "gõ chữ làm mất ảnh");
+  const n = (await comments()).length;
+  await page.keyboard.press("Control+Enter");
+  await waitComments(n + 1);
+  const text = (await comments())[0].text;
+  assert.equal((text.match(/!\[man-\d\.png\]\(attachment:\d+\)/g) ?? []).length, 3, text);
+  assert.ok(!text.includes("dac-ta.pdf"), text);
+  // The PDF going up opened "Đính kèm" without taking the cursor: the space typed did not press a file.
+  assert.equal(await page.locator(".lightbox").count(), 0, "gõ chữ đã bấm vào tệp đính kèm");
+});
+
 await step("Sửa bình luận: hiện như lúc đọc (danh sách, ảnh), không lộ mã", async () => {
   await box().click();
   const target = page.locator(".td-comment", { hasText: "hai" });

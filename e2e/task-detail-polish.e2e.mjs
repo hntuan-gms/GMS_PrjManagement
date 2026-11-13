@@ -24,9 +24,9 @@ async function step(name, fn) {
 }
 async function openTask(id = "DEMO-5") {
   await fetch(API + "/api/__restore", { method: "POST" });
-  await page.goto(process.env.E2E_APP ?? "http://localhost:5173/");
-  await page.waitForSelector(".wbs-row");
-  await page.locator(".wbs-row", { hasText: id }).dblclick();
+  // Opened by its link (?task=): a double-click on the middle of a row now lands on its tick box or "+"
+  // (wbs-dblclick.e2e.mjs covers the real double-click).
+  await page.goto(`${process.env.E2E_APP ?? "http://localhost:5173/?view=gantt"}&project=DEMO&task=${id}`);
   await page.waitForSelector(".modal-detail .modal-id");
 }
 const section = (title) => page.locator(".td-section", { has: page.locator(".td-section-title", { hasText: title }) });
@@ -116,15 +116,20 @@ await step("tải về một tệp", async () => {
   ]);
   assert.equal(dl.suggestedFilename(), "dac-ta.pdf");
 });
-await step("xoá một tệp: hỏi trước, huỷ thì giữ, đồng ý thì mất khỏi danh sách và số đếm giảm", async () => {
+await step("xoá một tệp: mất ngay không hỏi; Hoàn tác đưa lại; Jira chỉ bị xoá khi hết thời gian hoàn tác", async () => {
   const pdf = page.locator(".att-row", { hasText: "dac-ta.pdf" });
+  const onServer = async () => (await (await fetch(API + "/api/tasks/DEMO-5/attachments")).json()).files.some((f) => f.filename === "dac-ta.pdf");
   await pdf.locator('.att-act[title="Xoá"]').click();
-  await page.locator(".dlg").waitFor();
-  await page.locator(".dlg button", { hasText: "Huỷ" }).click();
-  assert.equal(await pdf.count(), 1);
+  assert.equal(await page.locator(".dlg").count(), 0, "còn hỏi xác nhận");
+  await pdf.waitFor({ state: "detached", timeout: 300 });
+  assert.equal(await hint("Đính kèm"), "1");
+  await page.locator(".toast button", { hasText: "Hoàn tác" }).click();
+  await pdf.waitFor({ timeout: 300 });
+  assert.equal(await hint("Đính kèm"), "2");
   await pdf.locator('.att-act[title="Xoá"]').click();
-  await page.locator(".dlg button.danger-solid").click();
-  await pdf.waitFor({ state: "detached" });
+  await pdf.waitFor({ state: "detached", timeout: 300 });
+  assert.ok(await onServer(), "Jira bị xoá trước khi hết thời gian hoàn tác");
+  await page.waitForFunction(async () => !(await (await fetch("/api/tasks/DEMO-5/attachments")).json()).files.some((f) => f.filename === "dac-ta.pdf"), null, { timeout: 8000 });
   assert.equal(await hint("Đính kèm"), "1");
 });
 
@@ -252,7 +257,7 @@ await step("chi tiết chưa tải đủ: chỉ có vòng xoay (khung đã đủ
   });
   await page.goto(process.env.E2E_APP ?? "http://localhost:5173/");
   await page.waitForSelector(".wbs-row");
-  await page.locator(".wbs-row", { hasText: "DEMO-5" }).dblclick();
+  await page.locator(".wbs-row", { hasText: "DEMO-5" }).locator(".wbs-col-name").first().dblclick();
   await page.locator(".td-loading .spinner").waitFor();
   await page.waitForTimeout(400); // the layer's own fade-in
   const loadingBox = await page.locator(".modal-detail").boundingBox();
@@ -300,7 +305,7 @@ await step("chi tiết là một lớp giữa màn hình: rộng, hai khung cạ
   await page.keyboard.press("Escape");
   await page.waitForSelector(".modal-detail", { state: "detached" });
   const before = await page.locator(".wbs-row", { hasText: "DEMO-6" }).first().locator(".wbs-col-name").evaluate((el) => el.getBoundingClientRect().width);
-  await page.locator(".wbs-row", { hasText: "DEMO-5" }).dblclick();
+  await page.locator(".wbs-row", { hasText: "DEMO-5" }).locator(".wbs-col-name").first().dblclick();
   await page.waitForSelector(".modal-detail");
   await page.waitForTimeout(300);
   const after = await page.locator(".wbs-row", { hasText: "DEMO-6" }).first().locator(".wbs-col-name").evaluate((el) => el.getBoundingClientRect().width);

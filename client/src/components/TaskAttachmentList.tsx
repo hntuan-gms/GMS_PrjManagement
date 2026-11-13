@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import type { TaskAttachments } from "../types";
-import { useDialogs } from "./dialogContext";
+import { dismissToast, toast } from "../toast";
 import { Icon } from "./Icons";
 import ImageLightbox from "./ImageLightbox";
 
@@ -9,6 +9,8 @@ type FileInfo = TaskAttachments["files"][number];
 
 /** What the server will show inline (routes/api.ts INLINE_IMAGE). */
 const RASTER = /^image\/(png|jpe?g|gif|webp)$/i;
+/** How long a removed file can still be put back: Jira is told only after this. */
+const UNDO_MS = 5000;
 /** A bigger picture is fetched only when someone opens it, not for a thumbnail. */
 const THUMB_MAX_BYTES = 3 * 1024 * 1024;
 
@@ -33,8 +35,10 @@ interface Props {
   taskId: string;
   files: TaskAttachments["files"];
   links: TaskAttachments["links"];
-  /** A file was removed from Jira. */
+  /** A file was removed (on screen at once; Jira is told a few seconds later). */
   onRemoved: (fileId: string) => void;
+  /** A removal was undone, or Jira refused it: the file is back. */
+  onRestored: (file: FileInfo) => void;
 }
 
 /**
@@ -42,13 +46,19 @@ interface Props {
  * size on click; any file can be downloaded or removed from the icons that appear when the row is
  * hovered or focused (always present for keyboard and touch — only their weight changes).
  */
-export default function TaskAttachmentList({ taskId, files, links, onRemoved }: Props) {
-  const dialogs = useDialogs();
+export default function TaskAttachmentList({ taskId, files, links, onRemoved, onRestored }: Props) {
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
   const [viewing, setViewing] = useState<{ file: FileInfo; url: string } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const urls = useRef<Record<string, string>>({});
+  // Removed here, not yet (or just) deleted in Jira. Kept hidden even if a re-read still lists them.
+  const [gone, setGone] = useState<ReadonlySet<string>>(new Set());
+  const waiting = useRef(new Map<string, { timer: ReturnType<typeof setTimeout>; send: () => void }>());
+  const live = useRef({ onRestored });
+  useEffect(() => {
+    live.current = { onRestored };
+  });
 
   // Thumbnails of the small pictures; revoked when the window closes.
   useEffect(() => {
@@ -70,7 +80,15 @@ export default function TaskAttachmentList({ taskId, files, links, onRemoved }: 
   }, [taskId, files]);
   useEffect(() => {
     const held = urls.current;
-    return () => Object.values(held).forEach((u) => URL.revokeObjectURL(u));
+    const pending = waiting.current;
+    return () => {
+      Object.values(held).forEach((u) => URL.revokeObjectURL(u));
+      // Closing the panel does not cancel a removal: what is waiting goes to Jira now.
+      for (const w of [...pending.values()]) {
+        clearTimeout(w.timer);
+        w.send();
+      }
+    };
   }, []);
 
   async function open(f: FileInfo) {
@@ -102,31 +120,56 @@ export default function TaskAttachmentList({ taskId, files, links, onRemoved }: 
     }
   }
 
-  async function remove(f: FileInfo) {
-    const ok = await dialogs.confirm({
-      title: "Xoá tệp đính kèm",
-      message: `"${f.filename}" sẽ bị xoá khỏi ${taskId} trên Jira. Hành động này không thể hoàn tác.`,
-      confirmLabel: "Xoá tệp",
-      tone: "danger",
+  const hide = (id: string, hidden: boolean) =>
+    setGone((g) => {
+      const next = new Set(g);
+      if (hidden) next.add(id);
+      else next.delete(id);
+      return next;
     });
-    if (!ok) return;
+
+  /**
+   * Gone from the list at once, no question asked; Jira, which cannot give a file back, is told only
+   * when the "Hoàn tác" toast has run out (or the panel closes). A refusal puts the row back.
+   */
+  function remove(f: FileInfo) {
     setError(null);
-    setBusy(f.id);
-    try {
-      await api.deleteAttachment(taskId, f.id);
-      onRemoved(f.id);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Không xoá được tệp.");
-    } finally {
-      setBusy(null);
-    }
+    hide(f.id, true);
+    onRemoved(f.id);
+    let toastId = 0;
+    const send = () => {
+      waiting.current.delete(f.id);
+      dismissToast(toastId);
+      api.deleteAttachment(taskId, f.id).catch((e) => {
+        hide(f.id, false);
+        live.current.onRestored(f);
+        toast(`Không xoá được ${f.filename}: ${e instanceof Error ? e.message : "lỗi không rõ"}`, { tone: "error" });
+      });
+    };
+    const timer = setTimeout(send, UNDO_MS);
+    waiting.current.set(f.id, { timer, send });
+    toastId = toast(`Đã xoá ${f.filename}`, {
+      ms: UNDO_MS,
+      action: {
+        label: "Hoàn tác",
+        run: () => {
+          const w = waiting.current.get(f.id);
+          if (!w) return;
+          clearTimeout(w.timer);
+          waiting.current.delete(f.id);
+          hide(f.id, false);
+          live.current.onRestored(f);
+        },
+      },
+    });
   }
 
-  if (files.length === 0 && links.length === 0) return null;
+  const shown = files.filter((f) => !gone.has(f.id));
+  if (shown.length === 0 && links.length === 0) return null;
   return (
     <>
       <ul className="att-existing">
-        {files.map((f) => {
+        {shown.map((f) => {
           const image = RASTER.test(f.mimeType);
           return (
             <li key={f.id} className="att-row">
@@ -157,7 +200,7 @@ export default function TaskAttachmentList({ taskId, files, links, onRemoved }: 
                 <button type="button" className="att-act" onClick={() => void download(f)} disabled={busy === f.id} aria-label={`Tải về ${f.filename}`} title="Tải về">
                   <Icon name="download" size={14} />
                 </button>
-                <button type="button" className="att-act is-danger" onClick={() => void remove(f)} disabled={busy === f.id} aria-label={`Xoá ${f.filename}`} title="Xoá">
+                <button type="button" className="att-act is-danger" onClick={() => remove(f)} disabled={busy === f.id} aria-label={`Xoá ${f.filename}`} title="Xoá">
                   <Icon name="trash" size={14} />
                 </button>
               </span>

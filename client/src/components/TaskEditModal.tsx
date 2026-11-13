@@ -5,8 +5,8 @@ import StatusGlyph from "./StatusGlyph";
 import { api } from "../api";
 import { buildTaskLink } from "../deepLink";
 import { isAssignableType } from "../types";
-import type { DependencyType, JiraUser, Predecessor, SlaSettings, Task, TaskTransition, TaskUpdateInput, TransitionField } from "../types";
-import { filesFromClipboard, hasPending, MAX_ATTACHMENT_BYTES, NO_ATTACHMENTS, uploadPending, type PendingAttachments } from "../attachments";
+import type { DependencyType, JiraUser, Predecessor, SlaSettings, Task, TaskAttachments, TaskTransition, TaskUpdateInput, TransitionField } from "../types";
+import { filesFromClipboard, filesFromDrop, hasPending, leftOutMessage, MAX_ATTACHMENT_BYTES, NO_ATTACHMENTS, tookImages, uploadPending, type PendingAttachments } from "../attachments";
 import AttachmentPicker from "./AttachmentPicker";
 import TaskAttachmentList from "./TaskAttachmentList";
 import NumberInput from "./NumberInput";
@@ -38,7 +38,7 @@ import { formatDateInput } from "../dateInput";
 import type { ResourceLoad } from "../resourceAllocation";
 import { toast } from "../toast";
 import { useWorkCalendar } from "./workCalendarContext";
-import { LIST_MAX_AGE_MS, TASK_MAX_AGE_MS } from "../detailCache";
+import { LIST_MAX_AGE_MS, peekDetail, TASK_MAX_AGE_MS } from "../detailCache";
 import { projectLists, readers } from "../taskDetailReads";
 import { useDetail } from "../useDetail";
 
@@ -239,8 +239,9 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
   const linkCount = linksRead.value ? linksRead.value.length : null;
   const hasData: Record<SectionKey, boolean> = { att: attCount > 0, pred: task.predecessors.length > 0, link: (linkCount ?? 0) > 0 };
   const visible = (k: SectionKey) => hasData[k] || opened.has(k);
-  const open = (k: SectionKey) => {
-    justOpened.current = k;
+  /** `focus` false: shown without taking the cursor (a file dropped while someone is typing a comment). */
+  const open = (k: SectionKey, focus = true) => {
+    if (focus) justOpened.current = k;
     setOpened((prev) => new Set(prev).add(k));
     setOrder((prev) => (prev.includes(k) ? prev : [...prev, k]));
   };
@@ -433,7 +434,9 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
   /** Files and links go up the moment they are added: there is no "Lưu" to wait for. */
   async function uploadNow(p: PendingAttachments) {
     if (!hasPending(p)) return;
-    open("att");
+    // Not focused: the files may have been dropped on the comment box mid-sentence, and a key typed next
+    // would press the first attachment's button instead.
+    open("att", false);
     setUploading(true);
     try {
       const failures = await uploadPending(task.id, p);
@@ -443,6 +446,12 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
       setUploading(false);
       void attachmentsRead.reload();
     }
+  }
+
+  /** Changes the held list as it is now (a delete settles seconds later, after other changes). */
+  function editAttachments(fn: (a: TaskAttachments) => TaskAttachments) {
+    const held = peekDetail<TaskAttachments>("attachments", task.id);
+    if (held) attachmentsRead.set(fn(held));
   }
 
   function addDropped(files: File[]) {
@@ -551,13 +560,22 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
         onDragLeave={(e) => {
           if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false);
         }}
+        // A box that takes the drop itself (the rich editor's picture drop) stops it before the
+        // bubbling onDrop below; the capture phase still runs, so the drop zone is always cleared.
+        onDropCapture={() => setDropping(false)}
         onDrop={(e) => {
           if (!hasFiles(e)) return;
           setDropping(false);
-          // The attachment box has its own drop zone and has already taken them.
-          if (e.defaultPrevented) return;
+          // The attachment box has its own drop zone and has already taken them; the rich editor took
+          // only the loose pictures (into its text) and leaves the rest of the drop to this.
+          const imagesTaken = tookImages(e.nativeEvent);
+          if (e.defaultPrevented && !imagesTaken) return;
           e.preventDefault();
-          addDropped(Array.from(e.dataTransfer.files));
+          void filesFromDrop(e.dataTransfer, { skipLooseImages: imagesTaken }).then((d) => {
+            const note = leftOutMessage(d);
+            if (note) toast(note, { tone: "error" });
+            addDropped(d.files);
+          });
         }}
       >
         <header className="td-header">
@@ -708,7 +726,10 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
                         taskId={task.id}
                         files={existing.files}
                         links={existing.links}
-                        onRemoved={(fileId) => attachmentsRead.set({ ...existing, files: existing.files.filter((f) => f.id !== fileId) })}
+                        onRemoved={(fileId) => editAttachments((a) => ({ ...a, files: a.files.filter((f) => f.id !== fileId) }))}
+                        onRestored={(file) =>
+                          editAttachments((a) => (a.files.some((f) => f.id === file.id) ? a : { ...a, files: [...a.files, file] }))
+                        }
                       />
                     ) : (
                       <Spinner block className="spinner-inline" />

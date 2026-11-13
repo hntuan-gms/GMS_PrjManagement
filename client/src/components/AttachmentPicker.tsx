@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { LINK_URL_RE, MAX_ATTACHMENT_BYTES, type PendingAttachments } from "../attachments";
+import { filesFromDrop, folderFiles, leftOutMessage, LINK_URL_RE, MAX_ATTACHMENT_BYTES, type DroppedFiles, type PendingAttachments } from "../attachments";
 import { Icon } from "./Icons";
 import ImageLightbox from "./ImageLightbox";
 
@@ -19,6 +19,7 @@ export default function AttachmentPicker({
   hint?: string;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const folderRef = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
   const [linkUrl, setLinkUrl] = useState("");
   const [linkTitle, setLinkTitle] = useState("");
@@ -34,12 +35,15 @@ export default function AttachmentPicker({
   );
   useEffect(() => () => previews.forEach((u) => u && URL.revokeObjectURL(u)), [previews]);
 
-  function addFiles(files: File[]) {
+  function addFiles(files: File[], leftOut: string | null = null) {
     const tooBig = files.filter((f) => f.size > MAX_ATTACHMENT_BYTES);
-    setError(tooBig.length ? `Quá 20 MB, không thêm: ${tooBig.map((f) => f.name).join(", ")}` : null);
+    const problems = [leftOut, tooBig.length ? `Quá 20 MB, không thêm: ${tooBig.map((f) => f.name).join(", ")}` : null].filter(Boolean);
+    setError(problems.length ? problems.join(" ") : null);
     const ok = files.filter((f) => f.size <= MAX_ATTACHMENT_BYTES);
     if (ok.length) onChange({ ...value, files: [...value.files, ...ok] });
   }
+
+  const addDropped = (d: DroppedFiles) => addFiles(d.files, leftOutMessage(d));
 
   function addLink() {
     const url = linkUrl.trim();
@@ -67,13 +71,18 @@ export default function AttachmentPicker({
         onDrop={(e) => {
           e.preventDefault();
           setOver(false);
-          addFiles(Array.from(e.dataTransfer.files));
+          // A folder is opened and its files attached side by side (Jira has no folders).
+          void filesFromDrop(e.dataTransfer).then(addDropped);
         }}
       >
         <span>
           Thả tệp, dán ảnh, hoặc{" "}
           <button type="button" className="text-btn" onClick={() => inputRef.current?.click()}>
             chọn tệp
+          </button>
+          {" / "}
+          <button type="button" className="text-btn" onClick={() => folderRef.current?.click()}>
+            thư mục
           </button>
         </span>
         <input
@@ -83,6 +92,20 @@ export default function AttachmentPicker({
           hidden
           onChange={(e) => {
             addFiles(Array.from(e.target.files ?? []));
+            e.target.value = "";
+          }}
+        />
+        <input
+          ref={(el) => {
+            folderRef.current = el;
+            // Not in React's typings; the attribute is what makes the picker choose a folder.
+            el?.setAttribute("webkitdirectory", "");
+          }}
+          type="file"
+          multiple
+          hidden
+          onChange={(e) => {
+            addDropped(folderFiles(Array.from(e.target.files ?? [])));
             e.target.value = "";
           }}
         />

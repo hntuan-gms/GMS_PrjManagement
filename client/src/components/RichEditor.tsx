@@ -2,11 +2,12 @@ import Mention from "@tiptap/extension-mention";
 import { Placeholder } from "@tiptap/extensions";
 import { EditorContent, Node, NodeViewWrapper, ReactNodeViewRenderer, mergeAttributes, useEditor, useEditorState, type Editor, type ReactNodeViewProps } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
+import { NodeSelection } from "@tiptap/pm/state";
 import type { EditorView } from "@tiptap/pm/view";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "../api";
-import { filesFromClipboard } from "../attachments";
+import { filesFromClipboard, isLooseImage, markImagesTaken } from "../attachments";
 import { docToRich, richToDoc, type DocNode } from "../richDoc";
 import { toast } from "../toast";
 import type { JiraUser } from "../types";
@@ -185,15 +186,30 @@ export default function RichEditor(props: Props) {
     setSuggest(s);
   };
 
-  function addImages(files: File[]) {
+  /** Puts the pictures in the text (at `at`, else where the cursor is) and uploads each. */
+  function addImages(files: File[], at?: number) {
     const editor = editorRef.current;
     const issue = live.current.taskId;
     if (!editor || !issue) return;
     const tooBig = files.filter((f) => f.size > MAX_IMAGE_BYTES);
     if (tooBig.length) toast(`Ảnh quá 20 MB, không thêm: ${tooBig.map((f) => f.name).join(", ")}`, { tone: "error" });
-    for (const file of files.filter((f) => f.size <= MAX_IMAGE_BYTES)) {
-      const src = `uploading:${++uploadSeq}`;
-      editor.chain().focus().insertContent({ type: "richImage", attrs: { src, alt: `Đang tải ${file.name}…` } }).run();
+    const items = files.filter((f) => f.size <= MAX_IMAGE_BYTES).map((file) => ({ file, src: `uploading:${++uploadSeq}` }));
+    if (items.length === 0) return;
+    // All in one insert. One by one, each picture was left selected and the next one replaced it:
+    // five dropped, five uploaded, one in the text. A picture already selected is kept the same way.
+    const nodes = items.map(({ file, src }) => ({ type: "richImage", attrs: { src, alt: `Đang tải ${file.name}…` } }));
+    const sel = editor.state.selection;
+    const pos = at ?? (sel instanceof NodeSelection ? sel.to : undefined);
+    const chain = editor.chain().focus();
+    (pos === undefined ? chain.insertContent(nodes) : chain.insertContentAt(pos, nodes)).run();
+    // Leave the cursor in text after the pictures, or the next key typed would replace the last one.
+    const after = editor.state.selection;
+    if (after instanceof NodeSelection) {
+      const end = after.to;
+      if (editor.state.doc.resolve(end).nodeAfter?.isTextblock) editor.commands.setTextSelection(end + 1);
+      else editor.chain().insertContentAt(end, { type: "paragraph" }).setTextSelection(end + 1).run();
+    }
+    for (const { file, src } of items) {
       setUploading((n) => n + 1);
       // The placeholder is found again by its src: the text may have moved around it meanwhile.
       const settle = (attrs: { src: string; alt: string } | null) => {
@@ -289,13 +305,16 @@ export default function RichEditor(props: Props) {
         addImages(files);
         return true;
       },
-      handleDrop: (_view: EditorView, event: DragEvent, _slice: unknown, moved: boolean) => {
+      handleDrop: (view: EditorView, event: DragEvent, _slice: unknown, moved: boolean) => {
         if (moved) return false;
-        const files = [...(event.dataTransfer?.files ?? [])].filter((f) => f.type.startsWith("image/"));
-        if (files.length === 0 || !live.current.taskId) return false;
+        const all = [...(event.dataTransfer?.files ?? [])];
+        const images = all.filter(isLooseImage);
+        if (images.length === 0 || !live.current.taskId) return false;
         event.preventDefault();
-        event.stopPropagation();
-        addImages(files);
+        // Anything else in the drop (a PDF, a folder) still goes on to the panel, which attaches it.
+        if (images.length === all.length) event.stopPropagation();
+        else markImagesTaken(event);
+        addImages(images, view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos);
         return true;
       },
       handleKeyDown: (_view: EditorView, event: KeyboardEvent) => {
