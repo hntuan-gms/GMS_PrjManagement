@@ -23,13 +23,14 @@ async function step(name, fn) {
 const tab = (name) => openLens(page, name);
 const counts = { tasks: 0, board: 0, timesheet: 0, progress: 0 };
 page.on("request", (r) => {
-  const m = r.url().match(/\/api\/(tasks|board|timesheet|progress)(\?|$)/);
-  if (m && r.method() === "GET") counts[m[1]]++;
+  // The hours grid reads Clockwork (my hours on every project); it is still counted as "timesheet".
+  const m = r.url().match(/\/api\/(tasks|board|clockwork|progress)(\?|$)/);
+  if (m && r.method() === "GET") counts[m[1] === "clockwork" ? "timesheet" : m[1]]++;
 });
 const snapshot = () => ({ ...counts });
 const seen = [];
 page.on("request", (r) => {
-  if (/\/api\/(tasks|board|timesheet|progress)(\?|$)/.test(r.url()) && r.method() === "GET") seen.push(Date.now() + " " + r.url());
+  if (/\/api\/(tasks|board|clockwork|progress)(\?|$)/.test(r.url()) && r.method() === "GET") seen.push(Date.now() + " " + r.url());
 });
 
 await page.goto(process.env.E2E_APP ?? "http://localhost:5173/");

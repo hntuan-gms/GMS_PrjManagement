@@ -78,6 +78,73 @@ function jiraOffset(tz: number): string {
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
+export interface WorklogRead {
+  entries: WorklogEntry[];
+  /** Everyone who logged in the window, by account id. */
+  authors: Map<string, { displayName: string; avatarUrl: string | null }>;
+  issueCount: number;
+  extraCalls: number;
+}
+
+/** `worklogDate` is evaluated in the Jira profile's timezone: ask a day wider each side, cut exactly later. */
+export function worklogDateJql(from: string, to: string): string {
+  return `worklogDate >= "${addDays(from, -1)}" AND worklogDate <= "${addDays(to, 1)}"`;
+}
+
+/**
+ * The worklogs of the issues a JQL finds, cut to [from, to] in the browser's timezone on each
+ * worklog's own `started`. Shared by the project timesheet and Clockwork (every project of a person).
+ */
+export async function readWorklogEntries(
+  jira: JiraClient,
+  jql: string,
+  from: string,
+  to: string,
+  tz: number,
+  viewerAccountId: string
+): Promise<WorklogRead> {
+  const afterMs = localMidnightMs(from, tz);
+  const beforeMs = localMidnightMs(addDays(to, 1), tz);
+  const issues = await jira.searchIssues(jql, ["summary", "issuetype", "worklog"]);
+  const entries: WorklogEntry[] = [];
+  const authors = new Map<string, { displayName: string; avatarUrl: string | null }>();
+  let extraCalls = 0;
+  // An issue's search hit carries at most 20 worklogs; past that, ask for the
+  // window explicitly. Most issues in a week's window are under the cap.
+  const perIssue = await Promise.all(
+    issues.map(async (issue) => {
+      const embedded = issue.fields?.worklog;
+      const complete = embedded && (embedded.total ?? 0) <= (embedded.worklogs?.length ?? 0);
+      if (!complete) extraCalls++;
+      const logs: any[] = complete ? embedded.worklogs : await jira.getWorklogs(issue.key, afterMs, beforeMs);
+      return { issue, logs };
+    })
+  );
+  for (const { issue, logs } of perIssue) {
+    for (const w of logs) {
+      const date = localDateOf(String(w.started ?? ""), tz);
+      if (!date || date < from || date > to) continue;
+      const accountId: string | null = w.author?.accountId ?? null;
+      const name: string = w.author?.displayName ?? "Không rõ";
+      if (accountId) authors.set(accountId, { displayName: name, avatarUrl: w.author?.avatarUrls?.["24x24"] ?? null });
+      entries.push({
+        id: String(w.id),
+        issueKey: issue.key,
+        summary: issue.fields?.summary ?? issue.key,
+        issueType: issue.fields?.issuetype?.name ?? "Task",
+        authorAccountId: accountId,
+        authorName: name,
+        date,
+        hours: round2((Number(w.timeSpentSeconds) || 0) / 3600),
+        comment: w.comment ? adfToText(w.comment).trim() || null : null,
+        mine: accountId === viewerAccountId,
+      });
+    }
+  }
+  entries.sort((a, b) => (a.date === b.date ? a.issueKey.localeCompare(b.issueKey) : a.date.localeCompare(b.date)));
+  return { entries, authors, issueCount: issues.length, extraCalls };
+}
+
 export class TimesheetService {
   constructor(
     private readonly jira: JiraClient,
@@ -96,56 +163,18 @@ export class TimesheetService {
       throw badRequest(`Mỗi lần xem tối đa ${MAX_RANGE_DAYS} ngày.`);
     }
     const t0 = Date.now();
-    const afterMs = localMidnightMs(from, tz);
-    const beforeMs = localMidnightMs(addDays(to, 1), tz);
 
     // worklogDate is evaluated in the Jira profile's timezone, which need not be
     // the browser's — so the JQL is widened a day each side and the exact cut is
     // made below, on each worklog's own `started` instant.
-    const jql =
-      `project = "${this.ctx.projectKey}" AND worklogDate >= "${addDays(from, -1)}" ` +
-      `AND worklogDate <= "${addDays(to, 1)}"`;
-    const [issues, members, profiles, absences] = await Promise.all([
-      this.jira.searchIssues(jql, ["summary", "issuetype", "worklog"]),
+    const jql = `project = "${this.ctx.projectKey}" AND ${worklogDateJql(from, to)}`;
+    const [read, members, profiles, absences] = await Promise.all([
+      readWorklogEntries(this.jira, jql, from, to, tz, this.ctx.accountId),
       getProjectMembers(this.jira, this.ctx.cloudId, this.ctx.projectKey, this.ctx.accountId),
       resources.listProfiles(this.ctx.cloudId),
       resources.listAbsences(this.ctx.cloudId, from),
     ]);
-
-    const entries: WorklogEntry[] = [];
-    const authors = new Map<string, { displayName: string; avatarUrl: string | null }>();
-    // An issue's search hit carries at most 20 worklogs; past that, ask for the
-    // window explicitly. Most issues in a week's window are under the cap.
-    const perIssue = await Promise.all(
-      issues.map(async (issue) => {
-        const embedded = issue.fields?.worklog;
-        const complete = embedded && (embedded.total ?? 0) <= (embedded.worklogs?.length ?? 0);
-        const logs: any[] = complete ? embedded.worklogs : await this.jira.getWorklogs(issue.key, afterMs, beforeMs);
-        return { issue, logs };
-      })
-    );
-    for (const { issue, logs } of perIssue) {
-      for (const w of logs) {
-        const date = localDateOf(String(w.started ?? ""), tz);
-        if (!date || date < from || date > to) continue;
-        const accountId: string | null = w.author?.accountId ?? null;
-        const name: string = w.author?.displayName ?? "Không rõ";
-        if (accountId) authors.set(accountId, { displayName: name, avatarUrl: w.author?.avatarUrls?.["24x24"] ?? null });
-        entries.push({
-          id: String(w.id),
-          issueKey: issue.key,
-          summary: issue.fields?.summary ?? issue.key,
-          issueType: issue.fields?.issuetype?.name ?? "Task",
-          authorAccountId: accountId,
-          authorName: name,
-          date,
-          hours: round2((Number(w.timeSpentSeconds) || 0) / 3600),
-          comment: w.comment ? adfToText(w.comment).trim() || null : null,
-          mine: accountId === this.ctx.accountId,
-        });
-      }
-    }
-    entries.sort((a, b) => (a.date === b.date ? a.issueKey.localeCompare(b.issueKey) : a.date.localeCompare(b.date)));
+    const { entries, authors } = read;
 
     const capacity = new Map(profiles.map((p) => [p.accountId, p.capacityHoursPerDay]));
     const person = (accountId: string, displayName: string, avatarUrl: string | null, outsider: boolean): TimesheetPerson => ({
@@ -166,8 +195,8 @@ export class TimesheetService {
     people.sort((a, b) => Number(a.outsider) - Number(b.outsider) || a.displayName.localeCompare(b.displayName, "vi"));
 
     console.log(
-      `[perf] timesheet ${this.ctx.projectKey} ${from}..${to}: ${issues.length} issues, ${entries.length} worklogs, ` +
-        `${perIssue.filter((p) => !(p.issue.fields?.worklog && (p.issue.fields.worklog.total ?? 0) <= (p.issue.fields.worklog.worklogs?.length ?? 0))).length} extra worklog calls, total ${Date.now() - t0}ms`
+      `[perf] timesheet ${this.ctx.projectKey} ${from}..${to}: ${read.issueCount} issues, ${entries.length} worklogs, ` +
+        `${read.extraCalls} extra worklog calls, total ${Date.now() - t0}ms`
     );
     return { from, to, people, entries };
   }

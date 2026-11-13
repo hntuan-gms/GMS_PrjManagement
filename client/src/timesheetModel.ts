@@ -2,7 +2,7 @@ import { fold } from "./csvImport";
 import { parseHours } from "./parseHours";
 import { roundHours } from "./taskForm";
 import { isAway, expectation } from "./timesheetDays";
-import { isAssignableType, type Task, type TimesheetPerson, type WorklogEntry } from "./types";
+import { type Task, type TimesheetPerson, type WorklogEntry } from "./types";
 import { dayKind, type WorkCalendar } from "./workCalendar";
 
 /*
@@ -25,18 +25,34 @@ export interface TaskRow {
   task: Task | null;
   /** "logged" = has hours in the period, "suggested" = my own open work with none yet, "added" = picked by hand. */
   kind: "logged" | "suggested" | "added";
+  /** The project the issue belongs to: the part of its key before the number. */
+  project: string;
   cells: Map<string, Cell>;
   total: number;
 }
 
 const NATURAL = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true });
 
+/** "GPM-104" → "GPM". */
+export function projectOfKey(issueKey: string): string {
+  const cut = issueKey.lastIndexOf("-");
+  return cut > 0 ? issueKey.slice(0, cut) : issueKey;
+}
+
+/** Work on a project this tab does not hold the plan of: enough to name a row and offer it. */
+export interface OpenWork {
+  key: string;
+  summary: string;
+  issueType: string;
+  inProgress?: boolean;
+}
+
 /** "2", "2,5", "1,33": hours the way people write them here. */
 export function fmtHours(h: number): string {
   return String(roundHours(h)).replace(".", ",");
 }
 
-function cellsOf(entries: readonly WorklogEntry[]): { cells: Map<string, Cell>; total: number } {
+export function cellsOf(entries: readonly WorklogEntry[]): { cells: Map<string, Cell>; total: number } {
   const cells = new Map<string, Cell>();
   let total = 0;
   for (const e of entries) {
@@ -47,57 +63,6 @@ function cellsOf(entries: readonly WorklogEntry[]): { cells: Map<string, Cell>; 
     total += e.hours;
   }
   return { cells, total: roundHours(total) };
-}
-
-/** My open work worth offering as an empty row: in progress first, then the rest of what is assigned to me. */
-export function suggestedTasks(tasks: readonly Task[], me: string, exclude: ReadonlySet<string>, limit = 6): Task[] {
-  const mine = tasks.filter((t) => t.assigneeAccountId === me && t.statusCategory !== "done" && isAssignableType(t.issueType) && !exclude.has(t.id));
-  const rank = (t: Task) => (t.statusCategory === "indeterminate" ? 0 : 1);
-  return mine
-    .map((t, i) => ({ t, i }))
-    .sort((a, b) => rank(a.t) - rank(b.t) || a.i - b.i)
-    .slice(0, limit)
-    .map(({ t }) => t);
-}
-
-/**
- * The rows of "Của tôi": every task I logged on in the period, then the ones I picked by hand this session, then
- * a few suggestions. `order` (see stableOrder) keeps a row where it first appeared: a row that gets its first
- * hours must not jump from "suggested" up to "logged" under the cursor.
- */
-export function buildMyRows(input: {
-  entries: readonly WorklogEntry[];
-  tasks: readonly Task[];
-  me: string;
-  added: readonly string[];
-  order?: readonly string[];
-  suggestLimit?: number;
-}): TaskRow[] {
-  const { entries, tasks, me, added } = input;
-  const byTask = new Map(tasks.map((t) => [t.id, t]));
-  const mine = new Map<string, WorklogEntry[]>();
-  for (const e of entries) {
-    if (!e.mine) continue;
-    const list = mine.get(e.issueKey) ?? [];
-    list.push(e);
-    mine.set(e.issueKey, list);
-  }
-  const rows: TaskRow[] = [];
-  const seen = new Set<string>();
-  const push = (key: string, kind: TaskRow["kind"], list: WorklogEntry[]) => {
-    if (seen.has(key)) return;
-    seen.add(key);
-    const t = byTask.get(key) ?? null;
-    const first = list[0];
-    const { cells, total } = cellsOf(list);
-    rows.push({ key, summary: t?.summary ?? first?.summary ?? key, issueType: t?.issueType ?? first?.issueType ?? "", task: t, kind, cells, total });
-  };
-  for (const key of [...mine.keys()].sort(NATURAL)) push(key, "logged", mine.get(key) ?? []);
-  for (const key of added) push(key, "added", []);
-  for (const t of suggestedTasks(tasks, me, seen, input.suggestLimit)) push(t.id, "suggested", []);
-  if (!input.order) return rows;
-  const pos = new Map(input.order.map((k, i) => [k, i]));
-  return rows.sort((a, b) => (pos.get(a.key) ?? Infinity) - (pos.get(b.key) ?? Infinity));
 }
 
 /**
@@ -147,8 +112,9 @@ export function dayState(
   calendar: WorkCalendar
 ): DayState {
   const cap = Math.max(p.capacityHoursPerDay, 0.01);
-  if (hours > cap + 1e-9) return "over";
+  // A day of leave has no capacity to be over: hours on it are their own state, not "8 of 4".
   if (isAway(p, d)) return hours > 0 ? "extra" : "off";
+  if (hours > cap + 1e-9) return "over";
   if (dayKind(d, calendar) !== "work") return hours > 0 ? "extra" : "off";
   if (hours <= 0) return d > today ? "later" : d === today ? "open" : "missing";
   return hours >= cap - 1e-9 ? "full" : "short";
@@ -237,7 +203,7 @@ export function personRows(entries: readonly WorklogEntry[], accountId: string):
   return [...by.keys()].sort(NATURAL).map((key) => {
     const list = by.get(key) ?? [];
     const { cells, total } = cellsOf(list);
-    return { key, summary: list[0]?.summary ?? key, issueType: list[0]?.issueType ?? "", task: null, kind: "logged", cells, total };
+    return { key, summary: list[0]?.summary ?? key, issueType: list[0]?.issueType ?? "", task: null, kind: "logged", project: projectOfKey(key), cells, total };
   });
 }
 

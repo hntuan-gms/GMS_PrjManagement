@@ -1,4 +1,5 @@
 import type { CreateRequirements } from "./createRequirements";
+import type { RemoteIssue } from "./taskPickerModel";
 import type {
   BoardSnapshot,
   ChatSessionSummary,
@@ -178,6 +179,15 @@ let jiraLimitedHandler: ((seconds: number) => void) | null = null;
 
 export function setJiraLimitedHandler(fn: ((seconds: number) => void) | null): void {
   jiraLimitedHandler = fn;
+}
+
+/**
+ * A worklog is written through the project its issue belongs to, which on Clockwork (every project of a
+ * person) need not be the one this tab is on. The server checks the caller can browse it, as for any tab.
+ */
+function issueProjectHeader(issueKey: string): Record<string, string> {
+  const cut = issueKey.lastIndexOf("-");
+  return cut > 0 ? { "X-Project-Key": issueKey.slice(0, cut) } : {};
 }
 
 /**
@@ -411,18 +421,36 @@ export const api = {
   logWork: (input: { issueKey: string; date: string; hours: number; comment?: string | null }) =>
     request<WorklogEntry>("/timesheet/worklogs", {
       method: "POST",
+      headers: issueProjectHeader(input.issueKey),
       body: JSON.stringify({ ...input, tzOffsetMinutes: -new Date().getTimezoneOffset() }),
     }),
   /** Only what is passed changes; `comment: null` clears the note. */
   updateWorklog: (issueKey: string, id: string, patch: { date?: string; hours?: number; comment?: string | null }) =>
     request<WorklogEntry>(`/timesheet/worklogs/${encodeURIComponent(issueKey)}/${encodeURIComponent(id)}`, {
       method: "PUT",
+      headers: issueProjectHeader(issueKey),
       body: JSON.stringify({ ...patch, tzOffsetMinutes: -new Date().getTimezoneOffset() }),
     }),
   deleteWorklog: (issueKey: string, id: string) =>
     request<void>(`/timesheet/worklogs/${encodeURIComponent(issueKey)}/${encodeURIComponent(id)}`, {
       method: "DELETE",
+      headers: issueProjectHeader(issueKey),
     }),
+
+  // Clockwork: a person's hours on every project (the rail).
+  getClockwork: (from: string, to: string, opts?: { background?: boolean }) =>
+    request<Timesheet>(`/clockwork?from=${from}&to=${to}&tz=${-new Date().getTimezoneOffset()}`, opts?.background ? BACKGROUND : undefined),
+  /**
+   * Issues of ANY project by key or title, for a project's "+ Thêm việc" in Clockwork. `project` narrows a title
+   * search to it, and with nothing typed lists what is likely next there (my work, what was created lately).
+   */
+  searchClockworkIssues: (q: string, project?: string | null) =>
+    request<RemoteIssue[]>(`/clockwork/issues?q=${encodeURIComponent(q)}${project ? `&project=${encodeURIComponent(project)}` : ""}`),
+  getClockworkTeam: (from: string, to: string, project?: string | null) =>
+    request<Timesheet>(
+      `/clockwork/team?from=${from}&to=${to}&tz=${-new Date().getTimezoneOffset()}${project ? `&project=${encodeURIComponent(project)}` : ""}`
+    ),
+
   // Progress report. The overview is free (computed, no model call); generating a
   // report waits on Gemini and can take several seconds.
   getProgress: (asOf: string, scope?: ProgressScope) => {

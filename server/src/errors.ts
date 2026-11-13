@@ -26,6 +26,7 @@ export type ErrorCode =
   | "STAFF_ONLY"
   | "RESOURCES_ADMIN_ONLY"
   | "SLA_ADMIN_ONLY"
+  | "TEAM_FORBIDDEN"
   | "BAD_REQUEST"
   | "TRANSITION_FIELDS_REQUIRED"
   | "TRANSITION_REFUSED"
@@ -83,6 +84,10 @@ export const slaAdminOnly = (what = "cài đặt SLA") =>
     "SLA_ADMIN_ONLY",
     `Chỉ người có quyền Administer Projects trên dự án này mới sửa được ${what}.`
   );
+
+/** Reading a team's hours is the project manager's call (or the resource manager's): routes/clockwork.ts. */
+export const teamForbidden = (what = "xem giờ của cả nhóm") =>
+  new AppError(403, "TEAM_FORBIDDEN", `Chỉ quản lý dự án hoặc quản lý nguồn lực mới ${what} được.`);
 
 export const badRequest = (message: string) => new AppError(400, "BAD_REQUEST", message);
 

@@ -27,6 +27,7 @@ export default function CellPicker({
   onPick,
   onClose,
   search,
+  onQuery,
   className,
 }: {
   anchor: DOMRect;
@@ -37,6 +38,8 @@ export default function CellPicker({
   onClose: () => void;
   /** Replaces the built-in filter (label + hint contain the folded query): ranking, limits. Gets every item and the raw query. */
   search?: (items: PickItem[], query: string) => PickItem[];
+  /** Told every time the typed text changes (a picker that also asks a server). */
+  onQuery?: (query: string) => void;
   /** Added to the panel, e.g. "is-wide". */
   className?: string;
 }) {
@@ -104,6 +107,7 @@ export default function CellPicker({
         onChange={(e) => {
           setQ(e.target.value);
           setActive(0);
+          onQuery?.(e.target.value);
         }}
       />
       <div className="cell-picker-list" role="listbox">

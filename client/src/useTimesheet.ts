@@ -39,28 +39,37 @@ export function useTimesheet(opts: {
   me: string;
   meName: string;
   onTasksChanged: () => void;
+  /**
+   * Clockwork is a person across projects: "mine" is my own hours on every project (the grid that is typed
+   * into), "team" the hours of the projects I manage, optionally cut to one. Each is cached on its own.
+   */
+  source?: "mine" | "team";
+  project?: string | null;
+  /** Do not read (the face this feeds is not showing). */
+  skip?: boolean;
 }) {
-  const { from, to, cacheScope, me, meName, onTasksChanged } = opts;
-  const range = `${from}|${to}`;
+  const { from, to, cacheScope, me, meName, onTasksChanged, source = "mine", project = null, skip = false } = opts;
+  const view = source === "team" ? "timesheet-team" : "timesheet";
+  const range = source === "team" ? `${from}|${to}|${project ?? ""}` : `${from}|${to}`;
   const [reloadKey, setReloadKey] = useState(0);
   const requestKey = `${range}|${reloadKey}`;
   const [result, setResult] = useState<Loaded>(null);
 
   useEffect(() => {
+    if (skip) return;
     let alive = true;
     // Fetched ahead when the project opened (warmViews.ts) and nothing changed since: no second read of Jira.
     const showAhead = () => {
-      if (reloadKey !== 0 || !isViewFresh(cacheScope, "timesheet", range)) return false;
-      const ahead = readViewCache<Timesheet>(cacheScope, "timesheet", range);
+      if (reloadKey !== 0 || !isViewFresh(cacheScope, view, range)) return false;
+      const ahead = readViewCache<Timesheet>(cacheScope, view, range);
       if (!ahead) return false;
       setResult({ key: requestKey, sheet: ahead });
       return true;
     };
     const fetchNow = () =>
-      api
-        .getTimesheet(from, to)
+      (source === "team" ? api.getClockworkTeam(from, to, project) : api.getClockwork(from, to))
         .then((sheet) => {
-          writeViewCache(cacheScope, "timesheet", range, sheet);
+          writeViewCache(cacheScope, view, range, sheet);
           if (alive) setResult({ key: requestKey, sheet });
         })
         .catch(
@@ -68,17 +77,17 @@ export function useTimesheet(opts: {
         );
     if (showAhead()) return;
     // Still on its way: wait for that answer rather than send the same request again.
-    const pending = reloadKey === 0 ? warmInFlight(cacheScope, "timesheet", range) : null;
+    const pending = reloadKey === 0 ? warmInFlight(cacheScope, view, range) : null;
     if (pending) void pending.then(() => alive && !showAhead() && fetchNow());
     else void fetchNow();
     return () => {
       alive = false;
     };
-  }, [from, to, range, requestKey, reloadKey, cacheScope]);
+  }, [from, to, range, requestKey, reloadKey, cacheScope, source, project, view, skip]);
 
   const loading = result?.key !== requestKey;
   // Until this range's answer lands, the last one seen for it beats a blank page.
-  const sheet = result?.sheet && result.key.startsWith(`${range}|`) ? result.sheet : (readViewCache<Timesheet>(cacheScope, "timesheet", range) ?? null);
+  const sheet = result?.sheet && result.key.startsWith(`${range}|`) ? result.sheet : (readViewCache<Timesheet>(cacheScope, view, range) ?? null);
   const error = result?.key === requestKey ? (result.error ?? null) : null;
 
   // The list the next write plans from: updated the moment a write is applied, not when React next renders.
@@ -87,9 +96,11 @@ export function useTimesheet(opts: {
     live.current = sheet;
   }, [sheet]);
   const rangeRef = useRef(range);
+  const viewRef = useRef(view);
   useEffect(() => {
     rangeRef.current = range;
-  }, [range]);
+    viewRef.current = view;
+  }, [range, view]);
 
   const [, bump] = useState(0);
   const patch = useCallback(
@@ -98,7 +109,7 @@ export function useTimesheet(opts: {
       if (!cur) return;
       const next = { ...cur, entries: fn(cur.entries) };
       live.current = next;
-      writeViewCache(cacheScope, "timesheet", rangeRef.current, next);
+      writeViewCache(cacheScope, viewRef.current, rangeRef.current, next);
       // The loaded answer when this period has one; otherwise the cache just written is what renders.
       setResult((r) => (r?.sheet && r.key.startsWith(`${rangeRef.current}|`) ? { ...r, sheet: next } : r));
       bump((n) => n + 1);

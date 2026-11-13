@@ -54,13 +54,14 @@ const colA = spare[0];
 const colB = spare[2];
 
 console.log("\n== Của tôi ==");
-await step("mở ra là lưới của mình: việc đã ghi trước, việc của mình chưa ghi là dòng gợi ý", async () => {
+await step("mở ra là lưới của mình: việc đã ghi trước, việc của mình chưa ghi là dòng chữ nhạt, không chữ 'gợi ý'", async () => {
   await page.waitForSelector(".ts-mine");
   assert.equal(await page.locator("[data-scope=mine][aria-selected=true]").count(), 1);
   const keys = await keysInOrder();
   assert.equal(keys[0], "DEMO-3", "việc đã ghi đứng đầu");
   assert.ok(keys.includes("DEMO-9"), "việc đang mở của mình có dòng gợi ý");
-  assert.ok((await page.locator(".ts-row.is-suggested .ts-hint").count()) > 0);
+  assert.ok((await page.locator(".ts-row.is-empty").count()) > 0, "dòng chưa có giờ được tô nhạt");
+  assert.doesNotMatch(await page.locator(".ts-mine").innerText(), /gợi ý/);
 });
 await step("tuần hiện đủ 7 cột, hôm nay có vạch son, tổng ngày ở chân bảng", async () => {
   assert.equal(await page.locator(".ts-mine thead th.ts-day").count(), 7);
@@ -79,9 +80,10 @@ await step("gõ 2h30 vào dòng gợi ý rồi Enter: ghi 2,5h đúng ngày, dò
   assert.deepEqual(await keysInOrder(), before, "dòng vừa có giờ đầu tiên không được đổi chỗ");
 });
 await step("Enter chuyển xuống ô dòng dưới, mũi tên đi lại như bảng tính", async () => {
+  const second = (await keysInOrder())[1];
   await cell("DEMO-3", colA).focus();
   await page.keyboard.press("Enter");
-  assert.equal((await active("key")) + "|" + (await active("c")), `DEMO-9|${colA}`);
+  assert.equal((await active("key")) + "|" + (await active("c")), `${second}|${colA}`);
   await page.keyboard.press("ArrowUp");
   assert.equal(await active("key"), "DEMO-3");
   await page.keyboard.press("ArrowRight");
@@ -183,7 +185,7 @@ await step("Jira từ chối: số vừa gõ trở về như cũ và có lời b
 });
 await step("'+ Thêm việc' chọn một việc: thành dòng mới, con trỏ vào ô hôm nay", async () => {
   await reset();
-  await page.locator("button.ts-add").click();
+  await page.locator('.ts-add-row[data-project="DEMO"] button.ts-add').click();
   await page.waitForSelector(".cell-picker-item");
   await page.locator(".cell-picker input").fill("DEMO-4");
   await page.locator(".cell-picker-item").first().click();
@@ -197,8 +199,8 @@ await step("'+ Thêm việc' chọn một việc: thành dòng mới, con trỏ 
 });
 await step("dòng chưa có giờ bỏ được bằng ×", async () => {
   const before = await page.locator(".ts-mine .ts-row").count();
-  await page.locator("button.ts-add").click();
-  await page.locator(".cell-picker input").fill("DEMO-5");
+  await page.locator('.ts-add-row[data-project="DEMO"] button.ts-add').click();
+  await page.locator(".cell-picker input").fill("DEMO-7");
   await page.locator(".cell-picker-item").first().click();
   await page.waitForSelector(".ts-row.is-added:has(.ts-dismiss)");
   await page.locator(".ts-row.is-added .ts-dismiss").first().click();

@@ -320,7 +320,22 @@ export interface Timesheet {
   to: string;
   people: TimesheetPerson[];
   entries: WorklogEntry[];
+  /** Clockwork only: names of the projects the rows belong to. */
+  projects?: Array<{ key: string; name: string }>;
+  /** Clockwork "Của tôi": my open work on any project, offered as empty rows. */
+  openWork?: Array<{ key: string; summary: string; issueType: string; inProgress: boolean }>;
+  /** Clockwork "Của tôi": what I logged in the 30 days before the period, one line per issue (clockworkLayout.ts). */
+  history?: Array<{ key: string; summary: string; issueType: string; lastDate: string; days: number; hours: number }>;
+  /** Clockwork "Của tôi": every project I can browse, for "+ Thêm dự án". */
+  allProjects?: Array<{ key: string; name: string }>;
+  /** Clockwork "Nhóm": the projects this viewer manages, for the project picker. */
+  managed?: Array<{ key: string; name: string }>;
+  /** Clockwork "Của tôi": what the viewer is, which decides whether the team's hours are offered at all. */
+  role?: ClockworkRole;
 }
+
+/** member: their own hours only. pm: also the teams of the projects they administer. manager: every team. */
+export type ClockworkRole = "member" | "pm" | "manager";
 
 /**
  * What PATCH /tasks/:id returns: the edited task, plus every OTHER task the

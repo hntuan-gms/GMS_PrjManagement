@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
-  buildMyRows,
   buildTeamRows,
   cellEntries,
+  cellsOf,
   dayState,
   filterTeam,
   fmtHours,
@@ -11,16 +11,15 @@ import {
   myDayTotals,
   personRows,
   planCell,
+  projectOfKey,
   replacingEntry,
   stableOrder,
-  suggestedTasks,
   teamCounts,
   withEntry,
   withoutEntries,
 } from "../src/timesheetModel";
 import { DEFAULT_WORK_CALENDAR, toWorkCalendar } from "../src/workCalendar";
 import type { TimesheetPerson, WorklogEntry } from "../src/types";
-import { task } from "./fixtures";
 
 const ME = "me";
 const entry = (o: Partial<WorklogEntry> & Pick<WorklogEntry, "id" | "issueKey" | "date" | "hours">): WorklogEntry => ({
@@ -78,52 +77,12 @@ describe("planCell", () => {
   });
 });
 
-describe("buildMyRows", () => {
-  const tasks = [
-    task({ id: "X-1", summary: "Một", assigneeAccountId: ME, statusCategory: "indeterminate" }),
-    task({ id: "X-2", summary: "Hai", assigneeAccountId: ME, statusCategory: "new" }),
-    task({ id: "X-3", summary: "Ba (xong)", assigneeAccountId: ME, statusCategory: "done" }),
-    task({ id: "X-4", summary: "Bốn của người khác", assigneeAccountId: "anh", statusCategory: "indeterminate" }),
-    task({ id: "X-10", summary: "Mười", assigneeAccountId: ME, statusCategory: "indeterminate" }),
-    task({ id: "X-E", summary: "Epic", issueType: "Epic", assigneeAccountId: ME, statusCategory: "indeterminate" }),
-  ];
-  const entries = [
-    entry({ id: "1", issueKey: "X-10", date: DAYS[0], hours: 2 }),
-    entry({ id: "2", issueKey: "X-10", date: DAYS[1], hours: 3 }),
-    entry({ id: "3", issueKey: "X-2", date: DAYS[0], hours: 1 }),
-    entry({ id: "4", issueKey: "X-2", date: DAYS[0], hours: 1.5 }),
-    entry({ id: "5", issueKey: "X-4", date: DAYS[0], hours: 9, authorAccountId: "anh", mine: false }),
-  ];
-
-  it("logged rows first in natural key order, then suggestions; nobody else's hours; no Epic, no finished work", () => {
-    const rows = buildMyRows({ entries, tasks, me: ME, added: [] });
-    assert.deepEqual(rows.map((r) => `${r.key}:${r.kind}`), ["X-2:logged", "X-10:logged", "X-1:suggested"]);
-  });
+describe("cellsOf", () => {
   it("sums a day's several worklogs into one cell and keeps them for the list", () => {
-    const x2 = buildMyRows({ entries, tasks, me: ME, added: [] }).find((r) => r.key === "X-2")!;
-    assert.equal(x2.cells.get(DAYS[0])?.hours, 2.5);
-    assert.equal(x2.cells.get(DAYS[0])?.entries.length, 2);
-    assert.equal(x2.total, 2.5);
-  });
-  it("a task picked by hand is a row even with no hours, and a logged one stays logged", () => {
-    const rows = buildMyRows({ entries, tasks, me: ME, added: ["X-4", "X-10"] });
-    assert.deepEqual(rows.map((r) => `${r.key}:${r.kind}`), ["X-2:logged", "X-10:logged", "X-4:added", "X-1:suggested"]);
-  });
-  it("a task of another project that was logged on still shows, by its worklog's own summary", () => {
-    const rows = buildMyRows({ entries: [entry({ id: "9", issueKey: "OTHER-1", summary: "Ngoài dự án", date: DAYS[0], hours: 1 })], tasks: [], me: ME, added: [] });
-    assert.equal(rows[0].summary, "Ngoài dự án");
-    assert.equal(rows[0].task, null);
-  });
-  it("order keeps a row in its place when it gets its first hours", () => {
-    const before = buildMyRows({ entries: [], tasks, me: ME, added: [] });
-    const order = before.map((r) => r.key);
-    const after = buildMyRows({ entries: [entry({ id: "n", issueKey: "X-10", date: DAYS[0], hours: 1 })], tasks, me: ME, added: [], order: stableOrder([], order) });
-    assert.deepEqual(after.map((r) => r.key), order);
-  });
-  it("suggestions are capped", () => {
-    const many = Array.from({ length: 20 }, (_, i) => task({ id: `M-${i}`, summary: "m", assigneeAccountId: ME, statusCategory: "indeterminate" }));
-    assert.equal(suggestedTasks(many, ME, new Set()).length, 6);
-    assert.equal(buildMyRows({ entries: [], tasks: many, me: ME, added: [], suggestLimit: 3 }).length, 3);
+    const { cells, total } = cellsOf([entry({ id: "3", issueKey: "X-2", date: DAYS[0], hours: 1 }), entry({ id: "4", issueKey: "X-2", date: DAYS[0], hours: 1.5 })]);
+    assert.equal(cells.get(DAYS[0])?.hours, 2.5);
+    assert.equal(cells.get(DAYS[0])?.entries.length, 2);
+    assert.equal(total, 2.5);
   });
 });
 
@@ -154,10 +113,20 @@ describe("dayState", () => {
     assert.equal(dayState(p, "2026-11-03", 0, today, cal), "off");
     assert.equal(dayState(p, "2026-11-07", 0, "2026-11-09", cal), "missing");
   });
-  it("leave is off, and more than the day is over wherever it falls", () => {
+  it("leave is off, and hours on it are extra: a day of leave has no capacity to be over", () => {
     const away = person("p", { absences: [{ from: "2026-11-03", to: "2026-11-03" }] });
     assert.equal(dayState(away, "2026-11-03", 0, today, DEFAULT_WORK_CALENDAR), "off");
-    assert.equal(dayState(away, "2026-11-03", 10, today, DEFAULT_WORK_CALENDAR), "over");
+    assert.equal(dayState(away, "2026-11-03", 10, today, DEFAULT_WORK_CALENDAR), "extra");
+  });
+  it("more than the day is still over on a weekend", () => {
+    assert.equal(dayState(p, "2026-11-07", 10, today, DEFAULT_WORK_CALENDAR), "over");
+  });
+});
+
+describe("projectOfKey", () => {
+  it("reads the project out of a key, hyphens in the key included", () => {
+    assert.equal(projectOfKey("GPM-104"), "GPM");
+    assert.equal(projectOfKey("MY-TEAM-7"), "MY-TEAM");
   });
 });
 

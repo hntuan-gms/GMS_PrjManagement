@@ -969,6 +969,30 @@ export class JiraClient {
   }
 
   /**
+   * The names of the groups the signed-in user belongs to. `expand=groups` on /myself is the one group
+   * read a user needs no admin permission for (it is about themselves). null when Jira leaves it out.
+   */
+  async getMyGroups(): Promise<string[] | null> {
+    const me = await this.request<{ groups?: { items?: Array<{ name?: string }> } }>(`/rest/api/3/myself?expand=groups`);
+    const items = me?.groups?.items;
+    return Array.isArray(items) ? items.map((g) => String(g.name ?? "")).filter(Boolean) : null;
+  }
+
+  /** Name and avatar for account ids we hold but did not get from a member list (a worklog). */
+  async getUsersBulk(accountIds: string[]): Promise<JiraUserLike[]> {
+    const out: JiraUserLike[] = [];
+    for (let i = 0; i < accountIds.length; i += 100) {
+      const q = accountIds
+        .slice(i, i + 100)
+        .map((id) => `accountId=${encodeURIComponent(id)}`)
+        .join("&");
+      const res = await this.request<{ values?: JiraUserLike[] }>(`/rest/api/3/user/bulk?maxResults=100&${q}`);
+      out.push(...(res?.values ?? []));
+    }
+    return out;
+  }
+
+  /**
    * Projects the *user* can browse. Note this endpoint pages with startAt/isLast,
    * unlike /search/jql's nextPageToken — paging it wrong silently hides projects
    * past the first 50.

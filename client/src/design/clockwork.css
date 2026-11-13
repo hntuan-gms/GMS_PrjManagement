@@ -1,0 +1,319 @@
+/* Clockwork "Của tôi": rows gathered by project (TimesheetMine, clockworkLayout.ts). Loaded after timesheet.css. */
+.ts-grid .ts-group-row > th,
+.ts-grid .ts-group-row > td {
+  height: 34px;
+  background: var(--sheet);
+  border-top: 1px solid var(--line);
+}
+.ts-grid tbody .ts-group-row:first-child > * {
+  border-top: 0;
+}
+.ts-group-in {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 100%;
+  padding-right: var(--space-2);
+}
+/* The whole name opens and folds the project. */
+button.ts-group-toggle {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  height: 100%;
+  padding: 0 var(--space-2) 0 10px;
+  border: 0;
+  background: none;
+  color: var(--ink-2);
+  font-size: var(--font-size-sm);
+  text-align: left;
+  cursor: pointer;
+}
+button.ts-group-toggle:hover {
+  color: var(--ink);
+}
+button.ts-group-toggle:focus-visible {
+  outline: 2px solid var(--info);
+  outline-offset: -2px;
+}
+button.ts-group-toggle svg {
+  flex: none;
+  color: var(--ink-3);
+}
+button.ts-group-toggle b {
+  flex: none;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--ink);
+}
+.ts-group-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ts-group-count {
+  flex: none;
+  color: var(--ink-3);
+}
+/* Always drawn, so it is clear it can be pressed; filled in son once pinned. */
+button.ts-pin {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+button.ts-pin:hover {
+  background: var(--sunken);
+  color: var(--ink-2);
+}
+button.ts-pin[aria-pressed="true"] {
+  color: var(--son);
+}
+button.ts-pin[aria-pressed="true"] svg {
+  fill: currentColor;
+}
+/* Hiding a project: a secondary action, shown where the pointer is (and always on a touch screen). */
+button.ts-hide {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--ink-3);
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity var(--d-1) var(--e-out);
+}
+.ts-group-row:hover button.ts-hide,
+.ts-group-row:focus-within button.ts-hide {
+  opacity: 1;
+}
+button.ts-hide:hover {
+  background: var(--sunken);
+  color: var(--ink);
+}
+button.ts-hide:focus-visible,
+button.ts-pin:focus-visible {
+  outline: 2px solid var(--info);
+  outline-offset: -2px;
+}
+@media (hover: none) {
+  button.ts-hide,
+  .ts-mine button.ts-dismiss {
+    opacity: 1;
+  }
+}
+/* The chevron turns rather than being swapped: open points down. */
+.ts-chev {
+  transition: transform var(--d-2) var(--e-move);
+}
+.ts-group-row.is-open .ts-chev {
+  transform: rotate(90deg);
+}
+/* The project line reads as a heading: paper behind it, the key and name a step up. */
+.ts-grid.ts-mine .ts-group-row > th,
+.ts-grid.ts-mine .ts-group-row > td:not(.is-weekend) {
+  background: var(--paper);
+}
+.ts-grid.ts-mine .ts-group-row button.ts-group-toggle {
+  font-size: var(--font-size-md);
+}
+/* Rows slide over each other while opening or folding: each needs its own ground. */
+.ts-grid.ts-mine tbody tr,
+.ts-grid.ts-mine tfoot tr {
+  background: var(--sheet);
+}
+/* Key and name are one button: the name is the link to the task. */
+button.ts-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+button.ts-open .ts-key {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  color: var(--ink-3);
+}
+button.ts-open:hover .ts-sum {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+button.ts-open:hover .ts-key {
+  color: var(--ink-2);
+}
+button.ts-open:focus-visible {
+  outline: 2px solid var(--info);
+  outline-offset: -2px;
+  border-radius: var(--radius-sm);
+}
+.ts-open-ext {
+  flex: none;
+  color: var(--ink-4);
+}
+button.ts-open:hover .ts-open-ext {
+  color: var(--ink-2);
+}
+.ts-grid .ts-group-row > td.ts-group-day {
+  text-align: center;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--font-size-sm);
+  color: var(--ink-3);
+}
+.ts-grid .ts-group-row > td.ts-group-day.is-weekend {
+  background: var(--sunken);
+}
+/* A task with no hours yet: lighter, nothing else. */
+.ts-row.is-empty .ts-sum {
+  color: var(--ink-2);
+}
+.ts-row.is-empty .ts-key {
+  color: var(--ink-3);
+}
+.ts-add-in {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 100%;
+  padding-left: 26px;
+}
+.ts-add-in button.ts-add {
+  margin-left: 0;
+}
+/* "Hiện thêm n việc ⌄" / "Thu gọn ⌃": one toggle in one place, the chevron says which way it goes. */
+button.ts-more-rows,
+button.ts-others {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--ink-2);
+  font-size: var(--font-size-md);
+  cursor: pointer;
+}
+button.ts-more-rows:hover,
+button.ts-others:hover {
+  background: var(--sunken);
+  color: var(--ink);
+}
+button.ts-more-rows:focus-visible,
+button.ts-others:focus-visible,
+button.ts-add:focus-visible {
+  outline: 2px solid var(--info);
+  outline-offset: -2px;
+}
+button.ts-more-rows svg {
+  transition: transform var(--d-2) var(--e-move);
+}
+button.ts-more-rows[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+.ts-add-in button.ts-more-rows {
+  margin-left: var(--space-2);
+}
+/* "+ Thêm dự án": the same kind of button as "+ Thêm việc", one level out (lined up with the project names). */
+button.ts-others {
+  margin-left: 6px;
+}
+.ts-grid .ts-others-row > * {
+  border-top: 1px solid var(--line);
+  border-bottom: 0;
+}
+/* Every working day of a row is a field: a faint box says so before anything is typed. */
+.ts-grid.ts-mine td.ts-cell:not(.is-weekend):not(.is-away)::after {
+  content: "";
+  position: absolute;
+  inset: 5px 7px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  pointer-events: none;
+}
+.ts-grid.ts-mine td.ts-cell:focus-within::after {
+  border-color: transparent;
+}
+/* Clockwork "Của tôi": the task's name gets the room, the days and the total take what they need. */
+.ts-grid.ts-mine {
+  table-layout: fixed;
+  min-width: calc(var(--ts-first) + 7 * 64px + 96px);
+}
+.ts-grid.ts-mine .ts-task-h,
+.ts-grid.ts-mine .ts-task {
+  width: auto;
+  min-width: 0;
+  max-width: none;
+}
+.ts-grid.ts-mine thead th.ts-day {
+  width: 76px;
+}
+.ts-grid.ts-mine.is-month {
+  min-width: calc(var(--ts-first) + 31 * 38px + 96px);
+}
+.ts-grid.ts-mine.is-month thead th.ts-day {
+  width: 38px;
+}
+.ts-grid.ts-mine .ts-total-h {
+  width: 104px;
+  min-width: 0;
+}
+.ts-group-total {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.tf-bar select.ts-team-project {
+  flex: none;
+  width: auto;
+}
+
+/* "+ Thêm việc" draws its + as an icon, like "+ Thêm dự án". */
+.ts-add-in button.ts-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+/* Inside the open button the name only takes its own width, so the "opens in a new tab" arrow sits right after it. */
+button.ts-open .ts-sum {
+  flex: 0 1 auto;
+}
+.ts-grid.ts-mine .ts-group-title {
+  color: var(--ink);
+  font-weight: 500;
+}
+/* App.css centres a button's content and paints a hover ground; this one is a line of text. */
+.ts-grid.ts-mine button.ts-open,
+.ts-grid.ts-mine button.ts-open:hover {
+  justify-content: flex-start;
+  background: none;
+}

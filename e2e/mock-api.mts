@@ -8,6 +8,7 @@ import { autoFieldMap, FIELD_SOURCES, mappableFields } from "../server/src/kbkt/
 import { parseWorkbook } from "../server/src/kbkt/parse.ts";
 import { DEFAULT_SETTINGS, validateSettings } from "../server/src/kbkt/settings.ts";
 import { AppError } from "../server/src/errors.ts";
+import { canManage, roleOf, type Viewer } from "../server/src/viewerRoles.ts";
 import { validateFilterInput } from "../server/src/savedFilters.ts";
 import { calendarOf, DEFAULT_SLA_SETTINGS, validateCalendar, validateSlaSettings } from "../server/src/sla.ts";
 import { KbktSync, type LogLine } from "../server/src/kbkt/sync.ts";
@@ -428,7 +429,7 @@ app.post("/api/__worklogs/fail", (req, r) => { failWorklogWrites = !!req.body?.o
 app.post("/api/timesheet/worklogs", (req, res) => {
   if (failWorklogWrites) return res.status(400).json({ error: "Jira từ chối ghi giờ" });
   const b = req.body ?? {};
-  const t = tasks.find((x: any) => x.id === b.issueKey);
+  const t = tasks.find((x: any) => x.id === b.issueKey) ?? foreignIssues.find((x) => x.key === b.issueKey);
   const w = { id: `w${++worklogSeq}`, issueKey: b.issueKey, summary: t?.summary ?? b.issueKey, issueType: t?.issueType ?? "Task", authorAccountId: "me", authorName: "Tuấn Test", date: b.date, hours: b.hours, comment: b.comment ?? null, mine: true };
   worklogs.push(w);
   res.status(201).json(w);
@@ -995,6 +996,84 @@ app.delete("/api/filters/:id", (req, res) => {
   savedFilters = savedFilters.filter((x) => !(x.id === req.params.id && x.createdBy === "me"));
   if (savedFilters.length === before) return res.status(404).json({ error: "Không tìm thấy bộ lọc." });
   res.status(204).end();
+});
+
+// --- Clockwork: a person across projects --------------------------------------------------------
+// The REAL rules (server/src/viewerRoles.ts) decide who may read a team; only the data is memory.
+// The signed-in account manages DEMO by default; POST /api/__clockwork/role switches it to a plain
+// member or a resource manager.
+let clockworkRole: "member" | "pm" | "manager" = "pm";
+const viewerNow = (): Viewer => ({
+  accountId: "me",
+  manager: clockworkRole === "manager",
+  pmOf: new Set(clockworkRole === "pm" ? ["DEMO"] : []),
+  accessible: new Set(PROJECTS.map((p) => p.key)),
+});
+app.post("/api/__clockwork/role", (req, r) => { clockworkRole = req.body?.role ?? "pm"; r.json({}); });
+const capacityOf = (id: string) => profiles.find((p) => p.accountId === id)?.capacityHoursPerDay ?? 8;
+// My hours on every project (an issue of OTHER is logged through X-Project-Key: OTHER).
+const otherIssues = [{ key: "OTHER-7", summary: "Hỗ trợ triển khai", issueType: "Task", inProgress: true }];
+const personSheet = (id: string, from: string, to: string) => ({
+  accountId: id, displayName: nameOf(id) ?? id, avatarUrl: null, capacityHoursPerDay: capacityOf(id),
+  absences: absences.filter((a) => a.accountId === id && a.from <= to).map((a) => ({ from: a.from, to: a.to })), outsider: false,
+});
+// A project I can browse with nothing on the page: what "+ Thêm dự án" offers.
+const TRAIN = { key: "TRAIN", name: "Đào tạo nội bộ" };
+const shiftIso = (iso: string, n: number) => {
+  const d = new Date(iso + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+};
+app.get("/api/clockwork", (req, res) => {
+  const { from, to } = req.query as Record<string, string>;
+  res.json({
+    role: roleOf(viewerNow()), from, to,
+    people: [personSheet("me", from, to)],
+    entries: worklogs.filter((w) => w.authorAccountId === "me" && w.date >= from && w.date <= to),
+    projects: PROJECTS.map((p) => ({ key: p.key, name: p.name })),
+    allProjects: [...PROJECTS.map((p) => ({ key: p.key, name: p.name })), TRAIN],
+    // Logged before the period: DEMO-5 (not mine any more) three days before it began.
+    history: [{ key: "DEMO-5", summary: "Thiết kế cơ sở dữ liệu", issueType: "Task", lastDate: shiftIso(from, -3), days: 2, hours: 5 }],
+    openWork: [
+      ...tasks.filter((t: any) => t.assigneeAccountId === "me" && t.statusCategory !== "done").map((t: any) => ({ key: t.id, summary: t.summary, issueType: t.issueType, inProgress: t.statusCategory === "indeterminate" })),
+      ...otherIssues,
+    ],
+  });
+});
+// "+ Thêm việc": issues of ANY project by key or title, narrowed to `project` when given; with nothing typed and a
+// project, what is likely next there. (The real route builds JQL; here a plain match.)
+const foreignIssues = [
+  ...otherIssues,
+  { key: "OTHER-12", summary: "Rà soát hợp đồng khách hàng", issueType: "Task", inProgress: false },
+  { key: "OTHER-13", summary: "Chuẩn bị tài liệu đào tạo", issueType: "Task", inProgress: false },
+  { key: "OTHER-14", summary: "Đã xong: bàn giao hợp đồng", issueType: "Task", inProgress: false, done: true },
+  { key: "TRAIN-1", summary: "Họp đào tạo hằng tuần", issueType: "Task", inProgress: false },
+];
+app.get("/api/clockwork/issues", (req, res) => {
+  const q = String(req.query.q ?? "").trim().toLowerCase();
+  const project = String(req.query.project ?? "").trim().toUpperCase();
+  const pool = [
+    ...tasks.map((t: any) => ({ key: t.id, summary: t.summary, issueType: t.issueType, inProgress: t.statusCategory === "indeterminate", done: t.statusCategory === "done" })),
+    ...foreignIssues,
+  ];
+  const inProject = pool.filter((i) => !project || i.key.startsWith(project + "-"));
+  if (!q) return res.json(project ? inProject.slice(0, 20) : []);
+  if (q.length < 2) return res.json([]);
+  const byKey = pool.filter((i) => i.key.toLowerCase() === q);
+  if (byKey.length) return res.json(byKey);
+  res.json(inProject.filter((i) => i.summary.toLowerCase().includes(q)).slice(0, 20));
+});
+app.get("/api/clockwork/team", (req, res) => {
+  const { from, to } = req.query as Record<string, string>;
+  const viewer = viewerNow();
+  if (roleOf(viewer) === "member") return res.status(403).json({ error: "Chỉ quản lý dự án hoặc quản lý nguồn lực mới xem giờ của cả nhóm được.", code: "TEAM_FORBIDDEN" });
+  res.json({
+    from, to,
+    people: users.map((u) => personSheet(u.accountId, from, to)),
+    entries: worklogs.filter((w) => w.date >= from && w.date <= to),
+    projects: PROJECTS.map((p) => ({ key: p.key, name: p.name })),
+    managed: PROJECTS.filter((p) => canManage(viewer, p.key)).map((p) => ({ key: p.key, name: p.name })),
+  });
 });
 
 const port = Number(process.env.MOCK_PORT ?? 4000);

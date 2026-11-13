@@ -1,22 +1,20 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { flushSync } from "react-dom";
+import { api } from "../api";
+import { layoutClockwork, otherProjects, togglePin, type ProjectGroup } from "../clockworkLayout";
 import { toast } from "../toast";
-import { orderTasksForLogging, parseHours } from "../parseHours";
+import { buildTaskLink } from "../deepLink";
+import { parseHours } from "../parseHours";
 import { expectation, isAway } from "../timesheetDays";
-import {
-  buildMyRows,
-  cellEntries,
-  dayState,
-  fmtHours,
-  myDayTotals,
-  stableOrder,
-  type Cell,
-  type TaskRow,
-} from "../timesheetModel";
+import { cellEntries, dayState, fmtHours, myDayTotals, projectOfKey, type Cell, type OpenWork, type TaskRow } from "../timesheetModel";
+import { remoteAsTask } from "../taskPickerModel";
 import type { Task, Timesheet, TimesheetPerson } from "../types";
 import type { TimesheetOps } from "../useTimesheet";
 import { useWorkCalendar } from "./workCalendarContext";
 import { dayLabel } from "../workCalendar";
 import { dayClass } from "../timesheetDays";
+import CellPicker from "./CellPicker";
+import { Icon } from "./Icons";
 import Metric, { MetricRow } from "./Metric";
 import StatusGlyph from "./StatusGlyph";
 import TaskPicker from "./TaskPicker";
@@ -25,11 +23,41 @@ import { WEEKDAYS_LONG, dm, weekday } from "../timesheetRange";
 
 const NO_KEYS: string[] = [];
 
+/** A motion token from tokens.css, in ms (a reduced-motion setting shortens them there). */
+function cssMs(name: string, fallback: number): number {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const n = parseFloat(v);
+  return Number.isFinite(n) ? (v.endsWith("ms") ? n : n * 1000) : fallback;
+}
+function cssVar(name: string, fallback: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+}
+const reducedMotion = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/** Per person, per site, in this browser: which projects are pinned, and which were opened or folded by hand. */
+function readPref<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+function writePref(key: string, value: unknown): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    /* private window: not remembered */
+  }
+}
+
 /**
- * "Của tôi": my hours as task × day, every cell a field. Type 4, 1,5 or 2h30 and press Enter: it is logged in Jira
- * under your name and the next row's cell is under the cursor, like a spreadsheet. A task you have not logged on yet
- * is already a row when it is yours and open, so a normal day is typing three numbers. Clearing a cell removes the
- * worklog (with "Hoàn tác"); a cell holding several worklogs opens its list.
+ * "Của tôi": my hours as task × day on every project, every cell a field. Type 4, 1,5 or 2h30 and press Enter: it
+ * is logged in Jira under your name and the next row's cell is under the cursor, like a spreadsheet.
+ *
+ * Rows are gathered by project. Which projects come first, which are open and which tasks are rows is decided in
+ * clockworkLayout.ts (from a backtest on real worklogs): what I logged lately leads, a pin puts a project on top,
+ * and each project has its own "+ Thêm việc", because new work almost always lands in a project already in use.
  */
 export default function TimesheetMine({
   sheet,
@@ -37,6 +65,7 @@ export default function TimesheetMine({
   month,
   today,
   me,
+  prefsKey,
   tasks,
   ops,
   focusDate,
@@ -49,6 +78,8 @@ export default function TimesheetMine({
   month: boolean;
   today: string;
   me: string;
+  /** Site + account: pins and folds are kept per person. */
+  prefsKey: string;
   tasks: Task[];
   ops: TimesheetOps;
   /** A day another screen asked to land on (a click on your own cell in "Cả nhóm"). */
@@ -65,27 +96,193 @@ export default function TimesheetMine({
     [sheet.people, me]
   );
 
-  // Tasks picked with "+ Thêm việc" this session, the ones dropped again, and the order rows were first shown in:
-  // a row keeps its place when it gets its first hours instead of jumping up under the cursor.
+  // Kept in this browser for the person: pins, and projects opened or folded by hand.
+  const pinKey = `gms.cw.pins.${prefsKey}`;
+  const openKey = `gms.cw.open.${prefsKey}`;
+  const [pinned, setPinned] = useState<string[]>(() => readPref(pinKey, [] as string[]));
+  const [openOverride, setOpenOverride] = useState<Record<string, boolean>>(() => readPref(openKey, {} as Record<string, boolean>));
+  const setOpen = (project: string, open: boolean) =>
+    setOpenOverride((cur) => {
+      const next = { ...cur, [project]: open };
+      writePref(openKey, next);
+      return next;
+    });
+  const pin = (project: string) =>
+    setPinned((cur) => {
+      const next = togglePin(cur, project);
+      writePref(pinKey, next);
+      return next;
+    });
+  // Hidden projects, and rows closed with ×: kept too, or a dead project's tasks would be back next week.
+  const hiddenKey = `gms.cw.hidden.${prefsKey}`;
+  const closedKey = `gms.cw.closed.${prefsKey}`;
+  const [hiddenProjects, setHiddenProjects] = useState<string[]>(() => readPref(hiddenKey, [] as string[]));
+  const [dismissed, setDismissed] = useState<string[]>(() => readPref(closedKey, [] as string[]));
+  const keepHidden = (f: (cur: string[]) => string[]) =>
+    setHiddenProjects((cur) => {
+      const next = f(cur);
+      writePref(hiddenKey, next);
+      return next;
+    });
+  const keepClosed = (f: (cur: string[]) => string[]) =>
+    setDismissed((cur) => {
+      const next = f(cur).slice(-500);
+      writePref(closedKey, next);
+      return next;
+    });
+  const hideProject = (project: string) => {
+    keepHidden((x) => (x.includes(project) ? x : [...x, project]));
+    setExtraProjects((x) => x.filter((p) => p !== project));
+    toast(`Đã ẩn ${project}. Mở lại từ "Dự án khác".`, { action: { label: "Hoàn tác", run: () => keepHidden((x) => x.filter((p) => p !== project)) } });
+  };
+  const closeRow = (key: string) => {
+    keepClosed((x) => (x.includes(key) ? x : [...x, key]));
+    toast(`Đã ẩn ${key}`, { action: { label: "Hoàn tác", run: () => keepClosed((x) => x.filter((k) => k !== key)) } });
+  };
+
+  // This period only: rows picked by hand, projects brought in, "+n việc khác" opened, and the order rows and
+  // projects were first drawn in (so nothing moves while typing).
   const [added, setAdded] = useState<string[]>([]);
-  const [dismissed, setDismissed] = useState<string[]>([]);
-  const [order, setOrder] = useState<{ range: string; keys: string[] }>({ range: rangeKey, keys: [] });
+  const [extraProjects, setExtraProjects] = useState<string[]>([]);
+  const [showAll, setShowAll] = useState<string[]>([]);
+  const [order, setOrder] = useState<{ range: string; rows: string[]; projects: string[] }>({ range: rangeKey, rows: [], projects: [] });
   const [forRange, setForRange] = useState(rangeKey);
   if (forRange !== rangeKey) {
-    // A new period starts without last period's hand-picked rows.
     setForRange(rangeKey);
     setAdded([]);
-    setDismissed([]);
+    setShowAll([]);
   }
-  const placed = useMemo(() => (order.range === rangeKey ? order.keys : NO_KEYS), [order, rangeKey]);
-  const rows = useMemo(
-    () => buildMyRows({ entries: sheet.entries, tasks, me, added, order: placed }).filter((r) => !(dismissed.includes(r.key) && r.total === 0)),
-    [sheet.entries, tasks, me, added, placed, dismissed]
+  const placedRows = order.range === rangeKey ? order.rows : NO_KEYS;
+  const placedProjects = order.range === rangeKey ? order.projects : NO_KEYS;
+
+  // Opening and folding move the rows below smoothly instead of jumping (FLIP: each row is drawn where it was,
+  // then slides to where it is now; new rows fade in one after another). Only after a click that asked for it:
+  // typing hours or a fresh read never animates. Rows that leave fade out first, then the rest close the gap.
+  const table = useRef<HTMLTableElement>(null);
+  const animateNext = useRef(false);
+  const lastTops = useRef<Map<string, number>>(new Map());
+  useLayoutEffect(() => {
+    const el = table.current;
+    if (!el) return;
+    const trs = [...el.querySelectorAll<HTMLTableRowElement>("tr[data-flip]")];
+    const tops = new Map(trs.map((tr) => [tr.dataset.flip!, tr.offsetTop]));
+    if (animateNext.current && !reducedMotion()) {
+      const move = cssMs("--d-3", 220);
+      const easeMove = cssVar("--e-move", "ease-out");
+      const easeOut = cssVar("--e-out", "ease-out");
+      let n = 0;
+      for (const tr of trs) {
+        const before = lastTops.current.get(tr.dataset.flip!);
+        const now = tops.get(tr.dataset.flip!)!;
+        if (before === undefined) {
+          tr.animate([{ opacity: 0, transform: "translateY(-6px)" }, { opacity: 1, transform: "none" }], {
+            duration: move,
+            delay: Math.min(n++, 12) * 22,
+            easing: easeOut,
+            fill: "backwards",
+          });
+        } else if (Math.abs(before - now) > 0.5) {
+          tr.animate([{ transform: `translateY(${before - now}px)` }, { transform: "none" }], { duration: move + 40, easing: easeMove });
+        }
+      }
+    }
+    animateNext.current = false;
+    lastTops.current = tops;
+  });
+  /** A change that opens rows: the layout effect animates it. */
+  const opening = (change: () => void) => {
+    animateNext.current = true;
+    change();
+  };
+  /** Fade out the rows that are about to go, then make the change; the rows below then slide up. */
+  const closing = (leaving: string[], change: () => void) => {
+    const els = leaving
+      .map((k) => table.current?.querySelector<HTMLElement>(`tr[data-flip="${CSS.escape(k)}"]`))
+      .filter((e): e is HTMLElement => !!e);
+    if (!els.length || reducedMotion()) {
+      animateNext.current = true;
+      change();
+      return;
+    }
+    const out = cssMs("--d-2", 150);
+    const anims = els.map((e) => e.animate([{ opacity: 1 }, { opacity: 0, transform: "translateY(-4px)" }], { duration: out, easing: cssVar("--e-in", "ease-in"), fill: "forwards" }));
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      animateNext.current = true;
+      flushSync(change);
+      // A row that stays after all must not be left invisible.
+      for (const a of anims) a.cancel();
+    };
+    Promise.all(anims.map((a) => a.finished)).then(finish, finish);
+    setTimeout(finish, out + 80);
+  };
+  const toggleGroup = (group: ProjectGroup) => {
+    if (group.open) closing([...group.rows.map((r) => `row:${r.key}`), `add:${group.project}`], () => setOpen(group.project, false));
+    else opening(() => setOpen(group.project, true));
+  };
+  const showMore = (project: string) => opening(() => setShowAll((x) => [...x, project]));
+  /** "Thu gọn": back to the first rows. The project's rows are laid out again, or those drawn would all stay. */
+  const showLess = (group: ProjectGroup) => {
+    const keep = new Set(group.base);
+    closing(
+      group.rows.filter((r) => !keep.has(r.key)).map((r) => `row:${r.key}`),
+      () => {
+        setShowAll((x) => x.filter((p) => p !== group.project));
+        setOrder((o) => ({ ...o, rows: o.rows.filter((k) => projectOfKey(k) !== group.project) }));
+      }
+    );
+  };
+  /** A task of this project opens in the panel; one of another project in a new tab, on its own project. */
+  const openRow = (row: TaskRow) => {
+    if (row.task) onOpenTask(row.task);
+    else window.open(buildTaskLink(window.location.origin, row.key), "_blank", "noopener");
+  };
+
+  // What was picked from a search: in neither the plan nor my open work, so the row needs its name from here.
+  const [picked, setPicked] = useState<ReadonlyMap<string, OpenWork>>(new Map());
+  const openWork = useMemo(() => {
+    const have = new Set((sheet.openWork ?? []).map((w) => w.key));
+    return [...(sheet.openWork ?? []), ...[...picked.values()].filter((w) => !have.has(w.key))];
+  }, [sheet.openWork, picked]);
+
+
+  const layout = useMemo(
+    () =>
+      layoutClockwork({
+        entries: sheet.entries,
+        history: sheet.history ?? [],
+        openWork,
+        tasks,
+        me,
+        added,
+        dismissed,
+        pinned,
+        extraProjects,
+        hiddenProjects,
+        openOverride,
+        showAll,
+        today,
+        calendar,
+        rowOrder: placedRows,
+        projectOrder: placedProjects,
+      }),
+    [sheet.entries, sheet.history, openWork, tasks, me, added, dismissed, pinned, extraProjects, hiddenProjects, openOverride, showAll, today, calendar, placedRows, placedProjects]
   );
-  const nextOrder = stableOrder(placed, rows.map((r) => r.key));
-  if (order.range !== rangeKey || nextOrder.length !== order.keys.length || nextOrder.some((k, i) => k !== order.keys[i])) {
-    setOrder({ range: rangeKey, keys: nextOrder });
+  const { groups } = layout;
+  const same = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((k, i) => k === b[i]);
+  if (order.range !== rangeKey || !same(order.rows, layout.rowOrder) || !same(order.projects, layout.projectOrder)) {
+    setOrder({ range: rangeKey, rows: layout.rowOrder, projects: layout.projectOrder });
   }
+  // The rows drawn, in order: what the arrow keys walk.
+  const rows = useMemo(() => groups.flatMap((g) => (g.open ? g.rows : [])), [groups]);
+  const projectName = useMemo(() => {
+    const m = new Map((sheet.allProjects ?? []).map((p) => [p.key, p.name]));
+    for (const p of sheet.projects ?? []) m.set(p.key, p.name);
+    return m;
+  }, [sheet.allProjects, sheet.projects]);
+  const others = useMemo(() => otherProjects(sheet.allProjects ?? [], groups.map((g) => g.project)), [sheet.allProjects, groups]);
 
   const totals = useMemo(() => myDayTotals(sheet.entries), [sheet.entries]);
   const hoursOn = (d: string) => totals.get(d) ?? 0;
@@ -106,7 +303,9 @@ export default function TimesheetMine({
   }, [focusDate, onFocusDone, rows.length]);
 
   const [list, setList] = useState<{ rect: DOMRect; row: TaskRow; date: string } | null>(null);
-  const [pick, setPick] = useState<DOMRect | null>(null);
+  // A project's "+ Thêm việc": the picker opens on what is likely next there, read from Jira as it opens.
+  const [pick, setPick] = useState<{ rect: DOMRect; project: string; list: Task[] | null } | null>(null);
+  const [pickProject, setPickProject] = useState<DOMRect | null>(null);
   // A row just picked takes the cursor on today's cell as soon as it is drawn.
   const landOn = useRef<string | null>(null);
   const landDate = days.includes(today) ? today : days[0];
@@ -114,8 +313,28 @@ export default function TimesheetMine({
     if (landOn.current && focusCell(landOn.current, landDate)) landOn.current = null;
   }, [rows.length, landDate]);
 
-  const loggable = useMemo(() => orderTasksForLogging(tasks, me, sheet.entries), [tasks, me, sheet.entries]);
-  const shownKeys = useMemo(() => rows.map((r) => r.key), [rows]);
+  /** What a project's picker offers before anything is typed: what I know of it here, then what Jira adds. */
+  function openPicker(rect: DOMRect, project: string) {
+    const inProject = (key: string) => projectOfKey(key) === project;
+    const local: Task[] = [
+      ...tasks.filter((t) => inProject(t.id)),
+      ...(sheet.history ?? []).filter((h) => inProject(h.key)).map((h) => remoteAsTask({ key: h.key, summary: h.summary, issueType: h.issueType })),
+      ...openWork.filter((w) => inProject(w.key)).map((w) => remoteAsTask(w)),
+    ];
+    const known = local.filter((t, i) => local.findIndex((x) => x.id === t.id) === i);
+    setPick({ rect, project, list: known.length ? known : null });
+    api
+      .searchClockworkIssues("", project)
+      .then((found) => {
+        // Merged here, not inside the state update: React may run an updater twice.
+        const have = new Set(known.map((t) => t.id));
+        const list = [...known, ...found.filter((r) => !have.has(r.key)).map(remoteAsTask)];
+        setPick((p) => (p && p.project === project ? { ...p, list } : p));
+      })
+      .catch(() => setPick((p) => (p && p.project === project ? { ...p, list: known } : p)));
+  }
+  const pickFor = pick?.project ?? null;
+  const remote = useMemo(() => (pickFor ? (q: string) => api.searchClockworkIssues(q, pickFor) : undefined), [pickFor]);
 
   /** Move between cells like a spreadsheet: by row and column index. */
   function move(from: HTMLElement, dr: number, dc: number): boolean {
@@ -148,7 +367,7 @@ export default function TimesheetMine({
       </MetricRow>
 
       <div className="ts-grid-scroll" ref={wrap}>
-        <table className={`ts-grid ts-mine${month ? " is-month" : ""}`} data-ts="mine">
+        <table ref={table} className={`ts-grid ts-mine${month ? " is-month" : ""}`} data-ts="mine">
           <thead>
             <tr>
               <th className="ts-task-h" scope="col">Việc</th>
@@ -159,60 +378,114 @@ export default function TimesheetMine({
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 && (
+            {groups.length === 0 && (
               <tr>
                 <td colSpan={colSpan} className="ts-empty-row">
                   Chưa có việc nào
                 </td>
               </tr>
             )}
-            {rows.map((row, r) => (
-              <tr key={row.key} className={`ts-row is-${row.kind}`}>
-                <th className="ts-task" scope="row">
-                  <div className="ts-task-in">
-                    {row.task ? <StatusGlyph category={row.task.statusCategory} name={row.task.statusName} percent={row.task.percentComplete} /> : <span className="ts-glyph-none" aria-hidden="true" />}
-                    <button type="button" className="ts-key" onClick={() => row.task && onOpenTask(row.task)} disabled={!row.task} title={row.task ? "Mở việc" : "Việc ngoài dự án này"}>
-                      {row.key}
-                    </button>
-                    <span className="ts-sum" title={row.summary}>{row.summary}</span>
-                    {row.kind === "suggested" && <span className="ts-hint" title="Việc của bạn đang mở">gợi ý</span>}
-                    {row.kind !== "logged" && row.total === 0 && (
-                      <button type="button" className="ts-dismiss" aria-label={`Bỏ dòng ${row.key}`} title="Bỏ dòng này" onClick={() => setDismissed((x) => [...x, row.key])}>
-                        ×
-                      </button>
-                    )}
-                  </div>
-                </th>
-                {days.map((d, c) => (
-                  <HourCell
-                    key={d}
-                    row={row}
-                    date={d}
-                    r={r}
-                    c={c}
-                    cell={row.cells.get(d)}
-                    away={isAway(person, d)}
-                    capacity={person.capacityHoursPerDay}
-                    today={today}
-                    ops={ops}
-                    move={move}
-                    openList={(rect) => setList({ rect, row, date: d })}
-                  />
-                ))}
-                <td className="ts-total"><b>{row.total > 0 ? fmtHours(row.total) : ""}</b></td>
-              </tr>
+            {groups.map((group) => (
+              <Fragment key={group.project}>
+                <GroupRow
+                  group={group}
+                  name={projectName.get(group.project)}
+                  days={days}
+                  today={today}
+                  onToggle={() => toggleGroup(group)}
+                  onPin={() => pin(group.project)}
+                  onHide={() => hideProject(group.project)}
+                />
+                {group.open &&
+                  group.rows.map((row) => {
+                    const r = rows.indexOf(row);
+                    return (
+                      <tr key={row.key} className={`ts-row is-${row.kind}${row.total === 0 ? " is-empty" : ""}`} data-project={group.project} data-flip={`row:${row.key}`}>
+                        <th className="ts-task" scope="row">
+                          <div className="ts-task-in">
+                            {row.task ? <StatusGlyph category={row.task.statusCategory} name={row.task.statusName} percent={row.task.percentComplete} /> : <span className="ts-glyph-none" aria-hidden="true" />}
+                            <button
+                              type="button"
+                              className="ts-open"
+                              onClick={() => openRow(row)}
+                              title={row.task ? `Mở ${row.key}: ${row.summary}` : `Mở ${row.key} trong tab mới (dự án ${row.project})`}
+                            >
+                              <span className="ts-key">{row.key}</span>
+                              <span className="ts-sum">{row.summary}</span>
+                              {!row.task && <Icon name="external" size={12} className="ts-open-ext" />}
+                            </button>
+                            {row.kind !== "logged" && row.total === 0 && (
+                              <button type="button" className="ts-dismiss" aria-label={`Ẩn dòng ${row.key}`} title="Ẩn dòng này" onClick={() => closeRow(row.key)}>
+                                ×
+                              </button>
+                            )}
+                          </div>
+                        </th>
+                        {days.map((d, c) => (
+                          <HourCell
+                            key={d}
+                            row={row}
+                            date={d}
+                            r={r}
+                            c={c}
+                            cell={row.cells.get(d)}
+                            away={isAway(person, d)}
+                            capacity={person.capacityHoursPerDay}
+                            today={today}
+                            ops={ops}
+                            move={move}
+                            openList={(rect) => setList({ rect, row, date: d })}
+                          />
+                        ))}
+                        <td className="ts-total"><b>{row.total > 0 ? fmtHours(row.total) : ""}</b></td>
+                      </tr>
+                    );
+                  })}
+                {group.open && (
+                  <tr className="ts-add-row" data-project={group.project} data-flip={`add:${group.project}`}>
+                    <th className="ts-task" scope="row">
+                      <div className="ts-add-in">
+                        <button type="button" className="ts-add" onClick={(e) => openPicker(e.currentTarget.getBoundingClientRect(), group.project)}>
+                          <Icon name="plus" size={14} />
+                          Thêm việc
+                        </button>
+                        {(group.more > 0 || group.expanded) && (
+                          <button
+                            type="button"
+                            className="ts-more-rows"
+                            aria-expanded={group.more === 0}
+                            onClick={() => (group.more > 0 ? showMore(group.project) : showLess(group))}
+                          >
+                            {group.more > 0 ? `Hiện thêm ${group.more} việc` : "Thu gọn"}
+                            <Icon name="chevronDown" size={14} />
+                          </button>
+                        )}
+                      </div>
+                    </th>
+                    <td colSpan={colSpan - 1} />
+                  </tr>
+                )}
+              </Fragment>
             ))}
-            <tr className="ts-add-row">
-              <th className="ts-task" scope="row">
-                <button type="button" className="ts-add" onClick={(e) => setPick(e.currentTarget.getBoundingClientRect())}>
-                  + Thêm việc
-                </button>
-              </th>
-              <td colSpan={colSpan - 1} />
-            </tr>
+            {others.length > 0 && (
+              <tr className="ts-others-row" data-flip="others">
+                <th className="ts-task" scope="row">
+                  <button
+                    type="button"
+                    className="ts-others"
+                    title={`Chọn trong ${others.length} dự án bạn xem được nhưng chưa có ở đây`}
+                    onClick={(e) => setPickProject(e.currentTarget.getBoundingClientRect())}
+                  >
+                    <Icon name="plus" size={14} />
+                    Thêm dự án
+                  </button>
+                </th>
+                <td colSpan={colSpan - 1} />
+              </tr>
+            )}
           </tbody>
           <tfoot>
-            <tr>
+            <tr data-flip="foot">
               <th className="ts-task" scope="row">Cả ngày</th>
               {days.map((d) => {
                 const h = hoursOn(d);
@@ -223,6 +496,7 @@ export default function TimesheetMine({
                   : st === "short" ? `Còn thiếu ${fmtHours(person.capacityHoursPerDay - h)}h`
                   : st === "over" ? `Vượt công suất ${fmtHours(h - person.capacityHoursPerDay)}h`
                   : st === "full" ? "Đủ ngày"
+                  : st === "extra" && isAway(person, d) ? "Ghi giờ trong ngày nghỉ phép"
                   : dayLabel(d, calendar) || undefined;
                 return (
                   <td key={d} className={`ts-foot st-${st} ${dayClass(d, calendar)}${d === today ? " is-today" : ""}`} title={hint}>
@@ -256,20 +530,106 @@ export default function TimesheetMine({
       )}
       {pick && (
         <TaskPicker
-          anchor={pick}
-          tasks={loggable}
-          exclude={shownKeys}
-          placeholder="Thêm việc vào bảng giờ"
+          anchor={pick.rect}
+          tasks={pick.list}
+          exclude={groups.find((g) => g.project === pick.project)?.rows.map((r) => r.key) ?? NO_KEYS}
+          remote={remote}
+          placeholder={`Thêm việc vào ${pick.project}`}
           onPick={(t) => {
             setPick(null);
-            setDismissed((x) => x.filter((k) => k !== t.id));
+            // Not in the plan and not mine: keep what the search told us so the row has a name.
+            if (!tasks.some((x) => x.id === t.id) && !(sheet.openWork ?? []).some((w) => w.key === t.id)) {
+              setPicked((m) => new Map(m).set(t.id, { key: t.id, summary: t.summary, issueType: t.issueType, inProgress: t.statusCategory === "indeterminate" }));
+            }
+            if (dismissed.includes(t.id)) keepClosed((x) => x.filter((k) => k !== t.id));
             setAdded((a) => (a.includes(t.id) ? a : [...a, t.id]));
+            const project = projectOfKey(t.id);
+            if (openOverride[project] === false) setOpen(project, true);
             if (!focusCell(t.id, landDate)) landOn.current = t.id;
           }}
           onClose={() => setPick(null)}
         />
       )}
+      {pickProject && (
+        <CellPicker
+          anchor={pickProject}
+          items={others.map((p) => ({ id: p.key, label: p.name, lead: <span className="tp-key">{p.key}</span> }))}
+          placeholder="Tìm dự án"
+          onPick={(it) => {
+            setPickProject(null);
+            setExtraProjects((x) => (x.includes(it.id) ? x : [...x, it.id]));
+            if (hiddenProjects.includes(it.id)) keepHidden((x) => x.filter((p) => p !== it.id));
+            if (openOverride[it.id] === false) setOpen(it.id, true);
+          }}
+          onClose={() => setPickProject(null)}
+        />
+      )}
     </>
+  );
+}
+
+/**
+ * The line that opens a project's rows. The whole name is the open/fold button; beside it what was logged on each
+ * day, the total, and the pin, which is always drawn so it is clear it can be pressed.
+ */
+function GroupRow({
+  group,
+  name,
+  days,
+  today,
+  onToggle,
+  onPin,
+  onHide,
+}: {
+  group: ProjectGroup;
+  name: string | undefined;
+  days: string[];
+  today: string;
+  onToggle: () => void;
+  onPin: () => void;
+  onHide: () => void;
+}) {
+  const calendar = useWorkCalendar();
+  const label = name ? `${group.project} ${name}` : group.project;
+  return (
+    <tr className={`ts-group-row${group.open ? " is-open" : ""}${group.pinned ? " is-pinned" : ""}`} data-project={group.project} data-flip={`group:${group.project}`}>
+      <th className="ts-task" scope="rowgroup">
+        <div className="ts-group-in">
+          <button type="button" className="ts-group-toggle" aria-expanded={group.open} title={group.open ? "Thu gọn dự án" : "Mở dự án"} onClick={onToggle}>
+            <Icon name="chevronRight" size={14} className="ts-chev" />
+            <b>{group.project}</b>
+            {name && <span className="ts-group-title">{name}</span>}
+            {!group.open && group.count > 0 && <span className="ts-group-count">{group.count} việc</span>}
+          </button>
+          <button
+            type="button"
+            className="ts-pin"
+            aria-pressed={group.pinned}
+            aria-label={group.pinned ? `Bỏ ghim ${label}` : `Ghim ${label} lên đầu`}
+            title={group.pinned ? "Bỏ ghim" : "Ghim lên đầu"}
+            onClick={onPin}
+          >
+            <Icon name="pin" size={14} />
+          </button>
+          {group.hideable && !group.pinned && (
+            <button type="button" className="ts-hide" aria-label={`Ẩn ${label}`} title="Ẩn dự án này" onClick={onHide}>
+              <Icon name="eyeOff" size={14} />
+            </button>
+          )}
+        </div>
+      </th>
+      {days.map((d) => {
+        const h = group.dayTotals.get(d) ?? 0;
+        return (
+          <td key={d} className={`ts-group-day ${dayClass(d, calendar)}${d === today ? " is-today" : ""}`}>
+            {h > 0 ? fmtHours(h) : ""}
+          </td>
+        );
+      })}
+      <td className="ts-total">
+        {group.total > 0 && <span className="ts-group-total">{fmtHours(group.total)}</span>}
+      </td>
+    </tr>
   );
 }
 

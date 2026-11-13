@@ -51,7 +51,7 @@ export function warmProgress(scope: string): Promise<void> {
   return warm(scope, "progress", overviewParams(asOf, none), () => api.getProgress(asOf, none));
 }
 
-/** The board and this week's timesheet: Jira reads of their own, so they wait until the plan is on screen. */
+/** The board and this week's Clockwork: Jira reads of their own, so they wait until the plan is on screen. */
 export function warmBoardAndTimesheet(scope: string, projectKey: string): Promise<void> {
   const boardId = readStoredBoardId(projectKey);
   const { from, to } = rangeOf("week", localToday());
@@ -59,7 +59,7 @@ export function warmBoardAndTimesheet(scope: string, projectKey: string): Promis
     // Marked as background: while the Jira quota is nearly spent the server turns these away, and each tab
     // asks for itself when it is opened.
     warm(scope, "board", String(boardId), () => api.getBoard(boardId, { background: true })),
-    warm(scope, "timesheet", `${from}|${to}`, () => api.getTimesheet(from, to, { background: true })),
+    warm(scope, "timesheet", `${from}|${to}`, () => api.getClockwork(from, to, { background: true })),
   ]).then(() => undefined);
 }
 

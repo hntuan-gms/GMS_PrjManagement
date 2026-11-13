@@ -98,6 +98,11 @@ export async function findAccessibleProject(jira: JiraClient, session: SessionDa
   return list.projects.find((p) => p.key === key) ?? null;
 }
 
+/** Every project this account can browse (the remembered list; listed once when there is none). */
+export async function listAccessibleProjects(jira: JiraClient, session: SessionData): Promise<ProjectRef[]> {
+  return (await accessibleProjects(jira, session, false)).projects;
+}
+
 /** Forget what an account may browse (logout, or a test). */
 export function forgetProjectList(cloudId: string, accountId: string): void {
   listed.delete(`${cloudId}:${accountId}`);

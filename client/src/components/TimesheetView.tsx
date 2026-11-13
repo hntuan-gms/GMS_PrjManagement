@@ -14,7 +14,10 @@ import TimesheetTeam from "./TimesheetTeam";
 import { useWorkCalendar } from "./workCalendarContext";
 
 /**
- * Giờ đã ghi: the hours logged in Jira, per day, against capacity.
+ * Clockwork: the hours logged in Jira, per day, against capacity.
+ *
+ * A place on the rail, so it is a person across projects: "Của tôi" is my hours on every project,
+ * "Cả nhóm" the projects I manage (project and resource managers only; server/src/routes/clockwork.ts).
  *
  * Everything here is Jira's worklogs (server/src/timesheet.ts) and logging here is logging in Jira, under the
  * signed-in user's name — the only author Jira accepts. So the page has two faces:
@@ -56,6 +59,7 @@ export default function TimesheetView({
   const range = `${from}|${to}`;
   const month = mode === "month";
   const [text, setText] = useState("");
+  const [teamProject, setTeamProject] = useState<string | null>(null);
   const [teamFilter, setTeamFilter] = useState<TeamFilter>("all");
   const [focusDate, setFocusDate] = useState<string | null>(null);
 
@@ -69,13 +73,21 @@ export default function TimesheetView({
   };
 
   const cacheScope = viewCacheScope(session.site.cloudId, me, session.project?.key ?? "");
-  const { sheet, loading, error, ops } = useTimesheet({ from, to, cacheScope, me, meName: session.user.displayName, onTasksChanged });
+  // My own hours are always read (they are what is typed into, and they say whether a team view is offered);
+  // the team's only when that face is showing.
+  const mine = useTimesheet({ from, to, cacheScope, me, meName: session.user.displayName, onTasksChanged });
+  const mayTeam = (mine.sheet?.role ?? "member") !== "member";
+  const scopeShown: Scope = scope === "team" && mine.sheet && !mayTeam ? "mine" : scope;
+  const team = useTimesheet({ from, to, cacheScope, me, meName: session.user.displayName, onTasksChanged, source: "team", project: teamProject, skip: scopeShown !== "team" || !mayTeam });
+  const { sheet, loading, error } = scopeShown === "team" ? team : mine;
+  const ops = mine.ops;
   const days = useMemo(() => eachDay(from, to), [from, to]);
 
   const allRows = useMemo(
     () => (sheet ? buildTeamRows({ people: sheet.people, entries: sheet.entries, days, today, calendar, me }) : []),
     [sheet, days, today, calendar, me]
   );
+  const managed = team.sheet?.managed ?? [];
   const counts = useMemo(() => teamCounts(allRows), [allRows]);
   const teamRows = useMemo(() => filterTeam(allRows, text, teamFilter), [allRows, text, teamFilter]);
   const logged = useMemo(() => roundHours(allRows.reduce((s, r) => s + r.total, 0)), [allRows]);
@@ -91,7 +103,7 @@ export default function TimesheetView({
 
   function exportCsv() {
     const header = ["Thành viên", ...days, "Tổng (giờ)", "Kỳ vọng (giờ)"];
-    const rows = (scope === "team" ? teamRows : allRows).map((r) => [
+    const rows = (scopeShown === "team" ? teamRows : allRows).map((r) => [
       r.person.displayName,
       ...days.map((d) => roundHours(r.hoursByDay.get(d) ?? 0)),
       r.total,
@@ -108,12 +120,14 @@ export default function TimesheetView({
     <div className="ts-wrap">
       <div className="tf-bar ts-toolbar">
         <div className="seg-group" role="tablist" aria-label="Phạm vi">
-          <button role="tab" data-scope="mine" aria-selected={scope === "mine"} className={scope === "mine" ? "active" : ""} onClick={() => setScope("mine")}>
+          <button role="tab" data-scope="mine" aria-selected={scopeShown === "mine"} className={scopeShown === "mine" ? "active" : ""} onClick={() => setScope("mine")}>
             Của tôi
           </button>
-          <button role="tab" data-scope="team" title="Chỉ xem. Jira chỉ cho mỗi người tự ghi giờ của mình" aria-selected={scope === "team"} className={scope === "team" ? "active" : ""} onClick={() => setScope("team")}>
-            Cả nhóm
-          </button>
+          {mayTeam && (
+            <button role="tab" data-scope="team" title="Chỉ xem. Jira chỉ cho mỗi người tự ghi giờ của mình" aria-selected={scopeShown === "team"} className={scopeShown === "team" ? "active" : ""} onClick={() => setScope("team")}>
+              Cả nhóm
+            </button>
+          )}
         </div>
         <div className="seg-group" role="group" aria-label="Độ dài kỳ">
           <button className={mode === "week" ? "active" : ""} onClick={() => setMode("week")}>Tuần</button>
@@ -129,12 +143,22 @@ export default function TimesheetView({
         <button className="tb-btn" onClick={() => setAnchor(today)} disabled={includesToday} title="Về kỳ chứa hôm nay">
           Hôm nay
         </button>
-        {scope === "team" && (
+        {scopeShown === "team" && (
           <>
             <div className="tf-search ts-member-search">
               <Icon name="search" size={14} className="tf-search-icon" />
               <input type="search" value={text} onChange={(e) => setText(e.target.value)} placeholder="Search people" aria-label="Tìm thành viên" />
             </div>
+            {managed.length > 1 && (
+              <select className="ts-team-project" value={teamProject ?? ""} onChange={(e) => setTeamProject(e.target.value || null)} aria-label="Dự án">
+                <option value="">Mọi dự án</option>
+                {managed.map((p) => (
+                  <option key={p.key} value={p.key}>
+                    {p.key}
+                  </option>
+                ))}
+              </select>
+            )}
           </>
         )}
         <span className="bd-spacer" />
@@ -152,9 +176,10 @@ export default function TimesheetView({
         )}
         {!sheet && !error && <Spinner block label="Đang tải giờ đã ghi" />}
 
-        {sheet && scope === "mine" && (
+        {sheet && scopeShown === "mine" && (
           <TimesheetMine
             sheet={sheet}
+            prefsKey={`${session.site.cloudId}.${me}`}
             days={days}
             month={month}
             today={today}
@@ -168,7 +193,7 @@ export default function TimesheetView({
           />
         )}
 
-        {sheet && scope === "team" && (
+        {sheet && scopeShown === "team" && (
           <>
             <MetricRow className="ts-tiles">
               <Metric value={`${fmtHours(logged)}h`} label="Cả nhóm đã ghi" />
