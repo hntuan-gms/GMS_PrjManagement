@@ -403,7 +403,13 @@ export default function TimesheetMine({
                       <tr key={row.key} className={`ts-row is-${row.kind}${row.total === 0 ? " is-empty" : ""}`} data-project={group.project} data-flip={`row:${row.key}`}>
                         <th className="ts-task" scope="row">
                           <div className="ts-task-in">
-                            {row.task ? <StatusGlyph category={row.task.statusCategory} name={row.task.statusName} percent={row.task.percentComplete} /> : <span className="ts-glyph-none" aria-hidden="true" />}
+                            {row.task ? (
+                              <StatusGlyph category={row.task.statusCategory} name={row.task.statusName} percent={row.task.percentComplete} />
+                            ) : row.status ? (
+                              <StatusGlyph category={row.status} title={row.status === "done" ? "Đã xong" : row.status === "indeterminate" ? "Đang làm" : "Chưa làm"} />
+                            ) : (
+                              <span className="ts-glyph-none" aria-hidden="true" />
+                            )}
                             <button
                               type="button"
                               className="ts-open"

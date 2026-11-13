@@ -1035,7 +1035,8 @@ app.get("/api/clockwork", (req, res) => {
     // Logged before the period: DEMO-5 (not mine any more) three days before it began.
     history: [{ key: "DEMO-5", summary: "Thiết kế cơ sở dữ liệu", issueType: "Task", lastDate: shiftIso(from, -3), days: 2, hours: 5 }],
     openWork: [
-      ...tasks.filter((t: any) => t.assigneeAccountId === "me" && t.statusCategory !== "done").map((t: any) => ({ key: t.id, summary: t.summary, issueType: t.issueType, inProgress: t.statusCategory === "indeterminate" })),
+      // Open work, and work finished lately (the real query: `statusCategory != Done OR updated >= -14d`).
+      ...tasks.filter((t: any) => t.assigneeAccountId === "me").map((t: any) => ({ key: t.id, summary: t.summary, issueType: t.issueType, inProgress: t.statusCategory === "indeterminate", done: t.statusCategory === "done" })),
       ...otherIssues,
     ],
   });

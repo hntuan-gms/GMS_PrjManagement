@@ -122,6 +122,24 @@ describe("rows in a project", () => {
     assert.deepEqual(keys, ["A-6", "A-5", "A-9", "A-2", "A-1", "A-8", "A-7"]);
   });
 
+  it("work I just finished stays a row, with the work in progress and before the backlog", () => {
+    const g = layoutClockwork(base({ openWork: [work("A-1"), { ...work("A-2"), done: true }, work("A-3", true)] })).groups[0];
+    assert.deepEqual(
+      g.rows.map((r) => r.key),
+      ["A-2", "A-3", "A-1"]
+    );
+    assert.equal(g.rows[0].status, "done", "a row of another project still says it is done");
+    assert.equal(g.open, true, "a project with work just finished opens");
+  });
+
+  it("a task of the plan finished in the last two weeks is a row; one finished long ago is not", () => {
+    const tasks = [
+      task({ id: "A-1", summary: "Vừa xong", assigneeAccountId: ME, statusCategory: "done", resolvedAt: "2026-11-12T10:00:00.000+0700" }),
+      task({ id: "A-2", summary: "Xong lâu rồi", assigneeAccountId: ME, statusCategory: "done", resolvedAt: "2026-10-01T10:00:00.000+0700" }),
+    ];
+    assert.deepEqual(rowsOf({ tasks }, "A"), ["A-1"]);
+  });
+
   it("Epics and finished work are rows like any other", () => {
     const keys = rowsOf({ history: [{ ...hist("A-1", "2026-11-10"), issueType: "Epic" }], tasks: [task({ id: "A-1", summary: "Epic đã xong", issueType: "Epic", statusCategory: "done" })] }, "A");
     assert.deepEqual(keys, ["A-1"]);

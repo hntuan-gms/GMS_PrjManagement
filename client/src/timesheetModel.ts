@@ -27,6 +27,8 @@ export interface TaskRow {
   kind: "logged" | "suggested" | "added";
   /** The project the issue belongs to: the part of its key before the number. */
   project: string;
+  /** Where the issue stands when the plan does not have it (an issue of another project), if known. */
+  status?: Task["statusCategory"];
   cells: Map<string, Cell>;
   total: number;
 }
@@ -45,6 +47,8 @@ export interface OpenWork {
   summary: string;
   issueType: string;
   inProgress?: boolean;
+  /** Finished lately: still a row, since time is often logged once a task is done. */
+  done?: boolean;
 }
 
 /** "2", "2,5", "1,33": hours the way people write them here. */

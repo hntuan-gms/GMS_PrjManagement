@@ -20,7 +20,8 @@ import { dayKind, type WorkCalendar } from "./workCalendar";
  * Open:      pinned, logged in the period or in the last ten working days, a task in progress, or chosen by hand.
  *            Anything else starts folded. What the person opened or folded wins.
  * Rows:      logged in the period and picked by hand always; then logged before the period (latest first),
- *            assigned in progress, assigned. At most ROW_LIMIT rows unless more were logged; the rest behind
+ *            assigned in progress or finished in the last two weeks (time is often logged once a task is done;
+ *            one just closed must not vanish), then the rest assigned. At most ROW_LIMIT rows unless more were logged; the rest behind
  *            "+n việc khác".
  * Stable:    rows and projects keep their place while the person types; only pinning moves a project at once.
  */
@@ -36,6 +37,14 @@ export interface HistoryItem {
 }
 
 export const ROW_LIMIT = 8;
+/** Assigned work finished within this many days is still offered as a row (the server reads the same window). */
+export const RECENT_DONE_DAYS = 14;
+
+function shiftIso(iso: string, days: number): string {
+  const d = new Date(iso + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
 /** "Recently" for opening a project: logged within this many working days. */
 export const RECENT_WORKDAYS = 10;
 
@@ -109,11 +118,12 @@ interface Candidate {
   key: string;
   summary: string;
   issueType: string;
-  /** 0 logged in period, 1 picked, 2 logged before, 3 assigned in progress, 4 assigned. */
+  /** 0 logged in period, 1 picked, 2 logged before, 3 assigned in progress or just finished, 4 assigned. */
   tier: number;
   /** Order inside its tier. */
   rank: number;
   lastDate: string;
+  status?: Task["statusCategory"];
 }
 
 export function layoutClockwork(input: LayoutInput): { groups: ProjectGroup[]; rowOrder: string[]; projectOrder: string[] } {
@@ -127,7 +137,8 @@ export function layoutClockwork(input: LayoutInput): { groups: ProjectGroup[]; r
   const cands = new Map<string, Candidate>();
   const offer = (c: Candidate) => {
     const cur = cands.get(c.key);
-    if (!cur || c.tier < cur.tier) cands.set(c.key, cur ? { ...c, summary: c.summary || cur.summary, issueType: c.issueType || cur.issueType } : c);
+    if (!cur || c.tier < cur.tier) cands.set(c.key, cur ? { ...c, summary: c.summary || cur.summary, issueType: c.issueType || cur.issueType, status: c.status ?? cur.status } : c);
+    else if (!cur.status && c.status) cands.set(c.key, { ...cur, status: c.status });
   };
   const mine = new Map<string, WorklogEntry[]>();
   for (const e of input.entries) {
@@ -146,13 +157,28 @@ export function layoutClockwork(input: LayoutInput): { groups: ProjectGroup[]; r
   });
   input.history.forEach((h, i) => offer({ key: h.key, summary: h.summary, issueType: h.issueType, tier: 2, rank: i, lastDate: h.lastDate }));
   // Assigned: my open work from the server, plus the tab's plan in case that list was cut short.
-  const assigned: Array<{ key: string; summary: string; issueType: string; inProgress: boolean }> = [...input.openWork.map((w) => ({ ...w, inProgress: !!w.inProgress }))];
+  const assigned: Array<{ key: string; summary: string; issueType: string; inProgress: boolean; done: boolean }> = [
+    ...input.openWork.map((w) => ({ ...w, inProgress: !!w.inProgress, done: !!w.done })),
+  ];
+  const doneSince = shiftIso(input.today, -RECENT_DONE_DAYS);
   for (const t of input.tasks) {
-    if (t.assigneeAccountId === input.me && t.statusCategory !== "done" && !work.has(t.id)) {
-      assigned.push({ key: t.id, summary: t.summary, issueType: t.issueType, inProgress: t.statusCategory === "indeterminate" });
-    }
+    if (t.assigneeAccountId !== input.me || work.has(t.id)) continue;
+    const done = t.statusCategory === "done";
+    // A task of the plan finished lately (by its resolution, or the change into a done status) is still a row.
+    if (done && !((t.resolvedAt ?? "").slice(0, 10) >= doneSince)) continue;
+    assigned.push({ key: t.id, summary: t.summary, issueType: t.issueType, inProgress: t.statusCategory === "indeterminate", done });
   }
-  assigned.forEach((w, i) => offer({ key: w.key, summary: w.summary, issueType: w.issueType, tier: w.inProgress ? 3 : 4, rank: i, lastDate: "" }));
+  assigned.forEach((w, i) =>
+    offer({
+      key: w.key,
+      summary: w.summary,
+      issueType: w.issueType,
+      tier: w.inProgress || w.done ? 3 : 4,
+      rank: i,
+      lastDate: "",
+      status: w.done ? "done" : w.inProgress ? "indeterminate" : "new",
+    })
+  );
 
   // Rows, per project.
   const perProject = new Map<string, TaskRow[]>();
@@ -170,6 +196,7 @@ export function layoutClockwork(input: LayoutInput): { groups: ProjectGroup[]; r
       task: t,
       kind: c.tier === 0 ? "logged" : c.tier === 1 ? "added" : "suggested",
       project: projectOfKey(c.key),
+      status: t?.statusCategory ?? c.status,
       cells,
       total,
     };
@@ -188,7 +215,8 @@ export function layoutClockwork(input: LayoutInput): { groups: ProjectGroup[]; r
   for (const e of input.entries) if (e.mine) note(e.issueKey, e.date, e.hours);
   for (const h of input.history) note(h.key, h.lastDate, h.hours);
   const inProgress = new Map<string, number>();
-  for (const w of assigned) if (w.inProgress) inProgress.set(projectOfKey(w.key), (inProgress.get(projectOfKey(w.key)) ?? 0) + 1);
+  // A project with work in progress, or just finished, is one being worked on: it opens, and ranks above one with only a backlog.
+  for (const w of assigned) if (w.inProgress || w.done) inProgress.set(projectOfKey(w.key), (inProgress.get(projectOfKey(w.key)) ?? 0) + 1);
 
   const extra = input.extraProjects ?? [];
   const hiddenSet = new Set(input.hiddenProjects ?? []);

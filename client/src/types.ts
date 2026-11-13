@@ -323,7 +323,7 @@ export interface Timesheet {
   /** Clockwork only: names of the projects the rows belong to. */
   projects?: Array<{ key: string; name: string }>;
   /** Clockwork "Của tôi": my open work on any project, offered as empty rows. */
-  openWork?: Array<{ key: string; summary: string; issueType: string; inProgress: boolean }>;
+  openWork?: Array<{ key: string; summary: string; issueType: string; inProgress: boolean; done?: boolean }>;
   /** Clockwork "Của tôi": what I logged in the 30 days before the period, one line per issue (clockworkLayout.ts). */
   history?: Array<{ key: string; summary: string; issueType: string; lastDate: string; days: number; hours: number }>;
   /** Clockwork "Của tôi": every project I can browse, for "+ Thêm dự án". */

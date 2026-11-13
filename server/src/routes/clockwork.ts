@@ -60,10 +60,20 @@ function shiftDays(iso: string, days: number): string {
 
 const projectOf = (issueKey: string) => issueKey.slice(0, issueKey.lastIndexOf("-"));
 
-/** My open work, wherever it is, the most recently touched first: rows to offer, and projects worth asking about. */
+/**
+ * My work, wherever it is, the most recently touched first: rows to offer, and projects worth asking about.
+ * Open work, and work finished in the last RECENT_DONE_DAYS: time is often logged once a task is done (17% of it
+ * in the worklog history), and a task just closed must not vanish from the page it is about to be logged on.
+ * "Updated" rather than "resolved", so a workflow that closes without a resolution counts too.
+ */
+const RECENT_DONE_DAYS = 14;
 function readOpenWork(jira: NonNullable<Request["auth"]>["jira"]): Promise<any[]> {
   return jira
-    .searchIssues("assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC", ["summary", "issuetype", "status"], MAX_OPEN_WORK)
+    .searchIssues(
+      `assignee = currentUser() AND (statusCategory != Done OR updated >= -${RECENT_DONE_DAYS}d) ORDER BY updated DESC`,
+      ["summary", "issuetype", "status"],
+      MAX_OPEN_WORK
+    )
     .catch(() => [] as any[]);
 }
 
@@ -120,6 +130,7 @@ clockworkRouter.get("/", async (req, res, next) => {
       summary: String(i.fields?.summary ?? i.key),
       issueType: String(i.fields?.issuetype?.name ?? "Task"),
       inProgress: i.fields?.status?.statusCategory?.key === "indeterminate",
+      done: i.fields?.status?.statusCategory?.key === "done",
     }));
     for (const w of openWork) used.add(projectOf(w.key));
     console.log(

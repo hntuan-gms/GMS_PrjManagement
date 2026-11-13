@@ -160,6 +160,20 @@ await step("ẩn dòng bằng × (hiện khi rê chuột vào dòng): F5 vẫn �
   await page.waitForFunction(() => !!document.querySelector('.ts-row[data-project="DEMO"] input[data-key="DEMO-9"]'));
 });
 
+console.log("\n== Việc vừa xong ==");
+await step("việc của mình vừa chuyển sang Done vẫn có dòng để ghi giờ, kèm dấu đã xong", async () => {
+  const done = await fetch(API + "/api/tasks/DEMO-9", {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ statusTransition: "Done", transitionFields: { customfield_9: "xong" } }),
+  });
+  assert.ok(done.ok, `không chuyển được DEMO-9 sang Done: ${done.status}`);
+  await open();
+  assert.ok((await rowsIn("DEMO")).includes("DEMO-9"), "DEMO-9 vừa xong phải còn dòng");
+  const glyph = page.locator('.ts-row[data-project="DEMO"]', { hasText: "DEMO-9" }).locator("svg.status-glyph");
+  assert.match(await glyph.getAttribute("class"), /sg-done/);
+});
+
 console.log("\n== Hiện thêm / Thu gọn, mở việc ==");
 await step("'Hiện thêm n việc' mở từ từ: dự án bên dưới trượt xuống, không nhảy; nút thành 'Thu gọn'", async () => {
   await post("/api/__tasks/generate", { n: 80 });
