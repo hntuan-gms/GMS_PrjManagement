@@ -1,8 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import RichText from "../RichText";
-import { hasUploading } from "../../richEdit";
-import { useRichEditing } from "../../useRichEditing";
-import RichToolbar from "../RichToolbar";
+import { hasUploading } from "../../richDoc";
+import RichEditor from "../RichEditorLazy";
 import Spinner from "../Spinner";
 
 /**
@@ -89,19 +88,10 @@ export function InlineDescription({
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
-  const areaRef = useRef<HTMLTextAreaElement>(null);
-  const rich = useRichEditing({ areaRef, setValue: setDraft, taskId, onUploaded: onAttachmentsChanged });
-  const waiting = rich.uploading || hasUploading(draft);
+  const [uploading, setUploading] = useState(false);
+  const waiting = uploading || hasUploading(draft);
   // Leaving the box ends the edit once, whichever of blur, a button or a key got there first.
   const done = useRef(true);
-
-  useEffect(() => {
-    if (!editing) return;
-    const el = areaRef.current;
-    if (!el) return;
-    el.focus();
-    el.setSelectionRange(el.value.length, el.value.length);
-  }, [editing]);
 
   function begin() {
     done.current = false;
@@ -159,29 +149,21 @@ export function InlineDescription({
 
   return (
     <div className="tdx-desc-edit">
-      <RichToolbar editing={rich} />
-      <textarea
-        ref={areaRef}
-        spellCheck={false}
-        value={draft}
-        aria-label="Mô tả"
-        placeholder="Thêm mô tả… (dán ảnh, # tiêu đề, - danh sách, **đậm**)"
-        onChange={(e) => setDraft(e.target.value)}
-        onPaste={rich.onPaste}
-        onDrop={rich.onDrop}
-        // Leaving the window (the picture picker opening) is not leaving the box.
-        onBlur={() => document.hasFocus() && finish(true)}
-        onKeyDown={(e) => {
-          if (rich.onKeyDown(e)) return;
-          if (e.key === "Escape") {
-            e.stopPropagation();
-            finish(false);
-          } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-            e.preventDefault();
-            e.stopPropagation();
-            finish(true);
-          }
+      <RichEditor
+        value={value ?? ""}
+        onChange={setDraft}
+        taskId={taskId}
+        autoFocus
+        ariaLabel="Mô tả"
+        placeholder="Thêm mô tả… (dán ảnh, # tiêu đề, - danh sách)"
+        onBlur={() => finish(true)}
+        onEscape={() => {
+          finish(false);
+          return true;
         }}
+        onSubmit={() => finish(true)}
+        onUploaded={onAttachmentsChanged}
+        onUploadingChange={setUploading}
       />
       {/* mousedown is kept off the buttons so the text area keeps focus: a blur first would save before "Huỷ" got its click. */}
       <div className="tdx-desc-actions">

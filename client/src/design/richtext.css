@@ -160,44 +160,155 @@
   color: var(--ink-3);
   font-size: var(--font-size-xs);
 }
-.rt-bar-preview {
-  margin-left: auto;
-  height: 24px;
-  padding: 0 8px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: none;
-  color: var(--ink-2);
-  font-size: var(--font-size-sm);
-  box-shadow: none;
-}
-.rt-bar-preview:hover {
-  background: var(--sunken);
-}
-.rt-bar-preview.is-on {
-  background: var(--sunken);
-  color: var(--ink);
-  font-weight: 600;
-}
-
 /* In the comment box the bar sits inside the field's one border. */
 .td-box .rt-bar {
   border-radius: var(--control-radius) var(--control-radius) 0 0;
-}
-.td-preview {
-  min-height: 96px;
-  max-height: 40vh;
-  overflow-y: auto;
-  padding: 8px 12px;
-  font-size: var(--control-font-size-form);
 }
 .td-ctext.rt {
   white-space: normal;
 }
 
-/* The description's editor: the bar above the box, as wide as the text. */
-.tdx-desc-edit .rt-bar {
-  margin-bottom: 4px;
-  border: 1px solid var(--line);
+.rt-bar-btn.is-on {
+  background: var(--sunken);
+  color: var(--ink);
+}
+
+/* ---- the box (components/RichEditor.tsx): the page's own look, with a caret ---- */
+.re {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.re-content {
+  min-width: 0;
+}
+.re-content .ProseMirror {
+  min-height: 96px;
+  max-height: 50vh;
+  overflow-y: auto;
+  padding: 8px 12px;
+  outline: none;
+  font-size: var(--control-font-size-form);
+  color: var(--ink);
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  scrollbar-width: thin;
+}
+.re-content .ProseMirror > * {
+  margin: 0 0 0.6em;
+}
+.re-content .ProseMirror > :last-child {
+  margin-bottom: 0;
+}
+.re-content .ProseMirror li > p {
+  margin: 0;
+}
+.re-content .ProseMirror pre {
+  padding: 8px 10px;
   border-radius: var(--radius-md);
+  background: var(--sunken);
+  white-space: pre-wrap;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+}
+.re-content .ProseMirror pre code {
+  padding: 0;
+  background: none;
+}
+.re-content .ProseMirror h1,
+.re-content .ProseMirror h2,
+.re-content .ProseMirror h3,
+.re-content .ProseMirror h4,
+.re-content .ProseMirror h5,
+.re-content .ProseMirror h6 {
+  margin: 0.9em 0 0.4em;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.re-content .ProseMirror > :is(h1, h2, h3, h4, h5, h6):first-child {
+  margin-top: 0;
+}
+.re-content .ProseMirror h1 {
+  font-size: var(--font-size-lg);
+}
+.re-content .ProseMirror h2 {
+  font-size: calc(var(--font-size-md) + 1px);
+}
+.re-content .ProseMirror :is(h3, h4, h5, h6) {
+  font-size: var(--font-size-md);
+}
+.re-content .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  color: var(--ink-3);
+  pointer-events: none;
+}
+.re-figure {
+  line-height: 0;
+}
+.re-figure.is-selected .rt-img-btn,
+.re-figure.is-selected .rt-img {
+  outline: 2px solid var(--info);
+  outline-offset: 1px;
+}
+.re-content .ProseMirror .td-mention {
+  white-space: nowrap;
+}
+.re-link {
+  display: flex;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+}
+.re-link input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.re-suggest {
+  margin: 0;
+}
+
+/* The folded comment box: one line, no bar. */
+.td-box .re.is-bare .ProseMirror {
+  min-height: 0;
+  max-height: 38px;
+  overflow: hidden;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+/* The description's editor: one framed field, bar on top, as wide as the text. */
+.tdx-desc-edit .re {
+  border: 1px solid var(--control-border-focus);
+  border-radius: var(--control-radius);
+  box-shadow: var(--control-ring);
+  background: var(--control-bg);
+}
+.tdx-desc-edit .re-content .ProseMirror {
+  min-height: 140px;
+  font-size: var(--font-size-md);
+  line-height: 1.6;
+}
+
+/* Stand-in while the editor's code loads (RichEditorLazy): the same box, with its placeholder. */
+.re-wait-box {
+  min-height: 96px;
+  padding: 8px 12px;
+  font-size: var(--control-font-size-form);
+  cursor: text;
+}
+.re-wait-box::before {
+  content: attr(data-placeholder);
+  color: var(--ink-3);
+}
+.td-box .re.is-bare .re-wait-box {
+  min-height: 0;
+  height: 38px;
+  overflow: hidden;
+}
+.tdx-desc-edit .re-wait-box {
+  min-height: 140px;
 }

@@ -1,6 +1,7 @@
-// Comments and descriptions as rich text: the formatting bar and its keys, lists that carry on with Enter,
-// a picture pasted straight into the box (uploaded once, shown in the comment), HTML pasted with its
-// structure, and a description written with a heading. Client against the stand-in API.
+// Comments and descriptions are edited as they read (TipTap): pressing a description shows its headings,
+// lists and links — never the stored `**`/`[..](..)` text. Markdown typed out of habit becomes the thing,
+// a picture pasted is uploaded once and shown, HTML pasted keeps its structure, "@" makes a mention, and
+// what reaches the API is still the stored text. Client against the stand-in API.
 import assert from "node:assert/strict";
 import { chromium } from "playwright-core";
 
@@ -21,8 +22,8 @@ async function step(name, fn) {
     console.log("  FAIL", name, "\n       ", String(e.message).split("\n")[0]);
   }
 }
-async function openTask(id = "DEMO-5") {
-  await fetch(API + "/api/__restore", { method: "POST" });
+async function openTask(id = "DEMO-5", restore = true) {
+  if (restore) await fetch(API + "/api/__restore", { method: "POST" });
   // Opened by its link (?task=), the way "Sao chép liên kết" hands it over.
   await page.goto(`${process.env.E2E_APP ?? "http://localhost:5173/?view=gantt"}&project=DEMO&task=${id}`);
   await page.waitForSelector(".modal-detail .modal-id");
@@ -31,7 +32,7 @@ async function openTask(id = "DEMO-5") {
 // A 1×1 PNG.
 const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 
-/** Pastes into the focused element what a clipboard holding `files` / `html` / `text` would. */
+/** Pastes into the focused element what a clipboard holding a picture / HTML / text would. */
 async function paste({ png = false, html = "", text = "" }) {
   await page.evaluate(
     ({ png, html, text, b64 }) => {
@@ -48,109 +49,130 @@ async function paste({ png = false, html = "", text = "" }) {
   );
 }
 
-const box = () => page.locator(".td-box textarea[aria-label='Bình luận mới']").first();
+const box = () => page.locator(".td-box .ProseMirror").first();
+const comments = async () => await (await fetch(API + "/api/tasks/DEMO-5/comments")).json();
 const attachmentCount = async () => (await (await fetch(API + "/api/tasks/DEMO-5/attachments")).json()).files.length;
+const waitComments = (n) => page.waitForFunction(async (n) => (await (await fetch("/api/tasks/DEMO-5/comments")).json()).length >= n, n);
 
 console.log("\n== Bình luận ==");
 await openTask();
 await step("khung bình luận có thanh định dạng khi bấm vào", async () => {
   await box().click();
   await page.locator(".td-box .rt-bar").waitFor();
-  for (const label of ["Đậm", "Nghiêng", "Danh sách", "Danh sách số", "Khối mã", "Chèn ảnh"]) {
+  for (const label of ["Đậm", "Nghiêng", "Danh sách", "Danh sách số", "Khối mã", "Liên kết", "Chèn ảnh"]) {
     assert.equal(await page.locator(`.td-box .rt-bar button[aria-label='${label}']`).count(), 1, `thiếu nút ${label}`);
   }
 });
 
-await step("Enter nối tiếp danh sách, Enter ở dòng trống thì thoát", async () => {
-  await box().fill("");
-  await box().pressSequentially("- một");
-  await box().press("Enter");
-  await box().pressSequentially("hai");
-  await box().press("Enter");
-  await box().press("Enter");
-  await box().pressSequentially("Xong");
-  assert.equal(await box().inputValue(), "- một\n- hai\nXong");
+await step("gõ '- ' thành danh sách thật; Enter nối tiếp, Enter ở dòng trống thì thoát", async () => {
+  await page.keyboard.type("- một");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("hai");
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("Xong");
+  assert.equal(await box().locator("ul > li").count(), 2);
+  assert.ok(!(await box().innerText()).includes("- "), "còn thấy dấu '- ' thô");
 });
 
 await step("Ctrl B bôi đậm chữ đang chọn; Ctrl Z hoàn tác được", async () => {
-  await box().evaluate((el) => {
-    const at = el.value.indexOf("Xong");
-    el.setSelectionRange(at, at + 4);
-  });
-  await box().press("Control+b");
-  assert.equal(await box().inputValue(), "- một\n- hai\n**Xong**");
-  await box().press("Control+z");
-  assert.equal(await box().inputValue(), "- một\n- hai\nXong");
-  await box().press("Control+b");
+  await page.keyboard.press("Shift+Home");
+  // The editor reads a keyboard selection on the browser's selectionchange, a beat later.
+  await page.waitForTimeout(60);
+  await page.keyboard.press("Control+b");
+  assert.equal(await box().locator("strong").innerText(), "Xong");
+  await page.keyboard.press("Control+z");
+  assert.equal(await box().locator("strong").count(), 0);
+  await page.keyboard.press("Control+b");
+  await page.keyboard.press("End");
 });
 
-await step("dán ảnh: lên Jira một lần (không thêm lần nữa vào đính kèm), nằm trong bình luận", async () => {
+await step("dán ảnh: hiện ngay trong ô, lên Jira đúng một lần", async () => {
   const before = await attachmentCount();
-  await box().evaluate((el) => el.setSelectionRange(el.value.length, el.value.length));
   await paste({ png: true });
-  await page.waitForFunction(() => /\]\(attachment:\d+\)/.test(document.querySelector(".td-box textarea").value));
-  assert.match(await box().inputValue(), /\n!\[anh-dan-\d+\.png\]\(attachment:\d+\)\n?$/);
+  await box().locator(".rt-img-btn img").waitFor();
   await page.waitForTimeout(300);
   assert.equal(await attachmentCount(), before + 1, "ảnh phải lên đúng một lần");
 });
 
-await step("Xem trước vẽ danh sách, chữ đậm và ảnh", async () => {
-  await page.locator(".td-box .rt-bar-preview").click();
-  const pv = page.locator(".td-preview");
-  assert.equal(await pv.locator("ul > li").count(), 2);
-  assert.equal(await pv.locator("strong").innerText(), "Xong");
-  await pv.locator(".rt-img-btn img").waitFor();
-  await page.locator(".td-box .rt-bar-preview").click();
-});
-
-await step("gửi xong, bình luận hiện có cấu trúc và ảnh tải được", async () => {
-  await box().press("Control+Enter");
+await step("gửi: API nhận văn bản đã lưu; bình luận hiện có cấu trúc và ảnh", async () => {
+  const n = (await comments()).length;
+  await page.keyboard.press("Control+Enter");
+  await waitComments(n + 1);
+  assert.match((await comments())[0].text, /^- một\n- hai\n\n\*\*Xong\*\*\n\n!\[anh-dan-\d+\.png\]\(attachment:\d+\)$/);
   const c = page.locator(".td-comment .td-ctext").first();
   await c.locator("ul").waitFor();
   assert.equal(await c.locator("ul > li").count(), 2);
-  assert.equal(await c.locator("strong").innerText(), "Xong");
   const img = c.locator(".rt-img-btn img");
   await img.waitFor();
   await page.waitForFunction((el) => el.complete && el.naturalWidth > 0, await img.elementHandle());
-  const sent = (await (await fetch(API + "/api/tasks/DEMO-5/comments")).json())[0].text;
-  assert.match(sent, /^- một\n- hai\n\*\*Xong\*\*\n!\[anh-dan-\d+\.png\]\(attachment:\d+\)$/);
+  assert.equal((await box().innerText()).trim(), "", "ô phải trống sau khi gửi");
 });
 
-await step("bấm ảnh trong bình luận mở to", async () => {
-  await page.locator(".td-comment .rt-img-btn").first().click();
-  await page.locator(".lightbox, [class*='lightbox']").first().waitFor();
+await step("bấm ảnh trong bình luận mở to; Esc chỉ đóng ảnh", async () => {
+  await page.locator(".td-comment .td-ctext .rt-img-btn").first().click();
+  await page.locator(".lightbox").waitFor();
   await page.keyboard.press("Escape");
-  assert.equal(await page.locator(".modal-detail").count(), 1, "Esc ở ảnh không được đóng cửa sổ việc");
+  await page.locator(".lightbox").waitFor({ state: "detached" });
+  assert.equal(await page.locator(".modal-detail").count(), 1);
 });
 
-await step("dán HTML (từ Jira/Docs) giữ tiêu đề, danh sách và chữ đậm", async () => {
+await step("dán HTML (từ Jira/Docs) giữ tiêu đề, danh sách, chữ đậm và link", async () => {
   await box().click();
-  await box().fill("");
   await paste({
-    html: "<h2>Việc cần làm</h2><ol><li>BoardView</li><li><b>OkrView</b> (59)</li></ol><p>Xem <a href='https://e.com/k'>kit</a></p>",
+    html: "<h2>Việc cần làm</h2><ol><li><p>BoardView</p></li><li><p><b>OkrView</b> (59)</p></li></ol><p>Xem <a href='https://e.com/k'>kit</a></p>",
     text: "Việc cần làm\nBoardView\nOkrView (59)\nXem kit",
   });
-  assert.equal(await box().inputValue(), "## Việc cần làm\n\n1. BoardView\n2. **OkrView** (59)\n\nXem [kit](https://e.com/k)");
-  await box().fill("");
+  assert.equal(await box().locator("h2").innerText(), "Việc cần làm");
+  assert.equal(await box().locator("ol > li").count(), 2);
+  assert.equal(await box().locator("a[href='https://e.com/k']").count(), 1);
+  const n = (await comments()).length;
+  await page.keyboard.press("Control+Enter");
+  await waitComments(n + 1);
+  assert.equal((await comments())[0].text, "## Việc cần làm\n\n1. BoardView\n2. **OkrView** (59)\n\nXem [kit](https://e.com/k)");
 });
 
-await step("sửa bình luận mở lại đúng văn bản đã gửi", async () => {
-  // The new-comment box is focused and empty: pressing "Sửa" folds it, and the click must still land.
+await step("@ gợi ý người; chọn thì thành mention, API nhận @[Tên](id)", async () => {
   await box().click();
-  await page.locator(".td-comment").first().locator("button", { hasText: "Sửa" }).click();
-  const edit = page.locator(".td-comment .td-box textarea").first();
-  assert.match(await edit.inputValue(), /^- một\n- hai\n\*\*Xong\*\*/);
-  await edit.press("Escape");
+  await page.keyboard.type("Nhờ @Anh");
+  await page.locator(".re-suggest").waitFor();
+  await page.keyboard.press("Enter");
+  assert.equal(await box().locator(".td-mention").innerText(), "@Nguyễn Anh");
+  await page.keyboard.type("xem giúp");
+  const n = (await comments()).length;
+  await page.keyboard.press("Control+Enter");
+  await waitComments(n + 1);
+  assert.equal((await comments())[0].text, "Nhờ @[Nguyễn Anh](anh) xem giúp");
+});
+
+await step("Sửa bình luận: hiện như lúc đọc (danh sách, ảnh), không lộ mã", async () => {
+  await box().click();
+  const target = page.locator(".td-comment", { hasText: "hai" });
+  await target.locator("button", { hasText: "Sửa" }).click();
+  const edit = target.locator(".ProseMirror");
+  await edit.waitFor();
+  assert.equal(await edit.locator("ul > li").count(), 2);
+  await edit.locator(".rt-img-btn img").waitFor();
+  const shown = await edit.innerText();
+  assert.ok(!/\*\*|\]\(|attachment:/.test(shown), `lộ mã: ${shown}`);
+  await page.keyboard.press("Escape");
+  await target.locator(".ProseMirror").waitFor({ state: "detached" });
 });
 
 console.log("\n== Mô tả ==");
 await openTask();
-await step("mô tả có thanh định dạng; tiêu đề và mã hiện đúng sau khi lưu", async () => {
+await step("viết mô tả bằng các phím quen (# , ``, - ) → lưu → hiện đúng", async () => {
   await page.locator(".tdx-desc").click();
-  const area = page.locator(".tdx-desc-edit textarea");
   await page.locator(".tdx-desc-edit .rt-bar").waitFor();
-  await area.fill("# Bối cảnh\n\nDùng `kit.tsx`:\n\n- Button\n- Input");
-  await area.press("Control+Enter");
+  await page.keyboard.press("Control+a");
+  await page.keyboard.type("# Bối cảnh");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("Dùng `kit.tsx` cho");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("- Button");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("Input");
+  await page.keyboard.press("Control+Enter");
   const read = page.locator(".tdx-desc");
   await read.locator(".rt-h1").waitFor();
   assert.equal(await read.locator(".rt-h1").innerText(), "Bối cảnh");
@@ -158,14 +180,44 @@ await step("mô tả có thanh định dạng; tiêu đề và mã hiện đúng
   assert.equal(await read.locator("ul > li").count(), 2);
 });
 
-await step("dán ảnh vào mô tả: chờ ảnh lên rồi mới lưu được", async () => {
+await step("bấm vào để sửa: trông như lúc đọc — tiêu đề, mã, danh sách", async () => {
   await page.locator(".tdx-desc").click({ position: { x: 300, y: 4 } });
-  const area = page.locator(".tdx-desc-edit textarea");
-  await area.waitFor();
-  await area.evaluate((el) => el.setSelectionRange(el.value.length, el.value.length));
+  const ed = page.locator(".tdx-desc-edit .ProseMirror");
+  await ed.waitFor();
+  assert.equal(await ed.locator("h1").innerText(), "Bối cảnh");
+  assert.equal(await ed.locator("code").innerText(), "kit.tsx");
+  assert.equal(await ed.locator("ul > li").count(), 2);
+  const shown = await ed.innerText();
+  assert.ok(!/^#|`|^- /m.test(shown), `lộ mã: ${shown}`);
+  await page.keyboard.press("Escape");
+  await page.locator(".tdx-desc-edit").waitFor({ state: "detached" });
+  assert.equal(await page.locator(".modal-detail").count(), 1, "Esc ở mô tả đóng cả cửa sổ");
+});
+
+await step("mô tả có link: lúc sửa chỉ thấy chữ của link, không thấy địa chỉ", async () => {
+  await fetch(API + "/api/tasks/DEMO-5", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ description: "**Mục tiêu:** thử\n\n- Đề bài: [MKT - Bài toán](https://docs.google.com/document/d/16C/edit)" }),
+  });
+  await openTask("DEMO-5", false);
+  await page.locator(".tdx-desc").click({ position: { x: 300, y: 4 } });
+  const ed = page.locator(".tdx-desc-edit .ProseMirror");
+  await ed.waitFor();
+  assert.equal(await ed.locator("strong").innerText(), "Mục tiêu:");
+  assert.equal(await ed.locator("a").innerText(), "MKT - Bài toán");
+  assert.ok(!(await ed.innerText()).includes("docs.google.com"), "lộ địa chỉ link");
+  await page.keyboard.press("Escape");
+});
+
+await step("dán ảnh vào mô tả: hiện trong ô, lưu xong hiện ở trang", async () => {
+  await page.locator(".tdx-desc").click({ position: { x: 300, y: 4 } });
+  const ed = page.locator(".tdx-desc-edit .ProseMirror");
+  await ed.waitFor();
+  await page.keyboard.press("Control+End");
   await paste({ png: true });
-  await page.waitForFunction(() => /\]\(attachment:\d+\)/.test(document.querySelector(".tdx-desc-edit textarea")?.value ?? ""));
-  await area.press("Control+Enter");
+  await ed.locator(".rt-img-btn img").waitFor();
+  await page.keyboard.press("Control+Enter");
   await page.locator(".tdx-desc .rt-img-btn img").waitFor();
 });
 

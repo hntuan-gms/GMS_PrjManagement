@@ -2,19 +2,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import * as server from "../../server/src/richText";
-import { applyAction, attachmentImage, continueBlock, hasUploading, indentItems, insertBlock, settleUpload, uploadingToken, type TextEdit } from "../src/richEdit";
+import { adfToRich, richToAdf } from "../../server/src/adf";
+import { docToRich, hasUploading, richToDoc, type DocNode } from "../src/richDoc";
 import * as client from "../src/richText";
-
-/** The text with the selection written as [ ] (or | for a caret), for readable cases. */
-function at(marked: string): TextEdit {
-  const caret = marked.indexOf("|");
-  if (caret >= 0) return { value: marked.replace("|", ""), start: caret, end: caret };
-  const start = marked.indexOf("[");
-  const end = marked.indexOf("]") - 1;
-  return { value: marked.replace("[", "").replace("]", ""), start, end };
-}
-const show = (e: TextEdit) =>
-  e.start === e.end ? e.value.slice(0, e.start) + "|" + e.value.slice(e.start) : e.value.slice(0, e.start) + "[" + e.value.slice(e.start, e.end) + "]" + e.value.slice(e.end);
 
 describe("richText mirror", () => {
   it("the client's file is the server's, byte for byte", () => {
@@ -30,78 +20,51 @@ describe("richText mirror", () => {
   }
 });
 
-describe("formatting actions", () => {
-  it("wraps a selection, and the same press unwraps it", () => {
-    const once = applyAction(at("viết [đậm] nhé"), "bold");
-    assert.equal(show(once), "viết **[đậm]** nhé");
-    assert.equal(show(applyAction(once, "bold")), "viết [đậm] nhé");
+const t = (text: string, ...marks: string[]): DocNode => (marks.length ? { type: "text", text, marks: marks.map((type) => ({ type })) } : { type: "text", text });
+const p = (...content: DocNode[]): DocNode => ({ type: "paragraph", content });
+const doc = (...content: DocNode[]): DocNode => ({ type: "doc", content });
+
+describe("the box's document ↔ stored text", () => {
+  for (const text of [
+    "**Mục tiêu:** Nghiên cứu (Signal Tracker → MQL).\n\n**Input tham khảo:**\n\n- Đề bài: [MKT - Bài toán](https://docs.google.com/document/d/16C/edit)\n- File mẫu: [Report](https://e.com/s)",
+    "# Bối cảnh\n\nDùng `kit.tsx` và _Chip_.\n\n1. BoardView\n   - con\n2. OkrView",
+    "```js\nconst a = 1;\n\nb()\n```\n\n> trích\n\n---",
+    "Chào @[Minh Quang](712:abc), xem https://x.com/y nhé\nDòng hai",
+    "![anh.png](attachment:10)\n\n![](media:aaaaaaaa-1111-2222-3333-444444444444)",
+    "Giá 5 * 3, tc_code_1, \\*không đậm\\*\n1\\. không phải danh sách\n\\- cũng không",
+  ]) {
+    it(`round-trips ${JSON.stringify(text.slice(0, 30))}`, () => {
+      assert.equal(docToRich(richToDoc(text)), text);
+    });
+  }
+
+  it("what the box writes reads back from Jira the same (box → text → ADF → text)", () => {
+    const d = doc(
+      { type: "heading", attrs: { level: 2 }, content: [t("Kết quả")] },
+      { type: "bulletList", content: [{ type: "listItem", content: [p(t("Đề xuất "), t("giải pháp", "bold"))] }] }
+    );
+    const text = docToRich(d);
+    assert.equal(text, "## Kết quả\n\n- Đề xuất **giải pháp**");
+    assert.equal(adfToRich(richToAdf(text)), text);
   });
 
-  it("keeps spaces at the selection's edges outside the marks", () => {
-    assert.equal(show(applyAction(at("a[ b ]c"), "italic")), "a _[b]_ c");
+  it("marks shared by neighbours are one run; italic inside a word falls back to stars", () => {
+    assert.equal(docToRich(doc(p(t("a ", "bold"), t("b", "bold", "italic")))), "**a _b_**");
+    assert.equal(docToRich(doc(p(t("x"), t("y", "italic"), t("z")))), "x*y*z");
   });
 
-  it("a caret gets an empty pair to type into", () => {
-    assert.equal(show(applyAction(at("x |"), "code")), "x `|`");
+  it("empty paragraphs the box keeps between blocks are not stored", () => {
+    assert.equal(docToRich(doc(p(t("a")), { type: "paragraph" }, p(t("b")))), "a\n\nb");
+    assert.equal(docToRich(doc({ type: "paragraph" })), "");
   });
 
-  it("lists every line touched, numbered in order; pressed again it takes them off", () => {
-    const on = applyAction(at("[một\nhai]"), "numbered");
-    assert.equal(on.value, "1. một\n2. hai");
-    assert.equal(applyAction({ ...on, start: 0, end: on.value.length }, "numbered").value, "một\nhai");
+  it("a picture still uploading is visible in the text", () => {
+    const text = docToRich(doc({ type: "richImage", attrs: { src: "uploading:3", alt: "Đang tải x.png…" } }));
+    assert.ok(hasUploading(text));
+    assert.ok(!hasUploading("![x](attachment:3)"));
   });
 
-  it("a bullet replaces a number rather than stacking on it", () => {
-    assert.equal(applyAction(at("1. a|"), "bullet").value, "- a");
-  });
-
-  it("a link puts the words in brackets and selects the address to type over", () => {
-    assert.equal(show(applyAction(at("xem [tài liệu]"), "link")), "xem [tài liệu]([https://])");
-  });
-
-  it("a code block fences the lines", () => {
-    assert.equal(applyAction(at("a\n[b]"), "codeblock").value, "a\n```\nb\n```");
-  });
-});
-
-describe("keys", () => {
-  it("Enter carries a list on, numbers counting", () => {
-    assert.equal(show(continueBlock(at("- a|")!)!), "- a\n- |");
-    assert.equal(show(continueBlock(at("  3. a|")!)!), "  3. a\n  4. |");
-    assert.equal(show(continueBlock(at("> a|")!)!), "> a\n> |");
-  });
-
-  it("Enter on an empty item ends the list", () => {
-    assert.equal(show(continueBlock(at("- a\n- |")!)!), "- a\n|");
-  });
-
-  it("Enter elsewhere, or inside a code block, is a plain Enter", () => {
-    assert.equal(continueBlock(at("chữ|")), null);
-    assert.equal(continueBlock(at("```\n- a|")), null);
-  });
-
-  it("Tab nests list lines, Shift+Tab takes them back", () => {
-    assert.equal(indentItems(at("- a\n- b|"), false)!.value, "- a\n  - b");
-    assert.equal(indentItems(at("- a\n  - b|"), true)!.value, "- a\n- b");
-    assert.equal(indentItems(at("chữ|"), false), null);
-  });
-});
-
-describe("pictures", () => {
-  it("a picture goes on a line of its own", () => {
-    assert.equal(show(insertBlock(at("xem|nhé"), "![a](attachment:1)")), "xem\n![a](attachment:1)\n|nhé");
-    assert.equal(show(insertBlock(at("|"), "![a](attachment:1)")), "![a](attachment:1)\n|");
-  });
-
-  it("the upload's placeholder is swapped for the picture, or removed when it failed", () => {
-    const v = `a\n${uploadingToken(3, "anh-dan.png")}\nb`;
-    assert.ok(hasUploading(v));
-    assert.equal(settleUpload(v, 3, attachmentImage("10", "anh-dan.png")), "a\n![anh-dan.png](attachment:10)\nb");
-    assert.equal(settleUpload(v, 3, ""), "a\nb");
-    assert.equal(settleUpload(v, 4, ""), v);
-  });
-
-  it("the placeholder reads as a picture while it waits", () => {
-    assert.deepEqual(client.parseBlocks(uploadingToken(1, "x.png")), [{ t: "image", alt: "Đang tải x.png…", src: "uploading:1" }]);
+  it("an empty text is one empty paragraph to type into", () => {
+    assert.deepEqual(richToDoc(""), { type: "doc", content: [{ type: "paragraph" }] });
   });
 });

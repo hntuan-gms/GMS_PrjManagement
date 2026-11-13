@@ -13,6 +13,7 @@ import { loadBigTasksCache, loadTasksCache, saveTasksCache, tasksCacheKey } from
 import { dropViewCache, noteViewsStale, readViewCache, viewCacheScope, writeViewCache } from "../viewCache";
 import { setDetailScope } from "../detailCache";
 import { prefetchProjectLists, prefetchTaskDetail } from "../taskDetailReads";
+import { preloadRichEditor } from "../richEditorLoad";
 import { optimisticTask, restoreFields, touchedFields } from "../taskPatch";
 import { warmBoardAndTimesheet, warmProgress } from "../warmViews";
 import { computeSla, slaIds } from "../sla";
@@ -407,6 +408,7 @@ export default function ProjectWorkspace({
       // A row Jira has not made yet has no panel to open (and no key to ask Jira about).
       if (t.pending || isPendingId(t.id)) return;
       prefetchTaskDetail(t.id, t.description === undefined);
+      preloadRichEditor();
       prefetchProjectLists();
       if (editingTask && editingTask.id !== t.id) {
         setPendingOpen(t);
@@ -442,6 +444,7 @@ export default function ProjectWorkspace({
     if (!selectedId || loading) return;
     const h = window.setTimeout(() => {
       prefetchTaskDetail(selectedId, true);
+      preloadRichEditor();
       prefetchProjectLists();
     }, 250);
     return () => window.clearTimeout(h);

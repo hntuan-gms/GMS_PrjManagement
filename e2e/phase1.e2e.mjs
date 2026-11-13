@@ -165,20 +165,21 @@ await step("mở modal: ưu tiên, nhãn, bình luận có @mention và link", a
   assert.equal(await page.locator(".td-ctext a[href='https://example.com/spec']").count(), 1, "link phải bấm được");
 });
 await step("gõ @ → gợi ý người → Enter chèn tên", async () => {
-  const box = page.locator(".td-box textarea").first();
+  const box = page.locator(".td-box .ProseMirror").first();
   await box.click();
   await box.pressSequentially("Chào @Anh");
   await page.waitForSelector(".td-suggest");
   assert.ok((await page.textContent(".td-suggest")).includes("Nguyễn Anh"));
   await page.keyboard.press("Enter");
-  assert.ok((await box.inputValue()).startsWith("Chào @Nguyễn Anh"));
+  assert.ok((await box.innerText()).startsWith("Chào @Nguyễn Anh"));
+  assert.equal(await box.locator(".td-mention").count(), 1, "tên phải thành mention, không phải chữ");
   await box.pressSequentially("xem giúp");
 });
 await step("Esc khi đang có bản nháp KHÔNG đóng modal", async () => {
-  await page.locator(".td-box textarea").first().press("Escape");
+  await page.locator(".td-box .ProseMirror").first().press("Escape");
   await page.waitForTimeout(200);
   assert.equal(await page.locator(".modal").count(), 1, "modal bị đóng");
-  assert.ok((await page.locator(".td-box textarea").first().inputValue()).includes("xem giúp"), "mất bản nháp");
+  assert.ok((await page.locator(".td-box .ProseMirror").first().innerText()).includes("xem giúp"), "mất bản nháp");
 });
 await step("gửi → API nhận token @[Tên](id) và hiện mention", async () => {
   await page.locator(".td-box-actions .primary").first().click();
@@ -189,8 +190,8 @@ await step("gửi → API nhận token @[Tên](id) và hiện mention", async ()
 });
 await step("sửa bình luận của mình: hiện @Tên, lưu lại giữ token", async () => {
   await page.locator(".td-comment", { hasText: "xem giúp" }).locator("button", { hasText: "Sửa" }).click();
-  const area = page.locator(".td-comment textarea");
-  assert.ok((await area.inputValue()).includes("@Nguyễn Anh") && !(await area.inputValue()).includes("]("), "đang hiện token thô");
+  const area = page.locator(".td-comment .ProseMirror");
+  assert.ok((await area.innerText()).includes("@Nguyễn Anh") && !(await area.innerText()).includes("]("), "đang hiện token thô");
   await area.press("Control+End");
   await area.pressSequentially(" nhé");
   await page.locator(".td-comment .primary", { hasText: "Lưu" }).click();

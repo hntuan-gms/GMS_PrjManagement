@@ -137,7 +137,7 @@ await step("thẻ bình luận không còn tiêu đề gập lặp lại; ô vi�
   const slim = (await page.locator(".td-box").boundingBox()).height;
   assert.ok(slim < 60, `ô bình luận chưa dùng cao ${slim}px`);
   assert.equal(await page.locator(".td-box-actions").isVisible(), false, "nút Gửi hiện khi chưa dùng ô");
-  await page.locator(".td-box textarea").click();
+  await page.locator(".td-box .ProseMirror").click();
   await page.locator(".td-box-actions .primary").waitFor();
   assert.ok((await page.locator(".td-box").boundingBox()).height > slim + 30, "ô không mở rộng khi dùng");
   const empty = await page.locator(".td-muted", { hasText: "Chưa có bình luận nào." }).boundingBox();
@@ -226,13 +226,11 @@ await step("mô tả không vẽ ô nhập khi chưa bấm; bấm mới thành �
   const read = page.locator(".tdx-desc");
   const rest = await read.evaluate((el) => ({ border: getComputedStyle(el).borderTopWidth, bg: getComputedStyle(el).backgroundColor }));
   assert.equal(rest.border, "0px", "mô tả có viền khi chưa bấm");
-  assert.equal(await page.locator(".tdx-desc-edit textarea").count(), 0);
+  assert.equal(await page.locator(".tdx-desc-edit .ProseMirror").count(), 0);
   await read.click();
-  const area = page.locator(".tdx-desc-edit textarea");
+  const area = page.locator(".tdx-desc-edit .ProseMirror");
   await area.waitFor();
-  const c = await area.evaluate((el) => ({ resize: getComputedStyle(el).resize, spell: el.spellcheck }));
-  assert.equal(c.resize, "none");
-  assert.equal(c.spell, false);
+  assert.equal(await area.evaluate((el) => el.spellcheck), false);
   await area.fill("Nháp không lưu");
   await area.press("Escape");
   await page.locator(".tdx-desc-edit").waitFor({ state: "detached" });
@@ -240,7 +238,7 @@ await step("mô tả không vẽ ô nhập khi chưa bấm; bấm mới thành �
   assert.ok(!(await read.innerText()).includes("Nháp không lưu"), "bản nháp bị Esc phải bị bỏ");
 });
 await step("ô bình luận: cùng một viền và một vòng focus cho cả ô và nút", async () => {
-  await page.locator(".td-box textarea").focus();
+  await page.locator(".td-box .ProseMirror").focus();
   const ring = await page.locator(".td-box").evaluate((el) => getComputedStyle(el).boxShadow);
   assert.notEqual(ring, "none");
 });
