@@ -1,6 +1,16 @@
 import type { ReactNode } from "react";
 
 export type IconName =
+  | "bold"
+  | "italic"
+  | "strike"
+  | "code"
+  | "codeBlock"
+  | "heading"
+  | "listBullet"
+  | "listNumber"
+  | "quote"
+  | "image"
   | "copy"
   | "stop"
   | "maximize"
@@ -335,6 +345,27 @@ const PATHS: Record<IconName, ReactNode> = {
   send: <path d="M5 12h13M13 6l6 6-6 6" />,
   pin: <path d="M9 4h6l-1 5 3 3H7l3-3-1-5ZM12 15v5" />,
   filter: <path d="M4 6h16M7 12h10M10 18h4" />,
+  bold: <path d="M7 5h6a3.5 3.5 0 0 1 0 7H7zM7 12h7a3.5 3.5 0 0 1 0 7H7z" />,
+  italic: <path d="M10 5h8M6 19h8M14 5l-4 14" />,
+  strike: <path d="M4 12h16M16.5 7.5C16 5.8 14.3 5 12 5c-2.8 0-4.5 1.3-4.5 3.2 0 1.4.9 2.3 2.7 2.8M7.5 16.2C8 18 9.8 19 12.3 19c2.9 0 4.7-1.3 4.7-3.3" />,
+  code: <path d="M8.5 7L3.5 12l5 5M15.5 7l5 5-5 5" />,
+  codeBlock: (
+    <>
+      <rect x="3.5" y="4.5" width="17" height="15" rx="2" />
+      <path d="M10 10l-2.5 2 2.5 2M14 10l2.5 2-2.5 2" />
+    </>
+  ),
+  heading: <path d="M6 5v14M18 5v14M6 12h12" />,
+  listBullet: <path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01" />,
+  listNumber: <path d="M10 6h10M10 12h10M10 18h10M4 5l1.5-1v5M3.8 13.5c.3-.6.9-1 1.6-1 .9 0 1.4.6 1.4 1.2 0 1-2.9 2.3-2.9 3.3h3" />,
+  quote: <path d="M5 7h5v5c0 2.5-1.5 4.5-4 5M14 7h5v5c0 2.5-1.5 4.5-4 5" />,
+  image: (
+    <>
+      <rect x="3.5" y="4.5" width="17" height="15" rx="2" />
+      <circle cx="9" cy="10" r="1.6" />
+      <path d="M20.5 16l-5-5-9 8.5" />
+    </>
+  ),
   paperclip: <path d="M20 11.5l-8 8a5 5 0 0 1-7-7l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.6 8.6a1.7 1.7 0 0 1-2.4-2.4l7.9-7.9" />,
   menu: <path d="M4 6h16M4 12h16M4 18h16" />,
   print: (

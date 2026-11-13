@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { adfToCommentText, commentToAdf } from "../src/adf.js";
+import { adfToRich, richToAdf } from "../src/adf.js";
 import { applyMentions, mentionsToPlain } from "../src/ai/mentionText.js";
 
 const quang = { typed: "Quang", accountId: "712020:q", name: "Võ Đình Quang" };
@@ -43,8 +43,8 @@ describe("applyMentions", () => {
 
   it("the result becomes a real ADF mention that reads back as the same text", () => {
     const text = applyMentions("@Quang xem giúp", [quang]);
-    assert.ok(JSON.stringify(commentToAdf(text)).includes('"id":"712020:q"'));
-    assert.equal(adfToCommentText(commentToAdf(text)), text);
+    assert.ok(JSON.stringify(richToAdf(text)).includes('"id":"712020:q"'));
+    assert.equal(adfToRich(richToAdf(text)), text);
   });
 });
 

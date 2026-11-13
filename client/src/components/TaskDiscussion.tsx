@@ -1,8 +1,12 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useRef, useState } from "react";
 import { api } from "../api";
 import { TASK_MAX_AGE_MS } from "../detailCache";
 import { readers } from "../taskDetailReads";
 import { useDetail } from "../useDetail";
+import RichText from "./RichText";
+import { hasUploading } from "../richEdit";
+import { useRichEditing } from "../useRichEditing";
+import RichToolbar from "./RichToolbar";
 import Spinner from "./Spinner";
 import { fromTokens, labelFor, toTokens, type Mentions } from "../mentions";
 import type { JiraUser } from "../types";
@@ -19,45 +23,14 @@ interface Props {
   members: JiraUser[];
   /** The signed-in account, so a mention of you can be marked. */
   myAccountId: string;
+  /** A picture pasted into a comment became an attachment of the issue. */
+  onAttachmentsChanged?: () => void;
 }
 
 /* ---------------------------------------------------------------- helpers */
 
-/** `@[Name](accountId)` — the mention token the server speaks — or a bare URL. */
-const TOKEN = /@\[([^\]]+)\]\(([^)\s]+)\)|\bhttps?:\/\/[^\s<>"')\]]+/g;
-
 const clean = (name: string) => name.replace(/[[\]()]/g, "");
 const fold = (s: string) => s.normalize("NFD").replace(/\p{Diacritic}/gu, "").replace(/đ/g, "d").toLowerCase();
-
-/** Comment text with mentions highlighted and links clickable — React elements, never innerHTML: the text is anyone's. */
-function renderText(text: string, myAccountId: string): ReactNode[] {
-  const out: ReactNode[] = [];
-  let last = 0;
-  let n = 0;
-  for (const m of text.matchAll(TOKEN)) {
-    const at = m.index ?? 0;
-    if (at > last) out.push(text.slice(last, at));
-    if (m[2]) {
-      out.push(
-        <span key={n++} className={`td-mention ${m[2] === myAccountId ? "is-me" : ""}`}>
-          @{m[1]}
-        </span>
-      );
-    } else {
-      const url = m[0].replace(/[).,;:!?]+$/, "");
-      out.push(
-        <a key={n++} href={url} target="_blank" rel="noreferrer">
-          {url}
-        </a>
-      );
-      const rest = m[0].slice(url.length);
-      if (rest) out.push(rest);
-    }
-    last = at + m[0].length;
-  }
-  if (last < text.length) out.push(text.slice(last));
-  return out;
-}
 
 function when(iso: string): string {
   const d = new Date(iso);
@@ -92,15 +65,29 @@ const fieldName = (f: string) => FIELD_VI[f.toLowerCase()] ?? f;
 
 /* -------------------------------------------------------------- the box   */
 
+/** Whether a mouse button or finger is down right now (see the box's blur). */
+let pointerHeld = false;
+if (typeof window !== "undefined") {
+  window.addEventListener("pointerdown", () => (pointerHeld = true), true);
+  window.addEventListener("pointerup", () => (pointerHeld = false), true);
+  window.addEventListener("pointercancel", () => (pointerHeld = false), true);
+}
+
 function CommentBox({
+  taskId,
   members,
+  myAccountId,
+  onUploaded,
   initialText = "",
   submitLabel,
   autoFocus,
   onSubmit,
   onCancel,
 }: {
+  taskId: string;
   members: JiraUser[];
+  myAccountId: string;
+  onUploaded?: () => void;
   initialText?: string;
   submitLabel: string;
   autoFocus?: boolean;
@@ -116,8 +103,11 @@ function CommentBox({
   const [error, setError] = useState<string | null>(null);
   // One line until it is used: a three-line box in front of every comment pushed the discussion off screen.
   const [focused, setFocused] = useState(!!autoFocus);
+  const [preview, setPreview] = useState(false);
   const areaRef = useRef<HTMLTextAreaElement>(null);
-  const open = focused || text.trim() !== "" || !!onCancel;
+  const editing = useRichEditing({ areaRef, setValue: setText, taskId, onUploaded });
+  const open = focused || text.trim() !== "" || !!onCancel || editing.uploading;
+  const waiting = editing.uploading || hasUploading(text);
 
   const candidates = suggest
     ? members.filter((m) => fold(m.displayName).includes(fold(suggest.query))).slice(0, 6)
@@ -147,13 +137,14 @@ function CommentBox({
   }
 
   async function submit() {
-    if (!text.trim() || busy) return;
+    if (!text.trim() || busy || waiting) return;
     setBusy(true);
     setError(null);
     try {
       await onSubmit(toTokens(text.trim(), mentions));
       setText("");
       setMentions(new Map());
+      setPreview(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Không gửi được bình luận.");
     } finally {
@@ -166,18 +157,32 @@ function CommentBox({
       className={`td-box${open ? "" : " is-collapsed"}`}
       onFocus={() => setFocused(true)}
       onBlur={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocused(false);
+        if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+        // Folding the box moves everything under it up. Pressed with the mouse, wait for the release:
+        // otherwise the button that took the focus ("Sửa" on a comment) slides away before its click.
+        if (pointerHeld) window.addEventListener("pointerup", () => setTimeout(() => setFocused(false)), { once: true });
+        else setFocused(false);
       }}
     >
+      {open && <RichToolbar editing={editing} preview={preview} onPreview={setPreview} />}
+      {preview && (
+        <div className="td-preview">
+          {text.trim() ? <RichText text={toTokens(text.trim(), mentions)} taskId={taskId} myAccountId={myAccountId} /> : <span className="td-muted">Chưa có gì để xem.</span>}
+        </div>
+      )}
       <textarea
         ref={areaRef}
-        rows={open ? 3 : 1}
+        rows={open ? 4 : 1}
+        // Kept in the page while the result shows, so its undo history survives the switch.
+        style={preview ? { display: "none" } : undefined}
         spellCheck={false}
         autoFocus={autoFocus}
         value={text}
-        placeholder="Viết bình luận…"
+        placeholder="Viết bình luận… (dán ảnh, - danh sách, **đậm**)"
         aria-label="Bình luận mới"
         onChange={(e) => onChange(e.target.value, e.target.selectionStart)}
+        onPaste={editing.onPaste}
+        onDrop={editing.onDrop}
         onKeyDown={(e) => {
           if (suggest && candidates.length > 0) {
             if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -213,7 +218,9 @@ function CommentBox({
           if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
             e.preventDefault();
             submit();
+            return;
           }
+          editing.onKeyDown(e);
         }}
       />
       {suggest && candidates.length > 0 && (
@@ -243,8 +250,8 @@ function CommentBox({
           </button>
         )}
         {/* Tonal, not solid: the one solid button in the window is "Lưu & đồng bộ Jira" below it. */}
-        <button type="button" className="primary tonal" onClick={submit} disabled={busy || !text.trim()}>
-          {busy ? "Đang gửi..." : submitLabel}
+        <button type="button" className="primary tonal" onClick={submit} disabled={busy || waiting || !text.trim()}>
+          {busy ? "Đang gửi..." : waiting ? "Đang tải ảnh…" : submitLabel}
         </button>
       </div>
     </div>
@@ -253,7 +260,7 @@ function CommentBox({
 
 /* ------------------------------------------------------------ the section */
 
-export default function TaskDiscussion({ taskId, members, myAccountId }: Props) {
+export default function TaskDiscussion({ taskId, members, myAccountId, onAttachmentsChanged }: Props) {
   const [tab, setTab] = useState<"comments" | "activity">("comments");
   // Both are read through detailCache: reopening a task shows what it showed last time at once, and the
   // read behind it replaces that. The history is a longer read (paged), so it waits for its tab.
@@ -308,7 +315,14 @@ export default function TaskDiscussion({ taskId, members, myAccountId }: Props) 
           {actionError && <div className="td-error">{actionError}</div>}
           {!comments && !commentsError && <Spinner block className="spinner-inline" />}
           {comments && comments.length === 0 && <div className="td-muted">Chưa có bình luận nào.</div>}
-          <CommentBox members={members} submitLabel="Gửi bình luận" onSubmit={add} />
+          <CommentBox
+            taskId={taskId}
+            members={members}
+            myAccountId={myAccountId}
+            onUploaded={onAttachmentsChanged}
+            submitLabel="Gửi bình luận"
+            onSubmit={add}
+          />
           <ul className="td-list">
             {(comments ?? []).map((c) => (
               <li key={c.id} className="td-comment">
@@ -341,7 +355,10 @@ export default function TaskDiscussion({ taskId, members, myAccountId }: Props) 
                 </div>
                 {editing === c.id ? (
                   <CommentBox
+                    taskId={taskId}
                     members={members}
+                    myAccountId={myAccountId}
+                    onUploaded={onAttachmentsChanged}
                     initialText={c.text}
                     submitLabel="Lưu"
                     autoFocus
@@ -349,7 +366,7 @@ export default function TaskDiscussion({ taskId, members, myAccountId }: Props) 
                     onCancel={() => setEditing(null)}
                   />
                 ) : (
-                  <div className="td-ctext">{renderText(c.text, myAccountId)}</div>
+                  <RichText className="td-ctext" text={c.text} taskId={taskId} myAccountId={myAccountId} />
                 )}
               </li>
             ))}

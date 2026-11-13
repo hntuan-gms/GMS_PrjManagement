@@ -1,0 +1,203 @@
+/* Rich text — comments and descriptions (components/RichText.tsx) and the bar that writes them
+   (components/RichToolbar.tsx). Read like a page: no boxes around paragraphs, a quiet code tint. */
+
+.rt {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+.rt > * {
+  margin: 0 0 0.6em;
+}
+.rt > :last-child {
+  margin-bottom: 0;
+}
+.rt p {
+  margin: 0 0 0.6em;
+}
+.rt li > p {
+  margin: 0;
+}
+.rt ul,
+.rt ol {
+  margin: 0 0 0.6em;
+  padding-left: 22px;
+}
+.rt li + li {
+  margin-top: 2px;
+}
+.rt li > ul,
+.rt li > ol {
+  margin: 2px 0 0;
+}
+.rt .rt-h {
+  margin: 0.9em 0 0.4em;
+  color: var(--ink);
+  font-weight: 600;
+  line-height: 1.35;
+}
+.rt > .rt-h:first-child {
+  margin-top: 0;
+}
+.rt .rt-h1 {
+  font-size: var(--font-size-lg);
+}
+.rt .rt-h2 {
+  font-size: calc(var(--font-size-md) + 1px);
+}
+.rt .rt-h3,
+.rt .rt-h4,
+.rt .rt-h5,
+.rt .rt-h6 {
+  font-size: var(--font-size-md);
+}
+.rt a {
+  color: var(--info-text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.rt code {
+  padding: 1px 4px;
+  border-radius: var(--radius-sm);
+  background: var(--sunken);
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+}
+.rt pre.rt-code {
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  background: var(--sunken);
+  overflow-x: auto;
+  white-space: pre;
+  line-height: 1.5;
+}
+.rt pre.rt-code code {
+  padding: 0;
+  background: none;
+  font-size: var(--font-size-sm);
+}
+.rt blockquote {
+  margin-left: 0;
+  margin-right: 0;
+  padding: 2px 0 2px 12px;
+  border-left: 3px solid var(--line-strong);
+  color: var(--ink-2);
+}
+.rt hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+.rt .rt-figure {
+  line-height: 0;
+}
+.rt-img-btn {
+  display: inline-block;
+  max-width: 100%;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--sheet);
+  cursor: zoom-in;
+  overflow: hidden;
+  line-height: 0;
+  box-shadow: none;
+}
+.rt-img-btn img {
+  display: block;
+  max-width: 100%;
+  max-height: 360px;
+  object-fit: contain;
+}
+.rt-img {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-md);
+  color: var(--ink-3);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+}
+.rt-img.is-wait {
+  border-style: solid;
+  background: var(--sunken);
+}
+.rt-img.is-link {
+  color: var(--info-text);
+}
+
+/* ---- the bar ---- */
+.rt-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1px;
+  padding: 3px 4px;
+  border-bottom: 1px solid var(--line);
+}
+.rt-bar-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--ink-2);
+  box-shadow: none;
+}
+.rt-bar-btn:hover:not(:disabled) {
+  background: var(--sunken);
+  color: var(--ink);
+}
+.rt-bar-btn:disabled {
+  opacity: 0.4;
+}
+.rt-bar-note {
+  margin-left: 6px;
+  color: var(--ink-3);
+  font-size: var(--font-size-xs);
+}
+.rt-bar-preview {
+  margin-left: auto;
+  height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--ink-2);
+  font-size: var(--font-size-sm);
+  box-shadow: none;
+}
+.rt-bar-preview:hover {
+  background: var(--sunken);
+}
+.rt-bar-preview.is-on {
+  background: var(--sunken);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* In the comment box the bar sits inside the field's one border. */
+.td-box .rt-bar {
+  border-radius: var(--control-radius) var(--control-radius) 0 0;
+}
+.td-preview {
+  min-height: 96px;
+  max-height: 40vh;
+  overflow-y: auto;
+  padding: 8px 12px;
+  font-size: var(--control-font-size-form);
+}
+.td-ctext.rt {
+  white-space: normal;
+}
+
+/* The description's editor: the bar above the box, as wide as the text. */
+.tdx-desc-edit .rt-bar {
+  margin-bottom: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}

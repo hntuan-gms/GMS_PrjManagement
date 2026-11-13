@@ -1,5 +1,8 @@
-import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { describeBlocks, linkPieces } from "../../descriptionView";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import RichText from "../RichText";
+import { hasUploading } from "../../richEdit";
+import { useRichEditing } from "../../useRichEditing";
+import RichToolbar from "../RichToolbar";
 import Spinner from "../Spinner";
 
 /**
@@ -64,58 +67,6 @@ export function InlineTitle({ value, onCommit }: { value: string; onCommit: (nex
 
 /* ------------------------------------------------------------- the description */
 
-function Linked({ text }: { text: string }) {
-  return (
-    <>
-      {linkPieces(text).map((p, i) =>
-        typeof p === "string" ? (
-          <Fragment key={i}>{p}</Fragment>
-        ) : (
-          <a key={i} href={p.url} target="_blank" rel="noreferrer">
-            {p.url}
-          </a>
-        )
-      )}
-    </>
-  );
-}
-
-/** The text as a page: paragraphs, lists, links that open. React elements only, never innerHTML. */
-export function DescriptionText({ text }: { text: string }) {
-  return (
-    <>
-      {describeBlocks(text).map((b, i) =>
-        b.kind === "p" ? (
-          <p key={i}>
-            {b.lines.map((l, j) => (
-              <Fragment key={j}>
-                {j > 0 && <br />}
-                <Linked text={l} />
-              </Fragment>
-            ))}
-          </p>
-        ) : b.kind === "ul" ? (
-          <ul key={i}>
-            {b.items.map((it, j) => (
-              <li key={j}>
-                <Linked text={it} />
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <ol key={i}>
-            {b.items.map((it, j) => (
-              <li key={j}>
-                <Linked text={it} />
-              </li>
-            ))}
-          </ol>
-        )
-      )}
-    </>
-  );
-}
-
 /**
  * Read as a page; pressed, it becomes a text area in the same place. Saves on leaving the box or Ctrl+Enter,
  * Esc (or the Huỷ button) throws the edit away. `value` undefined = not read yet, null = no description.
@@ -125,15 +76,22 @@ export function InlineDescription({
   error,
   onRetry,
   onCommit,
+  taskId,
+  onAttachmentsChanged,
 }: {
   value: string | null | undefined;
   error?: string | null;
   onRetry?: () => void;
   onCommit: (next: string | null) => void;
+  /** The issue a pasted picture is attached to. */
+  taskId?: string;
+  onAttachmentsChanged?: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const areaRef = useRef<HTMLTextAreaElement>(null);
+  const rich = useRichEditing({ areaRef, setValue: setDraft, taskId, onUploaded: onAttachmentsChanged });
+  const waiting = rich.uploading || hasUploading(draft);
   // Leaving the box ends the edit once, whichever of blur, a button or a key got there first.
   const done = useRef(true);
 
@@ -153,6 +111,8 @@ export function InlineDescription({
 
   function finish(save: boolean) {
     if (done.current) return;
+    // A picture still on its way would be saved as its placeholder: the edit stays open until it lands.
+    if (save && waiting) return;
     done.current = true;
     setEditing(false);
     const next = draft.trim();
@@ -181,8 +141,8 @@ export function InlineDescription({
         aria-label="Mô tả. Bấm để sửa"
         data-empty={value ? undefined : ""}
         onClick={(e) => {
-          // A link in the text opens; anything else starts the edit.
-          if ((e.target as HTMLElement).closest("a")) return;
+          // A link or a picture in the text opens; anything else starts the edit.
+          if ((e.target as HTMLElement).closest("a, .rt-img-btn")) return;
           begin();
         }}
         onKeyDown={(e) => {
@@ -192,22 +152,27 @@ export function InlineDescription({
           }
         }}
       >
-        {value ? <DescriptionText text={value} /> : <span className="tdx-empty">Thêm mô tả…</span>}
+        {value ? <RichText text={value} taskId={taskId} /> : <span className="tdx-empty">Thêm mô tả…</span>}
       </div>
     );
   }
 
   return (
     <div className="tdx-desc-edit">
+      <RichToolbar editing={rich} />
       <textarea
         ref={areaRef}
         spellCheck={false}
         value={draft}
         aria-label="Mô tả"
-        placeholder="Thêm mô tả…"
+        placeholder="Thêm mô tả… (dán ảnh, # tiêu đề, - danh sách, **đậm**)"
         onChange={(e) => setDraft(e.target.value)}
-        onBlur={() => finish(true)}
+        onPaste={rich.onPaste}
+        onDrop={rich.onDrop}
+        // Leaving the window (the picture picker opening) is not leaving the box.
+        onBlur={() => document.hasFocus() && finish(true)}
         onKeyDown={(e) => {
+          if (rich.onKeyDown(e)) return;
           if (e.key === "Escape") {
             e.stopPropagation();
             finish(false);
@@ -220,8 +185,8 @@ export function InlineDescription({
       />
       {/* mousedown is kept off the buttons so the text area keeps focus: a blur first would save before "Huỷ" got its click. */}
       <div className="tdx-desc-actions">
-        <button type="button" className="primary" onMouseDown={(e) => e.preventDefault()} onClick={() => finish(true)}>
-          Lưu
+        <button type="button" className="primary" disabled={waiting} onMouseDown={(e) => e.preventDefault()} onClick={() => finish(true)}>
+          {waiting ? "Đang tải ảnh…" : "Lưu"}
           <kbd>Ctrl ⏎</kbd>
         </button>
         <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => finish(false)}>

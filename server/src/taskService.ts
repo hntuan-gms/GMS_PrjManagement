@@ -1,6 +1,7 @@
 import { NO_REQUIREMENTS, readRequirements, type CreateRequirements } from "./createRequirements.js";
 import { getProjectMembers, type ProjectMembers } from "./projectMembers.js";
-import { adfToText, textToAdf } from "./adf.js";
+import { adfToRich, richToAdf } from "./adf.js";
+import { attachmentMatcher, mediaForWrite } from "./richMedia.js";
 import { isRateLimited, searchProjectIssues, shareInflight, type ProjectSearchResult } from "./parallelSearch.js";
 import { cacheFields, issueCacheEnabled, readCachedProject } from "./issueCache.js";
 import { pgIssueCache } from "./issueCacheStore.js";
@@ -287,7 +288,7 @@ export class TaskService {
     return this.lastRead;
   }
 
-  /** The description of one issue, as plain text — what the list leaves out. */
+  /** The description of one issue, as the rich text of richText.ts — what the list leaves out. */
   async getDescription(id: string): Promise<string | null> {
     this.assertOwnKey(id);
     // From the issue copy when it is current and this person's own id list names the issue (detailCache.ts).
@@ -296,7 +297,9 @@ export class TaskService {
       { cloudId: this.ctx.cloudId, projectKey: this.ctx.projectKey, accountId: this.ctx.accountId, key: id },
       async () => (await this.jira.getIssue(id, ["description"])).fields?.description ?? null
     );
-    return adf ? adfToText(adf) : null;
+    if (!adf) return null;
+    // The pictures in it are matched to the issue's files, so the panel can draw them.
+    return adfToRich(adf, { attachmentOf: await attachmentMatcher(this.jira, id, [adf]) });
   }
 
   /**
@@ -324,7 +327,7 @@ export class TaskService {
       wbsParentId: f.parent?.key ?? null,
       summary: f.summary,
       // undefined = the search did not ask for it (see listTasks), unlike null = it is empty.
-      description: f.description === undefined ? undefined : f.description ? adfToText(f.description) : null,
+      description: f.description === undefined ? undefined : f.description ? adfToRich(f.description) : null,
       issueType: f.issuetype?.name as IssueTypeName,
       statusName: f.status?.name ?? "Không rõ",
       statusCategory,
@@ -643,7 +646,10 @@ export class TaskService {
 
     const fields: Record<string, unknown> = {};
     if (input.summary !== undefined) fields.summary = input.summary;
-    if (input.description !== undefined) fields.description = textToAdf(input.description ?? "");
+    if (input.description !== undefined) {
+      const text = input.description ?? "";
+      fields.description = richToAdf(text, { media: await mediaForWrite(this.jira, id, text) });
+    }
     if (input.priority) fields.priority = { name: input.priority };
     if (input.labels !== undefined) fields.labels = cleanLabels(input.labels);
     if (input.components !== undefined) fields.components = cleanNames(input.components).map((name) => ({ name }));

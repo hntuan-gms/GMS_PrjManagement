@@ -398,23 +398,6 @@ button.tdx-more {
   outline: none;
   box-shadow: var(--control-ring);
 }
-.tdx-desc p,
-.tdx-desc ul,
-.tdx-desc ol {
-  margin: 0 0 0.6em;
-}
-.tdx-desc > :last-child {
-  margin-bottom: 0;
-}
-.tdx-desc ul,
-.tdx-desc ol {
-  padding-left: 20px;
-}
-.tdx-desc a {
-  color: var(--info-text);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
 .tdx-empty {
   color: var(--ink-3);
 }

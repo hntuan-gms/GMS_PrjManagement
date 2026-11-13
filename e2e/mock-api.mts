@@ -240,6 +240,15 @@ app.get("/api/tasks/:id/attachments/:attId/content", (req, r) => {
   r.setHeader("Content-Type", req.query.inline === "1" && f.mimeType === "image/png" ? "image/png" : "application/octet-stream");
   r.send(f.mimeType === "image/png" ? PNG : Buffer.from("%PDF-1.4 stand-in"));
 });
+// Upload: one file per request as the raw body, like the real route. Only DEMO-5 keeps what it is sent.
+let attSeq = 600;
+app.post("/api/tasks/:id/attachments", express.raw({ type: () => true, limit: "20mb" }), (req, r) => {
+  const filename = decodeURIComponent(String(req.get("x-file-name") ?? "tep"));
+  const mimeType = String(req.get("x-file-type") ?? "application/octet-stream");
+  const f = { id: String(++attSeq), filename, size: (req.body as Buffer).length, mimeType, created: new Date().toISOString(), author: "Tuấn Test" };
+  if (req.params.id === "DEMO-5") attachmentsOf5.push(f);
+  r.status(201).json([{ id: f.id, filename, size: f.size }]);
+});
 app.delete("/api/tasks/:id/attachments/:attId", (req, r) => {
   const before = attachmentsOf5.length;
   attachmentsOf5 = attachmentsOf5.filter((x) => x.id !== req.params.attId);

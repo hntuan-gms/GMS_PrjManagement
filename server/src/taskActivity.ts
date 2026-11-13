@@ -1,4 +1,5 @@
-import { adfToCommentText, commentToAdf } from "./adf.js";
+import { adfToRich, richToAdf, type AdfToRichOptions } from "./adf.js";
+import { attachmentMatcher, mediaForWrite } from "./richMedia.js";
 import { badRequest } from "./errors.js";
 import type { JiraClient } from "./jiraClient.js";
 import { cachedDetail, forgetDetail, type DetailStore } from "./detailCache.js";
@@ -10,8 +11,9 @@ import { cachedDetail, forgetDetail, type DetailStore } from "./detailCache.js";
  * gate as the issue copy; a comment restricted to a group or role is never kept,
  * and the history is always read from Jira.
  *
- * Mentions travel as `@[Name](accountId)` in the text this API speaks, which
- * `commentToAdf` turns into a real ADF mention node. Jira, not this app, then
+ * A comment travels as the small Markdown of richText.ts (headings, lists, code, quotes, pictures);
+ * adf.ts turns it into Jira's ADF and back. Mentions travel as `@[Name](accountId)`, which
+ * `richToAdf` turns into a real ADF mention node. Jira, not this app, then
  * notifies the person: it does so for any comment written through its API, so no
  * notification code exists here.
  */
@@ -79,13 +81,13 @@ export class TaskActivity {
     private readonly cache?: CommentCache
   ) {}
 
-  private toComment(c: any): TaskComment {
+  private toComment(c: any, media?: AdfToRichOptions["attachmentOf"]): TaskComment {
     return {
       id: String(c.id),
       authorAccountId: c.author?.accountId ?? null,
       authorName: c.author?.displayName ?? "Không rõ",
       authorAvatarUrl: c.author?.avatarUrls?.["24x24"] ?? null,
-      text: adfToCommentText(c.body),
+      text: adfToRich(c.body, { attachmentOf: media }),
       created: c.created,
       updated: c.updated ?? c.created,
       mine: !!c.author?.accountId && c.author.accountId === this.accountId,
@@ -95,7 +97,12 @@ export class TaskActivity {
 
   /** Newest first, as Jira's own issue view lists them. */
   async listComments(key: string): Promise<TaskComment[]> {
-    const read = async () => (await this.jira.getComments(key)).map((c) => this.toComment(c));
+    const read = async () => {
+      const raw = await this.jira.getComments(key);
+      // Pictures are matched to the issue's attachments once for the whole list.
+      const media = await attachmentMatcher(this.jira, key, raw.map((c) => c.body));
+      return raw.map((c) => this.toComment(c, media));
+    };
     const cache = this.cache;
     if (!cache) return read();
     return cachedDetail<TaskComment[]>(
@@ -119,14 +126,25 @@ export class TaskActivity {
     if (this.cache) await forgetDetail(this.cache.store, this.cache.cloudId, key, ["comments"]);
   }
 
+  /** The comment as ADF, its pictures resolved to the files Jira holds. */
+  private async toAdf(key: string, text: string) {
+    const body = this.checked(text);
+    return richToAdf(body, { media: await mediaForWrite(this.jira, key, body) });
+  }
+
+  /** The answer as the panel shows it: the pictures this app just wrote are matched back to their files. */
+  private async answer(key: string, c: any): Promise<TaskComment> {
+    return this.toComment(c, await attachmentMatcher(this.jira, key, [c.body]));
+  }
+
   async addComment(key: string, text: string): Promise<TaskComment> {
-    const created = this.toComment(await this.jira.addComment(key, commentToAdf(this.checked(text))));
+    const created = await this.answer(key, await this.jira.addComment(key, await this.toAdf(key, text)));
     await this.forget(key);
     return created;
   }
 
   async updateComment(key: string, commentId: string, text: string): Promise<TaskComment> {
-    const updated = this.toComment(await this.jira.updateComment(key, commentId, commentToAdf(this.checked(text))));
+    const updated = await this.answer(key, await this.jira.updateComment(key, commentId, await this.toAdf(key, text)));
     await this.forget(key);
     return updated;
   }

@@ -693,6 +693,8 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
               error={descRead.error}
               onRetry={() => void descRead.reload()}
               onCommit={(next) => void saveDescription(next)}
+              taskId={task.id}
+              onAttachmentsChanged={() => void attachmentsRead.reload()}
             />
           </section>
 
@@ -778,7 +780,7 @@ export default function TaskEditModal({ task, allTasks, users, onClose, onSave, 
 
           {/* Its own tabs (Bình luận / Lịch sử) are the heading, so no folding header repeats them. */}
           <section className="tdx-block td-card" aria-label="Bình luận và lịch sử thay đổi">
-            <TaskDiscussion taskId={task.id} members={users} myAccountId={myAccountId} />
+            <TaskDiscussion taskId={task.id} members={users} myAccountId={myAccountId} onAttachmentsChanged={() => void attachmentsRead.reload()} />
           </section>
           </div>
 

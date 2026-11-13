@@ -7,7 +7,7 @@
  * transport changed.
  */
 import { JIRA_API_BASE } from "./auth/config.js";
-import { textToAdf } from "./adf.js";
+import { richToAdf, textToAdf } from "./adf.js";
 import type { JiraFieldMeta } from "./transitionFields.js";
 import { readAllPages } from "./pagedList.js";
 
@@ -173,6 +173,9 @@ const RATE_LIMIT_RETRIES = 2;
 const RATE_LIMIT_MAX_WAIT_MS = 5000;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** `cloudId|attachmentId` → media-service id (see attachmentMediaId); it never changes, so it is kept. */
+const mediaIds = new Map<string, string>();
 
 /** `GET /bulk/queue/{taskId}`: where a bulk operation stands (kept by Jira for 14 days). */
 export interface BulkProgress {
@@ -762,6 +765,35 @@ export class JiraClient {
     return Buffer.from(await res.arrayBuffer());
   }
 
+  /**
+   * The media-service id of an attachment — what an ADF `media` node names, and what the REST
+   * API does not return. The content URL answers with a redirect to
+   * `…/file/<uuid>/binary?…`; reading that address (without following it) is the documented way
+   * round. Never changes for a given attachment, so it is remembered per site. Null when Jira
+   * answers some other way.
+   */
+  async attachmentMediaId(id: string): Promise<string | null> {
+    const memo = `${this.opts.cloudId}|${id}`;
+    const known = mediaIds.get(memo);
+    if (known) return known;
+    const url = `${JIRA_API_BASE}/ex/jira/${this.opts.cloudId}/rest/api/3/attachment/content/${encodeURIComponent(id)}`;
+    const ask = async (token: string) => fetch(url, { headers: { Authorization: `Bearer ${token}` }, redirect: "manual" });
+    let res = await ask(await this.opts.getAccessToken());
+    if (res.status === 401 && this.opts.onUnauthorized) {
+      const refreshed = await this.opts.onUnauthorized();
+      if (refreshed) res = await ask(refreshed);
+    }
+    // The body (a redirect page, or the file itself) is not wanted.
+    void res.body?.cancel().catch(() => {});
+    const location = res.headers.get("location") ?? "";
+    const found = /\/file\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/|\?|$)/i.exec(location)?.[1] ?? null;
+    if (found) {
+      if (mediaIds.size > 20_000) mediaIds.clear();
+      mediaIds.set(memo, found);
+    }
+    return found;
+  }
+
   async deleteAttachment(id: string): Promise<void> {
     await this.request(`/rest/api/3/attachment/${encodeURIComponent(id)}`, { method: "DELETE" });
   }
@@ -868,7 +900,7 @@ export class JiraClient {
       summary: input.summary,
     };
     if (input.parentKey) fields.parent = { key: input.parentKey };
-    if (input.description) fields.description = textToAdf(input.description);
+    if (input.description) fields.description = richToAdf(input.description);
     if (input.dueDate) fields.duedate = input.dueDate;
     if (input.startDate && input.startDateFieldId) fields[input.startDateFieldId] = input.startDate;
     if (input.assigneeAccountId) fields.assignee = { accountId: input.assigneeAccountId };

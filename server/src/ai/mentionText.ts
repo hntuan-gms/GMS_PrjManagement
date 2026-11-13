@@ -1,6 +1,6 @@
 /**
  * Turns "ping Quang about this" into the `@[Name](accountId)` text the comment
- * API speaks (see adf.commentToAdf), which becomes a real Jira mention — and a
+ * API speaks (see adf.richToAdf), which becomes a real Jira mention — and a
  * real notification.
  *
  * Names are resolved to accounts before this runs (resolvePerson), so an
