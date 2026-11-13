@@ -177,6 +177,35 @@ await step("thả 3 ảnh + 1 PDF vào ô: cả 3 ảnh nằm trong ô, PDF thà
   assert.equal(await page.locator(".lightbox").count(), 0, "gõ chữ đã bấm vào tệp đính kèm");
 });
 
+await step("Ctrl K mở ô liên kết như Jira: việc vừa xem, tìm theo mã, Enter chọn; dán địa chỉ + chữ hiển thị", async () => {
+  await box().click();
+  await page.keyboard.type("Xem ");
+  await page.keyboard.press("Control+k");
+  const lp = page.locator(".lp-float");
+  await lp.locator(".lp-row").first().waitFor();
+  assert.match(await lp.locator(".lp-meta").first().innerText(), /Đã xem \d+ phút trước/);
+  assert.equal(await page.locator(".td-box.is-collapsed").count(), 0, "ô bình luận gập lại khi mở ô liên kết");
+  await page.keyboard.type("DEMO-2");
+  await page.waitForFunction(() => document.querySelectorAll(".lp-float .lp-row").length === 1);
+  await page.waitForTimeout(250);
+  await page.keyboard.press("Enter");
+  await lp.waitFor({ state: "detached" });
+  const issueLink = box().locator("a[href='https://demo.atlassian.net/browse/DEMO-2']");
+  assert.match(await issueLink.innerText(), /^DEMO-2: /);
+  await page.keyboard.type(" và ");
+  await page.keyboard.press("Control+k");
+  await lp.waitFor();
+  await page.keyboard.type("https://figma.com/x");
+  assert.equal(await lp.locator(".lp-row").count(), 0, "địa chỉ không phải để tìm");
+  await page.locator(".lp-float input[aria-label='Chữ hiển thị của liên kết']").fill("Figma");
+  await page.keyboard.press("Enter");
+  await lp.waitFor({ state: "detached" });
+  const n = (await comments()).length;
+  await page.keyboard.press("Control+Enter");
+  await waitComments(n + 1);
+  assert.match((await comments())[0].text, /^Xem \[DEMO-2: [^\]]+\]\(https:\/\/demo\.atlassian\.net\/browse\/DEMO-2\) và \[Figma\]\(https:\/\/figma\.com\/x\)$/);
+});
+
 await step("Sửa bình luận: hiện như lúc đọc (danh sách, ảnh), không lộ mã", async () => {
   await box().click();
   const target = page.locator(".td-comment", { hasText: "hai" });

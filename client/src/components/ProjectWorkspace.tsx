@@ -1997,6 +1997,8 @@ export default function ProjectWorkspace({
     function onKey(e: KeyboardEvent) {
       const id = shortcutIdFor(e);
       if (id === "command") {
+        // Inside a rich text box Ctrl K is its link box, as in Jira (RichEditor's handleKeyDown, which runs after this).
+        if (e.target instanceof Element && e.target.closest(".re")) return;
         e.preventDefault();
         // Behind a picker or dialog the command bar would open under it; the open panel itself does not count.
         if (layersOpen("cmdk", "task-detail")) return;

@@ -6888,12 +6888,7 @@ button.att-remove:hover:not(:disabled) {
   color: var(--color-danger);
 }
 .att-link-add {
-  display: flex;
-  gap: 6px;
-}
-.att-link-add input {
-  flex: 1;
-  min-width: 0;
+  display: block;
 }
 .att-error {
   font-size: var(--font-size-sm);

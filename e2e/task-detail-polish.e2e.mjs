@@ -67,6 +67,16 @@ await step("form liên kết gập sẵn; bấm '+ Thêm liên kết' mới mở
   assert.equal(await page.locator(".att-link-add").count(), 0);
   assert.equal(await page.locator(".modal-detail").count(), 1, "Esc đã đóng cả cửa sổ chi tiết");
 });
+await step("'+ Thêm liên kết' là ô như Jira: bấm một việc vừa xem thì nó thành liên kết của task", async () => {
+  await page.getByRole("button", { name: "Thêm liên kết" }).click();
+  const row = page.locator(".att-link-add .lp-row").nth(1);
+  await row.waitFor();
+  const key = (await row.locator(".lp-key").innerText()).trim();
+  await row.click();
+  await page.locator(".att-row", { hasText: key }).waitFor();
+  const links = (await (await fetch(API + "/api/tasks/DEMO-5/attachments")).json()).links;
+  assert.ok(links.some((l) => l.url === `https://demo.atlassian.net/browse/${key}` && l.title.startsWith(`${key}: `)), JSON.stringify(links));
+});
 
 await openTask("DEMO-1");
 await step("việc không có gì: ba nút '+' thay cho ba form; bấm mới mở đúng phần đó", async () => {

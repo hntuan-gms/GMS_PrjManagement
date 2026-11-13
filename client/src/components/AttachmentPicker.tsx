@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { filesFromDrop, folderFiles, leftOutMessage, LINK_URL_RE, MAX_ATTACHMENT_BYTES, type DroppedFiles, type PendingAttachments } from "../attachments";
 import { Icon } from "./Icons";
 import ImageLightbox from "./ImageLightbox";
+import LinkPicker from "./LinkPicker";
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -21,8 +22,6 @@ export default function AttachmentPicker({
   const inputRef = useRef<HTMLInputElement>(null);
   const folderRef = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
-  const [linkUrl, setLinkUrl] = useState("");
-  const [linkTitle, setLinkTitle] = useState("");
   // The three-box link form is out of the way until someone wants to add a link.
   const [linkOpen, setLinkOpen] = useState(false);
   const [viewing, setViewing] = useState<number | null>(null);
@@ -44,19 +43,6 @@ export default function AttachmentPicker({
   }
 
   const addDropped = (d: DroppedFiles) => addFiles(d.files, leftOutMessage(d));
-
-  function addLink() {
-    const url = linkUrl.trim();
-    if (!LINK_URL_RE.test(url)) {
-      setError("Liên kết phải bắt đầu bằng http:// hoặc https://");
-      return;
-    }
-    setError(null);
-    onChange({ ...value, links: [...value.links, { url, title: linkTitle.trim() || url }] });
-    setLinkUrl("");
-    setLinkTitle("");
-    setLinkOpen(false);
-  }
 
   return (
     <div className="att-picker">
@@ -139,45 +125,16 @@ export default function AttachmentPicker({
 
       {linkOpen ? (
         <div className="att-link-add">
-          <input
-            type="url"
-            value={linkUrl}
-            placeholder="https://… (tài liệu, Figma, ảnh)"
-            aria-label="Địa chỉ liên kết"
-            autoFocus
-            onChange={(e) => setLinkUrl(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                addLink();
-              } else if (e.key === "Escape") {
-                // Closes the form only, not the window it sits in.
-                e.stopPropagation();
-                setLinkOpen(false);
-              }
+          <LinkPicker
+            onApply={(link) => {
+              // A Jira web link is http(s) only (the server refuses a mailto:).
+              if (!LINK_URL_RE.test(link.url)) return setError("Liên kết phải bắt đầu bằng http:// hoặc https://");
+              setError(null);
+              onChange({ ...value, links: [...value.links, { url: link.url, title: link.text }] });
+              setLinkOpen(false);
             }}
+            onCancel={() => setLinkOpen(false)}
           />
-          <input
-            value={linkTitle}
-            placeholder="Tên hiển thị (không bắt buộc)"
-            aria-label="Tên hiển thị của liên kết"
-            onChange={(e) => setLinkTitle(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                addLink();
-              } else if (e.key === "Escape") {
-                e.stopPropagation();
-                setLinkOpen(false);
-              }
-            }}
-          />
-          <button type="button" onClick={addLink} disabled={!linkUrl.trim()}>
-            Thêm
-          </button>
-          <button type="button" className="att-act" onClick={() => setLinkOpen(false)} aria-label="Đóng form liên kết" title="Đóng">
-            <Icon name="x" size={14} />
-          </button>
         </div>
       ) : (
         <button type="button" className="att-add-link" onClick={() => setLinkOpen(true)}>

@@ -257,15 +257,107 @@
 .re-content .ProseMirror .td-mention {
   white-space: nowrap;
 }
-.re-link {
+/* The link box (LinkPicker.tsx), laid out like Jira's: two fields, then what was viewed last or matches. */
+.lp {
   display: flex;
-  gap: 6px;
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--line);
+  flex-direction: column;
+  gap: 10px;
 }
-.re-link input {
+.lp-float {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: var(--z-popover);
+  padding: 14px;
+  background: var(--menu-bg);
+  border: 1px solid var(--menu-border);
+  border-radius: var(--menu-radius);
+  box-shadow: var(--menu-shadow);
+}
+.lp-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--font-size-sm);
+  color: var(--ink-3);
+}
+.lp-field input {
+  width: 100%;
+}
+.lp-float .lp {
+  min-height: 0;
   flex: 1 1 auto;
+}
+.lp-float .lp-list {
+  flex: 1 1 auto;
+  min-height: 80px;
+}
+.lp-list {
+  list-style: none;
+  margin: 0 -6px;
+  padding: 6px 0 0;
+  border-top: 1px solid var(--line);
+  max-height: 300px;
+  overflow-y: auto;
+}
+.lp-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  height: auto;
+  min-height: 0;
+  font: inherit;
+  font-weight: 400;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: var(--menu-item-radius);
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.lp-row > svg {
+  flex: none;
+  margin-top: 2px;
+}
+.lp-row.is-active {
+  background: var(--menu-item-hover);
+}
+.lp-text {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
+}
+.lp-title,
+.lp-meta {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.lp-key {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  color: var(--ink-3);
+}
+.lp-meta {
+  font-size: var(--font-size-sm);
+  color: var(--ink-3);
+}
+.lp-empty {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--ink-3);
+}
+.lp-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.lp-remove {
+  margin-right: auto;
 }
 .re-suggest {
   margin: 0;

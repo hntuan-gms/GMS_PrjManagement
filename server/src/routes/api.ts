@@ -12,6 +12,7 @@ import { progressRouter } from "./progress.js";
 import { boardRouter } from "./board.js";
 import { timesheetRouter } from "./timesheet.js";
 import { clockworkRouter } from "./clockwork.js";
+import { linksRouter } from "./links.js";
 import { kbktRouter } from "./kbkt.js";
 import { filtersRouter } from "./filters.js";
 import { slaRouter } from "./sla.js";
@@ -59,6 +60,8 @@ apiRouter.use("/sla", slaRouter);
 apiRouter.use("/calendar", calendarRouter);
 // A site route: a person across projects, so not behind requireProject (routes/clockwork.ts).
 apiRouter.use("/clockwork", clockworkRouter);
+// Also a site route: what the link box offers is the viewer's own Jira history (routes/links.ts).
+apiRouter.use("/link-suggestions", linksRouter);
 
 // Jira's own default attachment limit is 10 MB; this only has to sit above it
 // and below Cloud Run's 32 MB request cap, so Jira's message is the one people see.

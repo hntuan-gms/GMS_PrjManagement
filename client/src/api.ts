@@ -1,5 +1,6 @@
 import type { CreateRequirements } from "./createRequirements";
 import type { RemoteIssue } from "./taskPickerModel";
+import type { LinkSuggestion } from "./linkPicker";
 import type {
   BoardSnapshot,
   ChatSessionSummary,
@@ -446,6 +447,8 @@ export const api = {
    */
   searchClockworkIssues: (q: string, project?: string | null) =>
     request<RemoteIssue[]>(`/clockwork/issues?q=${encodeURIComponent(q)}${project ? `&project=${encodeURIComponent(project)}` : ""}`),
+  /** The link box's list: Jira's history with nothing typed, else a title or key search (any project). */
+  linkSuggestions: (q: string) => request<LinkSuggestion[]>(`/link-suggestions?q=${encodeURIComponent(q)}`),
   getClockworkTeam: (from: string, to: string, project?: string | null) =>
     request<Timesheet>(
       `/clockwork/team?from=${from}&to=${to}&tz=${-new Date().getTimezoneOffset()}${project ? `&project=${encodeURIComponent(project)}` : ""}`

@@ -124,6 +124,7 @@ app.post("/api/__restore", (_q, r) => {
   sessionProject = "DEMO";
   tasksSeen = [];
   attachmentsOf5 = seedFiles();
+  linksOf5 = [];
   sla = { settings: structuredClone(DEFAULT_SLA_SETTINGS), canEdit: true };
   guideReports = [];
   createRequirements = { dueDate: false, startDate: false, assignee: false, others: [] };
@@ -234,7 +235,15 @@ const seedFiles = () => [
   { id: "502", filename: "dac-ta.pdf", size: 2048, mimeType: "application/pdf", created: "2026-10-21T08:00:00.000+0700", author: "Nguyễn Anh" },
 ];
 let attachmentsOf5 = seedFiles();
-app.get("/api/tasks/:id/attachments", (req, r) => r.json({ files: req.params.id === "DEMO-5" ? attachmentsOf5 : [], links: [] }));
+let linksOf5: Array<{ id: string; url: string; title: string }> = [];
+app.get("/api/tasks/:id/attachments", (req, r) =>
+  r.json({ files: req.params.id === "DEMO-5" ? attachmentsOf5 : [], links: req.params.id === "DEMO-5" ? linksOf5 : [] })
+);
+app.post("/api/tasks/:id/links", (req, r) => {
+  const link = { id: String(Date.now()), url: String(req.body?.url ?? ""), title: String(req.body?.title ?? "") };
+  if (req.params.id === "DEMO-5") linksOf5.push(link);
+  r.status(201).json(link);
+});
 app.get("/api/tasks/:id/attachments/:attId/content", (req, r) => {
   const f = req.params.id === "DEMO-5" ? attachmentsOf5.find((x) => x.id === req.params.attId) : undefined;
   if (!f) return r.status(404).json({ error: "Không tìm thấy tệp đính kèm trên việc này." });
@@ -1050,6 +1059,22 @@ const foreignIssues = [
   { key: "OTHER-14", summary: "Đã xong: bàn giao hợp đồng", issueType: "Task", inProgress: false, done: true },
   { key: "TRAIN-1", summary: "Họp đào tạo hằng tuần", issueType: "Task", inProgress: false },
 ];
+// The link box (server/src/routes/links.ts): with nothing typed, "recently viewed" is the first tasks, newest first.
+app.get("/api/link-suggestions", (req, res) => {
+  const q = String(req.query.q ?? "").trim().toLowerCase();
+  if (/^(https?:\/\/|www\.)/.test(q)) return res.json([]);
+  const row = (t: any, i: number) => ({
+    key: t.id,
+    summary: t.summary,
+    issueType: t.issueType,
+    projectName: "Dự án mẫu",
+    lastViewed: q ? null : new Date(Date.now() - (i + 1) * 60_000 * 7).toISOString(),
+    url: `https://demo.atlassian.net/browse/${t.id}`,
+  });
+  if (!q) return res.json(tasks.slice(0, 5).map(row));
+  if (q.length < 2) return res.json([]);
+  res.json(tasks.filter((t: any) => t.id.toLowerCase() === q || t.summary.toLowerCase().includes(q)).slice(0, 8).map(row));
+});
 app.get("/api/clockwork/issues", (req, res) => {
   const q = String(req.query.q ?? "").trim().toLowerCase();
   const project = String(req.query.project ?? "").trim().toUpperCase();

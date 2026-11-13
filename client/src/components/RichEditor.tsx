@@ -12,6 +12,8 @@ import { docToRich, richToDoc, type DocNode } from "../richDoc";
 import { toast } from "../toast";
 import type { JiraUser } from "../types";
 import { Icon, type IconName } from "./Icons";
+import type { PickedLink } from "../linkPicker";
+import LinkPicker from "./LinkPicker";
 import RichImage from "./RichImage";
 
 /**
@@ -28,6 +30,8 @@ import RichImage from "./RichImage";
  */
 
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+/** About how tall the link box is with its list: below the cursor when that fits, else above it. */
+const BOX_HEIGHT = 480;
 let uploadSeq = 0;
 
 export interface RichEditorHandle {
@@ -176,7 +180,9 @@ export default function RichEditor(props: Props) {
   const [uploading, setUploading] = useState(0);
   const [suggest, setSuggest] = useState<SuggestState | null>(null);
   const suggestRef = useRef<SuggestState | null>(null);
-  const [linkAsk, setLinkAsk] = useState<{ href: string } | null>(null);
+  // The link box: what it edits (the range, the link's address and words) and where it floats.
+  const [linkAsk, setLinkAsk] = useState<{ href: string; text: string; from: number; to: number; place: React.CSSProperties } | null>(null);
+  const linkBoxRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<Editor | null>(null);
@@ -366,59 +372,71 @@ export default function RichEditor(props: Props) {
     live.current.onUploadingChange?.(uploading > 0);
   }, [uploading]);
 
+  /** Opens the link box at the cursor, over the selection or the link under it (Jira's Ctrl K). */
   function askLink() {
     const ed = editorRef.current;
     if (!ed) return;
-    setLinkAsk({ href: String(ed.getAttributes("link").href ?? "") });
+    const href = String(ed.getAttributes("link").href ?? "");
+    if (href) ed.chain().extendMarkRange("link").run();
+    const { from, to } = ed.state.selection;
+    const text = from === to ? "" : ed.state.doc.textBetween(from, to, " ");
+    // Below the cursor, or above it when the window ends first; never off the left or right edge.
+    const at = ed.view.coordsAtPos(from);
+    const width = Math.min(400, window.innerWidth - 16);
+    const left = Math.max(8, Math.min(at.left, window.innerWidth - width - 8));
+    const place: React.CSSProperties =
+      at.bottom + BOX_HEIGHT < window.innerHeight || at.top < BOX_HEIGHT
+        ? { left, width, top: at.bottom + 6, maxHeight: window.innerHeight - at.bottom - 14 }
+        : { left, width, bottom: window.innerHeight - at.top + 6, maxHeight: at.top - 14 };
+    setLinkAsk({ href, text, from, to, place });
   }
 
-  function applyLink(href: string) {
-    const ed = editorRef.current;
+  function closeLink() {
     setLinkAsk(null);
-    if (!ed) return;
-    const url = href.trim();
-    const chain = ed.chain().focus().extendMarkRange("link");
-    if (!url) return void chain.unsetLink().run();
-    const full = /^(https?:|mailto:)/i.test(url) ? url : `https://${url}`;
-    if (ed.state.selection.empty && !ed.isActive("link")) {
-      ed.chain().focus().insertContent({ type: "text", text: full, marks: [{ type: "link", attrs: { href: full } }] }).run();
-    } else chain.setLink({ href: full }).run();
+    editorRef.current?.commands.focus();
   }
+
+  /** Writes the link over the range the box was opened on (null = take the link off it). */
+  function applyLink(link: PickedLink | null) {
+    const ed = editorRef.current;
+    const ask = linkAsk;
+    setLinkAsk(null);
+    if (!ed || !ask) return;
+    const range = { from: Math.min(ask.from, ed.state.doc.content.size), to: Math.min(ask.to, ed.state.doc.content.size) };
+    if (!link) return void ed.chain().focus().setTextSelection(range).extendMarkRange("link").unsetLink().run();
+    ed.chain()
+      .focus()
+      .insertContentAt(range, { type: "text", text: link.text, marks: [{ type: "link", attrs: { href: link.url } }] })
+      // What is typed next is plain text again, not more of the link.
+      .unsetMark("link")
+      .run();
+  }
+
+  // A press outside the box closes it, like Jira's.
+  useEffect(() => {
+    if (!linkAsk) return;
+    const onDown = (e: PointerEvent) => {
+      if (!linkBoxRef.current?.contains(e.target as globalThis.Node)) setLinkAsk(null);
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    return () => document.removeEventListener("pointerdown", onDown, true);
+  }, [linkAsk]);
 
   return (
     <div ref={wrapRef} className={`re${bare ? " is-bare" : ""}${className ? ` ${className}` : ""}`}>
       {!bare && <Toolbar editor={editor} pictures={!!taskId} uploading={uploading > 0} onPick={() => fileRef.current?.click()} onLink={askLink} />}
+      {/* Fixed at the cursor but kept inside the box's own element, not portalled: the comment box and the
+          description decide "focus left the box" by DOM containment, and moving into this is not leaving. */}
       {linkAsk && (
-        <form
-          className="re-link"
-          onSubmit={(e) => {
-            e.preventDefault();
-            applyLink(String(new FormData(e.currentTarget).get("href") ?? ""));
-          }}
-        >
-          <input
-            name="href"
-            autoFocus
-            defaultValue={linkAsk.href}
-            placeholder="Dán địa chỉ liên kết (https://…)"
-            aria-label="Địa chỉ liên kết"
-            onKeyDown={(e) => {
-              if (e.key === "Escape") {
-                e.stopPropagation();
-                setLinkAsk(null);
-                editor.commands.focus();
-              }
-            }}
+        <div ref={linkBoxRef} className="lp-float" style={linkAsk.place}>
+          <LinkPicker
+            initialUrl={linkAsk.href}
+            initialText={linkAsk.text}
+            onApply={applyLink}
+            onCancel={closeLink}
+            onRemove={linkAsk.href ? () => applyLink(null) : undefined}
           />
-          <button type="submit" className="primary tonal">
-            {linkAsk.href ? "Lưu" : "Thêm"}
-          </button>
-          {linkAsk.href && (
-            <button type="button" onClick={() => applyLink("")}>
-              Bỏ liên kết
-            </button>
-          )}
-        </form>
+        </div>
       )}
       <EditorContent editor={editor} className="re-content rt" />
       <input
